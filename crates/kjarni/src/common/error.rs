@@ -58,6 +58,10 @@ pub enum KjarniError {
 /// Result type for kjarni operations.
 pub type KjarniResult<T> = Result<T, KjarniError>;
 
+#[allow(
+    dead_code,
+    reason = "warning type defined for the public error surface, not yet raised anywhere"
+)]
 /// Warning emitted for suboptimal configurations.
 #[derive(Debug, Clone)]
 pub struct KjarniWarning {
@@ -66,6 +70,10 @@ pub struct KjarniWarning {
 }
 
 impl KjarniWarning {
+    #[allow(
+        dead_code,
+        reason = "warning type defined for the public error surface, not yet raised anywhere"
+    )]
     /// Create a new warning without a suggestion.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
@@ -74,6 +82,10 @@ impl KjarniWarning {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "warning type defined for the public error surface, not yet raised anywhere"
+    )]
     /// Create a new warning with a suggestion.
     pub fn with_suggestion(message: impl Into<String>, suggestion: impl Into<String>) -> Self {
         Self {
@@ -102,7 +114,7 @@ mod tests {
     fn test_unknown_model_debug() {
         let err = KjarniError::UnknownModel("test".to_string());
         let debug = format!("{:?}", err);
-        
+
         assert!(debug.contains("UnknownModel"));
         assert!(debug.contains("test"));
     }
@@ -121,7 +133,7 @@ mod tests {
             reason: "BERT is an encoder model".to_string(),
         };
         let msg = err.to_string();
-        
+
         assert!(msg.contains("bert-base"));
         assert!(msg.contains("generation"));
         assert!(msg.contains("BERT is an encoder model"));
@@ -135,7 +147,7 @@ mod tests {
             reason: "encoder models cannot generate text".to_string(),
         };
         let msg = err.to_string();
-        
+
         assert!(msg.contains("minilm-l6-v2"));
         assert!(msg.contains("text generation"));
         assert!(msg.contains("encoder models cannot generate text"));
@@ -155,7 +167,7 @@ mod tests {
     fn test_model_not_downloaded_display() {
         let err = KjarniError::ModelNotDownloaded("llama-7b".to_string());
         let msg = err.to_string();
-        
+
         assert!(msg.contains("llama-7b"));
         assert!(msg.contains("not downloaded"));
         assert!(msg.contains("Never"));
@@ -175,7 +187,7 @@ mod tests {
             source,
         };
         let msg = err.to_string();
-        
+
         assert!(msg.contains("Failed to download"));
         assert!(msg.contains("phi3"));
         assert!(msg.contains("Connection timeout"));
@@ -188,7 +200,7 @@ mod tests {
             model: "model".to_string(),
             source,
         };
-        
+
         assert!(err.source().is_some());
     }
 
@@ -199,7 +211,7 @@ mod tests {
             model: "test".to_string(),
             source: inner,
         };
-        
+
         let source = err.source().unwrap();
         assert!(source.to_string().contains("DNS resolution failed"));
     }
@@ -212,7 +224,7 @@ mod tests {
             source,
         };
         let msg = err.to_string();
-        
+
         assert!(msg.contains("Failed to load"));
         assert!(msg.contains("custom-model"));
         assert!(msg.contains("Invalid safetensors format"));
@@ -225,7 +237,7 @@ mod tests {
             model: "model".to_string(),
             source,
         };
-        
+
         assert!(err.source().is_some());
     }
 
@@ -233,7 +245,7 @@ mod tests {
     fn test_inference_failed_display() {
         let err = KjarniError::InferenceFailed(anyhow::anyhow!("Out of memory"));
         let msg = err.to_string();
-        
+
         assert!(msg.contains("Inference failed"));
         assert!(msg.contains("Out of memory"));
     }
@@ -242,7 +254,7 @@ mod tests {
     fn test_inference_failed_from_anyhow() {
         let anyhow_err = anyhow::anyhow!("Tensor shape mismatch");
         let err: KjarniError = anyhow_err.into();
-        
+
         match err {
             KjarniError::InferenceFailed(_) => {}
             _ => panic!("Expected InferenceFailed variant"),
@@ -259,7 +271,7 @@ mod tests {
     fn test_gpu_unavailable_display() {
         let err = KjarniError::GpuUnavailable;
         let msg = err.to_string();
-        
+
         assert!(msg.contains("GPU"));
         assert!(msg.contains("WebGPU"));
     }
@@ -281,7 +293,7 @@ mod tests {
     fn test_invalid_config_display() {
         let err = KjarniError::InvalidConfig("temperature must be >= 0".to_string());
         let msg = err.to_string();
-        
+
         assert!(msg.contains("Invalid configuration"));
         assert!(msg.contains("temperature must be >= 0"));
     }
@@ -293,7 +305,7 @@ mod tests {
             "unknown pooling strategy",
             "max_tokens exceeds model limit",
         ];
-        
+
         for message in messages {
             let err = KjarniError::InvalidConfig(message.to_string());
             assert!(err.to_string().contains(message));
@@ -309,7 +321,7 @@ mod tests {
     fn test_no_labels_display() {
         let err = KjarniError::NoLabels;
         let msg = err.to_string();
-        
+
         assert!(msg.contains("label"));
         assert!(msg.contains("mapping") || msg.contains("configured"));
     }
@@ -327,9 +339,12 @@ mod tests {
         assert!(debug.contains("NoLabels"));
     }
     #[test]
+    #[allow(
+        clippy::unnecessary_literal_unwrap,
+        reason = "the literal Ok is the fixture under test"
+    )]
     fn test_kjarni_result_ok() {
         let result: KjarniResult<i32> = Ok(42);
-        assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
     }
 
@@ -340,6 +355,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::unnecessary_literal_unwrap,
+        reason = "the literal Ok is the fixture under test"
+    )]
     fn test_kjarni_result_with_string() {
         let result: KjarniResult<String> = Ok("success".to_string());
         assert_eq!(result.unwrap(), "success");
@@ -351,7 +370,7 @@ mod tests {
             let _: () = Err(KjarniError::GpuUnavailable)?;
             Ok(42)
         }
-        
+
         let result = inner();
         assert!(result.is_err());
     }
@@ -359,7 +378,7 @@ mod tests {
     #[test]
     fn test_warning_new() {
         let warning = KjarniWarning::new("This is a warning");
-        
+
         assert_eq!(warning.message, "This is a warning");
         assert!(warning.suggestion.is_none());
     }
@@ -375,7 +394,7 @@ mod tests {
             "Model is large",
             "Consider using a smaller model for faster inference.",
         );
-        
+
         assert_eq!(warning.message, "Model is large");
         assert_eq!(
             warning.suggestion,
@@ -385,11 +404,9 @@ mod tests {
 
     #[test]
     fn test_warning_with_suggestion_from_strings() {
-        let warning = KjarniWarning::with_suggestion(
-            String::from("Warning"),
-            String::from("Suggestion"),
-        );
-        
+        let warning =
+            KjarniWarning::with_suggestion(String::from("Warning"), String::from("Suggestion"));
+
         assert_eq!(warning.message, "Warning");
         assert_eq!(warning.suggestion, Some("Suggestion".to_string()));
     }
@@ -397,7 +414,7 @@ mod tests {
     fn test_warning_display_without_suggestion() {
         let warning = KjarniWarning::new("CPU fallback activated");
         let display = warning.to_string();
-        
+
         assert!(display.contains("Warning:"));
         assert!(display.contains("CPU fallback activated"));
     }
@@ -409,7 +426,7 @@ mod tests {
             "Try enabling GPU acceleration.",
         );
         let display = warning.to_string();
-        
+
         assert!(display.contains("Warning:"));
         assert!(display.contains("Slow performance detected"));
         assert!(display.contains("Try enabling GPU acceleration."));
@@ -419,7 +436,7 @@ mod tests {
     fn test_warning_display_format() {
         let warning = KjarniWarning::new("Test");
         let display = warning.to_string();
-        
+
         // Should start with "Warning: "
         assert!(display.starts_with("Warning: "));
     }
@@ -428,7 +445,7 @@ mod tests {
     fn test_warning_debug() {
         let warning = KjarniWarning::new("message");
         let debug = format!("{:?}", warning);
-        
+
         assert!(debug.contains("KjarniWarning"));
         assert!(debug.contains("message"));
     }
@@ -437,7 +454,7 @@ mod tests {
     fn test_warning_debug_with_suggestion() {
         let warning = KjarniWarning::with_suggestion("msg", "sug");
         let debug = format!("{:?}", warning);
-        
+
         assert!(debug.contains("msg"));
         assert!(debug.contains("sug"));
     }
@@ -446,7 +463,7 @@ mod tests {
     fn test_warning_clone() {
         let warning = KjarniWarning::with_suggestion("message", "suggestion");
         let cloned = warning.clone();
-        
+
         assert_eq!(warning.message, cloned.message);
         assert_eq!(warning.suggestion, cloned.suggestion);
     }
@@ -456,7 +473,7 @@ mod tests {
         let warning = KjarniWarning::new("original");
         let mut cloned = warning.clone();
         cloned.message = "modified".to_string();
-        
+
         // Original should be unchanged
         assert_eq!(warning.message, "original");
         assert_eq!(cloned.message, "modified");
@@ -465,7 +482,7 @@ mod tests {
     #[test]
     fn test_all_error_variants_are_errors() {
         fn assert_error<E: std::error::Error>(_: &E) {}
-        
+
         assert_error(&KjarniError::UnknownModel("m".into()));
         assert_error(&KjarniError::IncompatibleModel {
             model: "m".into(),
@@ -490,7 +507,7 @@ mod tests {
     #[test]
     fn test_all_error_variants_are_debug() {
         fn assert_debug<D: std::fmt::Debug>(_: &D) {}
-        
+
         assert_debug(&KjarniError::UnknownModel("m".into()));
         assert_debug(&KjarniError::IncompatibleModel {
             model: "m".into(),
@@ -547,7 +564,7 @@ mod tests {
             }
             Ok(format!("loaded: {}", name))
         }
-        
+
         assert!(load_model("minilm").is_ok());
         assert!(load_model("unknown").is_err());
     }
@@ -555,7 +572,7 @@ mod tests {
     #[test]
     fn test_error_matching() {
         let err = KjarniError::GpuUnavailable;
-        
+
         match err {
             KjarniError::GpuUnavailable => {}
             _ => panic!("Expected GpuUnavailable"),
@@ -569,9 +586,13 @@ mod tests {
             task: "generation".to_string(),
             reason: "wrong architecture".to_string(),
         };
-        
+
         match err {
-            KjarniError::IncompatibleModel { model, task, reason } => {
+            KjarniError::IncompatibleModel {
+                model,
+                task,
+                reason,
+            } => {
                 assert_eq!(model, "bert");
                 assert_eq!(task, "generation");
                 assert_eq!(reason, "wrong architecture");
@@ -587,9 +608,9 @@ mod tests {
             KjarniWarning::with_suggestion("Warning 2", "Fix it"),
             KjarniWarning::new("Warning 3"),
         ];
-        
+
         assert_eq!(warnings.len(), 3);
-        
+
         for warning in &warnings {
             assert!(warning.to_string().starts_with("Warning:"));
         }
@@ -601,7 +622,7 @@ mod tests {
             model: "test".to_string(),
             source: inner,
         };
-        
+
         let source = err.source().expect("Should have source");
         assert!(source.to_string().contains("Inner error"));
     }
@@ -613,7 +634,7 @@ mod tests {
             model: "mymodel".to_string(),
             source: inner,
         };
-        
+
         let display = err.to_string();
         assert!(display.contains("Root cause"));
         assert!(display.contains("mymodel"));
@@ -621,10 +642,10 @@ mod tests {
     #[test]
     fn test_display_vs_debug_different() {
         let err = KjarniError::GpuUnavailable;
-        
+
         let display = format!("{}", err);
         let debug = format!("{:?}", err);
-        
+
         assert!(display.contains("GPU"));
         assert!(debug.contains("GpuUnavailable"));
     }

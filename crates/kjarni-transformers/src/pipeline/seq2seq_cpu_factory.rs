@@ -15,15 +15,15 @@ use crate::{
     Normalization,
     activations::Activation,
     cpu::encoder::{encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention},
-    {EmbeddingData, Embeddings},
+    cpu::normalization::{LayerNorm, RMSNorm},
     linear_layer::{F32MatmulStrategy, LinearLayer},
     models::base::ModelLoadConfig,
-    cpu::normalization::{LayerNorm, RMSNorm},
     tensor::DType,
     traits::{
         AttentionLayout, EncoderLayout, FeedForwardLayout, ModelMetadata, NormalizationStrategy,
     },
     weights::ModelWeights,
+    {EmbeddingData, Embeddings},
 };
 
 /// Factory for building encoder/decoder components using ModelLayout.
@@ -194,7 +194,7 @@ impl<'a> Seq2SeqFactory<'a> {
 
         Ok(LayerNorm::new(weight, bias, eps))
     }
-   
+
     /// Build standard FFN from FeedForwardLayout.
     pub fn build_standard_ffn(
         &self,

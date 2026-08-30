@@ -1,15 +1,15 @@
 #[cfg(test)]
 mod embeddings_tests {
-    
-    use crate::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings};
+
     use crate::gpu::{GpuTensor, GpuTensorPool};
     use crate::models::base::ModelInput;
     use crate::tensor::DType;
     use crate::weights::ModelWeights;
+    use crate::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings};
     use crate::{Embeddings, WgpuContext};
     use anyhow::Result;
     use ndarray::{Array2, Array3, arr2};
-    
+
     use std::sync::Arc;
 
     fn create_dummy_weights(
@@ -17,7 +17,6 @@ mod embeddings_tests {
     ) -> (tempfile::TempDir, ModelWeights) {
         use safetensors::serialize;
         use safetensors::tensor::{Dtype, TensorView};
-        
 
         let dir = tempfile::TempDir::new().unwrap();
         let model_path = dir.path().join("model.safetensors");
@@ -74,7 +73,7 @@ mod embeddings_tests {
     #[test]
     fn test_position_embedding_broadcasting_batch() {
         let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // 10 words, hidden 4
-        let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5);  // 10 positions, hidden 4
+        let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5); // 10 positions, hidden 4
         let embeddings =
             Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
         let input_ids = Array2::<u32>::zeros((2, 3)); // batch 2, seq 3
@@ -89,7 +88,7 @@ mod embeddings_tests {
     }
     #[test]
     fn test_position_embedding_with_offset() {
-        let word_emb = Array2::<f32>::from_elem((10, 2), 1.0); 
+        let word_emb = Array2::<f32>::from_elem((10, 2), 1.0);
         let pos_emb = Array2::<f32>::from_shape_fn((10, 2), |(i, j)| i as f32 * 0.1 + j as f32);
 
         let embeddings =
@@ -159,7 +158,8 @@ mod embeddings_tests {
     fn test_token_type_embeddings() {
         let hidden_size = 3;
         let word_emb = Array2::<f32>::from_elem((5, hidden_size), 1.0);
-        let token_type_emb = Array2::<f32>::from_shape_fn((2, hidden_size), |(i, j)| i as f32 + 0.1 * j as f32);
+        let token_type_emb =
+            Array2::<f32>::from_shape_fn((2, hidden_size), |(i, j)| i as f32 + 0.1 * j as f32);
 
         let embeddings = Embeddings::new(
             EmbeddingData::F32(Arc::new(word_emb)),
@@ -188,7 +188,8 @@ mod embeddings_tests {
         let word_emb = Array2::<f32>::from_elem((5, 2), 1.0);
         let pos_emb = Array2::<f32>::from_elem((5, 2), 0.5);
 
-        let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
 
         let input_ids = Array2::<u32>::zeros((3, 4)); // batch 3, seq 4
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -207,20 +208,19 @@ mod embeddings_tests {
         let word_emb = Array2::<f32>::from_elem((5, 2), 1.0);
         let pos_emb = Array2::<f32>::from_elem((3, 2), 0.5); // shorter than sequence
 
-        let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
         let input_ids = Array2::<u32>::zeros((1, 4));
-        
+
         let output = embeddings.forward(&input_ids, None, 1, false); // offset 1
 
         // Only positions 1..3 are added (2 positions)
         assert_eq!(output[[0, 0, 0]], 1.0 + 0.5); // first seq position added
         assert_eq!(output[[0, 1, 0]], 1.0 + 0.5); // second seq position added
-        assert_eq!(output[[0, 2, 0]], 1.0);       // beyond pos_emb -> only word embedding
-        assert_eq!(output[[0, 3, 0]], 1.0);       // beyond pos_emb
+        assert_eq!(output[[0, 2, 0]], 1.0); // beyond pos_emb -> only word embedding
+        assert_eq!(output[[0, 3, 0]], 1.0); // beyond pos_emb
     }
 
-
-    
     #[tokio::test]
     #[ignore = "GPU required"]
     async fn test_scenario_pure_gpu() -> Result<()> {
@@ -438,7 +438,7 @@ mod embeddings_tests {
     }
     #[test]
     fn test_q8_0_lifecycle_correctness() {
-        let hidden_size = 32; 
+        let hidden_size = 32;
         let vocab_size = 4;
         let mut word_data = Vec::new();
         for i in 0..vocab_size {
@@ -451,14 +451,9 @@ mod embeddings_tests {
             vec![vocab_size, hidden_size],
         )]);
 
-        let embeddings = Embeddings::from_weights(
-            &weights,
-            "q8.weight",
-            None,
-            None,
-            Some(DType::Q8_0), 
-        )
-        .expect("Failed to load/quantize Q8_0");
+        let embeddings =
+            Embeddings::from_weights(&weights, "q8.weight", None, None, Some(DType::Q8_0))
+                .expect("Failed to load/quantize Q8_0");
 
         match embeddings.word_embeddings {
             EmbeddingData::Q8_0(_) => println!("Confirmed loaded as Q8_0"),

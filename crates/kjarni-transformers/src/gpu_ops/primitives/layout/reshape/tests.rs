@@ -1,12 +1,10 @@
-use crate::gpu::{GpuTensor, DType};
+use crate::gpu::{DType, GpuTensor};
 use crate::gpu_ops::primitives::layout::reshape::GpuReshape;
 use anyhow::Result;
-use ndarray::{ Array3};
-use common::{read_gpu_tensor_4d, get_test_context};
+use common::{get_test_context, read_gpu_tensor_4d};
+use ndarray::Array3;
 
-#[path = "../../../../tests/common.rs"]
-mod common;
-
+use crate::tests::common;
 
 #[tokio::test]
 #[ignore = "GPU required"]
@@ -25,12 +23,8 @@ async fn test_reshape_q_v_path() -> Result<()> {
         .permuted_axes([0, 2, 1, 3]) // [B, H, S, D]
         .as_standard_layout()
         .to_owned();
-    let gpu_output = GpuTensor::uninitialized(
-        &context,
-        vec![b, h, s, d],
-        DType::F32,
-        "Reshape Output Q/V",
-    );
+    let gpu_output =
+        GpuTensor::uninitialized(&context, vec![b, h, s, d], DType::F32, "Reshape Output Q/V");
     let mut encoder = context.device.create_command_encoder(&Default::default());
     gpu_reshape.encode(&mut encoder, &gpu_input, &gpu_output, false); // transpose_k = false
     context.queue.submit(Some(encoder.finish()));
@@ -56,12 +50,8 @@ async fn test_reshape_k_transpose_path() -> Result<()> {
         .permuted_axes([0, 2, 3, 1]) // [B, H, D, S]
         .as_standard_layout()
         .to_owned();
-    let gpu_output = GpuTensor::uninitialized(
-        &context,
-        vec![b, h, d, s], 
-        DType::F32,
-        "Reshape Output K^T",
-    );
+    let gpu_output =
+        GpuTensor::uninitialized(&context, vec![b, h, d, s], DType::F32, "Reshape Output K^T");
     let mut encoder = context.device.create_command_encoder(&Default::default());
     gpu_reshape.encode(&mut encoder, &gpu_input, &gpu_output, true); // transpose_k = true
     context.queue.submit(Some(encoder.finish()));

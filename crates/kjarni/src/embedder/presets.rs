@@ -32,7 +32,6 @@ pub struct EmbedderPreset {
     pub description: &'static str,
 }
 
-
 pub const EMBEDDING_SMALL_V1: EmbedderPreset = EmbedderPreset {
     name: "EMBEDDING_SMALL_V1",
     model: "minilm-l6-v2",
@@ -57,10 +56,7 @@ pub const EMBEDDING_NOMIC_V1: EmbedderPreset = EmbedderPreset {
 };
 
 /// All V1 presets.
-pub const ALL_V1_PRESETS: &[&EmbedderPreset] = &[
-    &EMBEDDING_SMALL_V1,
-    &EMBEDDING_NOMIC_V1,
-];
+pub const ALL_V1_PRESETS: &[&EmbedderPreset] = &[&EMBEDDING_SMALL_V1, &EMBEDDING_NOMIC_V1];
 
 /// Find a preset by name.
 pub fn find_preset(name: &str) -> Option<&'static EmbedderPreset> {

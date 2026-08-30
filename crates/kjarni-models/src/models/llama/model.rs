@@ -9,17 +9,15 @@ use kjarni_transformers::ChatTemplate;
 use kjarni_transformers::common::{
     DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams,
 };
-use kjarni_transformers::pipeline::DecoderModelFactory;
 use kjarni_transformers::loaders::LoadedRoPE;
+use kjarni_transformers::pipeline::DecoderModelFactory;
 use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
-use crate::models::llama::{
-    config::LlamaConfig, cpu_decoder::LlamaCpuDecoder,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+use crate::models::llama::{config::LlamaConfig, cpu_decoder::LlamaCpuDecoder};
 #[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
 
@@ -30,7 +28,7 @@ use kjarni_transformers::{
     execution::ExecutionPlan,
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
-    pipeline::{DecoderPipeline},
+    pipeline::DecoderPipeline,
     prelude::*,
     traits::{InferenceModel, ModelConfig},
     weights::ModelWeights,
@@ -49,7 +47,7 @@ impl DecoderModelFactory for LlamaModel {
     type Config = LlamaConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        LlamaConfig::from_loader(&*weights.loader(), Some(&weights.config_json()))
+        LlamaConfig::from_loader(weights.loader(), Some(weights.config_json()))
     }
 
     fn build_backends(
@@ -147,9 +145,7 @@ impl LlamaModel {
     }
 }
 
-
 // Public Accessors
-
 
 impl LlamaModel {
     /// Returns a reference to the model configuration.
@@ -190,7 +186,6 @@ impl InferenceModel for LlamaModel {
         self
     }
 }
-
 
 impl LanguageModel for LlamaModel {
     // TODO: extract to builder
@@ -234,9 +229,7 @@ impl LanguageModel for LlamaModel {
                 )?))
             }
             #[cfg(target_arch = "wasm32")]
-            Device::Wgpu => Err(anyhow::anyhow!(
-                "GPU cache is not available in WebAssembly"
-            )),
+            Device::Wgpu => Err(anyhow::anyhow!("GPU cache is not available in WebAssembly")),
         }
     }
 
@@ -308,11 +301,14 @@ impl CpuDecoderOps for LlamaModel {
     }
 
     fn get_attention_mask(&self, seq: usize, past: usize) -> Result<Array2<f32>> {
-        Ok(kjarni_transformers::utils::create_causal_mask(seq, seq + past))
+        Ok(kjarni_transformers::utils::create_causal_mask(
+            seq,
+            seq + past,
+        ))
     }
 
     fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
-        self.pipeline.embeddings().embed_cpu(&tokens, None, pos)
+        self.pipeline.embeddings().embed_cpu(tokens, None, pos)
     }
 }
 
@@ -330,10 +326,8 @@ impl GpuDecoderOps for LlamaModel {
         seq: usize,
         max: usize,
     ) -> Result<GpuTensor> {
-        let mask: Vec<f32> = (0..max)
-            .map(|i| if i < seq { 1.0 } else { 0.0 })
-            .collect();
-            
+        let mask: Vec<f32> = (0..max).map(|i| if i < seq { 1.0 } else { 0.0 }).collect();
+
         GpuTensor::create(ctx.context, &mask, vec![1, max], "AttentionMask")
     }
 
@@ -362,7 +356,6 @@ impl GpuDecoderOps for LlamaModel {
         }
     }
 }
-
 
 #[async_trait]
 impl DecoderLanguageModel for LlamaModel {

@@ -5,17 +5,15 @@
 //!
 //! The actual text generation is handled by the generic `Generator` struct.
 
-
-
 pub mod config;
 // No GPU backend on wasm.
+pub mod cpu_decoder;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_decoder;
-pub mod cpu_decoder;
 pub mod model;
 
-pub use model::LlamaModel;
 pub use config::LlamaConfig;
+pub use model::LlamaModel;
 
 #[cfg(test)]
 mod tests;

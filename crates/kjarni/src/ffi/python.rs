@@ -1,10 +1,10 @@
 //! Python bindings for EdgeGPT using PyO3
 
-use pyo3::prelude::*;
-use pyo3::exceptions::PyRuntimeError;
 use crate::edge_gpt::{EdgeGPT as RustEdgeGPT, EdgeGPTBuilder};
-use edgetransformers::prelude::Device;
 use edgetransformers::models::ModelType;
+use edgetransformers::prelude::Device;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -75,11 +75,10 @@ impl EdgeGPT {
     fn encode(&self, text: &str) -> PyResult<Vec<f32>> {
         let inner = self.inner.clone();
         let text = text.to_string();
-        
-        self.runtime.block_on(async move {
-            inner.encode(&text).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Encoding failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.encode(&text).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Encoding failed: {}", e)))
     }
 
     /// Encode a batch of sentences
@@ -91,11 +90,10 @@ impl EdgeGPT {
     ///     list[list[float]]: List of embedding vectors
     fn encode_batch(&self, texts: Vec<&str>) -> PyResult<Vec<Vec<f32>>> {
         let inner = self.inner.clone();
-        
-        self.runtime.block_on(async move {
-            inner.encode_batch(&texts).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Batch encoding failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.encode_batch(&texts).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Batch encoding failed: {}", e)))
     }
 
     /// Compute similarity between two texts
@@ -110,11 +108,10 @@ impl EdgeGPT {
         let inner = self.inner.clone();
         let text1 = text1.to_string();
         let text2 = text2.to_string();
-        
-        self.runtime.block_on(async move {
-            inner.similarity(&text1, &text2).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Similarity computation failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.similarity(&text1, &text2).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Similarity computation failed: {}", e)))
     }
 
     /// Find the most similar texts to a query
@@ -126,14 +123,18 @@ impl EdgeGPT {
     ///
     /// Returns:
     ///     list[tuple[int, float]]: List of (index, similarity_score) tuples
-    fn find_similar(&self, query: &str, candidates: Vec<&str>, top_k: usize) -> PyResult<Vec<(usize, f32)>> {
+    fn find_similar(
+        &self,
+        query: &str,
+        candidates: Vec<&str>,
+        top_k: usize,
+    ) -> PyResult<Vec<(usize, f32)>> {
         let inner = self.inner.clone();
         let query = query.to_string();
-        
-        self.runtime.block_on(async move {
-            inner.find_similar(&query, &candidates, top_k).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Finding similar failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.find_similar(&query, &candidates, top_k).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Finding similar failed: {}", e)))
     }
 
     /// Score a text pair for relevance
@@ -148,11 +149,10 @@ impl EdgeGPT {
         let inner = self.inner.clone();
         let text1 = text1.to_string();
         let text2 = text2.to_string();
-        
-        self.runtime.block_on(async move {
-            inner.predict(&text1, &text2).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Prediction failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.predict(&text1, &text2).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Prediction failed: {}", e)))
     }
 
     /// Score multiple text pairs
@@ -164,11 +164,10 @@ impl EdgeGPT {
     ///     list[float]: List of relevance scores
     fn predict_batch(&self, pairs: Vec<(&str, &str)>) -> PyResult<Vec<f32>> {
         let inner = self.inner.clone();
-        
-        self.runtime.block_on(async move {
-            inner.predict_batch(&pairs).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Batch prediction failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.predict_batch(&pairs).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Batch prediction failed: {}", e)))
     }
 
     /// Rerank documents by relevance to a query
@@ -182,11 +181,10 @@ impl EdgeGPT {
     fn rerank(&self, query: &str, documents: Vec<&str>) -> PyResult<Vec<(usize, f32)>> {
         let inner = self.inner.clone();
         let query = query.to_string();
-        
-        self.runtime.block_on(async move {
-            inner.rerank(&query, &documents).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Reranking failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.rerank(&query, &documents).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Reranking failed: {}", e)))
     }
 
     /// Rerank documents and return top K results
@@ -198,14 +196,18 @@ impl EdgeGPT {
     ///
     /// Returns:
     ///     list[tuple[int, float]]: Top K (index, score) tuples
-    fn rerank_top_k(&self, query: &str, documents: Vec<&str>, k: usize) -> PyResult<Vec<(usize, f32)>> {
+    fn rerank_top_k(
+        &self,
+        query: &str,
+        documents: Vec<&str>,
+        k: usize,
+    ) -> PyResult<Vec<(usize, f32)>> {
         let inner = self.inner.clone();
         let query = query.to_string();
-        
-        self.runtime.block_on(async move {
-            inner.rerank_top_k(&query, &documents, k).await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Top-K reranking failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.rerank_top_k(&query, &documents, k).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Top-K reranking failed: {}", e)))
     }
 
     /// Get the embedding dimension
@@ -214,37 +216,36 @@ impl EdgeGPT {
     ///     int: Embedding dimension
     fn embedding_dim(&self) -> PyResult<usize> {
         let inner = self.inner.clone();
-        
-        self.runtime.block_on(async move {
-            inner.embedding_dim().await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Getting embedding dim failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.embedding_dim().await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Getting embedding dim failed: {}", e)))
     }
 
     /// Preload the sentence encoder model
     fn preload_sentence_encoder(&self) -> PyResult<()> {
         let inner = self.inner.clone();
-        
-        self.runtime.block_on(async move {
-            inner.preload_sentence_encoder().await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Preloading sentence encoder failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.preload_sentence_encoder().await })
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("Preloading sentence encoder failed: {}", e))
+            })
     }
 
     /// Preload the cross encoder model
     fn preload_cross_encoder(&self) -> PyResult<()> {
         let inner = self.inner.clone();
-        
-        self.runtime.block_on(async move {
-            inner.preload_cross_encoder().await
-        })
-        .map_err(|e| PyRuntimeError::new_err(format!("Preloading cross encoder failed: {}", e)))
+
+        self.runtime
+            .block_on(async move { inner.preload_cross_encoder().await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Preloading cross encoder failed: {}", e)))
     }
 
     /// Unload the sentence encoder to free memory
     fn unload_sentence_encoder(&self) -> PyResult<()> {
         let inner = self.inner.clone();
-        
+
         self.runtime.block_on(async move {
             inner.unload_sentence_encoder().await;
             Ok(())
@@ -254,7 +255,7 @@ impl EdgeGPT {
     /// Unload the cross encoder to free memory
     fn unload_cross_encoder(&self) -> PyResult<()> {
         let inner = self.inner.clone();
-        
+
         self.runtime.block_on(async move {
             inner.unload_cross_encoder().await;
             Ok(())
@@ -264,7 +265,7 @@ impl EdgeGPT {
     /// Unload all models
     fn unload_all(&self) -> PyResult<()> {
         let inner = self.inner.clone();
-        
+
         self.runtime.block_on(async move {
             inner.unload_all().await;
             Ok(())
@@ -283,7 +284,10 @@ fn parse_model_type(name: &str) -> PyResult<ModelType> {
         "gpt2-medium" => Ok(ModelType::Gpt2Medium),
         "gpt2-large" => Ok(ModelType::Gpt2Large),
         "gpt2-xl" => Ok(ModelType::Gpt2XL),
-        _ => Err(PyRuntimeError::new_err(format!("Unknown model type: {}", name))),
+        _ => Err(PyRuntimeError::new_err(format!(
+            "Unknown model type: {}",
+            name
+        ))),
     }
 }
 

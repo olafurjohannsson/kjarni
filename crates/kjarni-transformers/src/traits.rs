@@ -1,13 +1,13 @@
 //! Core model traits and data structures for Kjarni.
 
-use ndarray::Array3;
-use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WgpuContext;
 use crate::activations::Activation;
 pub use crate::cache::Cache;
 use crate::cpu::encoder::traits::ClassificationMode;
 use crate::models::base::RopeScalingConfig;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::WgpuContext;
+use anyhow::Result;
+use ndarray::Array3;
 use std::any::Any;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -286,7 +286,9 @@ mod tests {
 
     #[test]
     fn test_inference_model_trait() {
-        let model = DummyModel { device: Device::Cpu };
+        let model = DummyModel {
+            device: Device::Cpu,
+        };
         let model_ref: &dyn InferenceModel = &model;
 
         assert_eq!(model_ref.device(), Device::Cpu);

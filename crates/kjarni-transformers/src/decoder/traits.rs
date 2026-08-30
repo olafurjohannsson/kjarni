@@ -164,7 +164,6 @@ pub trait CpuDecoder: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
-
     /// Forward pass through transformer layers
     fn forward_layers(
         &self,
@@ -332,16 +331,11 @@ pub trait DecoderLanguageModel: LanguageModel {
 
         let tokens = ops.embed(&input_ids, 0)?;
 
-        let decoder_output = ops.decoder().forward(
-            &tokens,
-            &attention_mask,
-            0,
-            None,
-        )?;
+        let decoder_output = ops.decoder().forward(&tokens, &attention_mask, 0, None)?;
 
         ops.project_to_logits(&decoder_output)
     }
-    
+
     #[cfg(not(target_arch = "wasm32"))]
     async fn get_logits_gpu(&self, text: &str) -> Result<Array3<f32>> {
         let input_ids = self.tokenize(text)?;
@@ -380,13 +374,12 @@ pub trait DecoderLanguageModel: LanguageModel {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::InferenceModel;
     use std::collections::HashSet;
     use std::sync::Arc;
-    use crate::traits::InferenceModel;
     use tokenizers::Tokenizer;
 
     #[derive(Clone)]
@@ -395,13 +388,27 @@ mod tests {
     }
 
     impl Cache for MockCache {
-        fn as_any(&self) -> &dyn Any { self }
-        fn as_any_mut(&mut self) -> &mut dyn Any { self }
-        fn get_seq_length(&self) -> usize { self.len }
-        fn set_seq_length(&mut self, len: usize) { self.len = len; }
-        fn clear(&mut self) { self.len = 0; }
-        fn increment_len(&mut self, n: usize) { self.len += n; }
-        fn clone_box(&self) -> Box<dyn Cache> { Box::new(self.clone()) }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn get_seq_length(&self) -> usize {
+            self.len
+        }
+        fn set_seq_length(&mut self, len: usize) {
+            self.len = len;
+        }
+        fn clear(&mut self) {
+            self.len = 0;
+        }
+        fn increment_len(&mut self, n: usize) {
+            self.len += n;
+        }
+        fn clone_box(&self) -> Box<dyn Cache> {
+            Box::new(self.clone())
+        }
     }
 
     struct MockCpuDecoder {
@@ -412,13 +419,21 @@ mod tests {
 
     impl MockCpuDecoder {
         fn new(num_layers: usize, hidden_size: usize, num_heads: usize) -> Self {
-            Self { num_layers, hidden_size, num_heads }
+            Self {
+                num_layers,
+                hidden_size,
+                num_heads,
+            }
         }
     }
 
     impl CpuDecoder for MockCpuDecoder {
-        fn as_any(&self) -> &dyn Any { self }
-        fn as_any_mut(&mut self) -> &mut dyn Any { self }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
 
         fn forward_layers(
             &self,
@@ -436,15 +451,21 @@ mod tests {
             Ok(hidden_states.clone())
         }
 
-        fn num_layers(&self) -> usize { self.num_layers }
-        fn hidden_size(&self) -> usize { self.hidden_size }
-        fn num_attention_heads(&self) -> usize { self.num_heads }
+        fn num_layers(&self) -> usize {
+            self.num_layers
+        }
+        fn hidden_size(&self) -> usize {
+            self.hidden_size
+        }
+        fn num_attention_heads(&self) -> usize {
+            self.num_heads
+        }
     }
 
     #[test]
     fn test_cpu_decoder_metadata() {
         let decoder = MockCpuDecoder::new(12, 768, 12);
-        
+
         assert_eq!(decoder.num_layers(), 12);
         assert_eq!(decoder.hidden_size(), 768);
         assert_eq!(decoder.num_attention_heads(), 12);
@@ -453,14 +474,14 @@ mod tests {
     #[test]
     fn test_cpu_decoder_default_num_kv_heads() {
         let decoder = MockCpuDecoder::new(12, 768, 12);
-    
+
         assert_eq!(decoder.num_kv_heads(), 12);
     }
 
     #[test]
     fn test_cpu_decoder_default_head_dim() {
         let decoder = MockCpuDecoder::new(12, 768, 12);
-        
+
         assert_eq!(decoder.head_dim(), 64); // 768 / 12
     }
 
@@ -482,99 +503,107 @@ mod tests {
     #[test]
     fn test_cpu_decoder_forward_layers() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
-        
-        let output = decoder.forward_layers(&hidden, &mask, 0, None, 0, 6).unwrap();
-        
+
+        let output = decoder
+            .forward_layers(&hidden, &mask, 0, None, 0, 6)
+            .unwrap();
+
         assert_eq!(output.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_forward_all_layers() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         let output = decoder.forward_all_layers(&hidden, &mask, 0, None).unwrap();
-        
+
         assert_eq!(output.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_forward_default() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         let output = decoder.forward(&hidden, &mask, 0, None).unwrap();
-        
+
         assert_eq!(output.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_final_norm() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
-        
+
         let output = decoder.final_norm(&hidden).unwrap();
-        
+
         assert_eq!(output.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_with_cache() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
         let mut cache = MockCache { len: 0 };
-        
-        let output = decoder.forward(&hidden, &mask, 0, Some(&mut cache)).unwrap();
-        
+
+        let output = decoder
+            .forward(&hidden, &mask, 0, Some(&mut cache))
+            .unwrap();
+
         assert_eq!(output.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_partial_layers() {
         let decoder = MockCpuDecoder::new(12, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         // Run only first half
-        let output1 = decoder.forward_layers(&hidden, &mask, 0, None, 0, 6).unwrap();
+        let output1 = decoder
+            .forward_layers(&hidden, &mask, 0, None, 0, 6)
+            .unwrap();
         assert_eq!(output1.shape(), &[1, 5, 64]);
-        
+
         // Run only second half
-        let output2 = decoder.forward_layers(&hidden, &mask, 0, None, 6, 12).unwrap();
+        let output2 = decoder
+            .forward_layers(&hidden, &mask, 0, None, 6, 12)
+            .unwrap();
         assert_eq!(output2.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_position_offset() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 1, 64)); // Single token
         let mask = Array2::<f32>::ones((1, 10)); // Mask for position 10
-        
+
         // Simulate decoding at position 9 (0-indexed)
         let output = decoder.forward(&hidden, &mask, 9, None).unwrap();
-        
+
         assert_eq!(output.shape(), &[1, 1, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_as_any() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let any_ref = decoder.as_any();
         let downcasted = any_ref.downcast_ref::<MockCpuDecoder>();
-        
+
         assert!(downcasted.is_some());
         assert_eq!(downcasted.unwrap().num_layers, 6);
     }
@@ -582,14 +611,14 @@ mod tests {
     #[test]
     fn test_cpu_decoder_as_any_mut() {
         let mut decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         {
             let any_mut = decoder.as_any_mut();
             let downcasted = any_mut.downcast_mut::<MockCpuDecoder>();
             assert!(downcasted.is_some());
             downcasted.unwrap().num_layers = 12;
         }
-        
+
         assert_eq!(decoder.num_layers, 12);
     }
 
@@ -628,7 +657,7 @@ mod tests {
     #[test]
     fn test_cpu_decoder_ops_decoder_access() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let decoder = ops.decoder();
         assert_eq!(decoder.num_layers(), 6);
         assert_eq!(decoder.hidden_size(), 64);
@@ -637,55 +666,55 @@ mod tests {
     #[test]
     fn test_cpu_decoder_ops_embed() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 2, 3, 4, 5]).unwrap();
         let hidden = ops.embed(&tokens, 0).unwrap();
-        
+
         assert_eq!(hidden.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_ops_project_to_logits() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let logits = ops.project_to_logits(&hidden).unwrap();
-        
+
         assert_eq!(logits.shape(), &[1, 5, 1000]);
     }
 
     #[test]
     fn test_cpu_decoder_ops_get_attention_mask() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let mask = ops.get_attention_mask(10, 0).unwrap();
-        
+
         assert_eq!(mask.shape(), &[10, 10]);
     }
 
     #[test]
     fn test_cpu_decoder_ops_forward_default() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 2, 3, 4, 5]).unwrap();
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         // Uses default implementation
         let hidden = ops.forward(&tokens, &mask, 0, None).unwrap();
-        
+
         assert_eq!(hidden.shape(), &[1, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_ops_forward_to_logits_default() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 2, 3, 4, 5]).unwrap();
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         // Uses default implementation: forward + project_to_logits
         let logits = ops.forward_to_logits(&tokens, &mask, 0, None).unwrap();
-        
+
         assert_eq!(logits.shape(), &[1, 5, 1000]);
     }
 
@@ -694,24 +723,54 @@ mod tests {
     }
 
     impl InferenceModel for MockDecoderModel {
-        fn device(&self) -> crate::traits::Device { crate::traits::Device::Cpu }
-        fn context(&self) -> Option<Arc<crate::WgpuContext>> { None }
-        fn as_any(&self) -> &dyn Any { self }
+        fn device(&self) -> crate::traits::Device {
+            crate::traits::Device::Cpu
+        }
+        fn context(&self) -> Option<Arc<crate::WgpuContext>> {
+            None
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
     }
 
     impl LanguageModel for MockDecoderModel {
-        fn vocab_size(&self) -> usize { 1000 }
-        fn hidden_size(&self) -> usize { 64 }
-        fn num_layers(&self) -> usize { 6 }
-        fn num_heads(&self) -> usize { 4 }
-        fn context_size(&self) -> usize { 2048 }
-        fn tokenizer(&self) -> &Tokenizer { unimplemented!() }
-        fn eos_token_id(&self) -> Option<u32> { Some(2) }
-        fn bos_token_id(&self) -> Option<u32> { Some(1) }
-        fn forced_bos_token_id(&self) -> Option<u32> { None }
-        fn forced_eos_token_id(&self) -> Option<u32> { None }
-        fn pad_token_id(&self) -> Option<u32> { Some(0) }
-        fn stop_token_ids(&self) -> HashSet<u32> { HashSet::from([2]) }
+        fn vocab_size(&self) -> usize {
+            1000
+        }
+        fn hidden_size(&self) -> usize {
+            64
+        }
+        fn num_layers(&self) -> usize {
+            6
+        }
+        fn num_heads(&self) -> usize {
+            4
+        }
+        fn context_size(&self) -> usize {
+            2048
+        }
+        fn tokenizer(&self) -> &Tokenizer {
+            unimplemented!()
+        }
+        fn eos_token_id(&self) -> Option<u32> {
+            Some(2)
+        }
+        fn bos_token_id(&self) -> Option<u32> {
+            Some(1)
+        }
+        fn forced_bos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn forced_eos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn pad_token_id(&self) -> Option<u32> {
+            Some(0)
+        }
+        fn stop_token_ids(&self) -> HashSet<u32> {
+            HashSet::from([2])
+        }
         fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
             Ok(Box::new(MockCache { len: 0 }))
         }
@@ -737,9 +796,9 @@ mod tests {
         let model = MockDecoderModel {
             cpu_ops: MockCpuDecoderOps::new(),
         };
-        
+
         let config = model.get_default_generation_config();
-        
+
         // Should return default config
         assert!(config.max_length > 0);
     }
@@ -749,7 +808,7 @@ mod tests {
         let model = MockDecoderModel {
             cpu_ops: MockCpuDecoderOps::new(),
         };
-        
+
         // Default: no chat template
         assert!(model.chat_template().is_none());
     }
@@ -759,7 +818,7 @@ mod tests {
         let model = MockDecoderModel {
             cpu_ops: MockCpuDecoderOps::new(),
         };
-        
+
         assert!(!model.is_instruct_model());
     }
 
@@ -768,10 +827,10 @@ mod tests {
         let model = MockDecoderModel {
             cpu_ops: MockCpuDecoderOps::new(),
         };
-        
+
         let ops = model.decoder_cpu_ops();
         assert!(ops.is_some());
-        
+
         let ops = ops.unwrap();
         assert_eq!(ops.decoder().num_layers(), 6);
     }
@@ -781,7 +840,7 @@ mod tests {
         let model = MockDecoderModel {
             cpu_ops: MockCpuDecoderOps::new(),
         };
-        
+
         // CPU-only model
         assert!(model.decoder_gpu_ops().is_none());
     }
@@ -791,15 +850,18 @@ mod tests {
         let model = MockDecoderModel {
             cpu_ops: MockCpuDecoderOps::new(),
         };
-        
-        assert!(matches!(model.autoregressive_loop(), AutoregressiveLoop::Pipelined));
+
+        assert!(matches!(
+            model.autoregressive_loop(),
+            AutoregressiveLoop::Pipelined
+        ));
     }
 
     #[test]
     fn test_autoregressive_loop_variants() {
         let pipelined = AutoregressiveLoop::Pipelined;
         let legacy = AutoregressiveLoop::Legacy;
-        
+
         // They should be different
         assert!(!matches!(pipelined, AutoregressiveLoop::Legacy));
         assert!(!matches!(legacy, AutoregressiveLoop::Pipelined));
@@ -807,46 +869,46 @@ mod tests {
     #[test]
     fn test_cpu_decoder_empty_sequence() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::zeros((1, 0, 64)); // Empty sequence
         let mask = Array2::<f32>::zeros((0, 0));
-        
+
         let output = decoder.forward(&hidden, &mask, 0, None).unwrap();
-        
+
         assert_eq!(output.shape(), &[1, 0, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_batch_size_greater_than_one() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((4, 5, 64)); // batch = 4
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         let output = decoder.forward(&hidden, &mask, 0, None).unwrap();
-        
+
         assert_eq!(output.shape(), &[4, 5, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_ops_embed_batch() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let tokens = Array2::from_shape_vec((2, 3), vec![1u32, 2, 3, 4, 5, 6]).unwrap();
         let hidden = ops.embed(&tokens, 0).unwrap();
-        
+
         assert_eq!(hidden.shape(), &[2, 3, 64]);
     }
 
     #[test]
     fn test_cpu_decoder_single_layer() {
         let decoder = MockCpuDecoder::new(1, 64, 4);
-        
+
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
-        
+
         let output = decoder.forward(&hidden, &mask, 0, None).unwrap();
-        
+
         assert_eq!(output.shape(), &[1, 5, 64]);
         assert_eq!(decoder.num_layers(), 1);
     }
@@ -854,7 +916,7 @@ mod tests {
     #[test]
     fn test_cpu_decoder_large_hidden_size() {
         let decoder = MockCpuDecoder::new(32, 4096, 32);
-        
+
         assert_eq!(decoder.hidden_size(), 4096);
         assert_eq!(decoder.head_dim(), 128);
     }
@@ -862,37 +924,37 @@ mod tests {
     #[test]
     fn test_attention_mask_generation_prefill() {
         let ops = MockCpuDecoderOps::new();
-        
+
         // Prefill: seq_len = 10, past_len = 0
         let mask = ops.get_attention_mask(10, 0).unwrap();
-        
+
         assert_eq!(mask.shape(), &[10, 10]);
     }
 
     #[test]
     fn test_attention_mask_generation_decode() {
         let ops = MockCpuDecoderOps::new();
-        
+
         // Decode: seq_len = 1, past_len = 10
         let mask = ops.get_attention_mask(1, 10).unwrap();
-        
+
         assert_eq!(mask.shape(), &[1, 1]);
     }
 
     #[test]
     fn test_full_cpu_inference_pipeline() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 100, 200, 300, 2]).unwrap();
-        
+
         let mask = ops.get_attention_mask(5, 0).unwrap();
-        
+
         let hidden = ops.embed(&tokens, 0).unwrap();
         assert_eq!(hidden.shape(), &[1, 5, 64]);
-        
+
         let output = ops.decoder().forward(&hidden, &mask, 0, None).unwrap();
         assert_eq!(output.shape(), &[1, 5, 64]);
-        
+
         let logits = ops.project_to_logits(&output).unwrap();
         assert_eq!(logits.shape(), &[1, 5, 1000]);
     }
@@ -900,12 +962,12 @@ mod tests {
     #[test]
     fn test_full_cpu_inference_with_forward_to_logits() {
         let ops = MockCpuDecoderOps::new();
-        
+
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 100, 200, 300, 2]).unwrap();
         let mask = ops.get_attention_mask(5, 0).unwrap();
-        
+
         let logits = ops.forward_to_logits(&tokens, &mask, 0, None).unwrap();
-        
+
         assert_eq!(logits.shape(), &[1, 5, 1000]);
     }
 }

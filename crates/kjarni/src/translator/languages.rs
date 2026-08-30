@@ -16,11 +16,19 @@ pub fn normalize_language(input: &str) -> Option<&'static str> {
     LANGUAGE_MAP.get(lower.as_str()).copied()
 }
 
+#[allow(
+    dead_code,
+    reason = "language-table helper, unused until the translator exposes language selection"
+)]
 /// Get the ISO code for a language.
 pub fn language_code(canonical: &str) -> Option<&'static str> {
     LANGUAGE_CODES.get(canonical).copied()
 }
 
+#[allow(
+    dead_code,
+    reason = "language-table helper, unused until the translator exposes language selection"
+)]
 /// Check if a language is supported by FLAN-T5.
 pub fn is_supported_language(input: &str) -> bool {
     normalize_language(input).is_some()
@@ -160,6 +168,10 @@ static LANGUAGE_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m
 });
 
+#[allow(
+    dead_code,
+    reason = "language-table helper, unused until the translator exposes language selection"
+)]
 static LANGUAGE_CODES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
     m.insert("English", "en");
@@ -193,7 +205,7 @@ mod tests {
     }
 
     #[test]
-        
+
     fn test_normalize_full_names() {
         // Implementation lowercases first, so all case variants work
         assert_eq!(normalize_language("English"), Some("English"));

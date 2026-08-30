@@ -4,8 +4,7 @@ use std::str::FromStr;
 
 use libm::{erff, expf, tanhf};
 use ndarray::{
-    Array1, Array2, Array3, Array4, ArrayBase, ArrayViewMut2, DataMut, s,
-    parallel::prelude::*,
+    Array1, Array2, Array3, Array4, ArrayBase, ArrayViewMut2, DataMut, parallel::prelude::*, s,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,10 +18,12 @@ const GELU_COEFF: f32 = 0.044715;
 /// Supported activation functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Activation {
     #[serde(alias = "gelu")]
     Gelu,
     #[serde(alias = "gelu_new")]
+    #[default]
     GeluNew,
     #[serde(alias = "relu")]
     Relu,
@@ -44,12 +45,6 @@ impl FromStr for Activation {
             "tanh" => Ok(Activation::Tanh),
             _ => Err(format!("unknown activation function: {}", s)),
         }
-    }
-}
-
-impl Default for Activation {
-    fn default() -> Self {
-        Activation::GeluNew
     }
 }
 
@@ -402,7 +397,10 @@ mod tests {
     #[test]
     fn test_activation_from_str() {
         assert_eq!(Activation::from_str("gelu").unwrap(), Activation::GeluNew);
-        assert_eq!(Activation::from_str("gelu_new").unwrap(), Activation::GeluNew);
+        assert_eq!(
+            Activation::from_str("gelu_new").unwrap(),
+            Activation::GeluNew
+        );
         assert_eq!(Activation::from_str("relu").unwrap(), Activation::Relu);
         assert_eq!(Activation::from_str("silu").unwrap(), Activation::SilU);
         assert_eq!(Activation::from_str("swish").unwrap(), Activation::SilU);
@@ -480,15 +478,17 @@ mod tests {
 
         softmax_1d_inplace(&mut input);
 
-        let max_diff = (&input - &golden).mapv(|x| x.abs()).iter().fold(0.0f32, |a, &b| a.max(b));
+        let max_diff = (&input - &golden)
+            .mapv(|x| x.abs())
+            .iter()
+            .fold(0.0f32, |a, &b| a.max(b));
         assert!(max_diff < 1e-5, "softmax 1d mismatch: {}", max_diff);
     }
 
     #[test]
     fn test_softmax_4d_golden() {
         let input_data = vec![
-            0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7,
-            0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5,
+            0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5,
         ];
         let golden_data = vec![
             0.213838, 0.236328, 0.261183, 0.288651, 0.213838, 0.236328, 0.261183, 0.288651,
@@ -500,20 +500,18 @@ mod tests {
 
         softmax_4d_inplace(&mut input);
 
-        let max_diff = (&input - &golden).mapv(|x| x.abs()).iter().fold(0.0f32, |a, &b| a.max(b));
+        let max_diff = (&input - &golden)
+            .mapv(|x| x.abs())
+            .iter()
+            .fold(0.0f32, |a, &b| a.max(b));
         assert!(max_diff < 1e-5, "softmax 4d mismatch: {}", max_diff);
     }
 
- #[test]
+    #[test]
     fn test_softmax_4d_axis() {
         let mut scores = Array::from_shape_vec(
             (1, 2, 2, 3),
-            vec![
-                1.0, 2.0, 3.0,
-                4.0, 2.0, 0.0,
-                -1.0, 0.0, 1.0,
-                5.0, 5.0, 5.0,
-            ],
+            vec![1.0, 2.0, 3.0, 4.0, 2.0, 0.0, -1.0, 0.0, 1.0, 5.0, 5.0, 5.0],
         )
         .unwrap();
 

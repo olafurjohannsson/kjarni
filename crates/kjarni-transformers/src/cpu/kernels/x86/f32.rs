@@ -7,122 +7,159 @@ use std::arch::x86_64::*;
 /// Computes a [4 x 3] block matrix multiplication.
 #[target_feature(enable = "avx2", enable = "fma")]
 pub(crate) unsafe fn matmul_block_4x3_f32(
-    out_ptr: *mut f32,       // Pointer to Output [row, col]
-    out_stride: usize,       // Output stride (usually hidden_dim)
-    a_ptr: *const f32,       // Input buffer (4 rows)
-    b_ptr: *const f32,       // Weight buffer (3 rows)
-    k: usize,                // Hidden dim
-    bias_ptr: *const f32,    // Optional bias pointer (len 3)
-) { unsafe {
-    let zero = _mm256_setzero_ps();
-    let (mut c00, mut c01, mut c02) = (zero, zero, zero);
-    let (mut c10, mut c11, mut c12) = (zero, zero, zero);
-    let (mut c20, mut c21, mut c22) = (zero, zero, zero);
-    let (mut c30, mut c31, mut c32) = (zero, zero, zero);
+    out_ptr: *mut f32,    // Pointer to Output [row, col]
+    out_stride: usize,    // Output stride (usually hidden_dim)
+    a_ptr: *const f32,    // Input buffer (4 rows)
+    b_ptr: *const f32,    // Weight buffer (3 rows)
+    k: usize,             // Hidden dim
+    bias_ptr: *const f32, // Optional bias pointer (len 3)
+) {
+    unsafe {
+        let zero = _mm256_setzero_ps();
+        let (mut c00, mut c01, mut c02) = (zero, zero, zero);
+        let (mut c10, mut c11, mut c12) = (zero, zero, zero);
+        let (mut c20, mut c21, mut c22) = (zero, zero, zero);
+        let (mut c30, mut c31, mut c32) = (zero, zero, zero);
 
-    let mut a0_ptr = a_ptr;
-    let mut a1_ptr = a_ptr.add(k);
-    let mut a2_ptr = a_ptr.add(2 * k);
-    let mut a3_ptr = a_ptr.add(3 * k);
+        let mut a0_ptr = a_ptr;
+        let mut a1_ptr = a_ptr.add(k);
+        let mut a2_ptr = a_ptr.add(2 * k);
+        let mut a3_ptr = a_ptr.add(3 * k);
 
-    let mut b0_ptr = b_ptr;
-    let mut b1_ptr = b_ptr.add(k);
-    let mut b2_ptr = b_ptr.add(2 * k);
+        let mut b0_ptr = b_ptr;
+        let mut b1_ptr = b_ptr.add(k);
+        let mut b2_ptr = b_ptr.add(2 * k);
 
-    let mut n = k;
+        let mut n = k;
 
-    while n >= 8 {
-        let a0 = _mm256_loadu_ps(a0_ptr);
-        let a1 = _mm256_loadu_ps(a1_ptr);
-        let a2 = _mm256_loadu_ps(a2_ptr);
-        let a3 = _mm256_loadu_ps(a3_ptr);
+        while n >= 8 {
+            let a0 = _mm256_loadu_ps(a0_ptr);
+            let a1 = _mm256_loadu_ps(a1_ptr);
+            let a2 = _mm256_loadu_ps(a2_ptr);
+            let a3 = _mm256_loadu_ps(a3_ptr);
 
-        let _w0 = _mm256_loadu_ps(b0_ptr);
-        let w0 = _mm256_loadu_ps(b0_ptr);
-        c00 = _mm256_fmadd_ps(a0, w0, c00);
-        c10 = _mm256_fmadd_ps(a1, w0, c10);
-        c20 = _mm256_fmadd_ps(a2, w0, c20);
-        c30 = _mm256_fmadd_ps(a3, w0, c30);
+            let _w0 = _mm256_loadu_ps(b0_ptr);
+            let w0 = _mm256_loadu_ps(b0_ptr);
+            c00 = _mm256_fmadd_ps(a0, w0, c00);
+            c10 = _mm256_fmadd_ps(a1, w0, c10);
+            c20 = _mm256_fmadd_ps(a2, w0, c20);
+            c30 = _mm256_fmadd_ps(a3, w0, c30);
 
-        let w1 = _mm256_loadu_ps(b1_ptr);
-        c01 = _mm256_fmadd_ps(a0, w1, c01);
-        c11 = _mm256_fmadd_ps(a1, w1, c11);
-        c21 = _mm256_fmadd_ps(a2, w1, c21);
-        c31 = _mm256_fmadd_ps(a3, w1, c31);
+            let w1 = _mm256_loadu_ps(b1_ptr);
+            c01 = _mm256_fmadd_ps(a0, w1, c01);
+            c11 = _mm256_fmadd_ps(a1, w1, c11);
+            c21 = _mm256_fmadd_ps(a2, w1, c21);
+            c31 = _mm256_fmadd_ps(a3, w1, c31);
 
-        let w2 = _mm256_loadu_ps(b2_ptr);
-        c02 = _mm256_fmadd_ps(a0, w2, c02);
-        c12 = _mm256_fmadd_ps(a1, w2, c12);
-        c22 = _mm256_fmadd_ps(a2, w2, c22);
-        c32 = _mm256_fmadd_ps(a3, w2, c32);
+            let w2 = _mm256_loadu_ps(b2_ptr);
+            c02 = _mm256_fmadd_ps(a0, w2, c02);
+            c12 = _mm256_fmadd_ps(a1, w2, c12);
+            c22 = _mm256_fmadd_ps(a2, w2, c22);
+            c32 = _mm256_fmadd_ps(a3, w2, c32);
 
-        // Advance
-        a0_ptr = a0_ptr.add(8);
-        a1_ptr = a1_ptr.add(8);
-        a2_ptr = a2_ptr.add(8);
-        a3_ptr = a3_ptr.add(8);
-        b0_ptr = b0_ptr.add(8);
-        b1_ptr = b1_ptr.add(8);
-        b2_ptr = b2_ptr.add(8);
-        n -= 8;
+            // Advance
+            a0_ptr = a0_ptr.add(8);
+            a1_ptr = a1_ptr.add(8);
+            a2_ptr = a2_ptr.add(8);
+            a3_ptr = a3_ptr.add(8);
+            b0_ptr = b0_ptr.add(8);
+            b1_ptr = b1_ptr.add(8);
+            b2_ptr = b2_ptr.add(8);
+            n -= 8;
+        }
+
+        // Horizontal Sums
+        let mut r00 = hsum_ps_avx(c00);
+        let mut r01 = hsum_ps_avx(c01);
+        let mut r02 = hsum_ps_avx(c02);
+        let mut r10 = hsum_ps_avx(c10);
+        let mut r11 = hsum_ps_avx(c11);
+        let mut r12 = hsum_ps_avx(c12);
+        let mut r20 = hsum_ps_avx(c20);
+        let mut r21 = hsum_ps_avx(c21);
+        let mut r22 = hsum_ps_avx(c22);
+        let mut r30 = hsum_ps_avx(c30);
+        let mut r31 = hsum_ps_avx(c31);
+        let mut r32 = hsum_ps_avx(c32);
+
+        // Remainder loop (scalar)
+        while n > 0 {
+            let va0 = *a0_ptr;
+            let va1 = *a1_ptr;
+            let va2 = *a2_ptr;
+            let va3 = *a3_ptr;
+            let wb0 = *b0_ptr;
+            let wb1 = *b1_ptr;
+            let wb2 = *b2_ptr;
+
+            r00 += va0 * wb0;
+            r01 += va0 * wb1;
+            r02 += va0 * wb2;
+            r10 += va1 * wb0;
+            r11 += va1 * wb1;
+            r12 += va1 * wb2;
+            r20 += va2 * wb0;
+            r21 += va2 * wb1;
+            r22 += va2 * wb2;
+            r30 += va3 * wb0;
+            r31 += va3 * wb1;
+            r32 += va3 * wb2;
+
+            a0_ptr = a0_ptr.add(1);
+            a1_ptr = a1_ptr.add(1);
+            a2_ptr = a2_ptr.add(1);
+            a3_ptr = a3_ptr.add(1);
+            b0_ptr = b0_ptr.add(1);
+            b1_ptr = b1_ptr.add(1);
+            b2_ptr = b2_ptr.add(1);
+            n -= 1;
+        }
+
+        // Add bias ONCE per output (not 8x via broadcast!)
+        if !bias_ptr.is_null() {
+            let b0 = *bias_ptr;
+            let b1 = *bias_ptr.add(1);
+            let b2 = *bias_ptr.add(2);
+
+            r00 += b0;
+            r10 += b0;
+            r20 += b0;
+            r30 += b0;
+            r01 += b1;
+            r11 += b1;
+            r21 += b1;
+            r31 += b1;
+            r02 += b2;
+            r12 += b2;
+            r22 += b2;
+            r32 += b2;
+        }
+
+        // Write to Output [Batch, Out]
+        // Row 0
+        *out_ptr = r00;
+        *out_ptr.add(1) = r01;
+        *out_ptr.add(2) = r02;
+
+        // Row 1
+        let dst1 = out_ptr.add(out_stride);
+        *dst1 = r10;
+        *dst1.add(1) = r11;
+        *dst1.add(2) = r12;
+
+        // Row 2
+        let dst2 = out_ptr.add(2 * out_stride);
+        *dst2 = r20;
+        *dst2.add(1) = r21;
+        *dst2.add(2) = r22;
+
+        // Row 3
+        let dst3 = out_ptr.add(3 * out_stride);
+        *dst3 = r30;
+        *dst3.add(1) = r31;
+        *dst3.add(2) = r32;
     }
-
-    // Horizontal Sums
-    let mut r00 = hsum_ps_avx(c00); let mut r01 = hsum_ps_avx(c01); let mut r02 = hsum_ps_avx(c02);
-    let mut r10 = hsum_ps_avx(c10); let mut r11 = hsum_ps_avx(c11); let mut r12 = hsum_ps_avx(c12);
-    let mut r20 = hsum_ps_avx(c20); let mut r21 = hsum_ps_avx(c21); let mut r22 = hsum_ps_avx(c22);
-    let mut r30 = hsum_ps_avx(c30); let mut r31 = hsum_ps_avx(c31); let mut r32 = hsum_ps_avx(c32);
-
-    // Remainder loop (scalar)
-    while n > 0 {
-        let va0 = *a0_ptr; let va1 = *a1_ptr; let va2 = *a2_ptr; let va3 = *a3_ptr;
-        let wb0 = *b0_ptr; let wb1 = *b1_ptr; let wb2 = *b2_ptr;
-        
-        r00 += va0 * wb0; r01 += va0 * wb1; r02 += va0 * wb2;
-        r10 += va1 * wb0; r11 += va1 * wb1; r12 += va1 * wb2;
-        r20 += va2 * wb0; r21 += va2 * wb1; r22 += va2 * wb2;
-        r30 += va3 * wb0; r31 += va3 * wb1; r32 += va3 * wb2;
-
-        a0_ptr = a0_ptr.add(1); a1_ptr = a1_ptr.add(1); a2_ptr = a2_ptr.add(1); a3_ptr = a3_ptr.add(1);
-        b0_ptr = b0_ptr.add(1); b1_ptr = b1_ptr.add(1); b2_ptr = b2_ptr.add(1);
-        n -= 1;
-    }
-
-    // Add bias ONCE per output (not 8x via broadcast!)
-    if !bias_ptr.is_null() {
-        let b0 = *bias_ptr;
-        let b1 = *bias_ptr.add(1);
-        let b2 = *bias_ptr.add(2);
-        
-        r00 += b0; r10 += b0; r20 += b0; r30 += b0;
-        r01 += b1; r11 += b1; r21 += b1; r31 += b1;
-        r02 += b2; r12 += b2; r22 += b2; r32 += b2;
-    }
-
-    // Write to Output [Batch, Out]
-    // Row 0
-    *out_ptr = r00;
-    *out_ptr.add(1) = r01;
-    *out_ptr.add(2) = r02;
-
-    // Row 1
-    let dst1 = out_ptr.add(out_stride);
-    *dst1 = r10;
-    *dst1.add(1) = r11;
-    *dst1.add(2) = r12;
-
-    // Row 2
-    let dst2 = out_ptr.add(2 * out_stride);
-    *dst2 = r20;
-    *dst2.add(1) = r21;
-    *dst2.add(2) = r22;
-
-    // Row 3
-    let dst3 = out_ptr.add(3 * out_stride);
-    *dst3 = r30;
-    *dst3.add(1) = r31;
-    *dst3.add(2) = r32;
-}}
+}
 
 /// Computes a vector-matrix multiplication (vec @ mat) for F32 weights
 #[target_feature(enable = "avx2", enable = "fma")]
@@ -182,11 +219,9 @@ pub(crate) unsafe fn matmul_vec_f32(
     }
 }
 
-
 #[cfg(test)]
 mod simd_matmul_tests {
     use super::*;
-    
 
     fn scalar_dot(a: &[f32], b: &[f32]) -> f32 {
         assert_eq!(a.len(), b.len());
@@ -204,7 +239,14 @@ mod simd_matmul_tests {
         c
     }
 
-    fn scalar_matmul_bias(a: &[f32], b: &[f32], bias: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    fn scalar_matmul_bias(
+        a: &[f32],
+        b: &[f32],
+        bias: &[f32],
+        m: usize,
+        k: usize,
+        n: usize,
+    ) -> Vec<f32> {
         let mut c = scalar_matmul(a, b, m, k, n);
         for row in 0..m {
             for col in 0..n {
@@ -222,6 +264,10 @@ mod simd_matmul_tests {
             .fold(0.0f32, f32::max)
     }
 
+    #[expect(
+        dead_code,
+        reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+    )]
     fn mean_diff(a: &[f32], b: &[f32]) -> f32 {
         assert_eq!(a.len(), b.len());
         let sum: f32 = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum();
@@ -360,7 +406,7 @@ mod simd_matmul_tests {
         unsafe {
             matmul_block_4x3_f32(
                 actual.as_mut_ptr(),
-                n,              // out_stride
+                n, // out_stride
                 a.as_ptr(),
                 b.as_ptr(),
                 k,
@@ -369,7 +415,10 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 NO BIAS (k={}, m={}, n={}) ===", k, m, n);
+        println!(
+            "\n=== matmul_block_4x3 NO BIAS (k={}, m={}, n={}) ===",
+            k, m, n
+        );
         println!("Expected: {:?}", &expected[..12.min(expected.len())]);
         println!("Actual:   {:?}", &actual[..12.min(actual.len())]);
         println!("Max diff: {:.2e}", diff);
@@ -402,12 +451,19 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 WITH BIAS (k={}, m={}, n={}) ===", k, m, n);
-        println!("Bias: {:?}", &bias);
+        println!(
+            "\n=== matmul_block_4x3 WITH BIAS (k={}, m={}, n={}) ===",
+            k, m, n
+        );
+        println!("Bias: {:?}", bias);
         println!("Expected: {:?}", &expected[..12.min(expected.len())]);
         println!("Actual:   {:?}", &actual[..12.min(actual.len())]);
         println!("Max diff: {:.2e}", diff);
-        assert!(diff < 1e-6, "Tiny with-bias test failed. Max diff: {}", diff);
+        assert!(
+            diff < 1e-6,
+            "Tiny with-bias test failed. Max diff: {}",
+            diff
+        );
     }
 
     #[test]
@@ -464,9 +520,16 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 WITH BIAS (k={}, m={}, n={}) ===", k, m, n);
+        println!(
+            "\n=== matmul_block_4x3 WITH BIAS (k={}, m={}, n={}) ===",
+            k, m, n
+        );
         println!("Max diff: {:.2e}", diff);
-        assert!(diff < 1e-5, "Small with-bias test failed. Max diff: {}", diff);
+        assert!(
+            diff < 1e-5,
+            "Small with-bias test failed. Max diff: {}",
+            diff
+        );
     }
 
     #[test]
@@ -494,7 +557,10 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 MEDIUM (k={}, m={}, n={}) ===", k, m, n);
+        println!(
+            "\n=== matmul_block_4x3 MEDIUM (k={}, m={}, n={}) ===",
+            k, m, n
+        );
         println!("Expected: {:?}", &expected[..6]);
         println!("Actual:   {:?}", &actual[..6]);
         println!("Max diff: {:.2e}", diff);
@@ -526,9 +592,16 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 MEDIUM WITH BIAS (k={}, m={}, n={}) ===", k, m, n);
+        println!(
+            "\n=== matmul_block_4x3 MEDIUM WITH BIAS (k={}, m={}, n={}) ===",
+            k, m, n
+        );
         println!("Max diff: {:.2e}", diff);
-        assert!(diff < 1e-4, "Medium with-bias test failed. Max diff: {}", diff);
+        assert!(
+            diff < 1e-4,
+            "Medium with-bias test failed. Max diff: {}",
+            diff
+        );
     }
 
     #[test]
@@ -556,7 +629,10 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 LARGE (k={}, m={}, n={}) ===", k, m, n);
+        println!(
+            "\n=== matmul_block_4x3 LARGE (k={}, m={}, n={}) ===",
+            k, m, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-4, "Large test failed. Max diff: {}", diff);
     }
@@ -587,8 +663,8 @@ mod simd_matmul_tests {
 
         let diff = max_diff(&expected, &actual);
         println!("\n=== matmul_block_4x3 NON-ALIGNED K (k={}) ===", k);
-        println!("Expected: {:?}", &expected);
-        println!("Actual:   {:?}", &actual);
+        println!("Expected: {:?}", expected);
+        println!("Actual:   {:?}", actual);
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Non-aligned k test failed. Max diff: {}", diff);
     }
@@ -619,17 +695,24 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== matmul_block_4x3 NON-ALIGNED K WITH BIAS (k={}) ===", k);
+        println!(
+            "\n=== matmul_block_4x3 NON-ALIGNED K WITH BIAS (k={}) ===",
+            k
+        );
         println!("Max diff: {:.2e}", diff);
-        assert!(diff < 1e-5, "Non-aligned k with-bias test failed. Max diff: {}", diff);
+        assert!(
+            diff < 1e-5,
+            "Non-aligned k with-bias test failed. Max diff: {}",
+            diff
+        );
     }
 
     #[test]
     fn test_block_4x3_output_stride() {
         let k = 32;
         let m = 4;
-        let n_kernel = 3;  // kernel produces 3 outputs
-        let n_total = 10;  // but output buffer is wider
+        let n_kernel = 3; // kernel produces 3 outputs
+        let n_total = 10; // but output buffer is wider
 
         let a = make_input(m, k, 0);
         let b = make_input(n_kernel, k, 100);
@@ -642,8 +725,8 @@ mod simd_matmul_tests {
 
         unsafe {
             matmul_block_4x3_f32(
-                actual.as_mut_ptr(),  // start at column 0
-                n_total,              // stride is full width
+                actual.as_mut_ptr(), // start at column 0
+                n_total,             // stride is full width
                 a.as_ptr(),
                 b.as_ptr(),
                 k,
@@ -660,7 +743,10 @@ mod simd_matmul_tests {
         }
 
         let diff = max_diff(&expected_small, &actual_extracted);
-        println!("\n=== matmul_block_4x3 OUTPUT STRIDE (stride={}) ===", n_total);
+        println!(
+            "\n=== matmul_block_4x3 OUTPUT STRIDE (stride={}) ===",
+            n_total
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Output stride test failed. Max diff: {}", diff);
     }

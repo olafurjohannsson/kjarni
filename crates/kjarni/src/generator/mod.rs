@@ -1,17 +1,15 @@
-
 //! Raw text generator for decoder language models.
 
 mod builder;
 mod model;
+pub mod presets;
 mod types;
 mod validation;
-pub mod presets;
 
 pub use builder::GeneratorBuilder;
 use kjarni_transformers::ModelType;
 pub use model::Generator;
 pub use types::*;
-
 
 /// Generate text with default settings.
 pub async fn generate(model: &str, prompt: &str) -> GeneratorResult<String> {

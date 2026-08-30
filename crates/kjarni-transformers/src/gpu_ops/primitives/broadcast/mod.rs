@@ -1,5 +1,5 @@
-use crate::gpu::GpuTensor;
 use crate::WgpuContext;
+use crate::gpu::GpuTensor;
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -141,11 +141,10 @@ impl GpuBroadcast {
         });
         cpass.set_pipeline(&self.pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
-        let dispatch_count = (dst.num_elements() as u32 + 255) / 256;
+        let dispatch_count = (dst.num_elements() as u32).div_ceil(256);
         cpass.dispatch_workgroups(dispatch_count, 1, 1);
     }
 }
-
 
 #[cfg(test)]
 mod tests;

@@ -119,9 +119,13 @@ impl TextSplitter {
         if text.is_empty() {
             return 0;
         }
-        let effective = self.config.chunk_size.saturating_sub(self.config.chunk_overlap).max(1);
+        let effective = self
+            .config
+            .chunk_size
+            .saturating_sub(self.config.chunk_overlap)
+            .max(1);
         let char_count = text.chars().count();
-        (char_count + effective - 1) / effective
+        char_count.div_ceil(effective)
     }
 }
 
@@ -132,8 +136,8 @@ pub fn clean_markdown(text: &str) -> String {
     let text = clean_markdown_images(&text);
     let text = clean_markdown_links(&text);
     let text = strip_html_tags(&text);
-    let text = collapse_whitespace(&text);
-    text
+
+    collapse_whitespace(&text)
 }
 
 fn strip_frontmatter(text: &str) -> String {
@@ -145,7 +149,7 @@ fn strip_frontmatter(text: &str) -> String {
     let after_first = &trimmed[3..];
     if let Some(end_pos) = after_first.find("\n---") {
         let rest = &after_first[end_pos + 4..];
-        rest.trim_start_matches('\n').to_string() 
+        rest.trim_start_matches('\n').to_string()
     } else {
         text.to_string()
     }
@@ -449,7 +453,10 @@ mod tests {
 
     #[test]
     fn test_clean_wikilinks_simple() {
-        assert_eq!(clean_wikilinks("See [[My Page]] for details"), "See My Page for details");
+        assert_eq!(
+            clean_wikilinks("See [[My Page]] for details"),
+            "See My Page for details"
+        );
     }
 
     #[test]
@@ -462,10 +469,7 @@ mod tests {
 
     #[test]
     fn test_clean_wikilinks_path() {
-        assert_eq!(
-            clean_wikilinks("See [[folder/subfolder/Note]]"),
-            "See Note"
-        );
+        assert_eq!(clean_wikilinks("See [[folder/subfolder/Note]]"), "See Note");
     }
 
     #[test]
@@ -598,7 +602,7 @@ The actual content that matters is here."#;
         let chunks = splitter.split(text);
 
         // Should split at markdown boundaries, not mid-sentence
-        assert!(chunks.len() >= 1);
+        assert!(!chunks.is_empty());
         // Each chunk should be coherent
         for chunk in &chunks {
             assert!(!chunk.trim().is_empty());
@@ -607,9 +611,33 @@ The actual content that matters is here."#;
 
     #[test]
     fn test_config_validation() {
-        assert!(SplitterConfig { chunk_size: 0, chunk_overlap: 0, clean_markdown: true }.validate().is_err());
-        assert!(SplitterConfig { chunk_size: 100, chunk_overlap: 100, clean_markdown: true }.validate().is_err());
-        assert!(SplitterConfig { chunk_size: 100, chunk_overlap: 50, clean_markdown: true }.validate().is_ok());
+        assert!(
+            SplitterConfig {
+                chunk_size: 0,
+                chunk_overlap: 0,
+                clean_markdown: true
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            SplitterConfig {
+                chunk_size: 100,
+                chunk_overlap: 100,
+                clean_markdown: true
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            SplitterConfig {
+                chunk_size: 100,
+                chunk_overlap: 50,
+                clean_markdown: true
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     #[test]
@@ -622,6 +650,6 @@ The actual content that matters is here."#;
         // 400 chars, effective size 80 → ~5 chunks
         let text = "x".repeat(400);
         let estimate = splitter.estimate_chunks(&text);
-        assert!(estimate >= 4 && estimate <= 6, "estimate was {}", estimate);
+        assert!((4..=6).contains(&estimate), "estimate was {}", estimate);
     }
 }

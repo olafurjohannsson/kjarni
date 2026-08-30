@@ -1,9 +1,10 @@
 //! Whisper transcription logic: chunking, greedy decode, timestamp parsing
-use anyhow::{anyhow, Result};
-use ndarray::{s, Array2, Array3};
+use anyhow::{Result, anyhow};
+use ndarray::{Array2, Array3, s};
 
 use kjarni_transformers::{
-    Cache, LanguageModel, cache::CpuBeamKVCache, cpu::encoder::{CpuEncoderOps, prelude::*}, encoder_decoder::traits::{CpuEncoderDecoderOps, EncoderDecoderLanguageModel}
+    Cache, LanguageModel, cache::CpuBeamKVCache, cpu::encoder::CpuEncoderOps,
+    encoder_decoder::traits::EncoderDecoderLanguageModel,
 };
 
 use super::WhisperModel;
@@ -17,12 +18,12 @@ pub const WHISPER_CHUNK_LENGTH_SECS: f32 = 30.0;
 /// Number of samples in one 30-second chunk at 16 kHz.
 pub const WHISPER_CHUNK_SAMPLES: usize = 480_000;
 
-const SOT_TOKEN: u32 = 50258;           // <|startoftranscript|>
-const EOT_TOKEN: u32 = 50257;           // <|endoftext|>
-const TRANSCRIBE_TOKEN: u32 = 50359;    // <|transcribe|>
-const TRANSLATE_TOKEN: u32 = 50360;     // <|translate|>
+const SOT_TOKEN: u32 = 50258; // <|startoftranscript|>
+const EOT_TOKEN: u32 = 50257; // <|endoftext|>
+const TRANSCRIBE_TOKEN: u32 = 50359; // <|transcribe|>
+const TRANSLATE_TOKEN: u32 = 50360; // <|translate|>
 const NO_TIMESTAMPS_TOKEN: u32 = 50363; // <|notimestamps|>
-const TIMESTAMP_BEGIN: u32 = 50364;     // <|0.00|>
+const TIMESTAMP_BEGIN: u32 = 50364; // <|0.00|>
 const FIRST_SPECIAL_TOKEN: u32 = 50257;
 
 /// Each timestamp token represents 0.02 seconds.
@@ -80,7 +81,6 @@ pub struct WhisperChunkResult {
     /// Full joined text for this chunk.
     pub text: String,
 }
-
 
 impl WhisperModel {
     /// Split audio samples into 30-second chunks.
@@ -168,12 +168,13 @@ impl WhisperModel {
         let enc_seq_len = encoder_hidden_states.dim().1;
         let encoder_mask = Array2::<f32>::ones((1, enc_seq_len));
 
-        let input_ids = Array2::from_shape_vec(
-            (1, prompt_tokens.len()),
-            prompt_tokens.clone(),
-        )?;
+        let input_ids = Array2::from_shape_vec((1, prompt_tokens.len()), prompt_tokens.clone())?;
         let padding_mask = Array2::<f32>::ones((1, prompt_tokens.len()));
 
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let output = decoder.forward(
             &input_ids,
             encoder_hidden_states,
@@ -196,12 +197,12 @@ impl WhisperModel {
         let mut generated_ids: Vec<u32> = vec![next_token];
 
         // Notify callback
-        if let Some(ref mut cb) = on_token {
-            if next_token != eos_token_id {
-                let text = tokenizer.decode(&[next_token], false).unwrap_or_default();
-                if !cb(next_token, &text) {
-                    return self.finalize_chunk(generated_ids, config, chunk_time_offset);
-                }
+        if let Some(ref mut cb) = on_token
+            && next_token != eos_token_id
+        {
+            let text = tokenizer.decode(&[next_token], false).unwrap_or_default();
+            if !cb(next_token, &text) {
+                return self.finalize_chunk(generated_ids, config, chunk_time_offset);
             }
         }
         for _step in 0..config.max_tokens_per_chunk {
@@ -212,6 +213,10 @@ impl WhisperModel {
             let step_ids = Array2::from_shape_vec((1, 1), vec![next_token])?;
             let step_mask = Array2::<f32>::ones((1, 1));
 
+            #[allow(
+                deprecated,
+                reason = "internal caller of an API deprecated without a named replacement"
+            )]
             let output = decoder.forward(
                 &step_ids,
                 encoder_hidden_states,
@@ -232,12 +237,12 @@ impl WhisperModel {
             next_token = Self::pick_token(&last_logits, config, eos_token_id);
             generated_ids.push(next_token);
 
-            if let Some(ref mut cb) = on_token {
-                if next_token != eos_token_id {
-                    let text = tokenizer.decode(&[next_token], false).unwrap_or_default();
-                    if !cb(next_token, &text) {
-                        break;
-                    }
+            if let Some(ref mut cb) = on_token
+                && next_token != eos_token_id
+            {
+                let text = tokenizer.decode(&[next_token], false).unwrap_or_default();
+                if !cb(next_token, &text) {
+                    break;
                 }
             }
         }
@@ -358,8 +363,7 @@ impl WhisperModel {
         for &id in token_ids {
             if id >= TIMESTAMP_BEGIN {
                 // Timestamp token
-                let time =
-                    (id - TIMESTAMP_BEGIN) as f32 * TIMESTAMP_RESOLUTION + chunk_offset;
+                let time = (id - TIMESTAMP_BEGIN) as f32 * TIMESTAMP_RESOLUTION + chunk_offset;
 
                 if current_start.is_none() {
                     // Opening timestamp
@@ -393,23 +397,23 @@ impl WhisperModel {
         }
 
         // Trailing text without a closing timestamp
-        if let Some(start) = current_start {
-            if !current_tokens.is_empty() {
-                let text_ids: Vec<u32> = current_tokens
-                    .iter()
-                    .filter(|&&t| t < FIRST_SPECIAL_TOKEN)
-                    .copied()
-                    .collect();
+        if let Some(start) = current_start
+            && !current_tokens.is_empty()
+        {
+            let text_ids: Vec<u32> = current_tokens
+                .iter()
+                .filter(|&&t| t < FIRST_SPECIAL_TOKEN)
+                .copied()
+                .collect();
 
-                let text = tokenizer.decode(&text_ids, true).unwrap_or_default();
+            let text = tokenizer.decode(&text_ids, true).unwrap_or_default();
 
-                if !text.trim().is_empty() {
-                    segments.push(WhisperSegment {
-                        start,
-                        end: start + WHISPER_CHUNK_LENGTH_SECS,
-                        text,
-                    });
-                }
+            if !text.trim().is_empty() {
+                segments.push(WhisperSegment {
+                    start,
+                    end: start + WHISPER_CHUNK_LENGTH_SECS,
+                    text,
+                });
             }
         }
 
@@ -445,7 +449,7 @@ impl WhisperModel {
         let mut merged: Vec<WhisperSegment> = Vec::with_capacity(segments.len());
 
         for seg in segments {
-            let should_merge = merged.last().map_or(false, |prev| {
+            let should_merge = merged.last().is_some_and(|prev| {
                 (prev.end - seg.start).abs() < 0.02 && is_chunk_boundary(prev.end)
             });
 
@@ -462,12 +466,10 @@ impl WhisperModel {
     }
 }
 
-
 fn is_chunk_boundary(time: f32) -> bool {
     let rem = time % WHISPER_CHUNK_LENGTH_SECS;
     rem < 0.02 || (WHISPER_CHUNK_LENGTH_SECS - rem) < 0.02
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -513,10 +515,17 @@ mod tests {
 
     #[test]
     fn test_parse_timestamps_basic() {
-        
         let segments = WhisperModel::merge_boundary_segments(vec![
-            WhisperSegment { start: 0.0, end: 30.0, text: "Hello ".into() },
-            WhisperSegment { start: 30.0, end: 45.0, text: "world.".into() },
+            WhisperSegment {
+                start: 0.0,
+                end: 30.0,
+                text: "Hello ".into(),
+            },
+            WhisperSegment {
+                start: 30.0,
+                end: 45.0,
+                text: "world.".into(),
+            },
         ]);
 
         assert_eq!(segments.len(), 1);

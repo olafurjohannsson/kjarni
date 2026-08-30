@@ -38,10 +38,7 @@ pub enum ClassificationTask {
     Toxicity,
 }
 
-
-
 // V1 Presets - Sentiment
-
 
 /// Binary sentiment (positive/negative) - fastest
 pub const SENTIMENT_BINARY_V1: ClassifierPreset = ClassifierPreset {
@@ -79,9 +76,7 @@ pub const SENTIMENT_5STAR_V1: ClassifierPreset = ClassifierPreset {
     description: "5-star ratings, multilingual (EN/DE/FR/ES/IT/NL)",
 };
 
-
 // V1 Presets - Emotion
-
 
 /// 7 basic emotions
 pub const EMOTION_V1: ClassifierPreset = ClassifierPreset {
@@ -89,7 +84,9 @@ pub const EMOTION_V1: ClassifierPreset = ClassifierPreset {
     model: "distilroberta-emotion",
     architecture: "roberta",
     task: ClassificationTask::Emotion,
-    labels: Some(&["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]),
+    labels: Some(&[
+        "anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise",
+    ]),
     recommended_device: KjarniDevice::Cpu,
     memory_mb: 329,
     description: "7 basic emotions",
@@ -102,20 +99,41 @@ pub const EMOTION_DETAILED_V1: ClassifierPreset = ClassifierPreset {
     architecture: "roberta",
     task: ClassificationTask::Emotion,
     labels: Some(&[
-        "admiration", "amusement", "anger", "annoyance", "approval", "caring",
-        "confusion", "curiosity", "desire", "disappointment", "disapproval",
-        "disgust", "embarrassment", "excitement", "fear", "gratitude", "grief",
-        "joy", "love", "nervousness", "optimism", "pride", "realization",
-        "relief", "remorse", "sadness", "surprise", "neutral"
+        "admiration",
+        "amusement",
+        "anger",
+        "annoyance",
+        "approval",
+        "caring",
+        "confusion",
+        "curiosity",
+        "desire",
+        "disappointment",
+        "disapproval",
+        "disgust",
+        "embarrassment",
+        "excitement",
+        "fear",
+        "gratitude",
+        "grief",
+        "joy",
+        "love",
+        "nervousness",
+        "optimism",
+        "pride",
+        "realization",
+        "relief",
+        "remorse",
+        "sadness",
+        "surprise",
+        "neutral",
     ]),
     recommended_device: KjarniDevice::Cpu,
     memory_mb: 499,
     description: "28 fine-grained emotions (multi-label)",
 };
 
-
 // V1 Presets - Toxicity
-
 
 /// Toxicity detection (multi-label)
 pub const TOXICITY_V1: ClassifierPreset = ClassifierPreset {
@@ -123,15 +141,20 @@ pub const TOXICITY_V1: ClassifierPreset = ClassifierPreset {
     model: "toxic-bert",
     architecture: "bert",
     task: ClassificationTask::Toxicity,
-    labels: Some(&["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]),
+    labels: Some(&[
+        "toxic",
+        "severe_toxic",
+        "obscene",
+        "threat",
+        "insult",
+        "identity_hate",
+    ]),
     recommended_device: KjarniDevice::Cpu,
     memory_mb: 438,
     description: "Multi-label toxicity detection",
 };
 
-
 // Preset Collections
-
 
 /// All V1 presets.
 pub const ALL_V1_PRESETS: &[&ClassifierPreset] = &[
@@ -155,9 +178,7 @@ pub fn find_preset(name: &str) -> Option<&'static ClassifierPreset> {
         .copied()
 }
 
-
 // Tier-Based Selection
-
 
 /// Tier-based preset selection for sentiment analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

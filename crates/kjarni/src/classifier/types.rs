@@ -1,8 +1,8 @@
 //! Types for the classifier module.
 
+pub use kjarni_transformers::cpu::encoder::traits::ClassificationMode;
 use std::fmt;
 use thiserror::Error;
-pub use kjarni_transformers::cpu::encoder::traits::ClassificationMode;
 
 /// Errors specific to classification.
 #[derive(Debug, Error)]
@@ -155,8 +155,6 @@ impl fmt::Display for ClassificationResult {
         write!(f, "{} ({:.1}%)", self.label, self.score * 100.0)
     }
 }
-
-
 
 /// Overrides for classification behavior.
 #[derive(Debug, Clone, Default)]

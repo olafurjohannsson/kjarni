@@ -25,8 +25,12 @@ pub unsafe fn matmul_vec_q8_0_avx2(
             let mut sum3 = _mm256_setzero_ps();
 
             // Process blocks in groups of 4 (4 * 32 = 128 weights)
+            #[allow(
+                clippy::chunks_exact_to_as_chunks,
+                reason = "the remainder() of this iterator is used below"
+            )]
             let mut chunks = row_blocks.chunks_exact(4);
-            while let Some(chunk) = chunks.next() {
+            for chunk in chunks.by_ref() {
                 {
                     let b = &chunk[0];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -81,7 +85,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                     sum1 = _mm256_fmadd_ps(_mm256_mul_ps(q3_f, d_vec), a3, sum1);
                 }
 
-                // Block 2 
+                // Block 2
                 {
                     let b = &chunk[2];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -109,7 +113,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                     sum2 = _mm256_fmadd_ps(_mm256_mul_ps(q3_f, d_vec), a3, sum2);
                 }
 
-                // Block 3 
+                // Block 3
                 {
                     let b = &chunk[3];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -140,7 +144,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                 a_ptr_local = a_ptr_local.add(128);
             }
 
-            //  remainder blocks 
+            //  remainder blocks
             for b in chunks.remainder() {
                 let d_vec = _mm256_set1_ps(b.d.to_f32());
                 let q_ptr = b.qs.as_ptr() as *const __m128i;

@@ -47,6 +47,9 @@ class KjarniError:
     CANCELLED = 8
     TIMEOUT = 9
     STREAM_ENDED = 10
+    # A panic in the native engine, caught at the ABI boundary. The operation failed
+    # and its outputs are undefined; the handle stays valid to close.
+    PANIC = 11
     UNKNOWN = 255
 
 class KjarniDevice:

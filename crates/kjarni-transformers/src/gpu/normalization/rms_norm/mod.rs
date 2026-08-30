@@ -147,7 +147,7 @@ impl GpuRMSNorm {
             eps: self.eps,
             is_bf16,
         };
-        
+
         let uniform_buffer =
             self.context
                 .device
@@ -182,7 +182,7 @@ impl GpuRMSNorm {
                     },
                 ],
             });
-        let label = format!("RMSNorm");
+        let label = "RMSNorm".to_string();
         self.context
             .profiler
             .profile(encoder, &label, |compute_pass| {

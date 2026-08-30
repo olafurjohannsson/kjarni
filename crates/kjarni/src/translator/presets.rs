@@ -21,9 +21,7 @@ pub struct TranslatorPreset {
     pub description: &'static str,
 }
 
-
 // V1 Presets
-
 
 /// Fast translation with FLAN-T5 Base.
 pub const TRANSLATION_FAST_V1: TranslatorPreset = TranslatorPreset {
@@ -31,7 +29,12 @@ pub const TRANSLATION_FAST_V1: TranslatorPreset = TranslatorPreset {
     model: "flan-t5-base",
     architecture: "t5",
     supported_languages: &[
-        "English", "German", "French", "Spanish", "Italian", "Portuguese",
+        "English",
+        "German",
+        "French",
+        "Spanish",
+        "Italian",
+        "Portuguese",
     ],
     recommended_device: KjarniDevice::Cpu,
     memory_mb: 990,
@@ -44,8 +47,17 @@ pub const TRANSLATION_QUALITY_V1: TranslatorPreset = TranslatorPreset {
     model: "flan-t5-large",
     architecture: "t5",
     supported_languages: &[
-        "English", "German", "French", "Spanish", "Italian", "Portuguese",
-        "Russian", "Chinese", "Japanese", "Korean", "Arabic",
+        "English",
+        "German",
+        "French",
+        "Spanish",
+        "Italian",
+        "Portuguese",
+        "Russian",
+        "Chinese",
+        "Japanese",
+        "Korean",
+        "Arabic",
     ],
     recommended_device: KjarniDevice::Gpu,
     memory_mb: 3000,
@@ -53,10 +65,7 @@ pub const TRANSLATION_QUALITY_V1: TranslatorPreset = TranslatorPreset {
 };
 
 /// All V1 presets.
-pub const ALL_V1_PRESETS: &[&TranslatorPreset] = &[
-    &TRANSLATION_FAST_V1,
-    &TRANSLATION_QUALITY_V1,
-];
+pub const ALL_V1_PRESETS: &[&TranslatorPreset] = &[&TRANSLATION_FAST_V1, &TRANSLATION_QUALITY_V1];
 
 /// Find a preset by name.
 pub fn find_preset(name: &str) -> Option<&'static TranslatorPreset> {
@@ -67,9 +76,7 @@ pub fn find_preset(name: &str) -> Option<&'static TranslatorPreset> {
         .copied()
 }
 
-
 // Tiers
-
 
 /// Tier-based preset selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

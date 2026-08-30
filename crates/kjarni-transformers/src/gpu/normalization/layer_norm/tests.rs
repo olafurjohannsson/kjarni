@@ -5,9 +5,6 @@ use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;
 use ndarray::{Array1, Array3, Axis};
 
-#[path = "../../../tests/common.rs"]
-mod common;
-
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn test_gpu_layernorm_parity() -> Result<()> {

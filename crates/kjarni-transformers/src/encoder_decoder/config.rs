@@ -46,15 +46,26 @@ impl TaskSpecificParams {
     }
 }
 
-fn default_length_penalty() -> f32 { 2.0 }
-fn default_no_repeat_ngram() -> usize { 3 }
-fn default_num_beams() -> usize { 4 }
+fn default_length_penalty() -> f32 {
+    2.0
+}
+fn default_no_repeat_ngram() -> usize {
+    3
+}
+fn default_num_beams() -> usize {
+    4
+}
 
 /// Position encoding strategy for seq2seq models.
 #[derive(Debug, Clone)]
 pub enum PositionEncodingType {
-    Learned { offset: usize },
-    RelativeBias { num_buckets: usize, max_distance: usize },
+    Learned {
+        offset: usize,
+    },
+    RelativeBias {
+        num_buckets: usize,
+        max_distance: usize,
+    },
     Sinusoidal,
     None,
 }
@@ -91,7 +102,6 @@ impl Seq2SeqEncoderConfig {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Seq2SeqDecoderConfig {
@@ -131,7 +141,6 @@ impl Seq2SeqDecoderConfig {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,7 +168,7 @@ mod tests {
         assert_eq!(sum.prefix.as_deref(), Some("summarize: "));
         // Defaults
         assert_eq!(sum.length_penalty, 2.0); // default_length_penalty
-        assert_eq!(sum.num_beams, 4);        // default_num_beams
+        assert_eq!(sum.num_beams, 4); // default_num_beams
         let trans = params.translation_en_to_de.as_ref().unwrap();
         assert!(!trans.early_stopping);
         assert_eq!(trans.prefix, "translate English to German: ");
@@ -184,25 +193,40 @@ mod tests {
     fn test_encoder_configs() {
         // BART
         let bart = Seq2SeqEncoderConfig::bart();
-        assert!(matches!(bart.position_encoding, PositionEncodingType::Learned { offset: 2 }));
+        assert!(matches!(
+            bart.position_encoding,
+            PositionEncodingType::Learned { offset: 2 }
+        ));
         assert!(bart.normalize_embeddings);
         assert!(!bart.final_layer_norm);
 
         // T5
         let t5 = Seq2SeqEncoderConfig::t5();
-        assert!(matches!(t5.position_encoding, PositionEncodingType::RelativeBias { num_buckets: 32, .. }));
+        assert!(matches!(
+            t5.position_encoding,
+            PositionEncodingType::RelativeBias {
+                num_buckets: 32,
+                ..
+            }
+        ));
         assert!(t5.final_layer_norm);
 
         // Whisper
         let whisper = Seq2SeqEncoderConfig::whisper();
-        assert!(matches!(whisper.position_encoding, PositionEncodingType::None)); // audio frontend handles positions
+        assert!(matches!(
+            whisper.position_encoding,
+            PositionEncodingType::None
+        )); // audio frontend handles positions
     }
 
     #[test]
     fn test_decoder_configs() {
         // BART
         let bart = Seq2SeqDecoderConfig::bart();
-        assert!(matches!(bart.position_encoding, PositionEncodingType::Learned { offset: 2 }));
+        assert!(matches!(
+            bart.position_encoding,
+            PositionEncodingType::Learned { offset: 2 }
+        ));
         assert!(!bart.pre_norm);
 
         // T5
@@ -213,6 +237,9 @@ mod tests {
         // Whisper
         let whisper = Seq2SeqDecoderConfig::whisper();
         assert!(whisper.pre_norm);
-        assert!(matches!(whisper.position_encoding, PositionEncodingType::Learned { offset: 0 }));
+        assert!(matches!(
+            whisper.position_encoding,
+            PositionEncodingType::Learned { offset: 0 }
+        ));
     }
 }

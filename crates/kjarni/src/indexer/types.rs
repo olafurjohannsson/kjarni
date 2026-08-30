@@ -1,4 +1,3 @@
-
 /// Statistics returned after indexing
 #[derive(Debug, Clone)]
 pub struct IndexStats {

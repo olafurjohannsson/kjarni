@@ -1,11 +1,10 @@
 //! WASM-compatible BPE tokenizer for GPT
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::tokenizer::{Encoding, ModelTokenizer};
-
 
 impl ModelTokenizer for BPETokenizer {
     fn encode(&self, text: &str, _add_special_tokens: bool) -> anyhow::Result<Vec<u32>> {
@@ -16,7 +15,6 @@ impl ModelTokenizer for BPETokenizer {
     }
 }
 
-
 pub struct BPETokenizer {
     encoder: HashMap<String, u32>,
     decoder: HashMap<u32, String>,
@@ -24,26 +22,26 @@ pub struct BPETokenizer {
     bos_token_id: Option<u32>,
     eos_token_id: Option<u32>,
     pad_token_id: Option<u32>,
-    cache: std::sync::Mutex<HashMap<String, Vec<u32>>>, 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
+    cache: std::sync::Mutex<HashMap<String, Vec<u32>>>,
 }
-
 
 impl BPETokenizer {
     pub fn from_json_str(content: &str) -> Result<Self> {
         let json: Value = serde_json::from_str(content)?;
-        
+
         let encoder = json["model"]["vocab"]
             .as_object()
             .ok_or_else(|| anyhow!("Could not find vocab"))?
             .iter()
             .map(|(token, id)| (token.clone(), id.as_u64().unwrap() as u32))
             .collect::<HashMap<String, u32>>();
-        
-        let decoder: HashMap<u32, String> = encoder
-            .iter()
-            .map(|(k, v)| (*v, k.clone()))
-            .collect();
-        
+
+        let decoder: HashMap<u32, String> = encoder.iter().map(|(k, v)| (*v, k.clone())).collect();
+
         let merges_array = json["model"]["merges"]
             .as_array()
             .ok_or_else(|| anyhow!("Could not find merges"))?;
@@ -57,11 +55,11 @@ impl BPETokenizer {
                 }
             }
         }
-        
+
         let bos_token_id = encoder.get("<|startoftext|>").copied();
         let eos_token_id = encoder.get("<|endoftext|>").copied();
         let pad_token_id = encoder.get("<|pad|>").copied().or(eos_token_id);
-        
+
         Ok(Self {
             encoder,
             decoder,
@@ -72,37 +70,42 @@ impl BPETokenizer {
             cache: std::sync::Mutex::new(HashMap::new()),
         })
     }
-    
+
     pub fn encode(&self, text: &str, _max_len: usize) -> Result<Encoding> {
         let mut ids = Vec::new();
-        
+
         if let Some(bos_id) = self.bos_token_id {
             ids.push(bos_id);
         }
         for (i, word) in text.split_inclusive(char::is_whitespace).enumerate() {
-             let mut token_list: Vec<String> = Vec::new();
-             
-             for (j, byte) in word.bytes().enumerate() {
-                 let s = if j == 0 && i > 0 && !word.starts_with(' ') {
-                     format!("Ġ{}", byte as char)
-                 } else if byte == b' ' {
-                     "Ġ".to_string()
-                 } else {
-                     (byte as char).to_string()
-                 };
-                 token_list.push(s);
-             }
+            let mut token_list: Vec<String> = Vec::new();
 
-             let word_ids = self.bpe(&token_list);
-             ids.extend(word_ids);
+            for (j, byte) in word.bytes().enumerate() {
+                let s = if j == 0 && i > 0 && !word.starts_with(' ') {
+                    format!("Ġ{}", byte as char)
+                } else if byte == b' ' {
+                    "Ġ".to_string()
+                } else {
+                    (byte as char).to_string()
+                };
+                token_list.push(s);
+            }
+
+            let word_ids = self.bpe(&token_list);
+            ids.extend(word_ids);
         }
 
-        Ok(Encoding { ids, attention_mask: None })
+        Ok(Encoding {
+            ids,
+            attention_mask: None,
+        })
     }
 
     fn bpe(&self, word: &[String]) -> Vec<u32> {
-        if word.is_empty() { return vec![]; }
-        
+        if word.is_empty() {
+            return vec![];
+        }
+
         let mut word = word.to_vec();
 
         loop {
@@ -110,20 +113,20 @@ impl BPETokenizer {
             if word.len() < 2 {
                 break;
             }
-            
+
             for i in 0..word.len() - 1 {
-                pairs.push((word[i].clone(), word[i+1].clone()));
+                pairs.push((word[i].clone(), word[i + 1].clone()));
             }
 
             let mut best_pair: Option<(String, String)> = None;
             let mut best_rank = usize::MAX;
 
             for pair in pairs {
-                if let Some(&rank) = self.bpe_ranks.get(&pair) {
-                    if rank < best_rank {
-                        best_rank = rank;
-                        best_pair = Some(pair);
-                    }
+                if let Some(&rank) = self.bpe_ranks.get(&pair)
+                    && rank < best_rank
+                {
+                    best_rank = rank;
+                    best_pair = Some(pair);
                 }
             }
 
@@ -135,7 +138,7 @@ impl BPETokenizer {
             let mut new_word = Vec::new();
             let mut i = 0;
             while i < word.len() {
-                if i < word.len() - 1 && word[i] == first && word[i+1] == second {
+                if i < word.len() - 1 && word[i] == first && word[i + 1] == second {
                     new_word.push(format!("{}{}", first, second));
                     i += 2;
                 } else {
@@ -143,7 +146,7 @@ impl BPETokenizer {
                     i += 1;
                 }
             }
-            
+
             word = new_word;
         }
 
@@ -156,20 +159,18 @@ impl BPETokenizer {
         let tokens: Vec<String> = ids
             .iter()
             .filter_map(|&id| {
-                if skip_special_tokens {
-                    if Some(id) == self.bos_token_id || 
-                       Some(id) == self.eos_token_id || 
-                       Some(id) == self.pad_token_id {
-                        return None;
-                    }
+                if skip_special_tokens
+                    && (Some(id) == self.bos_token_id
+                        || Some(id) == self.eos_token_id
+                        || Some(id) == self.pad_token_id)
+                {
+                    return None;
                 }
                 self.decoder.get(&id).cloned()
             })
             .collect();
 
-        Ok(tokens.join("")
-            .replace("Ġ", " ")
-            .replace("Ċ", "\n"))
+        Ok(tokens.join("").replace("Ġ", " ").replace("Ċ", "\n"))
     }
 }
 
@@ -230,8 +231,6 @@ mod tests {
         assert!(decoded.contains("i"));
         Ok(())
     }
-
-
 
     #[test]
     fn test_decode_with_unknown_ids() -> Result<()> {

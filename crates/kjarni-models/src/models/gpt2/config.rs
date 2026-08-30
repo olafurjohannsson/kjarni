@@ -43,7 +43,7 @@ impl ModelConfig for Gpt2Config {
     fn model_type(&self) -> &str {
         &self.model_type
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -90,7 +90,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             self_attn: AttentionLayout {
                 q_weight: format!("{}.attn.c_attn.weight", lp),
                 q_bias: Some(format!("{}.attn.c_attn.bias", lp)),
-                k_weight: String::new(), 
+                k_weight: String::new(),
                 k_bias: None,
                 v_weight: String::new(),
                 v_bias: None,

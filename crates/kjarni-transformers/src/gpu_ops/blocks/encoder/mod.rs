@@ -1,11 +1,13 @@
 use crate::WgpuContext;
 use crate::activations;
-use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
-use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
-use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights, GpuLayerNorm, GpuRMSNorm};
-use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::gpu::normalization::{
+    GpuLayerNorm, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
+};
 use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
+use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
+use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
+use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::traits::ModelMetadata;
 use anyhow::Result;
 use std::sync::Arc;
@@ -29,8 +31,8 @@ impl GpuEncoderLayer {
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
         self_attn_ln_weights: GpuNormalizationWeights,
-        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights, 
-        ffn_ln_weights: GpuNormalizationWeights,       
+        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights,
+        ffn_ln_weights: GpuNormalizationWeights,
         activation: activations::Activation,
         meta: &ModelMetadata,
     ) -> Result<Self> {
@@ -42,9 +44,9 @@ impl GpuEncoderLayer {
                 GpuNormalizationWeights::LayerNorm(_) => {
                     GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps))
                 }
-                GpuNormalizationWeights::RMSNorm(_) => GpuNormalization::RMSNorm(
-                    GpuRMSNorm::new(context, meta.norm_eps),
-                ),
+                GpuNormalizationWeights::RMSNorm(_) => {
+                    GpuNormalization::RMSNorm(GpuRMSNorm::new(context, meta.norm_eps))
+                }
             }
         };
 
@@ -175,13 +177,13 @@ mod tests {
     use crate::activations::Activation;
     use crate::cpu::encoder::encoder_layer::EncoderLayer;
     use crate::cpu::encoder::encoder_self_attention::EncoderSelfAttention;
+    use crate::cpu::normalization::LayerNorm;
     use crate::feedforward::{FeedForward, StdFeedForward};
+    use crate::gpu::{GpuFrameContext, GpuTensor};
     use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
-    use crate::gpu::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
-    use crate::cpu::normalization::LayerNorm;
     use crate::traits::{
         AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout,
     };
@@ -189,7 +191,7 @@ mod tests {
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
 
-    use crate::gpu::normalization::{GpuLayerNormWeights};
+    use crate::gpu::normalization::GpuLayerNormWeights;
 
     #[tokio::test]
     #[ignore = "GPU required"]
@@ -459,6 +461,10 @@ mod tests {
         Ok(())
     }
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     struct MockConfig {
         hidden_size: usize,
         num_heads: usize,
@@ -513,7 +519,7 @@ mod tests {
                     norm_weight: "layer.{}.attn_ln.weight".to_string(),
                     norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
                 },
-                cross_attn: None, 
+                cross_attn: None,
                 ffn: FeedForwardLayout {
                     up_weight: "layer.{}.ffn.up.weight".to_string(),
                     up_bias: Some("layer.{}.ffn.up.bias".to_string()),
@@ -529,7 +535,7 @@ mod tests {
             ModelLayout {
                 token_embedding: "embeddings.word_embeddings.weight".to_string(),
                 lm_head: "lm_head.weight".to_string(),
-                encoder: None, 
+                encoder: None,
                 decoder: Some(DecoderLayout {
                     position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
                     token_type_embedding: None,

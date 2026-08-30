@@ -8,10 +8,13 @@ pub trait ModelTokenizer: Send + Sync {
     fn decode(&self, ids: &[u32], skip_special_tokens: bool) -> anyhow::Result<String>;
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Encoding {
     ids: Vec<u32>,
+    #[allow(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     attention_mask: Option<Vec<u32>>,
 }
 
@@ -19,8 +22,12 @@ impl Encoding {
     pub fn get_ids(&self) -> &Vec<u32> {
         &self.ids
     }
-    
+
     pub fn len(&self) -> usize {
         self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
     }
 }

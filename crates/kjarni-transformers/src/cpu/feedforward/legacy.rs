@@ -56,7 +56,7 @@ impl LegacyFeedForward {
     }
     pub fn fc1(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let mut hidden = matmul_3d_2d(hidden, &self.dense1_weight);
-        if self.dense1_bias.len() > 0 {
+        if !self.dense1_bias.is_empty() {
             hidden += &self.dense1_bias;
         }
         Ok(hidden)
@@ -68,7 +68,7 @@ impl LegacyFeedForward {
 
     pub fn fc2(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let mut hidden = matmul_3d_2d(hidden, &self.dense2_weight);
-        if self.dense2_bias.len() > 0 {
+        if !self.dense2_bias.is_empty() {
             hidden += &self.dense2_bias;
         }
         Ok(hidden)

@@ -207,7 +207,7 @@ impl GpuDecoderBackend {
         });
 
         let start = std::time::Instant::now();
-        let mut map_result = None;
+        let map_result;
 
         loop {
             match self.context.device.poll(wgpu::PollType::Poll) {
@@ -344,13 +344,13 @@ mod tests {
         };
         assert_eq!(size, 5);
     }
-    
+
     #[tokio::test]
     #[ignore = "GPU required"]
     async fn test_gpu_decoder_backend_new() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx);
-        
+
         assert!(backend.is_ok());
     }
 
@@ -362,13 +362,16 @@ mod tests {
             timeout: Duration::from_secs(30),
             poll_interval: Duration::from_millis(5),
         };
-        
+
         let backend = GpuDecoderBackend::with_timeout(ctx, timeout_config);
-        
+
         assert!(backend.is_ok());
         let backend = backend.unwrap();
         assert_eq!(backend.timeout_config.timeout, Duration::from_secs(30));
-        assert_eq!(backend.timeout_config.poll_interval, Duration::from_millis(5));
+        assert_eq!(
+            backend.timeout_config.poll_interval,
+            Duration::from_millis(5)
+        );
     }
 
     #[tokio::test]
@@ -376,7 +379,7 @@ mod tests {
     async fn test_gpu_decoder_backend_context_getter() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx.clone()).unwrap();
-        
+
         assert!(Arc::ptr_eq(&ctx, backend.context()));
     }
 
@@ -385,9 +388,9 @@ mod tests {
     async fn test_new_decode_token() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let token = backend.new_decode_token();
-        
+
         assert!(token.is_ok());
         let token = token.unwrap();
         assert_eq!(token.shape(), &[1, 1]);
@@ -398,9 +401,9 @@ mod tests {
     async fn test_new_decode_token_initial_value() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let token = backend.new_decode_token().unwrap();
-        
+
         let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
         assert_eq!(downloaded[[0, 0]], 0);
     }
@@ -409,12 +412,12 @@ mod tests {
     async fn test_update_decode_token() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let mut token = backend.new_decode_token().unwrap();
-        
+
         let result = backend.update_decode_token(&mut token, 42);
         assert!(result.is_ok());
-        
+
         // Verify the update
         let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
         assert_eq!(downloaded[[0, 0]], 42);
@@ -425,14 +428,14 @@ mod tests {
     async fn test_update_decode_token_multiple_times() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let mut token = backend.new_decode_token().unwrap();
-        
+
         // Update multiple times
         backend.update_decode_token(&mut token, 100).unwrap();
         backend.update_decode_token(&mut token, 200).unwrap();
         backend.update_decode_token(&mut token, 300).unwrap();
-        
+
         let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
         assert_eq!(downloaded[[0, 0]], 300);
     }
@@ -442,11 +445,11 @@ mod tests {
     async fn test_update_decode_token_max_value() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let mut token = backend.new_decode_token().unwrap();
 
         backend.update_decode_token(&mut token, u32::MAX).unwrap();
-        
+
         let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
         assert_eq!(downloaded[[0, 0]], u32::MAX);
     }
@@ -455,9 +458,9 @@ mod tests {
     async fn test_get_or_create_staging_buffer_creates_new() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let buffer = backend.get_or_create_staging_buffer(1024);
-        
+
         assert_eq!(buffer.size(), 1024);
     }
 
@@ -466,10 +469,10 @@ mod tests {
     async fn test_get_or_create_staging_buffer_reuses_same_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let buffer1 = backend.get_or_create_staging_buffer(1024);
         let buffer2 = backend.get_or_create_staging_buffer(1024);
-        
+
         // Should reuse the same buffer (same size)
         assert_eq!(buffer1.size(), buffer2.size());
     }
@@ -479,10 +482,10 @@ mod tests {
     async fn test_get_or_create_staging_buffer_recreates_different_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let buffer1 = backend.get_or_create_staging_buffer(1024);
         assert_eq!(buffer1.size(), 1024);
-        
+
         let buffer2 = backend.get_or_create_staging_buffer(2048);
         assert_eq!(buffer2.size(), 2048);
     }
@@ -492,14 +495,14 @@ mod tests {
     async fn test_get_or_create_staging_buffer_size_tracking() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         {
             let size_guard = backend.staging_buffer_size.lock().unwrap();
             assert_eq!(*size_guard, 0);
         }
-        
+
         backend.get_or_create_staging_buffer(512);
-        
+
         {
             let size_guard = backend.staging_buffer_size.lock().unwrap();
             assert_eq!(*size_guard, 512);
@@ -540,10 +543,7 @@ mod tests {
 
     #[test]
     fn test_model_input_size_extraction_hidden_cpu() {
-        let hidden = ndarray::Array3::from_shape_vec(
-            (1, 10, 64),
-            vec![0.0f32; 640],
-        ).unwrap();
+        let hidden = ndarray::Array3::from_shape_vec((1, 10, 64), vec![0.0f32; 640]).unwrap();
         let input = ModelInput::HiddenCpu(hidden.view());
 
         let size = match &input {
@@ -560,10 +560,7 @@ mod tests {
     #[ignore = "GPU required"]
     async fn test_model_input_size_extraction_hidden_gpu() {
         let ctx = get_test_context().await;
-        let hidden = ndarray::Array3::from_shape_vec(
-            (1, 12, 64),
-            vec![0.0f32; 768],
-        ).unwrap();
+        let hidden = ndarray::Array3::from_shape_vec((1, 12, 64), vec![0.0f32; 768]).unwrap();
         let gpu_hidden = GpuTensor::from_ndarray(&ctx, &hidden).unwrap();
         let input = ModelInput::HiddenGpu(&gpu_hidden);
 
@@ -597,7 +594,7 @@ mod tests {
     async fn test_default_timeout_config() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         // Default config should be reasonable
         assert!(backend.timeout_config.timeout.as_secs() > 0);
         assert!(backend.timeout_config.poll_interval.as_millis() > 0);
@@ -611,11 +608,14 @@ mod tests {
             timeout: Duration::from_secs(60),
             poll_interval: Duration::from_millis(10),
         };
-        
+
         let backend = GpuDecoderBackend::with_timeout(ctx, config).unwrap();
-        
+
         assert_eq!(backend.timeout_config.timeout, Duration::from_secs(60));
-        assert_eq!(backend.timeout_config.poll_interval, Duration::from_millis(10));
+        assert_eq!(
+            backend.timeout_config.poll_interval,
+            Duration::from_millis(10)
+        );
     }
 
     #[tokio::test]
@@ -623,7 +623,7 @@ mod tests {
     async fn test_staging_buffer_small_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let buffer = backend.get_or_create_staging_buffer(4);
         assert_eq!(buffer.size(), 4);
     }
@@ -633,7 +633,7 @@ mod tests {
     async fn test_staging_buffer_large_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         let buffer = backend.get_or_create_staging_buffer(1024 * 1024);
         assert_eq!(buffer.size(), 1024 * 1024);
     }
@@ -642,13 +642,13 @@ mod tests {
     #[ignore = "GPU required"]
     async fn test_multiple_backends_independent() {
         let ctx = get_test_context().await;
-        
+
         let backend1 = GpuDecoderBackend::new(ctx.clone()).unwrap();
         let backend2 = GpuDecoderBackend::new(ctx.clone()).unwrap();
-        
+
         backend1.get_or_create_staging_buffer(1024);
         backend2.get_or_create_staging_buffer(2048);
-        
+
         {
             let size1 = backend1.staging_buffer_size.lock().unwrap();
             let size2 = backend2.staging_buffer_size.lock().unwrap();
@@ -662,14 +662,14 @@ mod tests {
     async fn test_decode_token_sequence() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
-        
+
         // Simulate a decode sequence
         let mut token = backend.new_decode_token().unwrap();
-        
+
         let sequence = [101u32, 2003, 1037, 3231, 102]; // "this is a test"
         for &tok in &sequence {
             backend.update_decode_token(&mut token, tok).unwrap();
-            
+
             // Verify each update
             let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
             assert_eq!(downloaded[[0, 0]], tok);

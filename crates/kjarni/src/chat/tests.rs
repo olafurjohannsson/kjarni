@@ -1,8 +1,7 @@
 use super::*;
 
-
 mod types_tests {
-    
+
     use crate::chat::types::*;
 
     #[test]
@@ -145,9 +144,7 @@ mod types_tests {
     }
 }
 
-
 // Unit Tests - Presets
-
 
 mod preset_tests {
     use super::*;
@@ -215,12 +212,10 @@ mod preset_tests {
     }
 }
 
-
 // Unit Tests - Validation
 
-
 mod validation_tests {
-    
+
     use crate::chat::validation::*;
     use kjarni_transformers::models::ModelType;
 
@@ -312,9 +307,7 @@ mod validation_tests {
     }
 }
 
-
 // Unit Tests - Builder
-
 
 mod builder_tests {
     use super::*;
@@ -404,7 +397,6 @@ mod integration_tests {
             .unwrap_or(false)
     }
 
-
     #[tokio::test]
     #[ignore = "decoder inference too slow for CI"]
     async fn test_basic_chat() {
@@ -430,7 +422,6 @@ mod integration_tests {
             response
         );
     }
-
 
     #[tokio::test]
     #[ignore = "decoder inference too slow for CI"]

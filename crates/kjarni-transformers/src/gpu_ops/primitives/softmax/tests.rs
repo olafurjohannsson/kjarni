@@ -1,7 +1,6 @@
 use crate::activations::softmax_4d_inplace;
 
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 use super::*;
 use crate::gpu::GpuTensor;
@@ -47,7 +46,7 @@ async fn test_softmax_simple_case() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
 
-    let rows = 12 * 1; // batch * heads
+    let rows = 12; // batch * heads
     let cols = 128;
     let mut cpu_data = Array::random((rows, cols), Uniform::new(-1.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;

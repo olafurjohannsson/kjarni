@@ -19,6 +19,13 @@ namespace Kjarni
         Cancelled = 8,
         Timeout = 9,
         StreamEnded = 10,
+
+        /// <summary>
+        /// A panic in the native engine was caught at the ABI boundary. The operation
+        /// failed and its outputs are undefined; the handle stays valid to dispose.
+        /// </summary>
+        Panic = 11,
+
         Unknown = 255,
     }
 

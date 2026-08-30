@@ -79,7 +79,7 @@ async fn test_distilgpt2_generation_parity_2() -> Result<()> {
         max_new_tokens: Some(20),
         strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.1,
-        add_bos_token: false, 
+        add_bos_token: false,
         ..Default::default()
     };
     let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
@@ -103,7 +103,7 @@ async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
         max_new_tokens: Some(5),
         strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.1,
-        add_bos_token: false, 
+        add_bos_token: false,
         ..Default::default()
     };
     let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;

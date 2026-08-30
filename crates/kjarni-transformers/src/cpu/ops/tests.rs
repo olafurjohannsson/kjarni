@@ -22,7 +22,7 @@ fn ground_truth_matmul(a: &Array2<f32>, b: &Array2<f32>) -> Array2<f32> {
 
     for i in 0..m {
         for j in 0..n {
-            let mut sum = 0.0f64; 
+            let mut sum = 0.0f64;
             for x in 0..k {
                 sum += (a[[i, x]] as f64) * (b[[j, x]] as f64);
             }
@@ -79,7 +79,7 @@ fn test_matmul_f32_decode_path() {
     let k = 256;
     let n = 512;
     let a = random_matrix(1, k, 42);
-    let b = random_matrix(n, k, 43); 
+    let b = random_matrix(n, k, 43);
 
     let expected = ground_truth_matmul(&a, &b);
     let actual = matmul_2d_cpu_f32(&a.view(), &b.view());
@@ -104,7 +104,7 @@ fn test_matmul_f32_prefill_path() {
 #[test]
 fn test_matmul_f32_odd_dimensions() {
     let m = 3;
-    let k = 127; 
+    let k = 127;
     let n = 33;
     let a = random_matrix(m, k, 46);
     let b = random_matrix(n, k, 47);
@@ -134,7 +134,7 @@ fn test_matmul_bf16_correctness() {
 
 #[test]
 fn test_matmul_q8_0_full_pipeline() {
-    let m = 2; 
+    let m = 2;
     let k = 512; // Must be multiple of 32
     let n = 128;
 
@@ -165,7 +165,7 @@ fn test_matmul_q8_0_decode_path() {
 #[test]
 #[should_panic(expected = "Input features must be a multiple of the block size")]
 fn test_matmul_q8_0_alignment_panic() {
-    let k = 33; 
+    let k = 33;
     let a = random_matrix(1, k, 0);
     let dummy_block = crate::cpu::kernels::q_common::BlockQ8_0 {
         d: half::f16::from_f32(1.0),
@@ -175,7 +175,6 @@ fn test_matmul_q8_0_alignment_panic() {
 
     matmul_2d_cpu_q8_0(&a.view(), &b_weights);
 }
-
 
 #[test]
 fn test_matmul_q4_k_plumbing() {

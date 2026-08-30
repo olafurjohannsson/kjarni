@@ -1,6 +1,10 @@
 use std::arch::x86_64::*;
 
-/// AVX2 RoPE 
+#[expect(
+    dead_code,
+    reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+)]
+/// AVX2 RoPE
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn rope_strided_avx2(
     head_ptr: *mut f32,

@@ -20,7 +20,7 @@ use kjarni_transformers::{
     WgpuContext,
     activations::softmax_inplace,
     cpu::encoder::{
-        CpuTransformerEncoder, 
+        CpuTransformerEncoder,
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},
@@ -39,7 +39,6 @@ mod tests;
 
 use crate::models::sequence_classifier::configs::RobertaConfig;
 use crate::{BertConfig, DistilBertConfig};
-
 
 /// A generic sequence classifier for encoder-only models.
 pub struct SequenceClassifier {
@@ -180,16 +179,19 @@ impl SequenceClassifier {
             .pipeline
             .context()
             .ok_or_else(|| anyhow!("GPU context required for GPU encoder"))?;
-        let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> =
-            context.get_inference_pool();
+        let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> = context.get_inference_pool();
         let pool_guard = pool.lock().await;
-        let mut frame = GpuFrameContext::new(&context, pool_guard);
+        let mut frame = GpuFrameContext::new(context, pool_guard);
         let (encoder_cmd, pool_ref) = frame.resources();
 
-        let input_ids_gpu = GpuTensor::from_ndarray(&context, input_ids)?;
-        let attention_mask_gpu = GpuTensor::from_ndarray(&context, attention_mask)?;
-        let token_types_gpu = GpuTensor::from_ndarray(&context, token_type_ids)?;
+        let input_ids_gpu = GpuTensor::from_ndarray(context, input_ids)?;
+        let attention_mask_gpu = GpuTensor::from_ndarray(context, attention_mask)?;
+        let token_types_gpu = GpuTensor::from_ndarray(context, token_type_ids)?;
 
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let gpu_output = gpu_encoder.forward(
             encoder_cmd,
             pool_ref,
@@ -392,6 +394,10 @@ impl SequenceClassifier {
         Ok(logits.outer_iter().map(|row| row.to_vec()).collect())
     }
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     fn scores_to_top_result(&self, scores: &[f32]) -> Result<ClassificationResult> {
         let (idx, &score) = scores
             .iter()

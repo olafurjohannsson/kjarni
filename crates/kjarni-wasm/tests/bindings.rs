@@ -34,7 +34,10 @@ fn model_bytes(rel: &str) -> Option<Vec<u8>> {
         let path = std::path::Path::new(&dir).join(name);
         return match std::fs::read(&path) {
             Ok(bytes) => Some(bytes),
-            Err(e) => panic!("KJARNI_KJQ_DIR is set but {} could not be read: {e}", path.display()),
+            Err(e) => panic!(
+                "KJARNI_KJQ_DIR is set but {} could not be read: {e}",
+                path.display()
+            ),
         };
     }
     std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).ok()
@@ -109,8 +112,14 @@ fn model_normalization_flag_is_honoured() {
     let raw = model.encode(vec!["Hello world".into()], false).unwrap();
 
     let norm = |v: &[f32]| v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    assert!((norm(&normalized) - 1.0).abs() < 1e-3, "normalize=true should give unit length");
-    assert!((norm(&raw) - 1.0).abs() > 1e-3, "normalize=false should not be unit length");
+    assert!(
+        (norm(&normalized) - 1.0).abs() < 1e-3,
+        "normalize=true should give unit length"
+    );
+    assert!(
+        (norm(&raw) - 1.0).abs() > 1e-3,
+        "normalize=false should not be unit length"
+    );
 }
 
 #[test]
@@ -137,7 +146,6 @@ fn model_ranks_by_meaning_not_shared_words() {
         "the refund sentence should rank far above the weather one"
     );
 }
-
 
 // ─── WasmReranker ────────────────────────────────────────────────
 
@@ -177,13 +185,14 @@ fn reranker_scores_are_deterministic() {
     };
     let reranker = WasmReranker::load(&bytes).unwrap();
 
-    let a = reranker.score("capital of Iceland", "Reykjavik is the capital.").unwrap();
-    let b = reranker.score("capital of Iceland", "Reykjavik is the capital.").unwrap();
+    let a = reranker
+        .score("capital of Iceland", "Reykjavik is the capital.")
+        .unwrap();
+    let b = reranker
+        .score("capital of Iceland", "Reykjavik is the capital.")
+        .unwrap();
     assert_eq!(a, b);
 }
-
-
-
 
 // ─── WasmClassifier ──────────────────────────────────────────────
 
@@ -199,20 +208,35 @@ fn classifier_reports_its_labels() {
         return;
     };
     assert_eq!(clf.num_labels(), 2);
-    assert_eq!(clf.labels(), vec!["NEGATIVE".to_string(), "POSITIVE".to_string()]);
+    assert_eq!(
+        clf.labels(),
+        vec!["NEGATIVE".to_string(), "POSITIVE".to_string()]
+    );
 }
 
 #[test]
 fn classifier_separates_positive_from_negative() {
     let Some(clf) = classifier() else { return };
 
-    let positive = clf.classify_core("I love this, it is absolutely wonderful.").unwrap();
-    let negative = clf.classify_core("This is terrible and I want my money back.").unwrap();
+    let positive = clf
+        .classify_core("I love this, it is absolutely wonderful.")
+        .unwrap();
+    let negative = clf
+        .classify_core("This is terrible and I want my money back.")
+        .unwrap();
 
     assert_eq!(positive[0].label, "POSITIVE", "got {positive:?}");
     assert_eq!(negative[0].label, "NEGATIVE", "got {negative:?}");
-    assert!(positive[0].score > 0.9, "weak confidence: {:?}", positive[0]);
-    assert!(negative[0].score > 0.9, "weak confidence: {:?}", negative[0]);
+    assert!(
+        positive[0].score > 0.9,
+        "weak confidence: {:?}",
+        positive[0]
+    );
+    assert!(
+        negative[0].score > 0.9,
+        "weak confidence: {:?}",
+        negative[0]
+    );
 }
 
 #[test]
@@ -227,7 +251,10 @@ fn classifier_returns_every_label_highest_first() {
     );
 
     let total: f32 = results.iter().map(|r| r.score).sum();
-    assert!((total - 1.0).abs() < 0.01, "softmax scores should sum to 1, got {total}");
+    assert!(
+        (total - 1.0).abs() < 0.01,
+        "softmax scores should sum to 1, got {total}"
+    );
 }
 
 #[test]
@@ -237,7 +264,11 @@ fn classifier_index_points_into_labels() {
     let labels = clf.labels();
 
     for r in clf.classify_core("Wonderful experience.").unwrap() {
-        assert_eq!(labels[r.index], r.label, "index {} does not name {}", r.index, r.label);
+        assert_eq!(
+            labels[r.index], r.label,
+            "index {} does not name {}",
+            r.index, r.label
+        );
     }
 }
 
@@ -271,7 +302,10 @@ fn classifier_batch_matches_classifying_one_at_a_time() {
 
     for (i, text) in texts.iter().enumerate() {
         let alone = clf.classify_core(text).unwrap();
-        assert_eq!(batched[i].label, alone[0].label, "batch disagrees on {text:?}");
+        assert_eq!(
+            batched[i].label, alone[0].label,
+            "batch disagrees on {text:?}"
+        );
         assert!(
             (batched[i].score - alone[0].score).abs() < 1e-4,
             "batch score drifted on {text:?}"
@@ -283,7 +317,9 @@ fn classifier_batch_matches_classifying_one_at_a_time() {
 fn classifier_rejects_an_embedding_model() {
     // A sentence encoder has no classification head; loading one must fail rather
     // than silently produce meaningless labels.
-    let Some(bytes) = model_bytes(EMBED_KJQ) else { return };
+    let Some(bytes) = model_bytes(EMBED_KJQ) else {
+        return;
+    };
     assert!(
         WasmClassifier::load_core(&bytes).is_err(),
         "an embedding model must not load as a classifier"
@@ -336,7 +372,9 @@ fn chat_generates_a_factual_completion() {
     // a broken KV cache or sampler actually gives.
     let Some(chat) = chat() else { return };
 
-    let out = chat.generate_core("The capital of Iceland is", 16, 0.0).unwrap();
+    let out = chat
+        .generate_core("The capital of Iceland is", 16, 0.0)
+        .unwrap();
     assert!(
         out.to_lowercase().contains("reykjav"),
         "expected the model to name Reykjavik, got {out:?}"
@@ -364,8 +402,12 @@ fn chat_is_deterministic_at_temperature_zero() {
 fn chat_respects_max_new_tokens() {
     let Some(chat) = chat() else { return };
 
-    let short = chat.generate_core("Tell me about Iceland.", 8, 0.0).unwrap();
-    let long = chat.generate_core("Tell me about Iceland.", 48, 0.0).unwrap();
+    let short = chat
+        .generate_core("Tell me about Iceland.", 8, 0.0)
+        .unwrap();
+    let long = chat
+        .generate_core("Tell me about Iceland.", 48, 0.0)
+        .unwrap();
     assert!(
         long.len() > short.len(),
         "a larger budget should produce more text: {} vs {}",
@@ -378,6 +420,8 @@ fn chat_respects_max_new_tokens() {
 fn chat_rejects_an_encoder_model() {
     // MiniLM has no decoder; loading it as a chat model must fail rather than
     // produce nonsense.
-    let Some(bytes) = model_bytes(EMBED_KJQ) else { return };
+    let Some(bytes) = model_bytes(EMBED_KJQ) else {
+        return;
+    };
     assert!(kjarni_wasm::WasmChat::load_core(&bytes, None).is_err());
 }

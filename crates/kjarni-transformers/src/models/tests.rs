@@ -184,10 +184,10 @@ fn test_repo_id_extraction() {
 #[test]
 fn test_from_cli_name() {
     assert_eq!(
-        ModelType::from_cli_name("llama3.2-1b-instruct"), 
+        ModelType::from_cli_name("llama3.2-1b-instruct"),
         Some(ModelType::Llama3_2_1B_Instruct)
     );
-    
+
     assert_eq!(
         ModelType::from_cli_name("minilm-l6-v2"),
         Some(ModelType::MiniLML6V2)
@@ -204,9 +204,9 @@ fn test_from_cli_name() {
 #[test]
 fn test_find_similar() {
     let suggestions = ModelType::find_similar("lama3.2-instruct");
-    
+
     assert!(!suggestions.is_empty(), "Should find suggestions for typo");
-    
+
     assert!(
         suggestions
             .iter()
@@ -290,9 +290,11 @@ fn no_module_inlines_the_cache_path() {
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 // Tests and examples may pin an explicit directory.
-                if name == "tests.rs" || path.components().any(|c| {
-                    matches!(c.as_os_str().to_str(), Some("tests") | Some("examples"))
-                }) {
+                if name == "tests.rs"
+                    || path
+                        .components()
+                        .any(|c| matches!(c.as_os_str().to_str(), Some("tests") | Some("examples")))
+                {
                     continue;
                 }
                 let Ok(text) = std::fs::read_to_string(&path) else {

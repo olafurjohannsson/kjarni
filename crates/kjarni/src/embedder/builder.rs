@@ -9,7 +9,7 @@ use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder}
 
 use super::model::Embedder;
 use super::presets::EmbedderPreset;
-use super::types::{EmbeddingOverrides, EmbedderResult};
+use super::types::{EmbedderResult, EmbeddingOverrides};
 
 /// Builder for configuring and constructing an Embedder.
 pub struct EmbedderBuilder {
@@ -70,7 +70,7 @@ impl EmbedderBuilder {
         }
     }
 
-    /// Run on CPU 
+    /// Run on CPU
     pub fn cpu(mut self) -> Self {
         self.device = KjarniDevice::Cpu;
         self

@@ -1,6 +1,6 @@
-use crate::{WgpuContext, gpu_profile};
 use crate::gpu::GpuTensor;
 use crate::tensor::DType;
+use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -216,19 +216,19 @@ impl GpuLinearLayer {
                     let max_dim = 65535;
                     if n > max_dim {
                         let grid_x = max_dim;
-                        let grid_y = (n + max_dim - 1) / max_dim;
+                        let grid_y = n.div_ceil(max_dim);
                         pass.dispatch_workgroups(grid_x, grid_y, 1);
                     } else {
                         pass.dispatch_workgroups(n, 1, 1);
                     }
                 } else if is_gemv {
                     // Standard GEMV: 1 Thread per Output Neuron
-                    let groups = (n + 255) / 256;
+                    let groups = n.div_ceil(256);
                     pass.dispatch_workgroups(groups, 1, 1);
                 } else {
                     // BMM: 2D Tiles
-                    let groups_x = (n + 15) / 16;
-                    let groups_y = (m + 15) / 16;
+                    let groups_x = n.div_ceil(16);
+                    let groups_y = m.div_ceil(16);
                     pass.dispatch_workgroups(groups_x, groups_y, 1);
                 }
             }

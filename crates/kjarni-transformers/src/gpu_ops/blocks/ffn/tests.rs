@@ -1,5 +1,4 @@
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 use super::*;
 use crate::feedforward::LegacyFeedForward as CpuFeedForward;
@@ -268,8 +267,8 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
         &expected_cpu,
         &output_gpu,
         "FFN FC2 Fused Output",
-        1e-4, 
-        1e-5, 
+        1e-4,
+        1e-5,
     )
     .await;
 

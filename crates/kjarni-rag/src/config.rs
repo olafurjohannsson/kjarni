@@ -7,9 +7,9 @@ pub struct IndexConfig {
     pub max_docs_per_segment: usize,
     pub max_segment_memory: usize,
     pub embedding_model: Option<String>,
-    pub model_name: Option<String>,     
-    pub created_at: Option<u64>,        
-    pub version: u32,                   
+    pub model_name: Option<String>,
+    pub created_at: Option<u64>,
+    pub version: u32,
 }
 
 impl Default for IndexConfig {
@@ -57,8 +57,6 @@ impl IndexConfig {
         self.embedding_model = Some(embedding_model.to_string());
         self
     }
-
-    
 
     /// Estimate memory usage for a segment
     pub fn estimate_segment_memory(&self, doc_count: usize, avg_doc_len: usize) -> usize {

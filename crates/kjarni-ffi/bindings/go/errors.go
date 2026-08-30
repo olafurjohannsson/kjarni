@@ -17,7 +17,10 @@ const (
 	ErrCancelled       ErrorCode = 8
 	ErrTimeout         ErrorCode = 9
 	ErrStreamEnded     ErrorCode = 10
-	ErrUnknown         ErrorCode = 255
+	// ErrPanic reports a panic in the native engine caught at the ABI boundary. The
+	// operation failed and its outputs are undefined; the handle stays valid to Close.
+	ErrPanic   ErrorCode = 11
+	ErrUnknown ErrorCode = 255
 )
 
 // KjarniError is an error returned by the kjarni engine.

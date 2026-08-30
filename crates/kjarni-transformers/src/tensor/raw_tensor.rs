@@ -6,11 +6,11 @@ use std::borrow::Cow;
 
 /// A raw, untyped view into a tensor's bytes, shape, and dtype.
 /// This is the primary output of a file loader before any CPU/GPU-specific processing.
-/// 
+///
 /// Important to note is that TensorView borrows and is only valid while
 /// mmap pages are alive and loader is alive, the view must be fully consumed synchronously
-#[derive(Debug)] 
-pub(crate) struct TensorView<'a> {
+#[derive(Debug)]
+pub struct TensorView<'a> {
     pub name: String,
     pub bytes: Cow<'a, [u8]>,
     pub shape: Vec<usize>,
@@ -31,8 +31,10 @@ impl<'a> TensorView<'a> {
                 // if not aligned, copy the bytes element by element.
                 else {
                     self.bytes
-                        .chunks_exact(4)
-                        .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|chunk| f32::from_le_bytes(*chunk))
                         .collect()
                 }
             }
@@ -70,6 +72,10 @@ impl<'a> TensorView<'a> {
 }
 
 #[cfg(test)]
+#[allow(
+    deprecated,
+    reason = "these tests cover to_ndarray_f32 itself, which is the deprecated item"
+)]
 mod tests {
     use super::*;
     use half::{bf16, f16};

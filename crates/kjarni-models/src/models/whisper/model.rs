@@ -10,6 +10,7 @@ use tokenizers::Tokenizer;
 
 use super::config::WhisperConfig;
 
+use kjarni_transformers::models::get_default_cache_dir;
 use kjarni_transformers::{
     LanguageModel, ModelType, WgpuContext,
     audio::{AudioConvFrontend, MelConfig},
@@ -32,7 +33,6 @@ use kjarni_transformers::{
     traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
-use kjarni_transformers::models::get_default_cache_dir;
 
 pub struct WhisperModel {
     tokenizer: Tokenizer,
@@ -88,7 +88,7 @@ impl WhisperModel {
         let weights = ModelWeights::new(model_path)?;
 
         // Load config
-        let config: WhisperConfig = serde_json::from_str(&weights.config_json())?;
+        let config: WhisperConfig = serde_json::from_str(weights.config_json())?;
         let config = Arc::new(config);
         let meta = config.metadata();
         let layout = config.layout();
@@ -170,7 +170,7 @@ impl EncoderDecoderModelFactory for WhisperModel {
     type Config = WhisperConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        let config: WhisperConfig = serde_json::from_str(&weights.config_json())?;
+        let config: WhisperConfig = serde_json::from_str(weights.config_json())?;
         Ok(Arc::new(config))
     }
 
@@ -443,7 +443,7 @@ impl GpuEncoderDecoderOps for WhisperModel {
         let (encoder_cmd, _pool) = frame.resources();
 
         let mut expanded_shape = encoder_hidden_states.shape().to_vec();
-        if expanded_shape.get(0) != Some(&1) {
+        if expanded_shape.first() != Some(&1) {
             return Err(anyhow!(
                 "Cannot broadcast encoder states with batch size != 1"
             ));

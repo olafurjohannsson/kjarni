@@ -379,7 +379,7 @@ mod tests {
     fn test_gguf_to_hf_reverse_mapping() {
         // Create a minimal valid mmap from temp file
         let temp_file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp_file.path(), &[0u8; 64]).unwrap();
+        std::fs::write(temp_file.path(), [0u8; 64]).unwrap();
         let file = File::open(temp_file.path()).unwrap();
 
         let loader = GgufLoader {
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn test_name_translation() {
         let temp_file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp_file.path(), &[0u8; 64]).unwrap();
+        std::fs::write(temp_file.path(), [0u8; 64]).unwrap();
         let file = File::open(temp_file.path()).unwrap();
 
         let loader = GgufLoader {

@@ -87,4 +87,3 @@ impl GenerationOverrides {
             && self.length_penalty.is_none()
     }
 }
-

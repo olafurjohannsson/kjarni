@@ -91,6 +91,7 @@ impl StdFeedForward {
     /// Forward pass writing to pre-allocated EncoderBuffers (no allocation).
     pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
         let tokens = hidden.shape()[0];
+        #[cfg_attr(not(debug_assertions), allow(unused_variables))]
         let intermediate_dim = self.fc1.out_features();
         let _hidden_dim = self.fc2.out_features();
 

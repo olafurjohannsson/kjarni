@@ -132,7 +132,7 @@ impl GpuLookup {
         });
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (uniforms.output_size + 255) / 256;
+        let workgroups = uniforms.output_size.div_ceil(256);
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }

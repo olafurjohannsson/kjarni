@@ -1,12 +1,10 @@
 pub mod layer_norm;
 pub mod rms_norm;
 
-use crate::gpu::{GpuTensor};
+use crate::gpu::GpuTensor;
 
 pub use layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 pub use rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
-
-
 
 pub enum GpuNormalizationWeights {
     LayerNorm(GpuLayerNormWeights),

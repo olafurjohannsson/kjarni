@@ -212,11 +212,11 @@ impl ModelWeights {
     pub fn is_bert(&self) -> bool {
         matches!(self.model_type(), Some(mt) if mt.eq_ignore_ascii_case("bert"))
     }
-    
+
     pub fn is_mpnet(&self) -> bool {
         matches!(self.model_type(), Some(mt) if mt.eq_ignore_ascii_case("mpnet"))
     }
-    
+
     pub fn is_distilbert(&self) -> bool {
         matches!(self.model_type(), Some(mt) if mt.eq_ignore_ascii_case("distilbert"))
     }

@@ -37,7 +37,10 @@ fn fixture(rel: &str) -> Option<Vec<u8>> {
         let path = std::path::Path::new(&dir).join(name);
         return match std::fs::read(&path) {
             Ok(bytes) => Some(bytes),
-            Err(e) => panic!("KJARNI_KJQ_DIR is set but {} could not be read: {e}", path.display()),
+            Err(e) => panic!(
+                "KJARNI_KJQ_DIR is set but {} could not be read: {e}",
+                path.display()
+            ),
         };
     }
     std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).ok()
@@ -140,7 +143,10 @@ async fn int8_quantization_stays_within_a_known_bound() {
     };
     let cache = kjarni_transformers::models::get_default_cache_dir().join(F32_CACHE);
     if !cache.join("model.safetensors").exists() {
-        eprintln!("skipping: full-precision weights not cached at {}", cache.display());
+        eprintln!(
+            "skipping: full-precision weights not cached at {}",
+            cache.display()
+        );
         return;
     }
 

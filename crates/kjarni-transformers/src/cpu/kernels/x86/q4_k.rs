@@ -387,8 +387,8 @@ mod tests {
         let mut qs = [0u8; 128];
         for (i, q) in qs.iter_mut().enumerate() {
             // Two 4-bit values per byte, range 0..15
-            let lo = ((i as u8 + seed) & 0x0F) as u8;
-            let hi = ((i as u8 + seed + 3) & 0x0F) as u8;
+            let lo = (i as u8 + seed) & 0x0F;
+            let hi = (i as u8 + seed + 3) & 0x0F;
             *q = lo | (hi << 4);
         }
 

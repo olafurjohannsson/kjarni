@@ -5,7 +5,7 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::{
-    Normalization, cpu::decoder::DecoderAttention, feedforward::SwiGluFeedForward, rope::RoPE
+    Normalization, cpu::decoder::DecoderAttention, feedforward::SwiGluFeedForward, rope::RoPE,
 };
 
 /// A complete transformer decoder layer with RoPE, pre-normalization, and SwiGLU.
@@ -47,7 +47,7 @@ impl CpuRoPEDecoderLayer {
 mod tests {
     use super::*;
     use crate::activations::Activation;
-    use crate::{linear_layer::LinearLayer, cpu::normalization::RMSNorm};
+    use crate::{cpu::normalization::RMSNorm, linear_layer::LinearLayer};
     use ndarray::{Array1, Array2};
 
     fn create_test_layer() -> CpuRoPEDecoderLayer {

@@ -1,15 +1,14 @@
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 use super::*;
-use crate::gpu::{GpuTensor};
+use crate::gpu::GpuTensor;
 use anyhow::Result;
-use common::{assert_arrays_are_close_2d, get_test_context, assert_all_close, read_gpu_tensor_to_vec};
+use common::{
+    assert_all_close, assert_arrays_are_close_2d, get_test_context, read_gpu_tensor_to_vec,
+};
 use ndarray::{Array, Array3, arr2};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
-
-
 
 #[tokio::test]
 #[ignore = "GPU required"]
@@ -19,7 +18,7 @@ async fn test_gpu_scale_out_of_place() -> Result<()> {
     let cpu_input = arr2(&[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
     let scale_factor = 2.5;
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
-    let output_shape: Vec<usize> = cpu_input.shape().iter().map(|d| *d).collect();
+    let output_shape: Vec<usize> = cpu_input.shape().to_vec();
     let gpu_output = GpuTensor::zeros(&context, output_shape, crate::gpu::DType::F32, "f32")?;
     let mut encoder = context.device.create_command_encoder(&Default::default());
     scale_kernel.encode_out_of_place(&mut encoder, &gpu_input, &gpu_output, scale_factor);

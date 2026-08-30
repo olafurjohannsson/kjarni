@@ -2,9 +2,7 @@
 
 use thiserror::Error;
 
-
 // Errors
-
 
 /// Errors that can occur during seq2seq generation.
 #[derive(Debug, Error)]
@@ -14,7 +12,9 @@ pub enum Seq2SeqError {
     UnknownModel(String),
 
     /// Model exists but hasn't been downloaded.
-    #[error("Model '{0}' not downloaded. Set download_policy(DownloadPolicy::IfMissing) or download manually.")]
+    #[error(
+        "Model '{0}' not downloaded. Set download_policy(DownloadPolicy::IfMissing) or download manually."
+    )]
     ModelNotDownloaded(String),
 
     /// Download failed.
@@ -53,7 +53,6 @@ pub enum Seq2SeqError {
 /// Result type for seq2seq operations.
 pub type Seq2SeqResult<T> = Result<T, Seq2SeqError>;
 
-
 /// A single token from streaming generation.
 #[derive(Debug, Clone)]
 pub struct Seq2SeqToken {
@@ -66,7 +65,6 @@ pub struct Seq2SeqToken {
     /// Whether this is a special token (EOS, PAD, etc.)
     pub is_special: bool,
 }
-
 
 /// User-specified overrides for seq2seq generation
 #[derive(Debug, Clone, Default)]

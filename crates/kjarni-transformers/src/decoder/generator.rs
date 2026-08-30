@@ -156,13 +156,12 @@ impl DecoderGenerator {
             .get_ids()
             .to_vec();
 
-        if config.add_bos_token {
-            if let Some(bos) = self.model.bos_token_id() {
-                if tokens.first() != Some(&bos) {
-                    tokens.insert(0, bos);
-                    trace!("prepended bos token: {}", bos);
-                }
-            }
+        if config.add_bos_token
+            && let Some(bos) = self.model.bos_token_id()
+            && tokens.first() != Some(&bos)
+        {
+            tokens.insert(0, bos);
+            trace!("prepended bos token: {}", bos);
         }
 
         debug!(
@@ -293,11 +292,11 @@ pub async fn run_generation_loop(
     let tokenizer = model.tokenizer();
 
     for &token_id in &input_tokens {
-        if let Some(ref c) = cancellation {
-            if c.is_cancelled() {
-                debug!("generation cancelled during prompt emission");
-                return Ok(());
-            }
+        if let Some(ref c) = cancellation
+            && c.is_cancelled()
+        {
+            debug!("generation cancelled during prompt emission");
+            return Ok(());
         }
 
         if Some(token_id) == model.bos_token_id() {
@@ -326,12 +325,16 @@ pub async fn run_generation_loop(
     let stop_tokens = model.stop_token_ids();
     let mut seq_len = prompt_len + 1;
 
+    #[allow(
+        clippy::explicit_counter_loop,
+        reason = "seq_len is also advanced inside the body, so it is not a plain loop counter"
+    )]
     for step in 0..max_new_tokens {
-        if let Some(ref c) = cancellation {
-            if c.is_cancelled() {
-                debug!("generation cancelled at step {}", step);
-                break;
-            }
+        if let Some(ref c) = cancellation
+            && c.is_cancelled()
+        {
+            debug!("generation cancelled at step {}", step);
+            break;
         }
 
         if all_tokens.len() >= context_limit {
@@ -495,6 +498,10 @@ mod tests {
         assert!(prompt_debug.contains("Prompt"));
         assert!(generated_debug.contains("Generated"));
     }
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     #[derive(Clone)]
     struct MockCache {
         len: usize,
@@ -590,10 +597,10 @@ mod tests {
 
         let mut iterations = 0;
         for _ in 0..10 {
-            if let Some(ref c) = cancellation {
-                if c.0.is_cancelled() {
-                    break;
-                }
+            if let Some(ref c) = cancellation
+                && c.0.is_cancelled()
+            {
+                break;
             }
             iterations += 1;
         }
@@ -646,7 +653,6 @@ mod tests {
         let prompt_len = 50;
         let max_len = config.max_length;
         let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
-        assert_eq!(max_new_tokens, 1998); 
+        assert_eq!(max_new_tokens, 1998);
     }
-
 }

@@ -207,7 +207,7 @@ impl GpuRoPE {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
+                let workgroups_x = (head_dim as u32 / 2).div_ceil(16);
                 let workgroups_y = seq_len as u32;
                 let workgroups_z = (batch_size * num_heads) as u32;
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);

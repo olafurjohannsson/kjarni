@@ -1,7 +1,6 @@
-
-use std::path::{Path, PathBuf};
-use anyhow::Result;
 use crate::kjarni_config::KjarniConfig;
+use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 /// Load configuration with standard priority:
 /// CLI flags > ./kjarni.toml > ~/.config/kjarni/config.toml > defaults
@@ -10,7 +9,7 @@ pub fn load_config() -> Result<KjarniConfig> {
     if let Some(config) = try_load_from_path("./kjarni.toml")? {
         return Ok(config);
     }
-    
+
     // Try user config
     if let Some(config_dir) = dirs::config_dir() {
         let user_config = config_dir.join("kjarni").join("config.toml");
@@ -18,7 +17,7 @@ pub fn load_config() -> Result<KjarniConfig> {
             return Ok(config);
         }
     }
-    
+
     // Return defaults
     Ok(KjarniConfig::default())
 }

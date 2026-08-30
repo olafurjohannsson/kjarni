@@ -3,23 +3,16 @@
 use std::fmt;
 use std::path::PathBuf;
 
-
 // Task
 
-
 /// Whisper task type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Task {
     /// Transcribe speech in the source language.
+    #[default]
     Transcribe,
     /// Translate speech to English.
     Translate,
-}
-
-impl Default for Task {
-    fn default() -> Self {
-        Self::Transcribe
-    }
 }
 
 impl fmt::Display for Task {
@@ -55,9 +48,7 @@ pub struct TranscriptionSegment {
     pub text: String,
 }
 
-
 // Streaming Token
-
 
 /// A single token emitted during streamed transcription.
 #[derive(Debug, Clone)]
@@ -70,9 +61,7 @@ pub struct TranscribedToken {
     pub is_special: bool,
 }
 
-
 // Progress Reporting
-
 
 /// Stage of the transcription pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +100,11 @@ pub struct TranscriptionProgress {
 
 impl TranscriptionProgress {
     pub fn new(stage: TranscriptionStage, current: usize, total: Option<usize>) -> Self {
-        Self { stage, current, total }
+        Self {
+            stage,
+            current,
+            total,
+        }
     }
 
     pub fn loading_audio() -> Self {
@@ -135,9 +128,7 @@ impl TranscriptionProgress {
 pub type TranscriptionProgressCallback =
     Box<dyn Fn(&TranscriptionProgress, Option<&str>) + Send + Sync>;
 
-
 // Errors
-
 
 /// Errors returned by the transcription API.
 #[derive(Debug)]
@@ -182,9 +173,9 @@ impl fmt::Display for TranscriberError {
 impl std::error::Error for TranscriberError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ModelLoadFailed(e)
-            | Self::AudioLoadFailed(e)
-            | Self::TranscriptionFailed(e) => Some(e.as_ref()),
+            Self::ModelLoadFailed(e) | Self::AudioLoadFailed(e) | Self::TranscriptionFailed(e) => {
+                Some(e.as_ref())
+            }
             _ => None,
         }
     }

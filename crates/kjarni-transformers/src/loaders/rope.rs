@@ -67,7 +67,7 @@ mod loaded_rope {
             hidden_size: 64,
             num_attention_heads: 2,
             num_kv_heads: 2,
-            head_dim: 32, 
+            head_dim: 32,
             max_seq_len: 128,
             rope_theta: Some(10000.0),
             rope_scaling: None,
@@ -148,13 +148,17 @@ mod loaded_rope {
         let gpu_rope = loaded.gpu.as_ref().unwrap();
 
         let shape = [1, 2, 4, 32];
-        let size = 1 * 2 * 4 * 32;
+        let size = 2 * 4 * 32;
         let data: Vec<f32> = (0..size).map(|i| (i as f32) * 0.01).collect();
 
         let input_cpu = Array4::from_shape_vec(shape, data)?;
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input_cpu)?;
-        let output_gpu =
-            GpuTensor::zeros(&ctx, input_cpu.shape().to_vec(), crate::tensor::DType::F32, "zeros")?;
+        let output_gpu = GpuTensor::zeros(
+            &ctx,
+            input_cpu.shape().to_vec(),
+            crate::tensor::DType::F32,
+            "zeros",
+        )?;
 
         let cpu_rotated = loaded.cpu.rotate_4d(&input_cpu, 0);
 
@@ -190,8 +194,12 @@ mod loaded_rope {
         let shape = [1, 1, 1, 32];
         let input_cpu = Array4::from_elem(shape, 1.0);
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input_cpu)?;
-        let output_gpu =
-            GpuTensor::zeros(&ctx, input_cpu.shape().to_vec(), crate::tensor::DType::F32, "zeros")?;
+        let output_gpu = GpuTensor::zeros(
+            &ctx,
+            input_cpu.shape().to_vec(),
+            crate::tensor::DType::F32,
+            "zeros",
+        )?;
 
         let offset = 10;
         let cpu_rotated = loaded.cpu.rotate_4d(&input_cpu, offset);

@@ -1,9 +1,8 @@
-use crate::gpu::{GpuTensor};
 use crate::WgpuContext;
+use crate::gpu::GpuTensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -118,7 +117,7 @@ fn run_internal_softmax(
     //     label: Some("Softmax Compute Pass"),
     //     timestamp_writes: None,
     // });
-    let label = format!("Softmax");
+    let label = "Softmax".to_string();
     context.profiler.profile(encoder, &label, |compute_pass| {
         compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);

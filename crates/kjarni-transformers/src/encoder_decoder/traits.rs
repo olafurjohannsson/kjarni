@@ -1,4 +1,4 @@
-//! traits for Encoder-Decoder 
+//! traits for Encoder-Decoder
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
 use crate::cpu::encoder::prelude::EncoderLanguageModel;
@@ -54,8 +54,8 @@ pub trait CpuCrossDecoder: Send + Sync {
         &self,
         _decoder_input_ids: &Array2<u32>,
         _encoder_hidden_states: &Array3<f32>,
-        _decoder_padding_mask: Option<&Array2<f32>>, 
-        _encoder_padding_mask: Option<&Array2<f32>>, 
+        _decoder_padding_mask: Option<&Array2<f32>>,
+        _encoder_padding_mask: Option<&Array2<f32>>,
         _cache: Option<&mut dyn Cache>,
         _cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
     ) -> Result<CpuCrossDecoderOutput> {
@@ -247,7 +247,6 @@ pub trait EncoderDecoderGenerationBackend: Send + Sync {
     fn reorder_cache(&self, cache: &mut dyn Cache, indices: &[usize]) -> Result<()>;
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,12 +278,12 @@ mod tests {
         let hidden = Array3::<f32>::zeros((1, 5, 64));
         let k = Array3::<f32>::zeros((1, 5, 64));
         let v = Array3::<f32>::zeros((1, 5, 64));
-        
+
         let output = CpuCrossDecoderOutput {
             last_hidden_state: hidden.clone(),
             new_self_attn_kv: vec![(k, v)],
         };
-        
+
         assert_eq!(output.last_hidden_state.shape(), &[1, 5, 64]);
         assert_eq!(output.new_self_attn_kv.len(), 1);
     }
@@ -300,12 +299,12 @@ mod tests {
                 )
             })
             .collect();
-        
+
         let output = CpuCrossDecoderOutput {
             last_hidden_state: hidden,
             new_self_attn_kv: kvs,
         };
-        
+
         assert_eq!(output.new_self_attn_kv.len(), 6);
     }
     struct MockCpuCrossDecoder {
@@ -336,7 +335,7 @@ mod tests {
     impl CpuCrossDecoder for MockCpuCrossDecoder {
         fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
             if self.has_embed_norm {
-                Ok(hidden_states.clone())
+                Ok(hidden_states.mapv(|v| v * 2.0))
             } else {
                 Ok(hidden_states.clone())
             }
@@ -344,7 +343,7 @@ mod tests {
 
         fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
             if self.has_final_norm {
-                Ok(hidden_states.clone())
+                Ok(hidden_states.mapv(|v| v * 2.0))
             } else {
                 Ok(hidden_states.clone())
             }
@@ -398,7 +397,7 @@ mod tests {
     fn test_mock_cpu_decoder_embed_norm() {
         let decoder = MockCpuCrossDecoder::new(6, 64).with_norms(true, false);
         let input = Array3::<f32>::ones((1, 3, 64));
-        
+
         let output = decoder.embed_norm(&input).unwrap();
         assert_eq!(output.shape(), input.shape());
     }
@@ -407,7 +406,7 @@ mod tests {
     fn test_mock_cpu_decoder_final_norm() {
         let decoder = MockCpuCrossDecoder::new(6, 64).with_norms(false, true);
         let input = Array3::<f32>::ones((1, 3, 64));
-        
+
         let output = decoder.final_norm(&input).unwrap();
         assert_eq!(output.shape(), input.shape());
     }
@@ -416,8 +415,10 @@ mod tests {
     fn test_mock_cpu_decoder_precompute_cross_kv() {
         let decoder = MockCpuCrossDecoder::new(6, 64);
         let encoder_hidden = Array3::<f32>::ones((1, 10, 64));
-        
-        let cache = decoder.precompute_cross_attention_kv(&encoder_hidden).unwrap();
+
+        let cache = decoder
+            .precompute_cross_attention_kv(&encoder_hidden)
+            .unwrap();
         assert!(cache.0.is_empty()); // Mock returns empty
     }
 
@@ -426,11 +427,11 @@ mod tests {
         let decoder = MockCpuCrossDecoder::new(6, 64);
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let encoder_hidden = Array3::<f32>::ones((1, 10, 64));
-        
+
         let output = decoder
             .forward_layers(&hidden, &encoder_hidden, None, None, None, None, 0, 6)
             .unwrap();
-        
+
         assert_eq!(output.last_hidden_state.shape(), &[1, 5, 64]);
         assert!(output.new_self_attn_kv.is_empty());
     }
@@ -487,20 +488,31 @@ mod tests {
     #[test]
     fn test_cpu_decoder_full_flow() {
         let decoder = MockCpuCrossDecoder::new(6, 64).with_norms(true, false);
-        
+
         let embedded = Array3::<f32>::ones((1, 5, 64)); // Would come from ops.embed_decoder_tokens()
         let encoder_hidden = Array3::<f32>::ones((1, 10, 64));
-        
+
         let normed = decoder.embed_norm(&embedded).unwrap();
         assert_eq!(normed.shape(), &[1, 5, 64]);
-        
-        let cross_kv = decoder.precompute_cross_attention_kv(&encoder_hidden).unwrap();
-        
+
+        let cross_kv = decoder
+            .precompute_cross_attention_kv(&encoder_hidden)
+            .unwrap();
+
         let output = decoder
-            .forward_layers(&normed, &encoder_hidden, None, None, None, Some(&cross_kv), 0, 0)
+            .forward_layers(
+                &normed,
+                &encoder_hidden,
+                None,
+                None,
+                None,
+                Some(&cross_kv),
+                0,
+                0,
+            )
             .unwrap();
         assert_eq!(output.last_hidden_state.shape(), &[1, 5, 64]);
-        
+
         let final_output = decoder.final_norm(&output.last_hidden_state).unwrap();
         assert_eq!(final_output.shape(), &[1, 5, 64]);
     }
@@ -510,11 +522,11 @@ mod tests {
         let decoder = MockCpuCrossDecoder::new(6, 64);
         let hidden = Array3::<f32>::zeros((1, 0, 64));
         let encoder_hidden = Array3::<f32>::zeros((1, 10, 64));
-        
+
         let output = decoder
             .forward_layers(&hidden, &encoder_hidden, None, None, None, None, 0, 0)
             .unwrap();
-        
+
         assert_eq!(output.last_hidden_state.shape(), &[1, 0, 64]);
     }
 
@@ -523,11 +535,11 @@ mod tests {
         let decoder = MockCpuCrossDecoder::new(6, 64);
         let hidden = Array3::<f32>::ones((4, 5, 64)); // batch=4
         let encoder_hidden = Array3::<f32>::ones((4, 10, 64));
-        
+
         let output = decoder
             .forward_layers(&hidden, &encoder_hidden, None, None, None, None, 0, 0)
             .unwrap();
-        
+
         assert_eq!(output.last_hidden_state.shape(), &[4, 5, 64]);
     }
 
@@ -536,12 +548,12 @@ mod tests {
         let decoder = MockCpuCrossDecoder::new(12, 64);
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let encoder_hidden = Array3::<f32>::ones((1, 10, 64));
-        
+
         // Only run layers 0-6 (first half)
         let output = decoder
             .forward_layers(&hidden, &encoder_hidden, None, None, None, None, 0, 6)
             .unwrap();
-        
+
         assert_eq!(output.last_hidden_state.shape(), &[1, 5, 64]);
     }
 
@@ -550,12 +562,12 @@ mod tests {
         let decoder = MockCpuCrossDecoder::new(12, 64);
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let encoder_hidden = Array3::<f32>::ones((1, 10, 64));
-        
+
         // Only run layers 6-12 (second half)
         let output = decoder
             .forward_layers(&hidden, &encoder_hidden, None, None, None, None, 6, 12)
             .unwrap();
-        
+
         assert_eq!(output.last_hidden_state.shape(), &[1, 5, 64]);
     }
 }

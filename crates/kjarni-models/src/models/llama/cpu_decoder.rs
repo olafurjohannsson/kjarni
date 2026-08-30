@@ -6,7 +6,16 @@ use anyhow::Result;
 use ndarray::{Array2, Array3};
 
 use kjarni_transformers::{
-    WgpuContext, activations::Activation, cache::CpuKVCache, decoder::prelude::*, normalization::RMSNorm, pipeline::CpuLayerFactory, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelLayout, ModelMetadata}, weights::ModelWeights
+    WgpuContext,
+    activations::Activation,
+    cache::CpuKVCache,
+    decoder::prelude::*,
+    normalization::RMSNorm,
+    pipeline::CpuLayerFactory,
+    rope::RoPE,
+    tensor::DType,
+    traits::{Cache, Device, InferenceModel, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 pub struct LlamaCpuDecoder {
@@ -222,8 +231,8 @@ mod tests {
     use crate::models::llama::LlamaModel;
 
     use kjarni_transformers::{
-        weights::{clear_mmap_cache, ModelWeights},
         ModelType,
+        weights::{ModelWeights, clear_mmap_cache},
     };
 
     fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
@@ -333,16 +342,28 @@ mod tests {
 
             assert_eq!(config_gguf.hidden_size, config_st.hidden_size);
             assert_eq!(config_gguf.num_hidden_layers, config_st.num_hidden_layers);
-            assert_eq!(config_gguf.num_attention_heads, config_st.num_attention_heads);
-            assert_eq!(config_gguf.num_key_value_heads, config_st.num_key_value_heads);
+            assert_eq!(
+                config_gguf.num_attention_heads,
+                config_st.num_attention_heads
+            );
+            assert_eq!(
+                config_gguf.num_key_value_heads,
+                config_st.num_key_value_heads
+            );
             assert_eq!(config_gguf.intermediate_size, config_st.intermediate_size);
             assert_eq!(config_gguf.vocab_size, config_st.vocab_size);
-            assert_eq!(config_gguf.max_position_embeddings, config_st.max_position_embeddings);
+            assert_eq!(
+                config_gguf.max_position_embeddings,
+                config_st.max_position_embeddings
+            );
             assert!((config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6);
             assert_eq!(config_gguf.hidden_act, config_st.hidden_act);
             assert!((config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6);
             assert_eq!(config_gguf.pad_token_id, config_st.pad_token_id);
-            assert_eq!(config_gguf.tie_word_embeddings, config_st.tie_word_embeddings);
+            assert_eq!(
+                config_gguf.tie_word_embeddings,
+                config_st.tie_word_embeddings
+            );
         }
 
         clear_mmap_cache();
@@ -369,16 +390,28 @@ mod tests {
 
             assert_eq!(config_gguf.hidden_size, config_st.hidden_size);
             assert_eq!(config_gguf.num_hidden_layers, config_st.num_hidden_layers);
-            assert_eq!(config_gguf.num_attention_heads, config_st.num_attention_heads);
-            assert_eq!(config_gguf.num_key_value_heads, config_st.num_key_value_heads);
+            assert_eq!(
+                config_gguf.num_attention_heads,
+                config_st.num_attention_heads
+            );
+            assert_eq!(
+                config_gguf.num_key_value_heads,
+                config_st.num_key_value_heads
+            );
             assert_eq!(config_gguf.intermediate_size, config_st.intermediate_size);
             assert_eq!(config_gguf.vocab_size, config_st.vocab_size);
-            assert_eq!(config_gguf.max_position_embeddings, config_st.max_position_embeddings);
+            assert_eq!(
+                config_gguf.max_position_embeddings,
+                config_st.max_position_embeddings
+            );
             assert!((config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6);
             assert_eq!(config_gguf.hidden_act, config_st.hidden_act);
             assert!((config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6);
             assert_eq!(config_gguf.pad_token_id, config_st.pad_token_id);
-            assert_eq!(config_gguf.tie_word_embeddings, config_st.tie_word_embeddings);
+            assert_eq!(
+                config_gguf.tie_word_embeddings,
+                config_st.tie_word_embeddings
+            );
         }
 
         clear_mmap_cache();

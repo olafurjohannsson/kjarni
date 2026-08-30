@@ -8,8 +8,8 @@ use kjarni_transformers::{
     },
     weights::WeightLoader,
 };
-use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use std::sync::Arc;
 
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
@@ -69,11 +69,21 @@ where
     deserializer.deserialize_any(TokenIdsVisitor)
 }
 
-fn default_rms_norm_eps() -> f32 { 1e-6 } 
-fn default_rope_theta() -> f32 { 1000000.0 } 
-fn default_hidden_act() -> String { "silu".to_string() }
-fn default_tie_word_embeddings() -> bool { false }
-fn default_true() -> bool { true }
+fn default_rms_norm_eps() -> f32 {
+    1e-6
+}
+fn default_rope_theta() -> f32 {
+    1000000.0
+}
+fn default_hidden_act() -> String {
+    "silu".to_string()
+}
+fn default_tie_word_embeddings() -> bool {
+    false
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct QwenConfig {
@@ -132,15 +142,18 @@ impl QwenConfig {
 
             // Helper to handle both "qwen2.key" and "llama.key" (some converters map it)
             let get_val = |k: &str| {
-                loader.get_u32(&format!("{}.{}", arch, k))
+                loader
+                    .get_u32(&format!("{}.{}", arch, k))
                     .or_else(|| loader.get_u32(&format!("llama.{}", k)))
             };
             let get_f32_val = |k: &str| {
-                loader.get_f32(&format!("{}.{}", arch, k))
+                loader
+                    .get_f32(&format!("{}.{}", arch, k))
                     .or_else(|| loader.get_f32(&format!("llama.{}", k)))
             };
 
-            let hidden_size = get_val("embedding_length").context("Missing embedding_length")? as usize;
+            let hidden_size =
+                get_val("embedding_length").context("Missing embedding_length")? as usize;
             let n_heads = get_val("attention.head_count").context("Missing head_count")? as usize;
 
             // Handle RoPE Scaling
@@ -159,12 +172,17 @@ impl QwenConfig {
                 hidden_size,
                 num_attention_heads: n_heads,
                 num_hidden_layers: get_val("block_count").context("Missing block_count")? as usize,
-                num_key_value_heads: get_val("attention.head_count_kv").unwrap_or(n_heads as u32) as usize,
-                intermediate_size: get_val("feed_forward_length").unwrap_or(hidden_size as u32 * 4) as usize,
+                num_key_value_heads: get_val("attention.head_count_kv").unwrap_or(n_heads as u32)
+                    as usize,
+                intermediate_size: get_val("feed_forward_length").unwrap_or(hidden_size as u32 * 4)
+                    as usize,
                 vocab_size: loader.get_u32("general.vocabulary_size").unwrap_or(151936) as usize,
                 max_position_embeddings: get_val("context_length").unwrap_or(32768) as usize,
                 rms_norm_eps: get_f32_val("attention.layer_norm_rms_epsilon").unwrap_or(1e-6),
-                hidden_act: loader.get_string(&format!("{}.feed_forward_activation", arch)).unwrap_or("silu").to_string(),
+                hidden_act: loader
+                    .get_string(&format!("{}.feed_forward_activation", arch))
+                    .unwrap_or("silu")
+                    .to_string(),
                 rope_theta: get_f32_val("rope.freq_base").unwrap_or(1000000.0),
                 // Qwen specific tokens
                 bos_token_id: 151643, // <|endoftext|> usually serves as BOS/EOS
@@ -188,8 +206,10 @@ impl QwenConfig {
 }
 
 impl ModelConfig for QwenConfig {
-    fn model_type(&self) -> &str { "qwen2" }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn model_type(&self) -> &str {
+        "qwen2"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -198,7 +218,9 @@ fn as_any(&self) -> &dyn std::any::Any {
             num_layers: self.num_hidden_layers,
             num_attention_heads: self.num_attention_heads,
             num_kv_heads: self.num_key_value_heads,
-            head_dim: self.head_dim.unwrap_or(self.hidden_size / self.num_attention_heads),
+            head_dim: self
+                .head_dim
+                .unwrap_or(self.hidden_size / self.num_attention_heads),
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position_embeddings,
             norm_eps: self.rms_norm_eps,
@@ -261,7 +283,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             } else {
                 "lm_head.weight"
             }
-                .to_string(),
+            .to_string(),
             encoder: None,
             decoder: Some(DecoderLayout {
                 position_embedding: None,

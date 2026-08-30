@@ -12,5 +12,4 @@ pub use overrides::GenerationOverrides;
 pub use resolution::resolve_generation_config;
 pub use resolved::ResolvedGenerationConfig;
 
-
 pub type GenConfig = GenerationOverrides;

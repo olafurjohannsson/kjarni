@@ -3,9 +3,9 @@ use std::path::Path;
 use anyhow::Result;
 use tokio::fs;
 
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::prelude::Device;
-use kjarni_transformers::WgpuContext;
 
 use crate::models::sentence_encoder::SentenceEncoder;
 
@@ -80,7 +80,12 @@ fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, n
 
         println!(
             "{}: batch {} - max abs diff: {:.6}, max rel diff: {:.6}, large diffs: {}/{}",
-            name, batch_idx, max_diff, max_rel_diff, num_large_diffs, cpu_emb.len()
+            name,
+            batch_idx,
+            max_diff,
+            max_rel_diff,
+            num_large_diffs,
+            cpu_emb.len()
         );
 
         assert!(
@@ -129,11 +134,19 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
 
     let cpu_embedding = cpu_encoder.encode(sentence).await?;
     let cpu_norm: f32 = cpu_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    println!("cpu norm: {:.6}, first 10: {:?}", cpu_norm, &cpu_embedding[..10]);
+    println!(
+        "cpu norm: {:.6}, first 10: {:?}",
+        cpu_norm,
+        &cpu_embedding[..10]
+    );
 
     let gpu_embedding = gpu_encoder.encode(sentence).await?;
     let gpu_norm: f32 = gpu_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    println!("gpu norm: {:.6}, first 10: {:?}", gpu_norm, &gpu_embedding[..10]);
+    println!(
+        "gpu norm: {:.6}, first 10: {:?}",
+        gpu_norm,
+        &gpu_embedding[..10]
+    );
 
     assert_embeddings_close(&[cpu_embedding], &[gpu_embedding], 1e-3, "single sentence");
     Ok(())

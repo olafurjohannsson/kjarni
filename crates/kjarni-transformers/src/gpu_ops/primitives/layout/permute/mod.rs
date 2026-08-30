@@ -1,4 +1,4 @@
-use crate::gpu::{GpuTensor};
+use crate::gpu::GpuTensor;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -109,7 +109,7 @@ impl GpuPermute {
             |pass: &mut wgpu::ComputePass<'_>| {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                let workgroups = (output.num_elements() as u32 + 255) / 256;
+                let workgroups = (output.num_elements() as u32).div_ceil(256);
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
         );

@@ -46,7 +46,7 @@ impl DType {
             DType::Q8_0 | DType::Q4_K | DType::Q5_K | DType::Q6_K => None,
         }
     }
- 
+
     pub fn size_in_bytes(&self) -> usize {
         match self {
             DType::F32 => 4,

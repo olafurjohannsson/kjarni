@@ -323,14 +323,11 @@ impl Classifier {
                     .predict_logits(&[text])
                     .await
                     .map_err(ClassifierError::ClassificationFailed)?;
-                let raw = logits.into_iter().next()
-                    .ok_or_else(|| {
-                        ClassifierError::ClassificationFailed(anyhow::anyhow!("No results"))
-                    })?;
-                
-                raw.iter()
-                    .map(|&x| sigmoid(x))
-                    .collect()
+                let raw = logits.into_iter().next().ok_or_else(|| {
+                    ClassifierError::ClassificationFailed(anyhow::anyhow!("No results"))
+                })?;
+
+                raw.iter().map(|&x| sigmoid(x)).collect()
             }
         };
 

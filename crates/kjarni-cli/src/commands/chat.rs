@@ -1,7 +1,6 @@
-
 //! Interactive chat command using the high-level Chat API.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use std::io::{self, BufRead, Write};
 
@@ -24,6 +23,10 @@ pub enum ChatCommand {
 pub enum CommandResult {
     /// Exit the chat loop
     Exit,
+    #[allow(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     /// Continue with normal message processing
     Continue,
     /// Command was handled, prompt for next input
@@ -72,7 +75,10 @@ pub async fn run(
 
     // Welcome message
     if !quiet {
-        println!("{}", format_welcome_message(chat.model_name(), &format!("{:?}", chat.device())));
+        println!(
+            "{}",
+            format_welcome_message(chat.model_name(), &format!("{:?}", chat.device()))
+        );
     }
 
     let stdin = io::stdin();
@@ -95,11 +101,11 @@ pub async fn run(
         // Handle Slash Commands
         if input.starts_with('/') {
             let command = parse_command(input);
-            
+
             match handle_command(&command, &mut convo, &chat, quiet) {
                 CommandResult::Exit => break,
                 CommandResult::Handled => continue,
-                CommandResult::Continue => {} 
+                CommandResult::Continue => {}
             }
         }
 
@@ -107,7 +113,7 @@ pub async fn run(
 
         // Get the stream
         let stream_result = convo.stream_next().await;
-        
+
         let mut stream = match stream_result {
             Ok(s) => s,
             Err(e) => {
@@ -172,7 +178,7 @@ where
 {
     match command {
         ChatCommand::Quit => CommandResult::Exit,
-        
+
         ChatCommand::Clear => {
             convo.clear_history(true);
             if !quiet {
@@ -180,7 +186,7 @@ where
             }
             CommandResult::Handled
         }
-        
+
         ChatCommand::ClearAll => {
             convo.clear_history(false);
             if !quiet {
@@ -188,7 +194,7 @@ where
             }
             CommandResult::Handled
         }
-        
+
         ChatCommand::ShowSystem => {
             if let Some(s) = chat.system_prompt() {
                 println!("System Prompt: {}", s);
@@ -197,7 +203,7 @@ where
             }
             CommandResult::Handled
         }
-        
+
         ChatCommand::ShowHistory => {
             let (len, messages) = convo.get_history_info();
             println!("\n--- History ({} messages) ---", len);
@@ -207,14 +213,17 @@ where
             println!("--- End ---\n");
             CommandResult::Handled
         }
-        
+
         ChatCommand::Help => {
             println!("{}", format_help_text());
             CommandResult::Handled
         }
-        
+
         ChatCommand::Unknown(cmd) => {
-            println!("Unknown command: {}. Type /help for available commands.", cmd);
+            println!(
+                "Unknown command: {}. Type /help for available commands.",
+                cmd
+            );
             CommandResult::Handled
         }
     }
@@ -229,7 +238,7 @@ impl ConversationLike for kjarni::chat::conversation::ChatConversation<'_> {
     fn clear_history(&mut self, keep_system: bool) {
         self.clear(keep_system);
     }
-    
+
     fn get_history_info(&self) -> (usize, Vec<(String, String)>) {
         let history = self.history();
         let messages: Vec<(String, String)> = history
@@ -257,7 +266,8 @@ Commands:
   /system           - Show system prompt
   /history          - Show conversation history
   /help             - Show this help
-"#.to_string()
+"#
+    .to_string()
 }
 
 #[cfg(test)]
@@ -384,16 +394,13 @@ mod tests {
             parse_command("/quit now"),
             ChatCommand::Unknown(_)
         ));
-        assert!(matches!(
-            parse_command("/help me"),
-            ChatCommand::Unknown(_)
-        ));
+        assert!(matches!(parse_command("/help me"), ChatCommand::Unknown(_)));
     }
 
     #[test]
     fn test_format_welcome_message() {
         let msg = format_welcome_message("llama-3.2-1b", "Cpu");
-        
+
         assert!(msg.contains("Kjarni Chat"));
         assert!(msg.contains("llama-3.2-1b"));
         assert!(msg.contains("Cpu"));
@@ -404,7 +411,7 @@ mod tests {
     #[test]
     fn test_format_welcome_message_different_model() {
         let msg = format_welcome_message("phi3.5-mini", "Wgpu");
-        
+
         assert!(msg.contains("phi3.5-mini"));
         assert!(msg.contains("Wgpu"));
     }
@@ -412,7 +419,7 @@ mod tests {
     #[test]
     fn test_format_help_text_contains_all_commands() {
         let help = format_help_text();
-        
+
         assert!(help.contains("/quit"));
         assert!(help.contains("/exit"));
         assert!(help.contains("/q"));
@@ -427,7 +434,7 @@ mod tests {
     #[test]
     fn test_format_help_text_contains_descriptions() {
         let help = format_help_text();
-        
+
         assert!(help.contains("Exit chat"));
         assert!(help.contains("Reset history"));
         assert!(help.contains("system prompt"));
@@ -454,7 +461,7 @@ mod tests {
         assert_eq!(ChatCommand::Quit, ChatCommand::Quit);
         assert_eq!(ChatCommand::Clear, ChatCommand::Clear);
         assert_ne!(ChatCommand::Quit, ChatCommand::Clear);
-        
+
         assert_eq!(
             ChatCommand::Unknown("a".to_string()),
             ChatCommand::Unknown("a".to_string())
@@ -499,14 +506,15 @@ mod tests {
 
     #[test]
     fn test_mock_conversation_with_messages() {
-        let mock = MockConversation::with_messages(vec![
-            ("user", "hello"),
-            ("assistant", "hi there"),
-        ]);
+        let mock =
+            MockConversation::with_messages(vec![("user", "hello"), ("assistant", "hi there")]);
         let (len, messages) = mock.get_history_info();
         assert_eq!(len, 2);
         assert_eq!(messages[0], ("user".to_string(), "hello".to_string()));
-        assert_eq!(messages[1], ("assistant".to_string(), "hi there".to_string()));
+        assert_eq!(
+            messages[1],
+            ("assistant".to_string(), "hi there".to_string())
+        );
     }
 
     #[test]
@@ -516,9 +524,9 @@ mod tests {
             ("user", "hello"),
             ("assistant", "hi"),
         ]);
-        
+
         mock.clear_history(true);
-        
+
         let (len, messages) = mock.get_history_info();
         assert_eq!(len, 1);
         assert_eq!(messages[0].0, "system");
@@ -527,13 +535,11 @@ mod tests {
 
     #[test]
     fn test_mock_conversation_clear_all() {
-        let mut mock = MockConversation::with_messages(vec![
-            ("system", "You are helpful"),
-            ("user", "hello"),
-        ]);
-        
+        let mut mock =
+            MockConversation::with_messages(vec![("system", "You are helpful"), ("user", "hello")]);
+
         mock.clear_history(false);
-        
+
         let (len, _) = mock.get_history_info();
         assert_eq!(len, 0);
         assert_eq!(mock.clear_calls, vec![false]);
@@ -542,7 +548,7 @@ mod tests {
     #[test]
     fn test_parse_and_identify_quit_commands() {
         let quit_inputs = vec!["/quit", "/exit", "/q", "/QUIT", "/Exit", "/Q"];
-        
+
         for input in quit_inputs {
             let cmd = parse_command(input);
             assert_eq!(cmd, ChatCommand::Quit, "Failed for input: {}", input);
@@ -552,7 +558,7 @@ mod tests {
     #[test]
     fn test_parse_and_identify_clear_commands() {
         let clear_inputs = vec!["/clear", "/reset", "/CLEAR", "/Reset"];
-        
+
         for input in clear_inputs {
             let cmd = parse_command(input);
             assert_eq!(cmd, ChatCommand::Clear, "Failed for input: {}", input);
@@ -572,7 +578,7 @@ mod tests {
             ("/history", ChatCommand::ShowHistory),
             ("/help", ChatCommand::Help),
         ];
-        
+
         for (input, expected) in commands {
             let result = parse_command(input);
             assert_eq!(result, expected, "Failed for input: {}", input);
@@ -607,10 +613,10 @@ mod tests {
             ("user", "u1"),
             ("assistant", "a1"),
         ]);
-        
+
         mock.clear_history(true);
         mock.clear_history(false);
-        
+
         assert_eq!(mock.clear_calls, vec![true, false]);
         let (len, _) = mock.get_history_info();
         assert_eq!(len, 0);
@@ -618,11 +624,9 @@ mod tests {
 
     #[test]
     fn test_mock_conversation_unicode() {
-        let mock = MockConversation::with_messages(vec![
-            ("user", "こんにちは"),
-            ("assistant", "你好"),
-        ]);
-        
+        let mock =
+            MockConversation::with_messages(vec![("user", "こんにちは"), ("assistant", "你好")]);
+
         let (len, messages) = mock.get_history_info();
         assert_eq!(len, 2);
         assert_eq!(messages[0].1, "こんにちは");
@@ -631,11 +635,8 @@ mod tests {
 
     #[test]
     fn test_mock_conversation_empty_messages() {
-        let mock = MockConversation::with_messages(vec![
-            ("user", ""),
-            ("assistant", ""),
-        ]);
-        
+        let mock = MockConversation::with_messages(vec![("user", ""), ("assistant", "")]);
+
         let (len, messages) = mock.get_history_info();
         assert_eq!(len, 2);
         assert_eq!(messages[0].1, "");
@@ -645,10 +646,8 @@ mod tests {
     #[test]
     fn test_mock_conversation_long_content() {
         let long_content = "a".repeat(10000);
-        let mock = MockConversation::with_messages(vec![
-            ("user", &long_content),
-        ]);
-        
+        let mock = MockConversation::with_messages(vec![("user", &long_content)]);
+
         let (_, messages) = mock.get_history_info();
         assert_eq!(messages[0].1.len(), 10000);
     }

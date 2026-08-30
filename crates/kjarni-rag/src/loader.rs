@@ -1,6 +1,6 @@
 //! Document loading and chunking utilities
 
-use crate::{Chunk, ChunkMetadata, TextSplitter, SplitterConfig};
+use crate::{Chunk, ChunkMetadata, SplitterConfig, TextSplitter};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
@@ -8,27 +8,22 @@ use std::path::Path;
 /// Supported file extensions for text loading
 pub const TEXT_EXTENSIONS: &[&str] = &[
     // Documents
-    "txt", "md", "markdown", "rst", "org",
-    // Data
-    "json", "yaml", "yml", "toml", "xml", "csv",
-    // Web
-    "html", "htm", "css",
-    // Code
-    "rs", "py", "js", "ts", "go", "java", "c", "cpp", "h", "hpp",
-    "cs", "rb", "sh", "bash", "zsh", "fish", "ps1",
-    "sql", "r", "scala", "kt", "swift", "m", "mm",
-    "lua", "pl", "php", "ex", "exs", "clj", "hs",
+    "txt", "md", "markdown", "rst", "org", // Data
+    "json", "yaml", "yml", "toml", "xml", "csv", // Web
+    "html", "htm", "css", // Code
+    "rs", "py", "js", "ts", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "sh", "bash", "zsh",
+    "fish", "ps1", "sql", "r", "scala", "kt", "swift", "m", "mm", "lua", "pl", "php", "ex", "exs",
+    "clj", "hs",
 ];
-
 
 #[derive(Debug, Clone)]
 pub struct LoaderConfig {
     pub splitter: SplitterConfig,
     pub recursive: bool,
-    pub extensions: Vec<String>,       
-    pub exclude_patterns: Vec<String>, 
+    pub extensions: Vec<String>,
+    pub exclude_patterns: Vec<String>,
     pub include_hidden: bool,
-    pub max_file_size: Option<usize>,   
+    pub max_file_size: Option<usize>,
     pub quiet: bool,
 }
 
@@ -38,7 +33,7 @@ impl LoaderConfig {
         self.extensions.push(ext.to_lowercase());
         self
     }
-    
+
     /// Add multiple extensions
     pub fn with_extensions(mut self, exts: &[&str]) -> Self {
         for ext in exts {
@@ -46,7 +41,7 @@ impl LoaderConfig {
         }
         self
     }
-    
+
     /// Exclude files matching pattern (e.g., "*.min.js", "node_modules/**")
     pub fn exclude(mut self, pattern: &str) -> Self {
         self.exclude_patterns.push(pattern.to_string());
@@ -88,7 +83,11 @@ impl DocumentLoader {
     pub fn load_file(&self, path: &Path) -> Result<Vec<Chunk>> {
         let content = fs::read_to_string(path)?;
         if !self.config.quiet {
-            eprintln!("Splitting file: {} (Size: {} bytes)", path.display(), content.len());
+            eprintln!(
+                "Splitting file: {} (Size: {} bytes)",
+                path.display(),
+                content.len()
+            );
         }
         let texts = self.splitter.split(&content);
         if !self.config.quiet {
@@ -132,12 +131,11 @@ impl DocumentLoader {
             }
 
             // Skip hidden files
-            if !self.config.include_hidden {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with('.') {
-                        continue;
-                    }
-                }
+            if !self.config.include_hidden
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && name.starts_with('.')
+            {
+                continue;
             }
 
             // Check extension
@@ -194,6 +192,10 @@ impl DocumentLoader {
     }
 }
 
+#[expect(
+    dead_code,
+    reason = "not referenced yet; kept until the path that needs it lands"
+)]
 /// Convenience function to load and chunk from paths
 pub fn load_documents(paths: &[&str], config: Option<LoaderConfig>) -> Result<Vec<Chunk>> {
     let loader = DocumentLoader::new(config.unwrap_or_default());
@@ -216,12 +218,12 @@ mod tests {
     #[test]
     fn test_is_supported_extension() {
         let loader = DocumentLoader::with_defaults();
-        
+
         assert!(loader.is_supported_extension(Path::new("file.txt")));
         assert!(loader.is_supported_extension(Path::new("file.md")));
         assert!(loader.is_supported_extension(Path::new("file.rs")));
         assert!(loader.is_supported_extension(Path::new("file.py")));
-        
+
         assert!(!loader.is_supported_extension(Path::new("file.pdf")));
         assert!(!loader.is_supported_extension(Path::new("file.docx")));
         assert!(!loader.is_supported_extension(Path::new("file.exe")));
@@ -232,7 +234,7 @@ mod tests {
     fn test_load_file() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.txt");
-        
+
         let mut file = fs::File::create(&file_path).unwrap();
         writeln!(file, "First paragraph.\n\nSecond paragraph.").unwrap();
 
@@ -240,13 +242,16 @@ mod tests {
         let chunks = loader.load_file(&file_path).unwrap();
 
         assert!(!chunks.is_empty());
-        assert_eq!(chunks[0].metadata.source, Some(file_path.display().to_string()));
+        assert_eq!(
+            chunks[0].metadata.source,
+            Some(file_path.display().to_string())
+        );
     }
 
     #[test]
     fn test_load_directory() {
         let dir = TempDir::new().unwrap();
-        
+
         // Create test files
         fs::write(dir.path().join("a.txt"), "Content A").unwrap();
         fs::write(dir.path().join("b.md"), "Content B").unwrap();
@@ -269,7 +274,7 @@ mod tests {
     #[test]
     fn test_skip_hidden_files() {
         let dir = TempDir::new().unwrap();
-        
+
         fs::write(dir.path().join("visible.txt"), "Visible").unwrap();
         fs::write(dir.path().join(".hidden.txt"), "Hidden").unwrap();
 
@@ -288,7 +293,7 @@ mod tests {
     #[test]
     fn test_custom_extensions() {
         let dir = TempDir::new().unwrap();
-        
+
         fs::write(dir.path().join("a.txt"), "Text").unwrap();
         fs::write(dir.path().join("b.custom"), "Custom").unwrap();
 

@@ -8,15 +8,13 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use std::sync::Arc;
 
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 use common::{assert_all_close_4d, read_gpu_tensor_to_vec};
 
 async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
-
 
 async fn run_bmm_test(batch: usize, heads: usize, m: usize, k: usize, n: usize) -> Result<()> {
     let context = get_test_context().await;
@@ -43,7 +41,9 @@ async fn run_bmm_test(batch: usize, heads: usize, m: usize, k: usize, n: usize) 
         (result_shape[0], result_shape[1], result_shape[2]),
         gpu_result_vec,
     )?;
-    let gpu_result_4d = gpu_result_3d.into_shape_with_order((batch, heads, m, n)).unwrap();
+    let gpu_result_4d = gpu_result_3d
+        .into_shape_with_order((batch, heads, m, n))
+        .unwrap();
     let cpu_result_4d = matmul_4d(&cpu_a_4d, &cpu_b_4d);
     assert_all_close_4d(&gpu_result_4d, &cpu_result_4d, 1e-4);
     Ok(())

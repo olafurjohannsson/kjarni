@@ -1,8 +1,8 @@
-use crate::cache::Cache;
-use crate::gpu_ops::{blocks::cache::GpuUpdateCache};
 use crate::WgpuContext;
+use crate::cache::Cache;
 use crate::gpu::GpuTensor;
-use anyhow::{anyhow, Result};
+use crate::gpu_ops::blocks::cache::GpuUpdateCache;
+use anyhow::{Result, anyhow};
 use std::any::Any;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
@@ -33,14 +33,15 @@ impl GpuKVCache {
         }
         log::info!(
             "[GpuKVCache] Starting new()... batch={}, heads={}, capacity={}",
-            batch_size, num_heads, capacity
+            batch_size,
+            num_heads,
+            capacity
         );
         let cache_shape = vec![batch_size, num_heads, capacity, head_dim];
         let mut k_tensors = Vec::with_capacity(num_layers);
         let mut v_tensors = Vec::with_capacity(num_layers);
 
         for i in 0..num_layers {
-
             k_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
@@ -109,7 +110,7 @@ impl GpuKVCache {
             self.k_tensors[0].shape()[2]
         }
     }
-    
+
     pub fn increment_len(&mut self, new_tokens_len: usize) {
         let new_len = self.seq_length + new_tokens_len;
         let max = self.max_seq_len();

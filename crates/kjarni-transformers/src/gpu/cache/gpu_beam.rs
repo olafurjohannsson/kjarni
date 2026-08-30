@@ -1,10 +1,8 @@
-use crate::cache::Cache;
-use crate::gpu_ops::{
-    blocks::cache::reorder::GpuReorderCache, blocks::cache::GpuUpdateCache,
-};
-use crate::gpu::GpuTensor;
 use crate::WgpuContext;
-use anyhow::{anyhow, Result};
+use crate::cache::Cache;
+use crate::gpu::GpuTensor;
+use crate::gpu_ops::{blocks::cache::GpuUpdateCache, blocks::cache::reorder::GpuReorderCache};
+use anyhow::{Result, anyhow};
 use std::any::Any;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
@@ -224,8 +222,8 @@ impl Cache for GpuBeamKVCache {
         Box::new(Self {
             k_tensors: new_k_tensors,
             v_tensors: new_v_tensors,
-            temp_k_tensors: vec![], 
-            temp_v_tensors: vec![], 
+            temp_k_tensors: vec![],
+            temp_v_tensors: vec![],
             seq_length: self.seq_length,
             update_kernel: self.update_kernel.clone(),
             reorder_kernel: self.reorder_kernel.clone(),

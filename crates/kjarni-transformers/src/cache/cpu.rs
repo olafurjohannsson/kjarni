@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-use ndarray::{s, Array3, ArrayView3, ArrayViewMut3};
+use ndarray::{Array3, ArrayView3, ArrayViewMut3, s};
 use rayon::prelude::*;
 
 use crate::traits::Cache;

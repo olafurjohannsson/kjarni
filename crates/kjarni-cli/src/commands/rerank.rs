@@ -1,15 +1,9 @@
 //! Rerank documents by relevance to a query using cross-encoder models
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::io::{self, BufRead};
 
-use kjarni::{
-    registry,
-    CrossEncoder,
-    ModelArchitecture,
-    ModelType,
-    Device,
-};
+use kjarni::{CrossEncoder, Device, ModelArchitecture, ModelType, registry};
 
 /// A rerank result with index, score, and document text
 #[derive(Debug, Clone)]
@@ -38,7 +32,7 @@ pub async fn run(
         io::stdin()
             .lock()
             .lines()
-            .filter_map(|l| l.ok())
+            .map_while(Result::ok)
             .filter(|l| !l.trim().is_empty())
             .collect()
     } else {
@@ -46,7 +40,9 @@ pub async fn run(
     };
 
     if docs.is_empty() {
-        return Err(anyhow!("No documents provided. Pass as arguments or pipe via stdin."));
+        return Err(anyhow!(
+            "No documents provided. Pass as arguments or pipe via stdin."
+        ));
     }
 
     // Resolve model
@@ -56,9 +52,8 @@ pub async fn run(
         return Err(anyhow!("--model-path not yet implemented."));
     }
 
-    let model_type = ModelType::from_cli_name(model).ok_or_else(|| {
-        anyhow!(super::util::model_not_found_error(model, Some("reranker")))
-    })?;
+    let model_type = ModelType::from_cli_name(model)
+        .ok_or_else(|| anyhow!(super::util::model_not_found_error(model, Some("reranker"))))?;
 
     // Validate it's a cross-encoder
     if model_type.architecture() != ModelArchitecture::Bert {
@@ -88,7 +83,11 @@ pub async fn run(
 
     // 4. Rerank
     if !quiet {
-        eprintln!("Reranking {} documents against query: {:?}", docs.len(), query);
+        eprintln!(
+            "Reranking {} documents against query: {:?}",
+            docs.len(),
+            query
+        );
         eprintln!();
     }
 
@@ -124,18 +123,24 @@ fn format_results(results: &[RerankResult], format: &str) -> Result<String> {
         "jsonl" => format_jsonl(results),
         "text" => Ok(format_text(results)),
         "docs" => Ok(format_docs(results)),
-        _ => Err(anyhow!("Unknown format: '{}'. Use: json, jsonl, text, docs", format)),
+        _ => Err(anyhow!(
+            "Unknown format: '{}'. Use: json, jsonl, text, docs",
+            format
+        )),
     }
 }
 
 fn format_json(results: &[RerankResult]) -> Result<String> {
-    let output: Vec<_> = results.iter().map(|r| {
-        serde_json::json!({
-            "index": r.index,
-            "score": r.score,
-            "document": r.document
+    let output: Vec<_> = results
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "index": r.index,
+                "score": r.score,
+                "document": r.document
+            })
         })
-    }).collect();
+        .collect();
     Ok(format!("{}\n", serde_json::to_string_pretty(&output)?))
 }
 
@@ -156,7 +161,12 @@ fn format_jsonl(results: &[RerankResult]) -> Result<String> {
 fn format_text(results: &[RerankResult]) -> String {
     let mut output = String::new();
     for r in results {
-        output.push_str(&format!("{:.4}\t{}\t{}\n", r.score, r.index, truncate(&r.document, 80)));
+        output.push_str(&format!(
+            "{:.4}\t{}\t{}\n",
+            r.score,
+            r.index,
+            truncate(&r.document, 80)
+        ));
     }
     output
 }
@@ -171,7 +181,7 @@ fn format_docs(results: &[RerankResult]) -> String {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    let s = s.replace('\n', " ").replace('\t', " ");
+    let s = s.replace(['\n', '\t'], " ");
     if s.len() <= max_len {
         s
     } else {
@@ -266,14 +276,20 @@ mod tests {
         let error = crate::commands::util::model_not_found_error("minilm", Some("reranker"));
         assert!(error.contains("Unknown model"));
         // "minilm" is close to several real names, so it must offer at least one.
-        assert!(error.contains("Did you mean?"), "no suggestion offered:\n{error}");
+        assert!(
+            error.contains("Did you mean?"),
+            "no suggestion offered:\n{error}"
+        );
     }
 
     #[test]
     fn test_model_not_found_error_close_match() {
         let error = crate::commands::util::model_not_found_error("minilm-l6", Some("reranker"));
         assert!(error.contains("Unknown model"));
-        assert!(error.contains("minilm-l6-v2"), "expected a near match:\n{error}");
+        assert!(
+            error.contains("minilm-l6-v2"),
+            "expected a near match:\n{error}"
+        );
     }
     #[test]
     fn test_format_json_single() {
@@ -338,10 +354,7 @@ mod tests {
 
     #[test]
     fn test_format_jsonl_multiple() {
-        let results = vec![
-            mock_result(0, 0.9, "first"),
-            mock_result(1, 0.8, "second"),
-        ];
+        let results = vec![mock_result(0, 0.9, "first"), mock_result(1, 0.8, "second")];
         let output = format_jsonl(&results).unwrap();
 
         let lines: Vec<&str> = output.trim().lines().collect();
@@ -387,10 +400,7 @@ mod tests {
 
     #[test]
     fn test_format_text_multiple() {
-        let results = vec![
-            mock_result(2, 0.95, "best"),
-            mock_result(0, 0.80, "second"),
-        ];
+        let results = vec![mock_result(2, 0.95, "best"), mock_result(0, 0.80, "second")];
         let output = format_text(&results);
 
         let lines: Vec<&str> = output.trim().lines().collect();

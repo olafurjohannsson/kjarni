@@ -81,25 +81,25 @@ impl SummarizerBuilder {
         self
     }
 
-    /// Use greedy 
+    /// Use greedy
     pub fn greedy(mut self) -> Self {
         self.overrides.do_sample = Some(false);
         self.overrides.num_beams = Some(1);
         self
     }
 
-    /// Set the device 
+    /// Set the device
     pub fn device(mut self, device: KjarniDevice) -> Self {
         self.device = device;
         self
     }
 
-    /// Use CPU 
+    /// Use CPU
     pub fn cpu(self) -> Self {
         self.device(KjarniDevice::Cpu)
     }
 
-    /// Use GPU 
+    /// Use GPU
     pub fn gpu(self) -> Self {
         self.device(KjarniDevice::Gpu)
     }

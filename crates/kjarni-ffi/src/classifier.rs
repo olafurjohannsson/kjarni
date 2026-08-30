@@ -52,18 +52,24 @@ impl KjarniClassResults {
     }
 }
 
+/// # Safety
+///
+/// - `results` must be a value returned by `kjarni_classifier_classify`, passed here exactly
+///   once. Its buffers are invalid to read afterwards.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_class_results_free(results: KjarniClassResults) { unsafe {
-    if !results.results.is_null() && results.len > 0 {
-        let slice = std::slice::from_raw_parts_mut(results.results, results.len);
-        for result in slice.iter_mut() {
-            if !result.label.is_null() {
-                let _ = CString::from_raw(result.label);
+pub unsafe extern "C" fn kjarni_class_results_free(results: KjarniClassResults) {
+    crate::panic::guard("kjarni_class_results_free", (), || unsafe {
+        if !results.results.is_null() && results.len > 0 {
+            let slice = std::slice::from_raw_parts_mut(results.results, results.len);
+            for result in slice.iter_mut() {
+                if !result.label.is_null() {
+                    let _ = CString::from_raw(result.label);
+                }
             }
+            let _ = Box::from_raw(slice.as_mut_ptr());
         }
-        let _ = Box::from_raw(slice.as_mut_ptr());
-    }
-}}
+    })
+}
 
 #[repr(C)]
 pub struct KjarniClassifierConfig {
@@ -115,181 +121,240 @@ pub struct KjarniClassifier {
 pub unsafe extern "C" fn kjarni_classifier_new(
     config: *const KjarniClassifierConfig,
     out: *mut *mut KjarniClassifier,
-) -> KjarniErrorCode { unsafe {
-    if out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
-
-    let default_config = kjarni_classifier_config_default();
-    let config = if config.is_null() {
-        &default_config
-    } else {
-        &*config
-    };
-
-    let result = get_runtime().block_on(async {
-        let mut builder = Classifier::builder("sentiment"); // default
-
-        // Device
-        match config.device {
-            KjarniDevice::Gpu => builder = builder.gpu(),
-            KjarniDevice::Cpu => builder = builder.cpu(),
-        }
-
-        // Cache dir
-        if !config.cache_dir.is_null() {
-            match CStr::from_ptr(config.cache_dir).to_str() {
-                Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Model name
-        if !config.model_name.is_null() {
-            match CStr::from_ptr(config.model_name).to_str() {
-                Ok(s) => builder = Classifier::builder(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Model path
-        if !config.model_path.is_null() {
-            match CStr::from_ptr(config.model_path).to_str() {
-                Ok(s) => builder = builder.model_path(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Custom labels
-        if !config.labels.is_null() && config.num_labels > 0 {
-            let mut labels_vec = Vec::with_capacity(config.num_labels);
-            for i in 0..config.num_labels {
-                let label_ptr = *config.labels.add(i);
-                if label_ptr.is_null() {
-                    return Err(KjarniErrorCode::NullPointer);
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_classifier_new",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if out.is_null() {
+                    return KjarniErrorCode::NullPointer;
                 }
-                match CStr::from_ptr(label_ptr).to_str() {
-                    Ok(s) => labels_vec.push(s.to_string()),
-                    Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+
+                let default_config = kjarni_classifier_config_default();
+                let config = if config.is_null() {
+                    &default_config
+                } else {
+                    &*config
+                };
+
+                let result = get_runtime().block_on(async {
+                    let mut builder = Classifier::builder("sentiment"); // default
+
+                    // Device
+                    match config.device {
+                        KjarniDevice::Gpu => builder = builder.gpu(),
+                        KjarniDevice::Cpu => builder = builder.cpu(),
+                    }
+
+                    // Cache dir
+                    if !config.cache_dir.is_null() {
+                        match CStr::from_ptr(config.cache_dir).to_str() {
+                            Ok(s) => builder = builder.cache_dir(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Model name
+                    if !config.model_name.is_null() {
+                        match CStr::from_ptr(config.model_name).to_str() {
+                            Ok(s) => builder = Classifier::builder(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Model path
+                    if !config.model_path.is_null() {
+                        match CStr::from_ptr(config.model_path).to_str() {
+                            Ok(s) => builder = builder.model_path(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Custom labels
+                    if !config.labels.is_null() && config.num_labels > 0 {
+                        let mut labels_vec = Vec::with_capacity(config.num_labels);
+                        for i in 0..config.num_labels {
+                            let label_ptr = *config.labels.add(i);
+                            if label_ptr.is_null() {
+                                return Err(KjarniErrorCode::NullPointer);
+                            }
+                            match CStr::from_ptr(label_ptr).to_str() {
+                                Ok(s) => labels_vec.push(s.to_string()),
+                                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                            }
+                        }
+                        builder = builder.labels(labels_vec);
+                    }
+
+                    // Multi-label mode
+                    if config.multi_label != 0 {
+                        builder = builder.multi_label();
+                    }
+
+                    builder = builder.quiet(config.quiet != 0);
+
+                    builder.build().await.map_err(|e| {
+                        set_last_error(e.to_string());
+                        match &e {
+                            ClassifierError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
+                            ClassifierError::ModelNotDownloaded(_) => {
+                                KjarniErrorCode::ModelNotFound
+                            }
+                            ClassifierError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
+                            ClassifierError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+                            _ => KjarniErrorCode::LoadFailed,
+                        }
+                    })
+                });
+
+                match result {
+                    Ok(classifier) => {
+                        let handle = Box::new(KjarniClassifier { inner: classifier });
+                        *out = Box::into_raw(handle);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => e,
                 }
             }
-            builder = builder.labels(labels_vec);
-        }
-
-        // Multi-label mode
-        if config.multi_label != 0 {
-            builder = builder.multi_label();
-        }
-
-        builder = builder.quiet(config.quiet != 0);
-
-        builder.build().await.map_err(|e| {
-            set_last_error(e.to_string());
-            match &e {
-                ClassifierError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
-                ClassifierError::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
-                ClassifierError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
-                ClassifierError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
-                _ => KjarniErrorCode::LoadFailed,
-            }
-        })
-    });
-
-    match result {
-        Ok(classifier) => {
-            let handle = Box::new(KjarniClassifier { inner: classifier });
-            *out = Box::into_raw(handle);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => e,
-    }
-}}
+        },
+    )
+}
 
 /// Free a Classifier.
+///
+/// # Safety
+///
+/// - `classifier` must be null, or a handle returned by `kjarni_classifier_new` that has not
+///   already been passed to this function. It is invalid to use afterwards.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_classifier_free(classifier: *mut KjarniClassifier) { unsafe {
-    if !classifier.is_null() {
-        let _ = Box::from_raw(classifier);
-    }
-}}
+pub unsafe extern "C" fn kjarni_classifier_free(classifier: *mut KjarniClassifier) {
+    crate::panic::guard("kjarni_classifier_free", (), || unsafe {
+        if !classifier.is_null() {
+            let _ = Box::from_raw(classifier);
+        }
+    })
+}
 
 /// Classify a single text.
+///
+/// # Safety
+///
+/// - `classifier` must be null, or a live handle returned by `kjarni_classifier_new` that has
+///   not been freed.
+/// - `text` must be null, or a valid pointer to a nul-terminated C string.
+/// - `out` must be a valid, writable pointer to a `KjarniClassResults`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_classify(
     classifier: *mut KjarniClassifier,
     text: *const c_char,
     out: *mut KjarniClassResults,
-) -> KjarniErrorCode { unsafe {
-    if classifier.is_null() || text.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_classifier_classify",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if classifier.is_null() || text.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let classifier_ref = &(*classifier).inner;
+                let classifier_ref = &(*classifier).inner;
 
-    let text = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let text = match CStr::from_ptr(text).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let result = get_runtime().block_on(async { classifier_ref.classify(text).await });
+                let result = get_runtime().block_on(async { classifier_ref.classify(text).await });
 
-    match result {
-        Ok(classification) => {
-            *out = KjarniClassResults::from_scores(classification.all_scores);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = KjarniClassResults::empty();
-            KjarniErrorCode::InferenceFailed
-        }
-    }
-}}
+                match result {
+                    Ok(classification) => {
+                        *out = KjarniClassResults::from_scores(classification.all_scores);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = KjarniClassResults::empty();
+                        KjarniErrorCode::InferenceFailed
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Get the classifier's labels.
+///
+/// # Safety
+///
+/// - `classifier` must be null, or a live handle returned by `kjarni_classifier_new` that has
+///   not been freed.
+/// - `out` must be a valid, writable pointer to a `KjarniStringArray`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_labels(
     classifier: *const KjarniClassifier,
     out: *mut KjarniStringArray,
-) -> KjarniErrorCode { unsafe {
-    if classifier.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_classifier_labels",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if classifier.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let classifier_ref = &(*classifier).inner;
+                let classifier_ref = &(*classifier).inner;
 
-    match classifier_ref.labels() {
-        Some(labels) => {
-            let len = labels.len();
-            let mut c_strings: Vec<*mut c_char> = labels
-                .into_iter()
-                .filter_map(|s| CString::new(s).ok())
-                .map(|cs| cs.into_raw())
-                .collect();
+                match classifier_ref.labels() {
+                    Some(labels) => {
+                        let len = labels.len();
+                        let mut c_strings: Vec<*mut c_char> = labels
+                            .into_iter()
+                            .filter_map(|s| CString::new(s).ok())
+                            .map(|cs| cs.into_raw())
+                            .collect();
 
-            let ptr = c_strings.as_mut_ptr();
-            std::mem::forget(c_strings);
+                        let ptr = c_strings.as_mut_ptr();
+                        std::mem::forget(c_strings);
 
-            *out = KjarniStringArray { strings: ptr, len };
-            KjarniErrorCode::Ok
-        }
-        None => {
-            *out = KjarniStringArray {
-                strings: ptr::null_mut(),
-                len: 0,
-            };
-            KjarniErrorCode::Ok
-        }
-    }
-}}
+                        *out = KjarniStringArray { strings: ptr, len };
+                        KjarniErrorCode::Ok
+                    }
+                    None => {
+                        *out = KjarniStringArray {
+                            strings: ptr::null_mut(),
+                            len: 0,
+                        };
+                        KjarniErrorCode::Ok
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Get number of labels.
+///
+/// # Safety
+///
+/// - `classifier` must be null, or a live handle returned by `kjarni_classifier_new` that has
+///   not been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_num_labels(
     classifier: *const KjarniClassifier,
-) -> usize { unsafe {
-    if classifier.is_null() {
-        return 0;
-    }
-    (*classifier).inner.num_labels()
-}}
+) -> usize {
+    crate::panic::guard("kjarni_classifier_num_labels", 0, || -> usize {
+        unsafe {
+            if classifier.is_null() {
+                return 0;
+            }
+            (*classifier).inner.num_labels()
+        }
+    })
+}

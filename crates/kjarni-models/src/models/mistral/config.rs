@@ -9,8 +9,8 @@ use kjarni_transformers::{
     },
     weights::WeightLoader,
 };
-use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use std::sync::Arc;
 
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
@@ -20,11 +20,19 @@ where
     struct TokenIdVisitor;
     impl<'de> Visitor<'de> for TokenIdVisitor {
         type Value = u32;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str("u32/array") }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> { Ok(v as u32) }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> { Ok(v as u32) }
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("u32/array")
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(v as u32)
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(v as u32)
+        }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            let first = seq.next_element::<u32>()?.ok_or_else(|| de::Error::custom("empty"))?;
+            let first = seq
+                .next_element::<u32>()?
+                .ok_or_else(|| de::Error::custom("empty"))?;
             while seq.next_element::<u32>()?.is_some() {}
             Ok(first)
         }
@@ -39,21 +47,35 @@ where
     struct TokenIdsVisitor;
     impl<'de> Visitor<'de> for TokenIdsVisitor {
         type Value = Vec<u32>;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str("u32/array") }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> { Ok(vec![v as u32]) }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> { Ok(vec![v as u32]) }
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("u32/array")
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(vec![v as u32])
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(vec![v as u32])
+        }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
             let mut ids = Vec::new();
-            while let Some(id) = seq.next_element::<u32>()? { ids.push(id); }
+            while let Some(id) = seq.next_element::<u32>()? {
+                ids.push(id);
+            }
             Ok(ids)
         }
     }
     deserializer.deserialize_any(TokenIdsVisitor)
 }
 
-fn default_rms_norm_eps() -> f32 { 1e-5 }
-fn default_hidden_act() -> String { "silu".to_string() }
-fn default_true() -> bool { true }
+fn default_rms_norm_eps() -> f32 {
+    1e-5
+}
+fn default_hidden_act() -> String {
+    "silu".to_string()
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MistralConfig {
@@ -106,7 +128,8 @@ impl MistralConfig {
             let get_u32 = |k: &str| loader.get_u32(&format!("{}.{}", arch, k));
             let get_f32 = |k: &str| loader.get_f32(&format!("{}.{}", arch, k));
 
-            let hidden_size = get_u32("embedding_length").context("Missing embedding_length")? as usize;
+            let hidden_size =
+                get_u32("embedding_length").context("Missing embedding_length")? as usize;
             let n_heads = get_u32("attention.head_count").context("Missing head_count")? as usize;
 
             let rope_type = loader.get_string(&format!("{}.rope.scaling.type", arch));
@@ -124,13 +147,17 @@ impl MistralConfig {
                 hidden_size,
                 num_attention_heads: n_heads,
                 num_hidden_layers: get_u32("block_count").context("Missing block_count")? as usize,
-                num_key_value_heads: get_u32("attention.head_count_kv").unwrap_or(n_heads as u32) as usize,
+                num_key_value_heads: get_u32("attention.head_count_kv").unwrap_or(n_heads as u32)
+                    as usize,
                 intermediate_size: get_u32("feed_forward_length").unwrap_or(14336) as usize, // Mistral 7B default
                 vocab_size: loader.get_u32("general.vocabulary_size").unwrap_or(32000) as usize,
                 // Mistral 0.3 is 32k, 0.1 is 32k/4k
                 max_position_embeddings: get_u32("context_length").unwrap_or(32768) as usize,
                 rms_norm_eps: get_f32("attention.layer_norm_rms_epsilon").unwrap_or(1e-5),
-                hidden_act: loader.get_string(&format!("{}.feed_forward_activation", arch)).unwrap_or("silu").to_string(),
+                hidden_act: loader
+                    .get_string(&format!("{}.feed_forward_activation", arch))
+                    .unwrap_or("silu")
+                    .to_string(),
 
                 // Mistral v0.1 was 10000.0, v0.3 often 1000000.0
                 rope_theta: Some(get_f32("rope.freq_base").unwrap_or(1000000.0)), // Default for v0.3
@@ -156,8 +183,10 @@ impl MistralConfig {
 }
 
 impl ModelConfig for MistralConfig {
-    fn model_type(&self) -> &str { "mistral" }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn model_type(&self) -> &str {
+        "mistral"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -166,7 +195,9 @@ fn as_any(&self) -> &dyn std::any::Any {
             num_layers: self.num_hidden_layers,
             num_attention_heads: self.num_attention_heads,
             num_kv_heads: self.num_key_value_heads,
-            head_dim: self.head_dim.unwrap_or(self.hidden_size / self.num_attention_heads),
+            head_dim: self
+                .head_dim
+                .unwrap_or(self.hidden_size / self.num_attention_heads),
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position_embeddings,
             norm_eps: self.rms_norm_eps,

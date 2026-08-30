@@ -1,4 +1,3 @@
-
 //! Builder pattern for Generator configuration.
 
 use std::path::PathBuf;

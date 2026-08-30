@@ -128,9 +128,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         gpu_model.meta().is_prenorm,
         "Pre-norm flag mismatch"
     );
-    assert_eq!(
-        cpu_model.meta().is_prenorm,
-        false,
+    assert!(
+        !cpu_model.meta().is_prenorm,
         "BART must be Post-Norm (is_prenorm=false)"
     );
     assert_eq!(
@@ -230,8 +229,10 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
             gpu_cross_attn_layout.is_some(),
             "GPU layout should also have cross-attention"
         );
-        let cpu_cross = cpu_cross_attn_layout.unwrap();
-        let gpu_cross = gpu_cross_attn_layout.unwrap();
+        let (Some(cpu_cross), Some(gpu_cross)) = (cpu_cross_attn_layout, gpu_cross_attn_layout)
+        else {
+            unreachable!("both layouts were just asserted to be Some")
+        };
 
         assert_eq!(cpu_cross.q_weight, gpu_cross.q_weight);
         assert_eq!(cpu_cross.q_bias, gpu_cross.q_bias);

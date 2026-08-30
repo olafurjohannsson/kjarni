@@ -14,7 +14,7 @@ use kjarni_transformers::gpu::encoder::GpuTransformerEncoder;
 use kjarni_transformers::{
     WgpuContext,
     cpu::encoder::{
-        CpuTransformerEncoder, 
+        CpuTransformerEncoder,
         config::{EncodingConfig, PoolingStrategy},
         traits::{
             CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps,
@@ -44,15 +44,15 @@ impl EncoderModelFactory for SentenceEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
         if weights.is_distilbert() {
             Ok(Arc::new(DistilBertConfig::from_json(
-                &weights.config_json(),
+                weights.config_json(),
             )?))
         } else if weights.is_roberta() || weights.is_distilroberta() {
-            Ok(Arc::new(RobertaConfig::from_json(&weights.config_json())?))
+            Ok(Arc::new(RobertaConfig::from_json(weights.config_json())?))
         } else if weights.is_mpnet() {
-            Ok(Arc::new(MpnetConfig::from_json(&weights.config_json())?))
+            Ok(Arc::new(MpnetConfig::from_json(weights.config_json())?))
         } else {
             // Default to BertConfig for BERT-like models
-            Ok(Arc::new(BertConfig::from_json(&weights.config_json())?))
+            Ok(Arc::new(BertConfig::from_json(weights.config_json())?))
         }
     }
 
@@ -117,9 +117,7 @@ impl EncoderModelFactory for SentenceEncoder {
     }
 }
 
-
 // Public API
-
 
 impl SentenceEncoder {
     /// Create encoder from HuggingFace model registry.
@@ -223,7 +221,7 @@ impl SentenceEncoder {
             normalize: false,
             pooling_strategy: self.pipeline.pooling_strategy(),
         };
-        
+
         kjarni_transformers::cpu::encoder::traits::l2_normalize_inplace(&mut pooled);
 
         let (rows, cols) = pooled.dim();
@@ -297,7 +295,6 @@ impl SentenceEncoder {
         self.pipeline.plan().layers
     }
 }
-
 
 impl LanguageModel for SentenceEncoder {
     fn vocab_size(&self) -> usize {

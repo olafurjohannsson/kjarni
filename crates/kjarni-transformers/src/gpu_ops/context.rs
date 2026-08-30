@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use tokio::sync::Mutex;
@@ -9,9 +9,9 @@ use wgpu::{
     RequestAdapterOptions,
 };
 
+use crate::gpu::GpuTensorPool;
 use crate::gpu_ops::profiler::GpuProfiler;
 use crate::gpu_ops::uniforms::GpuUniformBuffer;
-use crate::gpu::GpuTensorPool;
 
 #[derive(Debug, Clone)]
 pub struct GpuMemoryInfo {
@@ -31,7 +31,10 @@ impl GpuMemoryInfo {
             self.reserved_for_kv_cache as f64 / 1_073_741_824.0
         );
         if let Some(available) = self.available_memory {
-            log::debug!("available vram: {:.2}GB", available as f64 / 1_073_741_824.0);
+            log::debug!(
+                "available vram: {:.2}GB",
+                available as f64 / 1_073_741_824.0
+            );
         }
     }
 }
@@ -77,13 +80,13 @@ impl WgpuContext {
         let _adapter_info = adapter.get_info();
         let adapter_limits = adapter.limits();
 
-log::info!(
-    "Adapter reported limits: max_storage_buffer_binding_size={} ({:.2}MB), max_buffer_size={} ({:.2}GB)",
-    adapter_limits.max_storage_buffer_binding_size,
-    adapter_limits.max_storage_buffer_binding_size as f64 / 1_048_576.0,
-    adapter_limits.max_buffer_size,
-    adapter_limits.max_buffer_size as f64 / 1_073_741_824.0,
-);
+        log::info!(
+            "Adapter reported limits: max_storage_buffer_binding_size={} ({:.2}MB), max_buffer_size={} ({:.2}GB)",
+            adapter_limits.max_storage_buffer_binding_size,
+            adapter_limits.max_storage_buffer_binding_size as f64 / 1_048_576.0,
+            adapter_limits.max_buffer_size,
+            adapter_limits.max_buffer_size as f64 / 1_073_741_824.0,
+        );
 
         let memory_info = Self::calculate_memory_info(&adapter, &config)?;
         memory_info.print_summary();
@@ -232,10 +235,10 @@ log::info!(
                     .unwrap_or(false)
                 {
                     let mem_info_path = path.join("device/mem_info_vram_total");
-                    if let Ok(contents) = std::fs::read_to_string(&mem_info_path) {
-                        if let Ok(bytes) = contents.trim().parse::<u64>() {
-                            return Some(bytes);
-                        }
+                    if let Ok(contents) = std::fs::read_to_string(&mem_info_path)
+                        && let Ok(bytes) = contents.trim().parse::<u64>()
+                    {
+                        return Some(bytes);
                     }
                 }
             }
@@ -244,12 +247,10 @@ log::info!(
         if let Ok(output) = std::process::Command::new("nvidia-smi")
             .args(["--query-gpu=memory.free", "--format=csv,noheader,nounits"])
             .output()
+            && let Ok(text) = String::from_utf8(output.stdout)
+            && let Ok(mb) = text.trim().parse::<u64>()
         {
-            if let Ok(text) = String::from_utf8(output.stdout) {
-                if let Ok(mb) = text.trim().parse::<u64>() {
-                    return Some(mb * 1_048_576);
-                }
-            }
+            return Some(mb * 1_048_576);
         }
 
         log::warn!("failed to query gpu memory on linux");

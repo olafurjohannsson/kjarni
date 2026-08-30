@@ -2,14 +2,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-use ndarray::{s, Array1, Array2, Array3, Array4};
+use ndarray::{Array1, Array2, Array3, Array4, s};
 
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::gpu::normalization::{GpuRMSNorm, GpuRMSNormWeights};
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, Kernel};
-use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::models::ModelType;
+use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::normalization::RMSNorm;
 use kjarni_transformers::rope::RoPE;
 use kjarni_transformers::tensor::DType;
@@ -17,9 +17,9 @@ use kjarni_transformers::traits::{Device, ModelConfig};
 use kjarni_transformers::{DecoderPipeline, WgpuContext};
 
 use crate::models::gpt2::Gpt2Model;
+use crate::models::llama::LlamaModel;
 use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
-use crate::models::llama::LlamaModel;
 
 #[ignore = "GPU required"]
 #[tokio::test]
@@ -109,9 +109,8 @@ async fn test_rms_norm_isolated_parity() -> Result<()> {
         (idx * 0.001).sin() * 0.5
     });
 
-    let gamma_cpu = Array1::<f32>::from_shape_fn(hidden_size, |i| {
-        1.0 + (i as f32 * 0.0001).sin() * 0.1
-    });
+    let gamma_cpu =
+        Array1::<f32>::from_shape_fn(hidden_size, |i| 1.0 + (i as f32 * 0.0001).sin() * 0.1);
 
     let cpu_norm = RMSNorm::new(gamma_cpu.clone(), eps);
     let cpu_output = cpu_norm.forward_3d(&input_cpu);
@@ -374,7 +373,11 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
 
-        assert!(attn_diff <= 0.01, "attention block diverges: {:.6}", attn_diff);
+        assert!(
+            attn_diff <= 0.01,
+            "attention block diverges: {:.6}",
+            attn_diff
+        );
 
         let ffn_input = cpu_attn_block_out.clone();
 
@@ -782,7 +785,12 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f32, f32::max);
 
-            assert!(max_diff <= 0.1, "divergence at layer {}: {:.6}", n, max_diff);
+            assert!(
+                max_diff <= 0.1,
+                "divergence at layer {}: {:.6}",
+                n,
+                max_diff
+            );
         }
 
         let ops = cpu_model

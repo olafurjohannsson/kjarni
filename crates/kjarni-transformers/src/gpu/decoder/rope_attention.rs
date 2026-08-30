@@ -4,14 +4,14 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::gpu_ops::blocks::attention::ops::AttentionOps;
+use crate::WgpuContext;
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
+use crate::gpu_ops::blocks::attention::ops::AttentionOps;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::primitives::repeat_kv::GpuRepeatKV;
-use crate::gpu::{GpuTensor, GpuTensorPool};
-use crate::WgpuContext;
 
 pub struct GpuRoPEAttention {
     ops: AttentionOps,
@@ -215,13 +215,8 @@ impl GpuRoPEAttention {
         let k_transposed = k.permute(encoder, self.ops.permute_kernel(), &[0, 1, 3, 2]);
         let scores = self.ops.bmm_4d(encoder, q, &k_transposed, pool);
 
-        self.ops.apply_mask_and_softmax(
-            encoder,
-            &scores,
-            Some(mask),
-            true,
-            position_offset,
-        );
+        self.ops
+            .apply_mask_and_softmax(encoder, &scores, Some(mask), true, position_offset);
 
         self.ops.bmm_4d(encoder, &scores, v, pool)
     }
@@ -268,11 +263,11 @@ mod tests {
     use ndarray::{Array1, Array2, Array3, Array4};
 
     use super::*;
+    use crate::WgpuContext;
+    use crate::gpu::GpuTensorPool;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::rope::GpuRoPE;
-    use crate::gpu::GpuTensorPool;
     use crate::rope::RoPE;
-    use crate::WgpuContext;
 
     async fn setup() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()

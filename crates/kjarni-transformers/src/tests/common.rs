@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::WgpuContext;
-use crate::gpu::GpuTensor; 
+use crate::gpu::GpuTensor;
 use anyhow::Result;
 use ndarray::{Array, Array2, Array3, Array4, Dimension, Ix2, Ix3, Ix4};
 use std::sync::Arc;
@@ -61,7 +61,7 @@ pub async fn assert_tensors_are_close_2d(
 
     let mut max_diff = 0.0;
     let mut max_diff_index = 0;
-    
+
     for (i, &d) in diffs.iter().enumerate() {
         if d > max_diff {
             max_diff = d;
@@ -71,15 +71,18 @@ pub async fn assert_tensors_are_close_2d(
 
     if max_diff > tolerance {
         println!("Mismatch in tensor '{}'", label);
-        println!("Max difference: {} at flat index {}", max_diff, max_diff_index);
-        
+        println!(
+            "Max difference: {} at flat index {}",
+            max_diff, max_diff_index
+        );
+
         if cpu_tensor.len() < 1000 {
             println!("CPU tensor: \n{:?}", cpu_tensor);
             println!("GPU tensor: \n{:?}", gpu_as_cpu);
         }
-        
+
         panic!(
-            "Tensor '{}' mismatch. Max diff: {} > tolerance {}", 
+            "Tensor '{}' mismatch. Max diff: {} > tolerance {}",
             label, max_diff, tolerance
         );
     }

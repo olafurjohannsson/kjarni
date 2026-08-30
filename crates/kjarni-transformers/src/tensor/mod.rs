@@ -9,10 +9,9 @@ use crate::cpu::kernels::{
     dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block},
     q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, Ix1, Ix2, Ix3};
-
 
 /// A wrapper for quantized matrix dat
 #[derive(Debug, Clone)]
@@ -35,10 +34,10 @@ impl<B: Dequantizable> QuantizedMatrix<B> {
 pub trait Dequantizable {
     /// Block size (number of elements per block)
     const BLOCK_SIZE: usize;
-    
+
     /// Dequantize a single block into the output slice
     fn dequantize_block(block: &Self, output: &mut [f32]);
-    
+
     /// Dequantize all blocks into a 2D array
     fn dequantize_blocks(
         blocks: &[Self],
@@ -50,12 +49,13 @@ pub trait Dequantizable {
         Self: Sized,
     {
         let blocks_per_row = cols / Self::BLOCK_SIZE;
-        
+
         for (row_idx, mut row) in output.axis_iter_mut(ndarray::Axis(0)).enumerate() {
             let row_blocks = &blocks[row_idx * blocks_per_row..(row_idx + 1) * blocks_per_row];
-            let row_slice = row.as_slice_mut()
+            let row_slice = row
+                .as_slice_mut()
                 .ok_or_else(|| anyhow!("Non-contiguous row during dequantization"))?;
-            
+
             for (b_idx, block) in row_blocks.iter().enumerate() {
                 let start = b_idx * Self::BLOCK_SIZE;
                 let end = start + Self::BLOCK_SIZE;
@@ -68,7 +68,7 @@ pub trait Dequantizable {
 
 impl Dequantizable for BlockQ8_0 {
     const BLOCK_SIZE: usize = 32;
-    
+
     fn dequantize_block(block: &Self, output: &mut [f32]) {
         dequantize_q8_0_block(block, output);
     }
@@ -76,7 +76,7 @@ impl Dequantizable for BlockQ8_0 {
 
 impl Dequantizable for BlockQ4_K {
     const BLOCK_SIZE: usize = 256;
-    
+
     fn dequantize_block(block: &Self, output: &mut [f32]) {
         dequantize_q4_k_block(block, output);
     }
@@ -84,12 +84,11 @@ impl Dequantizable for BlockQ4_K {
 
 impl Dequantizable for BlockQ6_K {
     const BLOCK_SIZE: usize = 256;
-    
+
     fn dequantize_block(block: &Self, output: &mut [f32]) {
         dequantize_q6_k_block(block, output);
     }
 }
-
 
 /// A generic, typed tensor for CPU computation.
 #[allow(non_camel_case_types)]
@@ -161,7 +160,7 @@ impl CpuTensor {
     /// Works for F32, F16, BF16. Fails for quantized matrix types.
     pub fn to_array1_f32(self) -> Result<Array1<f32>> {
         let len = self.num_elements();
-        
+
         match self {
             CpuTensor::F32(arr) => Ok(arr
                 .into_shape_with_order(len)?
@@ -185,7 +184,10 @@ impl CpuTensor {
     pub fn to_array2_f32(self) -> Result<Array2<f32>> {
         let shape = self.shape().to_vec();
         if shape.len() < 2 {
-            return Err(anyhow!("Cannot convert rank-{} tensor to Array2", shape.len()));
+            return Err(anyhow!(
+                "Cannot convert rank-{} tensor to Array2",
+                shape.len()
+            ));
         }
         let (rows, cols) = (shape[0], shape[1]);
 
@@ -211,7 +213,10 @@ impl CpuTensor {
     pub fn to_array3_f32(self) -> Result<Array3<f32>> {
         let shape = self.shape().to_vec();
         if shape.len() != 3 {
-            return Err(anyhow!("Cannot convert rank-{} tensor to Array3", shape.len()));
+            return Err(anyhow!(
+                "Cannot convert rank-{} tensor to Array3",
+                shape.len()
+            ));
         }
         let (d0, d1, d2) = (shape[0], shape[1], shape[2]);
 
@@ -280,7 +285,6 @@ impl CpuTensor {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,7 +292,8 @@ mod tests {
 
     #[test]
     fn test_cpu_tensor_f32_metadata() {
-        let arr = ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let arr =
+            ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
         let tensor = CpuTensor::F32(arr);
 
         assert_eq!(tensor.dtype(), DType::F32);
@@ -303,8 +308,14 @@ mod tests {
     fn test_cpu_tensor_f16_metadata() {
         let arr = ArrayD::from_shape_vec(
             vec![2, 2],
-            vec![f16::from_f32(1.0), f16::from_f32(2.0), f16::from_f32(3.0), f16::from_f32(4.0)],
-        ).unwrap();
+            vec![
+                f16::from_f32(1.0),
+                f16::from_f32(2.0),
+                f16::from_f32(3.0),
+                f16::from_f32(4.0),
+            ],
+        )
+        .unwrap();
         let tensor = CpuTensor::F16(arr);
 
         assert_eq!(tensor.dtype(), DType::F16);
@@ -317,8 +328,14 @@ mod tests {
     fn test_cpu_tensor_bf16_metadata() {
         let arr = ArrayD::from_shape_vec(
             vec![4],
-            vec![bf16::from_f32(1.0), bf16::from_f32(2.0), bf16::from_f32(3.0), bf16::from_f32(4.0)],
-        ).unwrap();
+            vec![
+                bf16::from_f32(1.0),
+                bf16::from_f32(2.0),
+                bf16::from_f32(3.0),
+                bf16::from_f32(4.0),
+            ],
+        )
+        .unwrap();
         let tensor = CpuTensor::BF16(arr);
 
         assert_eq!(tensor.dtype(), DType::BF16);
@@ -339,7 +356,8 @@ mod tests {
 
     #[test]
     fn test_f32_to_array2() {
-        let arr = ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let arr =
+            ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
         let tensor = CpuTensor::F32(arr);
 
         let result = tensor.to_array2_f32().unwrap();
@@ -365,7 +383,8 @@ mod tests {
         let arr = ArrayD::from_shape_vec(
             vec![3],
             vec![f16::from_f32(1.5), f16::from_f32(2.5), f16::from_f32(3.5)],
-        ).unwrap();
+        )
+        .unwrap();
         let tensor = CpuTensor::F16(arr);
 
         let result = tensor.to_array1_f32().unwrap();
@@ -385,7 +404,8 @@ mod tests {
                 bf16::from_f32(3.0),
                 bf16::from_f32(4.0),
             ],
-        ).unwrap();
+        )
+        .unwrap();
         let tensor = CpuTensor::BF16(arr);
 
         let result = tensor.to_array2_f32().unwrap();
@@ -396,7 +416,8 @@ mod tests {
 
     #[test]
     fn test_array1_from_2d_flattens() {
-        let arr = ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let arr =
+            ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
         let tensor = CpuTensor::F32(arr);
 
         // Should flatten to 1D
@@ -406,7 +427,8 @@ mod tests {
 
     #[test]
     fn test_array3_wrong_rank_error() {
-        let arr = ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let arr =
+            ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
         let tensor = CpuTensor::F32(arr);
 
         let result = tensor.to_array3_f32();
@@ -435,10 +457,8 @@ mod tests {
 
     #[test]
     fn test_as_f32_slice_wrong_type() {
-        let arr = ArrayD::from_shape_vec(
-            vec![2],
-            vec![f16::from_f32(1.0), f16::from_f32(2.0)],
-        ).unwrap();
+        let arr =
+            ArrayD::from_shape_vec(vec![2], vec![f16::from_f32(1.0), f16::from_f32(2.0)]).unwrap();
         let tensor = CpuTensor::F16(arr);
 
         assert!(tensor.as_f32_slice().is_none());

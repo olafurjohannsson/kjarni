@@ -87,7 +87,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: false,           
+            is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             problem_type: None,
@@ -143,7 +143,6 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
     }
 }
 
-
 /// RoBERTa configuration for sequence classification.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RobertaConfig {
@@ -156,7 +155,7 @@ pub struct RobertaConfig {
     pub vocab_size: usize,
     pub layer_norm_eps: f32,
     pub type_vocab_size: usize,
-    
+
     #[serde(default)]
     pub position_embedding_type: String,
 
@@ -197,7 +196,7 @@ impl ModelConfig for RobertaConfig {
     fn model_type(&self) -> &str {
         "roberta"
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn id2label(&self) -> Option<&[String]> {
@@ -220,14 +219,14 @@ fn as_any(&self) -> &dyn std::any::Any {
                 "relu" => Activation::Relu,
                 _ => Activation::Gelu, // Default to Gelu
             },
-            extra_pos_embeddings: 2, 
+            extra_pos_embeddings: 2,
             rope_theta: None,
             rope_scaling: None,
             decoder_layers: None,
             intermediate_size: 0,
             scale_embeddings: false,
             normalize_embedding: false,
-            is_prenorm: false, 
+            is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             problem_type: None,
@@ -247,8 +246,11 @@ fn as_any(&self) -> &dyn std::any::Any {
                 v_bias: Some("roberta.encoder.layer.{}.attention.self.value.bias".to_string()),
                 o_weight: "roberta.encoder.layer.{}.attention.output.dense.weight".to_string(),
                 o_bias: Some("roberta.encoder.layer.{}.attention.output.dense.bias".to_string()),
-                norm_weight: "roberta.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
-                norm_bias: Some("roberta.encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
+                norm_weight: "roberta.encoder.layer.{}.attention.output.LayerNorm.weight"
+                    .to_string(),
+                norm_bias: Some(
+                    "roberta.encoder.layer.{}.attention.output.LayerNorm.bias".to_string(),
+                ),
             },
             ffn: FeedForwardLayout {
                 up_weight: "roberta.encoder.layer.{}.intermediate.dense.weight".to_string(),
@@ -266,8 +268,12 @@ fn as_any(&self) -> &dyn std::any::Any {
             token_embedding: "roberta.embeddings.word_embeddings.weight".to_string(),
             lm_head: "classifier.out_proj.weight".to_string(),
             encoder: Some(EncoderLayout {
-                position_embedding: Some("roberta.embeddings.position_embeddings.weight".to_string()),
-                token_type_embedding: Some("roberta.embeddings.token_type_embeddings.weight".to_string()),
+                position_embedding: Some(
+                    "roberta.embeddings.position_embeddings.weight".to_string(),
+                ),
+                token_type_embedding: Some(
+                    "roberta.embeddings.token_type_embeddings.weight".to_string(),
+                ),
                 embedding_norm_weight: Some("roberta.embeddings.LayerNorm.weight".to_string()),
                 embedding_norm_bias: Some("roberta.embeddings.LayerNorm.bias".to_string()),
                 final_norm_weight: None, // RoBERTa does not have a final norm before the classifier
@@ -278,4 +284,3 @@ fn as_any(&self) -> &dyn std::any::Any {
         }
     }
 }
-

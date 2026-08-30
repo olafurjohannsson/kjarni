@@ -111,7 +111,10 @@ impl std::str::FromStr for SearchMode {
             "keyword" | "bm25" => Ok(SearchMode::Keyword),
             "semantic" | "vector" => Ok(SearchMode::Semantic),
             "hybrid" => Ok(SearchMode::Hybrid),
-            _ => Err(format!("Unknown search mode: '{}'. Use: keyword, semantic, hybrid", s)),
+            _ => Err(format!(
+                "Unknown search mode: '{}'. Use: keyword, semantic, hybrid",
+                s
+            )),
         }
     }
 }
@@ -157,9 +160,15 @@ mod tests {
 
     #[test]
     fn test_search_mode_parse() {
-        assert_eq!("keyword".parse::<SearchMode>().unwrap(), SearchMode::Keyword);
+        assert_eq!(
+            "keyword".parse::<SearchMode>().unwrap(),
+            SearchMode::Keyword
+        );
         assert_eq!("bm25".parse::<SearchMode>().unwrap(), SearchMode::Keyword);
-        assert_eq!("semantic".parse::<SearchMode>().unwrap(), SearchMode::Semantic);
+        assert_eq!(
+            "semantic".parse::<SearchMode>().unwrap(),
+            SearchMode::Semantic
+        );
         assert_eq!("hybrid".parse::<SearchMode>().unwrap(), SearchMode::Hybrid);
         assert!("invalid".parse::<SearchMode>().is_err());
     }

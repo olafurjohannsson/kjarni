@@ -1,14 +1,18 @@
 //! Model management commands
 
 use anyhow::Result;
-use kjarni::registry;
 use kjarni::ModelType;
+use kjarni::registry;
 use kjarni_cli::ModelCommands;
 use std::path::Path;
 
 pub async fn run(action: ModelCommands) -> Result<()> {
     match action {
-        ModelCommands::List { arch, task, downloaded } => list(arch, task, downloaded),
+        ModelCommands::List {
+            arch,
+            task,
+            downloaded,
+        } => list(arch, task, downloaded),
         ModelCommands::Download { name, gguf, quiet } => download(&name, gguf, quiet).await,
         ModelCommands::Remove { name } => remove(&name),
         ModelCommands::Info { name } => info(&name),
@@ -111,7 +115,11 @@ pub fn format_params(millions: usize) -> String {
     }
 }
 
-fn list(filter_arch: Option<String>, filter_task: Option<String>, only_downloaded: bool) -> Result<()> {
+fn list(
+    filter_arch: Option<String>,
+    filter_task: Option<String>,
+    only_downloaded: bool,
+) -> Result<()> {
     let models = registry::list_models();
     let arch_filter = filter_arch.as_deref().map(|s| s.to_lowercase());
     let task_filter = filter_task.as_deref().map(|s| s.to_lowercase());
@@ -131,7 +139,7 @@ fn list(filter_arch: Option<String>, filter_task: Option<String>, only_downloade
     println!();
     println!("Cache: {}", registry::cache_dir().display());
     println!("Models: {}/{} downloaded", downloaded_count, total_count);
-    
+
     // Show active filters
     if arch_filter.is_some() || task_filter.is_some() || only_downloaded {
         let mut filters = Vec::new();
@@ -179,7 +187,9 @@ fn list(filter_arch: Option<String>, filter_task: Option<String>, only_downloade
                         "embedding" | "embed" | "encoder" => m_group == "Embedding",
                         "classification" | "classify" | "classifier" => m_group == "Classifier",
                         "rerank" | "reranker" | "re-ranker" => m_group == "Re-Ranker",
-                        "seq2seq" | "summarization" | "translation" | "summarize" => m_group == "Seq2Seq",
+                        "seq2seq" | "summarization" | "translation" | "summarize" => {
+                            m_group == "Seq2Seq"
+                        }
                         _ => {
                             // Also check task enum
                             let task_str = format!("{:?}", m.model_type.info().task).to_lowercase();
@@ -210,7 +220,7 @@ fn list(filter_arch: Option<String>, filter_task: Option<String>, only_downloade
                 if has_gguf_downloaded(&m.model_type) {
                     "✓ gguf"
                 } else {
-                    "✓ st  "  // safetensors
+                    "✓ st  " // safetensors
                 }
             } else {
                 "      "
@@ -364,11 +374,11 @@ mod tests {
         assert_eq!(format_bytes(0), "0.0 MB");
         assert_eq!(format_bytes(1), "0.0 MB");
         assert_eq!(format_bytes(1024), "0.0 MB");
-        
+
         // Just under 1 GB
         let just_under_gb = 1024 * 1024 * 1024 - 1;
         assert_eq!(format_bytes(just_under_gb), "1024.0 MB");
-        
+
         // Exactly 1 GB
         let exactly_gb = 1024 * 1024 * 1024;
         assert_eq!(format_bytes(exactly_gb), "1.00 GB");
@@ -378,13 +388,13 @@ mod tests {
     fn test_format_bytes_realistic_model_sizes() {
         let mb = 1024 * 1024;
         let gb = 1024 * 1024 * 1024;
-        assert_eq!(format_bytes(90 * mb), "90.0 MB");      
-        assert_eq!(format_bytes(268 * mb), "268.0 MB");    
-        assert_eq!(format_bytes(550 * mb), "550.0 MB");    
+        assert_eq!(format_bytes(90 * mb), "90.0 MB");
+        assert_eq!(format_bytes(268 * mb), "268.0 MB");
+        assert_eq!(format_bytes(550 * mb), "550.0 MB");
         assert_eq!(format_bytes(gb + 600 * mb), "1.59 GB");
-        assert_eq!(format_bytes(3 * gb), "3.00 GB");      
-        assert_eq!(format_bytes(7 * gb), "7.00 GB");      
-        assert_eq!(format_bytes(16 * gb), "16.00 GB");     
+        assert_eq!(format_bytes(3 * gb), "3.00 GB");
+        assert_eq!(format_bytes(7 * gb), "7.00 GB");
+        assert_eq!(format_bytes(16 * gb), "16.00 GB");
     }
     #[test]
     fn test_format_params_millions() {
@@ -416,15 +426,15 @@ mod tests {
 
     #[test]
     fn test_format_params_realistic_models() {
-        assert_eq!(format_params(22), "22M");      
-        assert_eq!(format_params(66), "66M");      
-        assert_eq!(format_params(137), "137M");    
-        assert_eq!(format_params(490), "490M");    
-        assert_eq!(format_params(1230), "1.2B");   
-        assert_eq!(format_params(3210), "3.2B");   
-        assert_eq!(format_params(3800), "3.8B");   
-        assert_eq!(format_params(7240), "7.2B");   
-        assert_eq!(format_params(8030), "8.0B");   
+        assert_eq!(format_params(22), "22M");
+        assert_eq!(format_params(66), "66M");
+        assert_eq!(format_params(137), "137M");
+        assert_eq!(format_params(490), "490M");
+        assert_eq!(format_params(1230), "1.2B");
+        assert_eq!(format_params(3210), "3.2B");
+        assert_eq!(format_params(3800), "3.8B");
+        assert_eq!(format_params(7240), "7.2B");
+        assert_eq!(format_params(8030), "8.0B");
     }
     #[test]
     fn test_pad_center_shorter_string() {
@@ -467,9 +477,9 @@ mod tests {
     #[test]
     fn test_pad_center_single_char() {
         assert_eq!(pad_center("x", 5), "  x  ");
-        assert_eq!(pad_center("x", 4), " x  ");  // odd padding: extra on right
+        assert_eq!(pad_center("x", 4), " x  "); // odd padding: extra on right
         assert_eq!(pad_center("x", 3), " x ");
-        assert_eq!(pad_center("x", 2), "x ");    // odd padding: extra on right
+        assert_eq!(pad_center("x", 2), "x "); // odd padding: extra on right
         assert_eq!(pad_center("x", 1), "x");
     }
 
@@ -524,7 +534,10 @@ mod tests {
             "Fast binary sentiment"
         );
         assert_eq!(
-            truncate("Zero-shot classifier. Classify text into ANY labels you provide at runtime.", 30),
+            truncate(
+                "Zero-shot classifier. Classify text into ANY labels you provide at runtime.",
+                30
+            ),
             "Zero-shot classifier. Class..."
         );
     }
@@ -532,9 +545,12 @@ mod tests {
     #[test]
     fn test_format_functions_together() {
         // Simulate what list() does for display
-        let params = format_params(1230);  // 1.2B
-        let desc = truncate("Official Meta edge model. Very fast, good general chat.", 30);
-        
+        let params = format_params(1230); // 1.2B
+        let desc = truncate(
+            "Official Meta edge model. Very fast, good general chat.",
+            30,
+        );
+
         assert_eq!(params, "1.2B");
         assert_eq!(desc, "Official Meta edge model. V...");
     }
@@ -571,8 +587,8 @@ mod tests {
 
     #[test]
     fn test_format_params_very_large() {
-        assert_eq!(format_params(70000), "70.0B");   
-        assert_eq!(format_params(175000), "175.0B"); 
-        assert_eq!(format_params(540000), "540.0B"); 
+        assert_eq!(format_params(70000), "70.0B");
+        assert_eq!(format_params(175000), "175.0B");
+        assert_eq!(format_params(540000), "540.0B");
     }
 }

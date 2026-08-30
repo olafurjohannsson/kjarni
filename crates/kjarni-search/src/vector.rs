@@ -175,11 +175,7 @@ impl VectorStore {
             return vec![];
         }
 
-        let query_norm = query_embedding
-            .iter()
-            .map(|x| x * x)
-            .sum::<f32>()
-            .sqrt();
+        let query_norm = query_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         // Below this the scan finishes in well under a millisecond and thread
         // hand-off costs more than it saves.
@@ -257,7 +253,9 @@ impl TopK {
             }
         }
 
-        let pos = self.items.partition_point(|&kept| ranks_before(kept, candidate));
+        let pos = self
+            .items
+            .partition_point(|&kept| ranks_before(kept, candidate));
         self.items.insert(pos, candidate);
         if self.items.len() > self.limit {
             self.items.pop();
@@ -407,11 +405,7 @@ mod tests {
     }
 
     /// The reference implementation this replaced: score everything, sort, truncate.
-    fn search_by_full_sort(
-        store: &VectorStore,
-        query: &[f32],
-        limit: usize,
-    ) -> Vec<(usize, f32)> {
+    fn search_by_full_sort(store: &VectorStore, query: &[f32], limit: usize) -> Vec<(usize, f32)> {
         let mut all: Vec<(usize, f32)> = store
             .embeddings
             .iter()
@@ -437,7 +431,10 @@ mod tests {
             assert_eq!(fast.len(), reference.len(), "limit {limit}");
             for (got, want) in fast.iter().zip(reference.iter()) {
                 assert_eq!(got.0, want.0, "index mismatch at limit {limit}");
-                assert!((got.1 - want.1).abs() < 1e-6, "score mismatch at limit {limit}");
+                assert!(
+                    (got.1 - want.1).abs() < 1e-6,
+                    "score mismatch at limit {limit}"
+                );
             }
         }
     }
@@ -471,14 +468,18 @@ mod tests {
         );
 
         for _ in 0..20 {
-            assert_eq!(store.search(&query, 5), first, "repeated queries must agree");
+            assert_eq!(
+                store.search(&query, 5),
+                first,
+                "repeated queries must agree"
+            );
         }
     }
 
     #[test]
     fn test_search_zero_limit_returns_nothing() {
         let store = VectorStore::new(vec![vec![1.0, 0.0], vec![0.0, 1.0]]).unwrap();
-        assert!(store.search(&vec![1.0, 0.0], 0).is_empty());
+        assert!(store.search(&[1.0, 0.0], 0).is_empty());
     }
 
     #[test]

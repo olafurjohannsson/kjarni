@@ -123,7 +123,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    /// Use greedy decoding 
+    /// Use greedy decoding
     pub fn greedy(mut self) -> Self {
         self.overrides.num_beams = Some(1);
         self

@@ -1,6 +1,6 @@
 //! Search command with colored terminal output.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use colored::*;
 use kjarni::{IndexReader, SearchMode, SearchResult, embedder::Embedder};
 
@@ -82,8 +82,12 @@ pub async fn run(
         if !quiet {
             eprintln!(
                 "{}",
-                format!("Reranking top {} results with '{}'...", results.len(), reranker_name)
-                    .dimmed()
+                format!(
+                    "Reranking top {} results with '{}'...",
+                    results.len(),
+                    reranker_name
+                )
+                .dimmed()
             );
         }
 
@@ -94,7 +98,10 @@ pub async fn run(
 
         let reranker = builder.build().await.map_err(|e| anyhow!(e))?;
         let texts: Vec<&str> = results.iter().map(|r| r.text.as_str()).collect();
-        let reranked_results = reranker.rerank(query, &texts).await.map_err(|e| anyhow!(e))?;
+        let reranked_results = reranker
+            .rerank(query, &texts)
+            .await
+            .map_err(|e| anyhow!(e))?;
 
         let mut new_results = Vec::with_capacity(reranked_results.len());
         for rr in reranked_results {
@@ -184,9 +191,9 @@ fn format_results_pretty(results: &[SearchResult], query: &str) -> String {
     for (i, r) in results.iter().enumerate() {
         // Normalize score to 0-1 for visual display
         let norm_score = if results.len() == 1 {
-            r.score.min(1.0).max(0.0)
+            r.score.clamp(0.0, 1.0)
         } else {
-            ((r.score - min_score) / score_range).min(1.0).max(0.0)
+            ((r.score - min_score) / score_range).clamp(0.0, 1.0)
         };
 
         let source = r

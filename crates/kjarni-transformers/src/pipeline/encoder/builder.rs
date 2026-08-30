@@ -25,7 +25,7 @@ pub struct EncoderPipelineBuilder<'a> {
     load_config: ModelLoadConfig,
     context: Option<Arc<WgpuContext>>,
 
-    // Backends 
+    // Backends
     cpu_encoder: Option<Box<dyn CpuEncoder>>,
     gpu_encoder: Option<Box<dyn GpuEncoder>>,
 
@@ -155,17 +155,15 @@ impl<'a> EncoderPipelineBuilder<'a> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activations::Activation;
     use crate::cpu::encoder::config::PoolingStrategy;
     use crate::models::base::ModelLoadConfig;
-    use crate::activations::Activation;
     use crate::traits::{
-        AttentionLayout, DecoderLayout, DecoderLayerLayout, EncoderLayout,
-        EncoderLayerLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata,
-        NormalizationStrategy,
+        AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout,
+        FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
     };
     struct MockModelConfig {
         metadata: ModelMetadata,
@@ -313,7 +311,7 @@ mod tests {
         let mean = PoolingStrategy::Mean;
         let cls = PoolingStrategy::Cls;
         let last = PoolingStrategy::LastToken;
-        
+
         assert!(matches!(mean, PoolingStrategy::Mean));
         assert!(matches!(cls, PoolingStrategy::Cls));
         assert!(matches!(last, PoolingStrategy::LastToken));
@@ -322,7 +320,7 @@ mod tests {
     fn test_mock_model_config_metadata() {
         let config = MockModelConfig::new();
         let meta = config.metadata();
-        
+
         assert_eq!(meta.hidden_size, 768);
         assert_eq!(meta.num_layers, 12);
         assert_eq!(meta.num_attention_heads, 12);
@@ -337,7 +335,7 @@ mod tests {
     fn test_mock_model_config_layout_default() {
         let config = MockModelConfig::new();
         let layout = config.layout();
-        
+
         assert!(layout.encoder.is_none());
         assert!(layout.decoder.is_none());
         assert!(!layout.token_embedding.is_empty());
@@ -348,7 +346,7 @@ mod tests {
     fn test_mock_model_config_with_encoder_layout() {
         let config = MockModelConfig::new().with_encoder_layout();
         let layout = config.layout();
-        
+
         assert!(layout.encoder.is_some());
         let enc = layout.encoder.as_ref().unwrap();
         assert!(enc.position_embedding.is_some());
@@ -360,7 +358,7 @@ mod tests {
     fn test_mock_model_config_with_decoder_layout() {
         let config = MockModelConfig::new().with_decoder_layout();
         let layout = config.layout();
-        
+
         assert!(layout.decoder.is_some());
         let dec = layout.decoder.as_ref().unwrap();
         assert!(dec.position_embedding.is_some());
@@ -378,7 +376,7 @@ mod tests {
             has_head: false,
             num_labels: None,
         };
-        
+
         assert_eq!(config.num_layers, 12);
         assert_eq!(config.hidden_size, 768);
         assert!(!config.has_head);
@@ -395,7 +393,7 @@ mod tests {
             has_head: true,
             num_labels: Some(2),
         };
-        
+
         assert!(config.has_head);
         assert_eq!(config.num_labels, Some(2));
     }
@@ -404,7 +402,7 @@ mod tests {
     fn test_execution_plan_from_load_config_cpu() {
         let load_config = ModelLoadConfig::default();
         let plan = ExecutionPlan::from_load_config(Device::Cpu, &load_config);
-        
+
         assert_eq!(plan.embeddings, Device::Cpu);
     }
 
@@ -412,21 +410,29 @@ mod tests {
     fn test_execution_plan_from_load_config_gpu() {
         let load_config = ModelLoadConfig::default();
         let plan = ExecutionPlan::from_load_config(Device::Wgpu, &load_config);
-        
+
         assert_eq!(plan.embeddings, Device::Wgpu);
     }
 
     #[test]
     fn test_device_selection_with_context() {
         let has_context = true;
-        let primary_device = if has_context { Device::Wgpu } else { Device::Cpu };
+        let primary_device = if has_context {
+            Device::Wgpu
+        } else {
+            Device::Cpu
+        };
         assert_eq!(primary_device, Device::Wgpu);
     }
 
     #[test]
     fn test_device_selection_without_context() {
         let has_context = false;
-        let primary_device = if has_context { Device::Wgpu } else { Device::Cpu };
+        let primary_device = if has_context {
+            Device::Wgpu
+        } else {
+            Device::Cpu
+        };
         assert_eq!(primary_device, Device::Cpu);
     }
     #[test]
@@ -455,8 +461,11 @@ mod tests {
             problem_type: None,
             intermediate_size: 3072,
         };
-        
-        assert!(matches!(meta.normalization_strategy, NormalizationStrategy::LayerNorm));
+
+        assert!(matches!(
+            meta.normalization_strategy,
+            NormalizationStrategy::LayerNorm
+        ));
         assert!(meta.rope_theta.is_none());
         assert!(!meta.is_prenorm);
         assert!(meta.normalize_embedding);
@@ -488,8 +497,11 @@ mod tests {
             decoder_layers: None,
             intermediate_size: 11008,
         };
-        
-        assert!(matches!(meta.normalization_strategy, NormalizationStrategy::RMSNorm));
+
+        assert!(matches!(
+            meta.normalization_strategy,
+            NormalizationStrategy::RMSNorm
+        ));
         assert!(meta.rope_theta.is_some());
         assert!(meta.is_prenorm);
         assert!(!meta.normalize_embedding);
@@ -510,7 +522,7 @@ mod tests {
             activation: Activation::Gelu,
             rope_theta: None,
             rope_scaling: None,
-            scale_embeddings: true, // BART scales embeddings
+            scale_embeddings: true,  // BART scales embeddings
             extra_pos_embeddings: 2, // BART has offset
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
@@ -522,7 +534,7 @@ mod tests {
             decoder_layers: Some(12),
             intermediate_size: 4096,
         };
-        
+
         assert!(meta.scale_embeddings);
         assert_eq!(meta.extra_pos_embeddings, 2);
         assert_eq!(meta.decoder_layers, Some(12));
@@ -542,7 +554,7 @@ mod tests {
             norm_weight: "norm.weight".to_string(),
             norm_bias: Some("norm.bias".to_string()),
         };
-        
+
         assert!(layout.q_bias.is_some());
         assert!(layout.k_bias.is_some());
         assert!(layout.v_bias.is_some());
@@ -564,7 +576,7 @@ mod tests {
             norm_weight: "norm.weight".to_string(),
             norm_bias: None,
         };
-        
+
         assert!(layout.q_bias.is_none());
         assert!(layout.k_bias.is_none());
         assert!(layout.v_bias.is_none());
@@ -584,7 +596,7 @@ mod tests {
             norm_weight: "norm.weight".to_string(),
             norm_bias: Some("norm.bias".to_string()),
         };
-        
+
         assert!(layout.gate_weight.is_none());
         assert!(layout.gate_bias.is_none());
     }
@@ -601,7 +613,7 @@ mod tests {
             norm_weight: "norm.weight".to_string(),
             norm_bias: None,
         };
-        
+
         assert!(layout.gate_weight.is_some());
     }
 
@@ -639,7 +651,7 @@ mod tests {
                 },
             },
         };
-        
+
         assert!(layout.position_embedding.is_some());
         assert!(layout.token_type_embedding.is_some());
         assert!(layout.final_norm_weight.is_some());
@@ -679,7 +691,7 @@ mod tests {
                 },
             },
         };
-        
+
         assert!(layout.position_embedding.is_none());
         assert!(layout.token_type_embedding.is_none());
     }
@@ -688,7 +700,7 @@ mod tests {
     fn test_decoder_layout_with_cross_attention() {
         let config = MockModelConfig::new().with_decoder_layout();
         let dec = config.layout.decoder.as_ref().unwrap();
-        
+
         assert!(dec.layer.cross_attn.is_some());
     }
 
@@ -727,7 +739,7 @@ mod tests {
                 },
             },
         };
-        
+
         assert!(layout.layer.cross_attn.is_none());
         assert!(layout.layer.ffn.gate_weight.is_some()); // SwiGLU
     }
@@ -736,7 +748,7 @@ mod tests {
     fn test_model_layout_encoder_only() {
         let config = MockModelConfig::new().with_encoder_layout();
         let layout = config.layout();
-        
+
         assert!(layout.encoder.is_some());
         assert!(layout.decoder.is_none());
     }
@@ -745,7 +757,7 @@ mod tests {
     fn test_model_layout_decoder_only() {
         let config = MockModelConfig::new().with_decoder_layout();
         let layout = config.layout();
-        
+
         assert!(layout.encoder.is_none());
         assert!(layout.decoder.is_some());
     }
@@ -756,7 +768,7 @@ mod tests {
             .with_encoder_layout()
             .with_decoder_layout();
         let layout = config.layout();
-        
+
         assert!(layout.encoder.is_some());
         assert!(layout.decoder.is_some());
     }
@@ -766,7 +778,7 @@ mod tests {
         let gelu = Activation::Gelu;
         let silu = Activation::SilU;
         let relu = Activation::Relu;
-        
+
         assert!(matches!(gelu, Activation::Gelu));
         assert!(matches!(silu, Activation::SilU));
         assert!(matches!(relu, Activation::Relu));
@@ -776,7 +788,7 @@ mod tests {
     fn test_normalization_strategy_variants() {
         let layer_norm = NormalizationStrategy::LayerNorm;
         let rms_norm = NormalizationStrategy::RMSNorm;
-        
+
         assert!(matches!(layer_norm, NormalizationStrategy::LayerNorm));
         assert!(matches!(rms_norm, NormalizationStrategy::RMSNorm));
     }

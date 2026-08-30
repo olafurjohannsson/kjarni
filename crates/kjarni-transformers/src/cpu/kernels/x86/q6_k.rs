@@ -14,7 +14,6 @@ unsafe fn hsum_ps_avx(v: __m256) -> f32 {
     }
 }
 
-
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn matmul_vec_q6_k_avx2(
     out_chunk: &mut [f32],
@@ -23,7 +22,7 @@ pub unsafe fn matmul_vec_q6_k_avx2(
     k: usize,
 ) {
     let num_blocks_per_row = k / 256;
-    unsafe {
+    {
         for (i, val) in out_chunk.iter_mut().enumerate() {
             let block_start_idx = i * num_blocks_per_row;
             let blocks = &b_blocks[block_start_idx..block_start_idx + num_blocks_per_row];
@@ -47,7 +46,7 @@ pub unsafe fn matmul_vec_q6_k_avx2(
 
                     let mask_low4 = _mm256_set1_epi8(0x0F);
                     let mask_low2 = _mm256_set1_epi8(0x03);
-                    let m32 = _mm256_set1_epi8(32); 
+                    let m32 = _mm256_set1_epi8(32);
 
                     // Iterate 2 halves (0..128 and 128..256)
                     for is in 0..2 {
@@ -58,7 +57,8 @@ pub unsafe fn matmul_vec_q6_k_avx2(
                         // ql: 64 bytes per half (0..64 or 64..128)
                         let ql_base = is * 64;
                         let ql_vec_0 = _mm256_loadu_si256(ql_ptr.add(ql_base) as *const __m256i);
-                        let ql_vec_1 = _mm256_loadu_si256(ql_ptr.add(ql_base + 32) as *const __m256i);
+                        let ql_vec_1 =
+                            _mm256_loadu_si256(ql_ptr.add(ql_base + 32) as *const __m256i);
 
                         // Scales: 8 scales per half (0..8 or 8..16)
                         let s_base = is * 8;
@@ -101,16 +101,18 @@ pub unsafe fn matmul_vec_q6_k_avx2(
 
                         //  Dot Product
                         let dot_stream = |q_i8: __m256i,
-                                              s_a: __m256,
-                                              s_b: __m256,
-                                              a_off: usize,
-                                              sum: __m256|
-                                              -> __m256 {
+                                          s_a: __m256,
+                                          s_b: __m256,
+                                          a_off: usize,
+                                          sum: __m256|
+                         -> __m256 {
                             let q_low128 = _mm256_castsi256_si128(q_i8);
                             let q_high128 = _mm256_extracti128_si256(q_i8, 1);
 
                             let q_f32_0 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(q_low128));
-                            let q_f32_1 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(q_low128, 8)));
+                            let q_f32_1 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(
+                                q_low128, 8,
+                            )));
                             let a0 = _mm256_loadu_ps(a_ptr_block.add(a_off));
                             let a1 = _mm256_loadu_ps(a_ptr_block.add(a_off + 8));
 
@@ -118,7 +120,9 @@ pub unsafe fn matmul_vec_q6_k_avx2(
                             acc = _mm256_fmadd_ps(_mm256_mul_ps(q_f32_1, s_a), a1, acc);
 
                             let q_f32_2 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(q_high128));
-                            let q_f32_3 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(q_high128, 8)));
+                            let q_f32_3 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(
+                                q_high128, 8,
+                            )));
                             let a2 = _mm256_loadu_ps(a_ptr_block.add(a_off + 16));
                             let a3 = _mm256_loadu_ps(a_ptr_block.add(a_off + 24));
 
@@ -128,10 +132,10 @@ pub unsafe fn matmul_vec_q6_k_avx2(
                         };
 
                         let input_base = is * 128;
-                        sum0 = dot_stream(q0_i8, sc0, sc1, input_base + 0, sum0);   // q0
-                        sum1 = dot_stream(q2_i8, sc4, sc5, input_base + 64, sum1);  // q2
-                        sum2 = dot_stream(q1_i8, sc2, sc3, input_base + 32, sum2);  // q1
-                        sum3 = dot_stream(q3_i8, sc6, sc7, input_base + 96, sum3);  // q3
+                        sum0 = dot_stream(q0_i8, sc0, sc1, input_base, sum0); // q0
+                        sum1 = dot_stream(q2_i8, sc4, sc5, input_base + 64, sum1); // q2
+                        sum2 = dot_stream(q1_i8, sc2, sc3, input_base + 32, sum2); // q1
+                        sum3 = dot_stream(q3_i8, sc6, sc7, input_base + 96, sum3); // q3
                     }
 
                     a_ptr_block = a_ptr_block.add(256);
@@ -146,30 +150,34 @@ pub unsafe fn matmul_vec_q6_k_avx2(
     }
 }
 
-
 #[cfg(all(test, any(target_arch = "x86", target_arch = "x86_64")))]
 mod q6_k_avx2_test {
     use super::*;
-    use rand::{Rng, SeedableRng, rngs::StdRng};
-    use half::f16;
     use crate::cpu::kernels::dequantize::dequantize_q6_k_block;
+    use half::f16;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     fn ground_truth_matmul(a: &[f32], b_blocks: &[BlockQ6_K], k: usize) -> Vec<f32> {
         let blocks_per_row = k / 256;
         let rows = b_blocks.len() / blocks_per_row;
         let mut out = vec![0.0; rows];
-        
+
         let mut weights_buf = [0.0f32; 256];
 
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "indexed numeric loop; the index addresses more than the iterated slice"
+        )]
         for i in 0..rows {
             let mut row_sum = 0.0;
             for b in 0..blocks_per_row {
                 let block_idx = i * blocks_per_row + b;
-                
+
                 dequantize_q6_k_block(&b_blocks[block_idx], &mut weights_buf);
-                
+
                 let input_chunk = &a[b * 256..(b + 1) * 256];
-                row_sum += weights_buf.iter()
+                row_sum += weights_buf
+                    .iter()
                     .zip(input_chunk.iter())
                     .map(|(w, x)| w * x)
                     .sum::<f32>();
@@ -215,25 +223,26 @@ mod q6_k_avx2_test {
 
         let input = random_f32_vec(&mut rng, k);
         let blocks: Vec<BlockQ6_K> = (0..rows * 2).map(|_| random_q6k_block(&mut rng)).collect();
-        
+
         let expected = ground_truth_matmul(&input, &blocks, k);
 
         let mut actual = vec![0.0f32; rows];
         unsafe {
-            matmul_vec_q6_k_avx2(
-                &mut actual, 
-                input.as_ptr(), 
-                &blocks, 
-                k
-            );
+            matmul_vec_q6_k_avx2(&mut actual, input.as_ptr(), &blocks, k);
         }
 
         for i in 0..rows {
             let diff = (expected[i] - actual[i]).abs();
             let rel_err = diff / expected[i].abs().max(1.0);
-            
-            assert!(rel_err < 1e-4, 
-                "Row {}: Ref {} vs AVX {} (RelErr: {})", i, expected[i], actual[i], rel_err);
+
+            assert!(
+                rel_err < 1e-4,
+                "Row {}: Ref {} vs AVX {} (RelErr: {})",
+                i,
+                expected[i],
+                actual[i],
+                rel_err
+            );
         }
     }
 }

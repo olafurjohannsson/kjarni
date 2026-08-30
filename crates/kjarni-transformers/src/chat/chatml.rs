@@ -16,7 +16,9 @@ pub struct ChatMLTemplate {
 
 impl ChatMLTemplate {
     pub fn new() -> Self {
-        Self { add_generation_prompt: true }
+        Self {
+            add_generation_prompt: true,
+        }
     }
 }
 
@@ -30,8 +32,11 @@ impl ChatTemplate for ChatMLTemplate {
                 Role::User => "user",
                 Role::Assistant => "assistant",
             };
-            
-            prompt.push_str(&format!("<|im_start|>{}\n{}<|im_end|>\n", role, message.content));
+
+            prompt.push_str(&format!(
+                "<|im_start|>{}\n{}<|im_end|>\n",
+                role, message.content
+            ));
         }
 
         if self.add_generation_prompt {
@@ -42,17 +47,13 @@ impl ChatTemplate for ChatMLTemplate {
     }
 
     fn stop_sequences(&self) -> Vec<String> {
-        vec![
-            "<|im_end|>".to_string(),
-            "<|endoftext|>".to_string(),
-        ]
+        vec!["<|im_end|>".to_string(), "<|endoftext|>".to_string()]
     }
 
     fn default_system_prompt(&self) -> Option<&str> {
         Some("You are a helpful assistant.")
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -106,7 +107,7 @@ mod tests {
 
         let prompt = template.apply(&convo);
         assert!(prompt.matches("<|im_start|>user\n").count() == 2);
-        assert!(prompt.matches("<|im_start|>assistant\n").count() == 3); 
+        assert!(prompt.matches("<|im_start|>assistant\n").count() == 3);
         // 2 assistant messages + trailing generation header
         assert!(prompt.matches("<|im_start|>system\n").count() == 0);
     }
@@ -122,7 +123,10 @@ mod tests {
     #[test]
     fn chatml_default_system_prompt() {
         let template = ChatMLTemplate::new();
-        assert_eq!(template.default_system_prompt(), Some("You are a helpful assistant."));
+        assert_eq!(
+            template.default_system_prompt(),
+            Some("You are a helpful assistant.")
+        );
     }
 
     #[test]

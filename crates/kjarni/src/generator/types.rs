@@ -1,4 +1,3 @@
-
 //! Generator types and error definitions.
 
 use thiserror::Error;

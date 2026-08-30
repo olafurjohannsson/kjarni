@@ -1,10 +1,10 @@
 //! Compute semantic similarity between two texts
 
+use crate::commands::display;
 use anyhow::{Result, anyhow};
+use colored::*;
 use std::fs;
 use std::path::Path;
-use colored::*;
-use crate::commands::display;
 
 use kjarni::{Device, ModelArchitecture, ModelType, SentenceEncoder, registry};
 
@@ -39,7 +39,7 @@ pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) 
     let similarity = cosine_similarity(&embeddings[0], &embeddings[1]);
 
     if quiet {
-        print!("{:.6}\n", similarity);
+        println!("{:.6}", similarity);
     } else {
         print!("{}", format_pretty(similarity, &content1, &content2));
     }
@@ -55,25 +55,14 @@ fn format_pretty(score: f32, text1: &str, text2: &str) -> String {
     let pct = display::score_pct(score);
     let label = display::similarity_label(score);
 
-    output.push_str(&format!(
-        "  {}  {}  {}\n\n",
-        bar, pct, label
-    ));
+    output.push_str(&format!("  {}  {}  {}\n\n", bar, pct, label));
 
     // Texts being compared
     let t1 = truncate_clean(text1, 60);
     let t2 = truncate_clean(text2, 60);
 
-    output.push_str(&format!(
-        "  {} \"{}\"\n",
-        "↔".dimmed(),
-        t1.white()
-    ));
-    output.push_str(&format!(
-        "  {} \"{}\"\n",
-        "↔".dimmed(),
-        t2.white()
-    ));
+    output.push_str(&format!("  {} \"{}\"\n", "↔".dimmed(), t1.white()));
+    output.push_str(&format!("  {} \"{}\"\n", "↔".dimmed(), t2.white()));
 
     output
 }
@@ -114,7 +103,6 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let denom = (norm_a.sqrt() * norm_b.sqrt()).max(1e-9);
     dot / denom
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -157,7 +145,7 @@ mod tests {
     #[test]
     fn test_cosine_similarity_scaled() {
         let a = vec![1.0, 2.0, 3.0];
-        let b = vec![2.0, 4.0, 6.0]; 
+        let b = vec![2.0, 4.0, 6.0];
         let sim = cosine_similarity(&a, &b);
         assert!(
             (sim - 1.0).abs() < 1e-6,
@@ -204,7 +192,10 @@ mod tests {
         let b: Vec<f32> = (0..384).map(|i| (i as f32 * 0.01).cos()).collect();
         let sim = cosine_similarity(&a, &b);
 
-        assert!(sim >= -1.0 && sim <= 1.0, "Similarity should be in [-1, 1]");
+        assert!(
+            (-1.0..=1.0).contains(&sim),
+            "Similarity should be in [-1, 1]"
+        );
     }
 
     #[test]
@@ -271,7 +262,7 @@ mod tests {
         let result = resolve_text("").unwrap();
         assert_eq!(result, "");
     }
-   
+
     #[test]
     fn test_full_workflow_file_and_literal() {
         let mut temp_file = NamedTempFile::new().unwrap();
@@ -323,5 +314,4 @@ mod tests {
         let result = resolve_text("   ").unwrap();
         assert_eq!(result, "   ");
     }
-
 }

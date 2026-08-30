@@ -14,7 +14,7 @@ use kjarni_transformers::gpu::encoder::GpuTransformerEncoder;
 use kjarni_transformers::{
     WgpuContext,
     cpu::encoder::{
-        CpuTransformerEncoder, 
+        CpuTransformerEncoder,
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},
@@ -29,8 +29,6 @@ use kjarni_transformers::{
 use crate::BertConfig;
 use crate::models::sequence_classifier::configs::MiniLMCrossEncoderConfig;
 
-
-
 /// Cross-encoder for semantic similarity and reranking.
 pub struct CrossEncoder {
     pipeline: EncoderPipeline,
@@ -38,8 +36,6 @@ pub struct CrossEncoder {
     config: Arc<dyn ModelConfig + Send + Sync>,
     model_type: Option<ModelType>,
 }
-
-
 
 impl EncoderModelFactory for CrossEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
@@ -94,9 +90,6 @@ impl EncoderModelFactory for CrossEncoder {
             Device::Wgpu => {
                 return Err(anyhow!("GPU inference is not available in WebAssembly"));
             }
-            _ => {
-                panic!("No CPU or GPU encoder on CrossEncoder, will not work!");
-            }
         }
 
         Ok((cpu, gpu))
@@ -132,8 +125,6 @@ impl EncoderModelFactory for CrossEncoder {
     }
 }
 
-
-
 impl CrossEncoder {
     /// Run the encoder on the GPU, or `None` when there is no GPU backend.
     ///
@@ -162,6 +153,10 @@ impl CrossEncoder {
         let attention_mask_gpu = GpuTensor::from_ndarray(&context, attention_mask)?;
         let token_types_gpu = GpuTensor::from_ndarray(&context, token_type_ids)?;
 
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let gpu_output = ops.encoder().forward(
             encoder_cmd,
             pool_ref,

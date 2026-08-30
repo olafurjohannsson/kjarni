@@ -39,7 +39,8 @@ pub use builder::ClassifierBuilder;
 pub use model::Classifier;
 pub use presets::{ClassifierPreset, ClassifierTier};
 pub use types::{
-    ClassificationOverrides, ClassificationMode, ClassificationResult, ClassifierError, ClassifierResult,
+    ClassificationMode, ClassificationOverrides, ClassificationResult, ClassifierError,
+    ClassifierResult,
 };
 
 /// Classify a single text using the specified model.
@@ -79,7 +80,6 @@ pub fn is_classifier_model(model: &str) -> ClassifierResult<()> {
 pub fn available_models() -> Vec<&'static str> {
     validation::get_classifier_models()
 }
-
 
 #[cfg(test)]
 mod tests;

@@ -99,6 +99,10 @@ mod more_tests {
             self
         }
 
+        #[expect(
+            dead_code,
+            reason = "not referenced yet; kept until the path that needs it lands"
+        )]
         fn with_metadata(mut self) -> Self {
             self.has_meta = true;
             self
@@ -535,10 +539,7 @@ mod more_tests {
             use std::fs::File;
             use std::io::Write;
 
-            let data1: Vec<u8> = vec![1.0f32, 2.0]
-                .iter()
-                .flat_map(|f| f.to_le_bytes())
-                .collect();
+            let data1: Vec<u8> = [1.0f32, 2.0].iter().flat_map(|f| f.to_le_bytes()).collect();
             let view1 = SafeTensorView::new(Dtype::F32, vec![2], &data1).unwrap();
             let serialized = safetensors::serialize(vec![("tensor1", view1)], &None)?;
 
@@ -552,10 +553,7 @@ mod more_tests {
             use std::fs::File;
             use std::io::Write;
 
-            let data2: Vec<u8> = vec![3.0f32, 4.0]
-                .iter()
-                .flat_map(|f| f.to_le_bytes())
-                .collect();
+            let data2: Vec<u8> = [3.0f32, 4.0].iter().flat_map(|f| f.to_le_bytes()).collect();
             let view2 = SafeTensorView::new(Dtype::F32, vec![2], &data2).unwrap();
             let serialized = safetensors::serialize(vec![("tensor2", view2)], &None)?;
 

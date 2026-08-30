@@ -4,7 +4,6 @@
 // of the encoder stack that silently drifted from the engine. The bindings are still
 // wasm-only, but the crate now builds natively so its behaviour can be tested.
 
-
 use anyhow::Result;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -21,12 +20,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // The shared engine. Everything below that used to run on this crate's own copy of
 // the encoder stack is being moved onto these.
 use kjarni_models::{CrossEncoder, SentenceEncoder, SequenceClassifier};
-use kjarni_transformers::pipeline::EncoderLoader;
-use kjarni_transformers::traits::Device as EngineDevice;
 use kjarni_transformers::decoder::generator::DecoderGenerator;
 use kjarni_transformers::decoder::traits::DecoderLanguageModel;
+use kjarni_transformers::pipeline::EncoderLoader;
+use kjarni_transformers::traits::Device as EngineDevice;
 use kjarni_transformers::weights::kjq;
-
 
 // ─── Debug Logging ───────────────────────────────────────────────
 
@@ -159,8 +157,8 @@ impl WasmIndexBuilder {
 
         let t_enc = now_ms();
         let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
-        let embeddings = encode_all(&self.model, &chunk_refs)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let embeddings =
+            encode_all(&self.model, &chunk_refs).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t_enc;
 
         let t_idx = now_ms();
@@ -289,8 +287,8 @@ impl WasmSearch {
 
         let t_enc = now_ms();
         let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
-        let embeddings = encode_all(&self.model, &chunk_refs)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let embeddings =
+            encode_all(&self.model, &chunk_refs).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t_enc;
 
         let t_idx = now_ms();
@@ -353,8 +351,8 @@ impl WasmSearch {
         let t0 = now_ms();
 
         let t_enc = now_ms();
-        let embedding = encode_all(&self.model, &[query])
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let embedding =
+            encode_all(&self.model, &[query]).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t_enc;
 
         let t_search = now_ms();
@@ -391,8 +389,8 @@ impl WasmSearch {
     #[wasm_bindgen]
     pub fn search_semantic(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
         let t0 = now_ms();
-        let embedding = encode_all(&self.model, &[query])
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let embedding =
+            encode_all(&self.model, &[query]).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t0;
 
         let t_search = now_ms();
@@ -465,7 +463,7 @@ impl WasmEncoder {
 
         let mut results: Vec<EncodedChunk> = Vec::new();
         let max_batch = 1;
-        let num_batches = (chunks.len() + max_batch - 1) / max_batch;
+        let num_batches = chunks.len().div_ceil(max_batch);
 
         klog!(
             "encode_file: {} chunks, {} batches (max {}) | {}",
@@ -580,10 +578,7 @@ impl WasmClassifier {
     /// The labels this model predicts, in index order.
     #[wasm_bindgen]
     pub fn labels(&self) -> Vec<String> {
-        self.inner
-            .labels()
-            .map(|l| l.to_vec())
-            .unwrap_or_default()
+        self.inner.labels().map(|l| l.to_vec()).unwrap_or_default()
     }
 
     /// How many labels the model predicts.
@@ -647,7 +642,11 @@ impl WasmClassifier {
                     ranked.remove(0)
                 };
                 let index = labels.iter().position(|l| *l == label).unwrap_or(0);
-                ClassifyResult { label, score, index }
+                ClassifyResult {
+                    label,
+                    score,
+                    index,
+                }
             })
             .collect())
     }
@@ -716,7 +715,10 @@ impl WasmChat {
         // config's own `model_type` field is the source of truth, not the caller.
         let arch: String = serde_json::from_str::<serde_json::Value>(&unpacked.config_json)
             .ok()
-            .and_then(|v| v.get("model_type").and_then(|m| m.as_str().map(String::from)))
+            .and_then(|v| {
+                v.get("model_type")
+                    .and_then(|m| m.as_str().map(String::from))
+            })
             .unwrap_or_default();
 
         let model: std::sync::Arc<dyn DecoderLanguageModel + Send + Sync> = match arch.as_str() {
@@ -883,7 +885,6 @@ mod browser_only {
 
         Ok(text_js.as_string().ok_or("Failed to convert text")?)
     }
-
 }
 
 #[cfg(target_arch = "wasm32")]

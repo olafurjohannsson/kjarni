@@ -69,11 +69,7 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
         }
     }
 
-    fn update_decode_token(
-        &self,
-        token: &mut Self::DecodeToken,
-        new_token_id: u32,
-    ) -> Result<()> {
+    fn update_decode_token(&self, token: &mut Self::DecodeToken, new_token_id: u32) -> Result<()> {
         match self {
             AnyDecoderBackend::Cpu(backend) => {
                 let concrete = token

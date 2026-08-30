@@ -1,15 +1,12 @@
 use crate::WgpuContext;
+use crate::cpu::normalization::rms_norm::RMSNorm;
 use crate::gpu::GpuTensor;
 use crate::gpu::normalization::{GpuRMSNorm, GpuRMSNormWeights};
-use crate::cpu::normalization::rms_norm::RMSNorm;
 use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;
 use ndarray::{Array, Array1, Array3, Axis};
 use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
-
-#[path = "../../../tests/common.rs"]
-mod common;
 
 #[tokio::test]
 #[ignore = "GPU required"]

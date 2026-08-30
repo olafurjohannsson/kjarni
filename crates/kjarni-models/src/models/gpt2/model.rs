@@ -107,7 +107,7 @@ impl Gpt2Model {
             Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
 
         let config: Arc<Gpt2Config> = {
-            let mut cfg = serde_json::from_str::<Gpt2Config>(&weights.config_json())?;
+            let mut cfg = serde_json::from_str::<Gpt2Config>(weights.config_json())?;
             if model_type == ModelType::DistilGpt2 {
                 // Special handling for DistilGPT2's unique weight naming convention.
                 cfg.set_model_type("distilgpt2".to_string());
@@ -186,8 +186,7 @@ impl InferenceModel for Gpt2Model {
     }
     #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
-        let ctx = self.context.clone();
-        ctx
+        self.context.clone()
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -289,7 +288,7 @@ impl CpuDecoderOps for Gpt2Model {
             .cpu_decoder
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No GPT2 CPU Decoder"))?;
-        let tokens = decoder.embeddings.forward(&tokens, None, pos, false);
+        let tokens = decoder.embeddings.forward(tokens, None, pos, false);
         Ok(tokens)
     }
 }
@@ -367,7 +366,7 @@ mod tests {
     use super::*;
 
     use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
-    
+
     use kjarni_transformers::prelude::LanguageModel;
 
     /// Helper function to load the DistilGPT2 model for testing.

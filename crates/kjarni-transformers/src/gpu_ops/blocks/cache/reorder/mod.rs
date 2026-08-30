@@ -169,8 +169,8 @@ impl GpuReorderCache {
         pass.set_bind_group(0, &bind_group, &[]);
 
         // Dispatch logic
-        let wg_x = (head_dim as u32 + 15) / 16;
-        let wg_y = (num_heads as u32 + 15) / 16;
+        let wg_x = (head_dim as u32).div_ceil(16);
+        let wg_y = (num_heads as u32).div_ceil(16);
         let wg_z = (num_beams * current_seq_len) as u32;
 
         pass.dispatch_workgroups(wg_x, wg_y, wg_z);

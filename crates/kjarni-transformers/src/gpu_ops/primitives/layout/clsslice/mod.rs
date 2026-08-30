@@ -24,14 +24,12 @@ struct ClsSliceUniforms {
 
 impl GpuClsSlice {
     pub fn new(context: &Arc<WgpuContext>) -> Self {
-        let shader = context.device.create_shader_module(
-            wgpu::ShaderModuleDescriptor {
+        let shader = context
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("CLS Slice Shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("./clsslice.wgsl").into()
-                ),
-            },
-        );
+                source: wgpu::ShaderSource::Wgsl(include_str!("./clsslice.wgsl").into()),
+            });
 
         let bind_group_layout =
             context
@@ -44,9 +42,7 @@ impl GpuClsSlice {
                             binding: 0,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage {
-                                    read_only: true,
-                                },
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
@@ -57,9 +53,7 @@ impl GpuClsSlice {
                             binding: 1,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage {
-                                    read_only: false,
-                                },
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
@@ -88,17 +82,16 @@ impl GpuClsSlice {
                     push_constant_ranges: &[],
                 });
 
-        let pipeline =
-            context
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("CLS Slice Pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                });
+        let pipeline = context
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("CLS Slice Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
 
         Self {
             pipeline,
@@ -136,33 +129,32 @@ impl GpuClsSlice {
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
 
-        let bind_group =
-            self.context
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("CLS Slice Bind Group"),
-                    layout: &self.bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: src.buffer().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: dst.buffer().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-
-        let mut compute_pass =
-            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("CLS Slice Pass"),
-                timestamp_writes: None,
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("CLS Slice Bind Group"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: src.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: dst.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                ],
             });
+
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("CLS Slice Pass"),
+            timestamp_writes: None,
+        });
 
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
@@ -170,8 +162,7 @@ impl GpuClsSlice {
         // One thread per (batch, hidden) element
         let workgroup_size = 256;
         let total_elements = (batch_size * hidden_size) as u32;
-        let num_workgroups =
-            (total_elements + workgroup_size - 1) / workgroup_size;
+        let num_workgroups = total_elements.div_ceil(workgroup_size);
 
         compute_pass.dispatch_workgroups(num_workgroups, 1, 1);
     }

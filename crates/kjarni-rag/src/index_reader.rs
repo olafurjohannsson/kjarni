@@ -102,6 +102,10 @@ impl MetadataFilter {
 
 /// Reads and searches a segmented index
 pub struct IndexReader {
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     root: PathBuf,
     config: IndexConfig,
     segments: Vec<Segment>,

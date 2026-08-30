@@ -13,6 +13,16 @@ env:
 
 jobs:
   # ─── Lint ───────────────────────────────────────────────────────
+  #
+  # This job ended in `|| true` for as long as it existed, so it reported green on
+  # a workspace that clippy could not even compile: eight deny-by-default findings,
+  # including a `pub fn` in the C ABI that dereferenced a caller's raw pointer
+  # without being `unsafe`, and three `assert!(x.len() >= 0)` that are true for
+  # every possible input. A lint job that cannot fail is a lint job that is not run.
+  #
+  # `-D warnings` is what makes it real. Deliberate exemptions live in
+  # `[workspace.lints.clippy]` in the root Cargo.toml, each with the reason it is
+  # exempt, so an allow is a decision in the diff rather than an invisible default.
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -23,7 +33,23 @@ jobs:
           toolchain: "1.91.1"
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets 2>&1 || true
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ─── Format ─────────────────────────────────────────────────────
+  #
+  # Stock rustfmt defaults; there is no rustfmt.toml. This keeps a diff about one
+  # change from also carrying whatever a contributor's format-on-save did to the
+  # rest of the file.
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          components: rustfmt
+      - run: cargo fmt --all --check
 
   # ─── Test (CPU only, models cached) ────────────────────────────
   test:
@@ -42,12 +68,14 @@ jobs:
           path: ~/.cache/kjarni
           key: kjarni-models-v2
 
+      # Built under the same profile as the tests below, so the two share artifacts
+      # rather than compiling the whole dependency graph twice.
       - name: Build CLI for model downloads
-        run: cargo build --release --package kjarni-cli
+        run: cargo build --profile ci --package kjarni-cli
 
       - name: Download test models
         run: |
-          CLI=./target/release/kjarni
+          CLI=./target/ci/kjarni
           $CLI model download distilbert-sentiment
           $CLI model download roberta-sentiment
           $CLI model download bert-sentiment-multilingual
@@ -94,25 +122,16 @@ jobs:
       # kjarni-wasm was excluded because the crate was `#![cfg(target_arch = "wasm32")]`
       # and could not build natively. Browser-only code now lives in a gated module,
       # so its 18 binding tests compile and run here like any other crate.
-      - name: Run tests
+      # `cargo test` with no profile flag uses `test`, which inherits `dev` at
+      # opt-level 0. That is what made this job take an hour: the engine's decode
+      # loop is roughly twenty times slower unoptimised. `--profile ci` is release
+      # optimisation with `debug_assert!`s and overflow checks kept on, so this run
+      # checks everything the dev-profile run checked -- see [profile.ci] in the
+      # root Cargo.toml.
+      - name: Run tests (optimised)
         env:
           KJARNI_KJQ_DIR: /tmp/kjq
-        run: cargo test --workspace
-
-      # Decoder generation is ignored in the debug run above because an unoptimised
-      # decode loop is roughly twenty times slower: one generation test measured
-      # 110s debug against 5s release, and the whole job was being cancelled at 54
-      # minutes because of it. Skipping them outright would leave the decode loop,
-      # the sampler and the KV cache with no CI coverage at all, so they run here
-      # optimised instead. The main run stays in debug to keep the engine's 47
-      # `debug_assert!`s live, which a wholesale switch to --release would silence.
-      - name: Run generation tests (optimised)
-        env:
-          KJARNI_KJQ_DIR: /tmp/kjq
-        # Not `-- --ignored`: the gate is `cfg_attr(debug_assertions, ignore)`, so in
-        # a release build these tests are not ignored at all and `--ignored` filters
-        # them out, running the unconditionally-ignored GPU parity suite instead.
-        run: cargo test --release -p kjarni-models -p kjarni-wasm
+        run: cargo test --workspace --profile ci
 
   # ─── C# binding tests (the shipped NuGet surface) ───────────────
   csharp-test:

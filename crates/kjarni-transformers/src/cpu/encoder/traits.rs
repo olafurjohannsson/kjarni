@@ -6,6 +6,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WgpuContext;
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::cpu::strategy::ComputeStrategy;
@@ -14,8 +16,6 @@ use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput};
 use crate::pooling::mean_pool;
 use crate::traits::CpuTransformerCore;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::WgpuContext;
 use crate::{last_token_pool, max_pool};
 
 use anyhow::{Result, anyhow};
@@ -96,7 +96,7 @@ pub trait EncoderLanguageModel: LanguageModel {
             let hidden: Array3<f32> = ops.embed_tokens(input_ids, None, 0)?;
             let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
 
-            let hidden_states = if compute_strategy.use_scratch_buffers == false {
+            let _hidden_states = if !compute_strategy.use_scratch_buffers {
                 encoder
                     .forward(&normalized_hidden, &attention_mask_f32)?
                     .last_hidden_state
@@ -115,7 +115,24 @@ pub trait EncoderLanguageModel: LanguageModel {
                     .last_hidden_state
             };
 
-            hidden_states
+            if !compute_strategy.use_scratch_buffers {
+                encoder
+                    .forward(&normalized_hidden, &attention_mask_f32)?
+                    .last_hidden_state
+            } else {
+                let mut buffers = encoder.create_buffers(batch_size, seq_len);
+                #[cfg(debug_assertions)]
+                {
+                    let buf_desc: String = buffers.memory_breakdown();
+                    println!(
+                        "Encoder buffers allocated for batch_size={}, seq_len={}: {}",
+                        batch_size, seq_len, buf_desc
+                    );
+                }
+                encoder
+                    .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
+                    .last_hidden_state
+            }
         } else if let Some(ops) = self.encoder_gpu_ops() {
             let context = self
                 .context()
@@ -133,6 +150,10 @@ pub trait EncoderLanguageModel: LanguageModel {
             let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask_f32)?;
 
             // Run the forward pass
+            #[allow(
+                deprecated,
+                reason = "internal caller of an API deprecated without a named replacement"
+            )]
             let gpu_output = ops.encoder().forward(
                 encoder_cmd,
                 pool_ref,
@@ -259,9 +280,7 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
         let mut pooled = match config.pooling_strategy {
-            PoolingStrategy::Cls => {
-                hidden_states.slice(ndarray::s![.., 0, ..]).to_owned()
-            }
+            PoolingStrategy::Cls => hidden_states.slice(ndarray::s![.., 0, ..]).to_owned(),
             PoolingStrategy::Mean => mean_pool(&hidden_states, &attention_mask)?,
             PoolingStrategy::LastToken => last_token_pool(&hidden_states, &attention_mask)?,
             PoolingStrategy::Max => max_pool(&hidden_states, &attention_mask)?,
@@ -390,7 +409,6 @@ pub struct GpuEncoderOutput {
     pub last_hidden_state: GpuTensor,
 }
 
-
 /// Placeholder GPU encoder for wasm builds.
 ///
 /// There is no GPU backend on wasm, but the encoder pipeline still carries
@@ -408,7 +426,7 @@ pub trait GpuEncoderOps: Send + Sync {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub trait GpuEncoder: Send + Sync {
-    /// Compute embeddings only 
+    /// Compute embeddings only
     fn embed(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
@@ -485,7 +503,8 @@ pub trait GpuEncoder: Send + Sync {
             last_hidden_state: output,
         })
     }
-    fn forward2( // todo do something
+    fn forward2(
+        // todo do something
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -534,7 +553,7 @@ pub trait GpuEncoderOps: Send + Sync {
 
     fn get_attention_mask(&self, ctx: &Arc<WgpuContext>, seq_len: usize) -> Result<GpuTensor> {
         let mask_cpu = Array2::<f32>::ones((1, seq_len));
-        Ok(GpuTensor::from_ndarray(ctx, &mask_cpu)?)
+        GpuTensor::from_ndarray(ctx, &mask_cpu)
     }
 
     /// Full forward from tokens: embed -> embed_norm -> layers -> final_norm
@@ -561,12 +580,8 @@ pub trait GpuEncoderOps: Send + Sync {
         };
 
         // Run through encoder layers + final norm
-        self.encoder().forward2(
-            cmd_encoder,
-            pool,
-            &normalized,
-            &mask,
-        )
+        self.encoder()
+            .forward2(cmd_encoder, pool, &normalized, &mask)
     }
 
     /// Forward from mel spectrogram (Whisper)
@@ -585,12 +600,7 @@ pub trait GpuEncoderOps: Send + Sync {
             None => self.get_attention_mask(ctx, hidden.shape()[1])?,
         };
 
-        self.encoder().forward2(
-            cmd_encoder,
-            pool,
-            &hidden,
-            &mask,
-        )
+        self.encoder().forward2(cmd_encoder, pool, &hidden, &mask)
     }
 }
 
@@ -880,7 +890,7 @@ mod tests_trait {
         };
         let out_mean = model.encode_batch(&["a", "b"], &config_mean).await?;
 
-        let pool_mean_data = vec![
+        let pool_mean_data = [
             -1.331581, -0.437193, 0.457194, 1.351580, -1.331581, -0.437193, 0.457193, 1.351581,
         ];
         for (i, row) in out_mean.iter().enumerate() {
@@ -901,7 +911,7 @@ mod tests_trait {
         };
         let out_cls = model.encode_batch(&["a", "b"], &config_cls).await?;
 
-        let pool_cls_data = vec![
+        let pool_cls_data = [
             -1.331580, -0.437194, 0.457193, 1.351581, -1.331580, -0.437194, 0.457193, 1.351581,
         ];
         for (i, row) in out_cls.iter().enumerate() {
@@ -917,7 +927,7 @@ mod tests_trait {
         };
         let out_max = model.encode_batch(&["a", "b"], &config_max).await?;
 
-        let pool_max_data = vec![
+        let pool_max_data = [
             -1.331580, -0.437193, 0.457194, 1.351581, -1.331580, -0.437193, 0.457194, 1.351581,
         ];
         for (i, row) in out_max.iter().enumerate() {
@@ -933,7 +943,7 @@ mod tests_trait {
         };
         let out_last = model.encode_batch(&["a", "b"], &config_last).await?;
 
-        let pool_last_data = vec![
+        let pool_last_data = [
             -1.331581, -0.437193, 0.457194, 1.351580, -1.331581, -0.437193, 0.457194, 1.351580,
         ];
         for (i, row) in out_last.iter().enumerate() {
@@ -949,7 +959,7 @@ mod tests_trait {
         };
         let out_norm = model.encode_batch(&["a", "b"], &config_norm).await?;
 
-        let normed_mean_data = vec![
+        let normed_mean_data = [
             -0.665787, -0.218596, 0.228596, 0.675787, -0.665787, -0.218595, 0.228595, 0.675787,
         ];
         for (i, row) in out_norm.iter().enumerate() {

@@ -1,9 +1,9 @@
 use anyhow::Result;
-use ndarray::{arr3, Array, Array3, Ix3};
+use ndarray::{Array, Array3, Ix3, arr3};
 
-use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu::{DType, GpuTensor, Kernel};
 use crate::WgpuContext;
+use crate::gpu::{DType, GpuTensor, Kernel};
+use crate::gpu_ops::primitives::add::GpuAdd;
 
 async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
     let shape = tensor.shape().to_vec();
@@ -57,7 +57,7 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
 
     let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
     let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
-    let vec: Vec<usize> = a_cpu.shape().iter().map(|&d| d as usize).collect();
+    let vec: Vec<usize> = a_cpu.shape().to_vec();
     let output_gpu = GpuTensor::zeros(&context, vec, DType::F32, "output")?;
 
     let add_kernel = GpuAdd::new(&context);

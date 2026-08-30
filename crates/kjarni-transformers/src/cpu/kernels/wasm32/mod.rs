@@ -70,14 +70,7 @@ pub unsafe fn wasm_dot_product(a: &[f32], b: &[f32]) -> f32 {
 /// A is [m, k], B is [n, k] (row-major, transposed), C is [m, n].
 #[cfg(target_arch = "wasm32")]
 #[target_feature(enable = "simd128")]
-pub unsafe fn wasm_matmul_2d(
-    out: &mut [f32],
-    a: &[f32],
-    b: &[f32],
-    m: usize,
-    n: usize,
-    k: usize,
-) {
+pub unsafe fn wasm_matmul_2d(out: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
     debug_assert_eq!(a.len(), m * k);
     debug_assert_eq!(b.len(), n * k);
     debug_assert_eq!(out.len(), m * n);

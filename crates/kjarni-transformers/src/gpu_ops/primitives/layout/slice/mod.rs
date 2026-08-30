@@ -181,8 +181,8 @@ impl GpuSlice {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroup_x = (dst_d as u32 + 15) / 16;
-        let workgroup_y = (dst_s as u32 + 3) / 4;
+        let workgroup_x = (dst_d as u32).div_ceil(16);
+        let workgroup_y = (dst_s as u32).div_ceil(4);
         let workgroup_z = (dst_b * dst_h) as u32;
         compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
     }

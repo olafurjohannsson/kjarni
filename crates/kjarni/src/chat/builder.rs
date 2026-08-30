@@ -27,6 +27,10 @@ use super::types::{ChatMode, ChatResult};
 pub struct ChatBuilder {
     // Model selection
     pub(crate) model: String,
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     pub(crate) model_path: Option<PathBuf>,
 
     // Chat-specific
@@ -74,19 +78,19 @@ impl ChatBuilder {
         let mut builder = Self::new(preset.model);
         builder.device = preset.recommended_device;
         builder.mode = preset.mode;
-        
+
         if let Some(system) = preset.system_prompt {
             builder.system_prompt = Some(system.to_string());
         }
-        
+
         if let Some(temp) = preset.temperature {
             builder.generation_overrides.temperature = Some(temp);
         }
-        
+
         if let Some(max) = preset.max_tokens {
             builder.generation_overrides.max_new_tokens = Some(max);
         }
-        
+
         builder
     }
 
@@ -216,7 +220,6 @@ impl ChatBuilder {
         Chat::from_builder(self).await
     }
 }
-
 
 impl Chat {
     /// Create a builder from a preset.

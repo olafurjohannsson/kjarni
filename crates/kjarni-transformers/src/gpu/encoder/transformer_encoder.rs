@@ -107,7 +107,7 @@ impl GpuTransformerEncoder {
         for i in 0..meta.num_layers {
             let idx = i.to_string();
             let name = |t: &String| t.replace("{}", &idx);
-            let resolve_bias = |opt: &Option<String>| opt.as_ref().map(|s| name(s));
+            let resolve_bias = |opt: &Option<String>| opt.as_ref().map(&name);
 
             let q_name = name(&encoder_layout.layer.self_attn.q_weight);
             let k_name = name(&encoder_layout.layer.self_attn.k_weight);
@@ -178,12 +178,7 @@ impl GpuTransformerEncoder {
 
             let up_name = name(&encoder_layout.layer.ffn.up_weight);
             let down_name = name(&encoder_layout.layer.ffn.down_weight);
-            let gate_name = encoder_layout
-                .layer
-                .ffn
-                .gate_weight
-                .as_ref()
-                .map(|s| name(s));
+            let gate_name = encoder_layout.layer.ffn.gate_weight.as_ref().map(&name);
 
             let load_transposed = |n: &str| -> Result<ndarray::Array2<f32>> {
                 let arr = weights.get_array2(n)?;

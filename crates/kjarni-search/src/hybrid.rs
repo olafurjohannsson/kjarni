@@ -30,7 +30,6 @@ pub fn hybrid_search(
     final_results
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

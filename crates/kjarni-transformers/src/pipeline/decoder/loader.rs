@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -8,18 +8,18 @@ use crate::chat::llama3::Llama3ChatTemplate;
 use crate::chat::mistral::MistralChatTemplate;
 use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
+use crate::loaders::LoadedRoPE;
 use crate::models::base::ModelLoadConfig;
+use crate::models::get_default_cache_dir;
 use crate::models::{ModelArchitecture, ModelType};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::{download_model_files, registry::WeightsFormat};
+use crate::pipeline::DecoderPipeline;
 use crate::pipeline::decoder::DecoderPipelineBuilder;
-use crate::pipeline::{DecoderPipeline};
-use crate::loaders::LoadedRoPE;
 use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 use crate::{ChatTemplate, WgpuContext};
-use crate::models::get_default_cache_dir;
 
 pub trait DecoderModelFactory: Sized {
     type Config: ModelConfig + 'static;
@@ -61,7 +61,7 @@ impl DecoderLoader {
         let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        let config = load_config.clone().unwrap_or_default();
+        let config = load_config.unwrap_or_default();
 
         let is_quantized_request = matches!(
             config.target_dtype,
@@ -95,8 +95,8 @@ impl DecoderLoader {
         model_type: Option<ModelType>,
     ) -> Result<M> {
         log::info!("Loading from {:?}", model_path);
-        if model_type.is_some() {
-            log::info!("Model {:?}", model_type.unwrap().cli_name());
+        if let Some(model_type) = model_type {
+            log::info!("Model {:?}", model_type.cli_name());
         }
         let weights = ModelWeights::new(model_path)?;
         let load_config: ModelLoadConfig = load_config.unwrap_or_default();
@@ -128,7 +128,7 @@ impl DecoderLoader {
         // try load generation defaults from generation_config.json
         let generation_defaults = Self::try_load_generation_defaults(model_path);
 
-        // Build Backends 
+        // Build Backends
         let (cpu_decoder, gpu_decoder) = M::build_backends(
             &weights,
             &meta,

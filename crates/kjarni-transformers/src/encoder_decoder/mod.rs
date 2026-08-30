@@ -12,15 +12,12 @@ pub mod config;
 
 pub mod decoder_self_attn;
 
-
-
 pub use crate::encoder_decoder::config::{SummarizationParams, TaskSpecificParams};
 pub use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
-pub use beams::{run_beam_search, run_beam_search_stream, BeamHypothesis};
+pub use beams::{BeamHypothesis, run_beam_search, run_beam_search_stream};
 pub use cpu_backend::CpuSeq2SeqState;
 
 pub use decoder_self_attn::DecoderSelfAttention;
 pub use generator::{AnyEncoderDecoderBackend, EncoderDecoderGenerator};
-

@@ -1,4 +1,4 @@
-//! GPU implementation of the Llama decoder 
+//! GPU implementation of the Llama decoder
 
 use anyhow::{Context, Result};
 use kjarni_transformers::{
@@ -26,6 +26,10 @@ pub struct LlamaGpuDecoder {
     pub final_ln_weights: GpuNormalizationWeights,
     pub gpu_rope: Arc<GpuRoPE>,
     context: Arc<WgpuContext>,
+    #[expect(
+        dead_code,
+        reason = "held for the GPU decoder path, which is not wired up yet"
+    )]
     load_config: ModelLoadConfig,
     embeddings: LoadedEmbeddings,
     metadata: ModelMetadata,
@@ -56,8 +60,8 @@ impl LlamaGpuDecoder {
             Some(context),
             weights,
             EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size),
-            false, 
-            true,  
+            false,
+            true,
             target_dtype,
         )?;
 

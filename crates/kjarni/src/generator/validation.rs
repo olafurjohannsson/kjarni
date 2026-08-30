@@ -111,13 +111,13 @@ mod tests {
     fn test_get_generator_models() {
         let models = get_generator_models();
         assert!(!models.is_empty());
-        
+
         // Should contain LLM models
         let has_llm = models.iter().any(|m| {
             m.contains("llama") || m.contains("qwen") || m.contains("mistral") || m.contains("phi")
         });
         assert!(has_llm, "Should contain LLM models");
-        
+
         // Should NOT contain encoders
         assert!(!models.contains(&"minilm-l6-v2"));
         assert!(!models.contains(&"nomic-embed-text"));

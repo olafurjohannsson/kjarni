@@ -118,8 +118,7 @@ impl<'a> ChatConversation<'a> {
     /// ```
     pub async fn stream_next(
         &self,
-    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
-    {
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         // Format prompt from current history
         let conversation = self.chat.history_to_conversation(&self.history);
         let prompt = self.chat.format_prompt(&conversation);
@@ -136,8 +135,7 @@ impl<'a> ChatConversation<'a> {
     pub async fn stream(
         &mut self,
         message: &str,
-    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
-    {
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         self.push_user(message);
         self.stream_next().await
     }

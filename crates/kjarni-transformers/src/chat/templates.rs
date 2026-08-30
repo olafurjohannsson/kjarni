@@ -266,7 +266,7 @@ mod tests {
         convo.push_user("u1");
         convo.push_assistant("a1");
 
-        let tmpl = RawTemplate::default();
+        let tmpl = RawTemplate;
         let output = tmpl.apply(&convo);
         let expected = "sys\n\nu1\n\na1";
         assert_eq!(output, expected);

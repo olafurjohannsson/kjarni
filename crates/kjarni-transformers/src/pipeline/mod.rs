@@ -23,8 +23,8 @@ mod seq2seq_cpu_factory;
 pub use cpu_factory::CpuLayerFactory;
 
 pub use decoder::{
-    DecoderModelFactory, DecoderPipeline, DecoderPipelineBuilder, DecoderPipelineConfig,
-    DecoderLoader,
+    DecoderLoader, DecoderModelFactory, DecoderPipeline, DecoderPipelineBuilder,
+    DecoderPipelineConfig,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use encoder_decoder::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig};

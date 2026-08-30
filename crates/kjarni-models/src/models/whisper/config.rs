@@ -220,7 +220,7 @@ mod tests {
         let layout = config.layout();
 
         // Verify Whisper-specifics
-        assert_eq!(meta.is_prenorm, true);
+        assert!(meta.is_prenorm);
         assert_eq!(
             meta.normalization_strategy,
             NormalizationStrategy::LayerNorm

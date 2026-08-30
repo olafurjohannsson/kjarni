@@ -313,7 +313,7 @@ mod tests {
                 7.0, 8.0, // batch 1, pos 1
             ],
         )
-            .unwrap();
+        .unwrap();
 
         let output = rms_norm.forward_3d(&hidden);
         let rms_00 = ((1.0_f32.powi(2) + 2.0_f32.powi(2)) / 2.0).sqrt();

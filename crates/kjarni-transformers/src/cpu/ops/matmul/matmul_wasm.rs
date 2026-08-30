@@ -12,7 +12,11 @@ use crate::cpu::kernels;
 pub fn matmul_2d_cpu_f32(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim();
-    assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
+    assert_eq!(
+        k, k2,
+        "Matmul dimension mismatch: A[k]={} != B[k]={}",
+        k, k2
+    );
 
     let mut c = Array2::<f32>::zeros((m, n));
 

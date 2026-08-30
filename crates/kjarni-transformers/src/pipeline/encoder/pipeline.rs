@@ -1,21 +1,19 @@
 //! Encoder pipeline for embedding and classification models.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
+use crate::LoadedEmbeddings;
+use crate::WgpuContext;
 use crate::cpu::encoder::{
     classifier::CpuSequenceClassificationHead,
     config::PoolingStrategy,
     traits::{CpuEncoder, GpuEncoder},
 };
-use crate::LoadedEmbeddings;
 use crate::execution::ExecutionPlan;
 use crate::traits::Device;
-use crate::WgpuContext;
-
 
 // Pipeline Configuration
-
 
 /// Configuration for the encoder pipeline.
 #[derive(Debug, Clone)]
@@ -37,15 +35,15 @@ pub struct EncoderPipeline {
     embeddings: LoadedEmbeddings,
     cpu_encoder: Option<Box<dyn CpuEncoder>>,
     gpu_encoder: Option<Box<dyn GpuEncoder>>,
-    
+
     // Optional classification head (None for SentenceEncoder)
     cpu_head: Option<CpuSequenceClassificationHead>,
     // gpu_head: Option<GpuSequenceClassificationHead>, // TODO:
-    
+
     // Configuration
     plan: ExecutionPlan,
     config: EncoderPipelineConfig,
-    
+
     // Runtime context
     context: Option<Arc<WgpuContext>>,
 }
@@ -71,21 +69,21 @@ impl EncoderPipeline {
             context,
             config,
         };
-        
+
         pipeline.validate_plan(&pipeline.plan)?;
         Ok(pipeline)
     }
-    
+
     pub fn plan(&self) -> &ExecutionPlan {
         &self.plan
     }
-    
+
     pub fn set_plan(&mut self, plan: ExecutionPlan) -> Result<()> {
         self.validate_plan(&plan)?;
         self.plan = plan;
         Ok(())
     }
-    
+
     fn validate_plan(&self, plan: &ExecutionPlan) -> Result<()> {
         match plan.embeddings {
             Device::Cpu if !self.embeddings.is_cpu() => {
@@ -99,7 +97,7 @@ impl EncoderPipeline {
             }
             _ => {}
         }
-        
+
         match plan.layers {
             Device::Cpu if self.cpu_encoder.is_none() => {
                 return Err(anyhow!("Plan requires CPU encoder but not loaded"));
@@ -109,7 +107,7 @@ impl EncoderPipeline {
             }
             _ => {}
         }
-        
+
         if plan.needs_gpu() && self.context.is_none() {
             return Err(anyhow!("Plan requires GPU but no WgpuContext available"));
         }
@@ -117,58 +115,58 @@ impl EncoderPipeline {
         if plan.needs_cpu() && self.cpu_encoder.is_none() {
             return Err(anyhow!("Plan requires CPU encoder but not loaded"));
         }
-        
+
         Ok(())
     }
-    
+
     pub fn embeddings(&self) -> &LoadedEmbeddings {
         &self.embeddings
     }
-    
+
     pub fn cpu_encoder(&self) -> Option<&dyn CpuEncoder> {
         self.cpu_encoder.as_ref().map(|e| e.as_ref())
     }
-    
+
     pub fn gpu_encoder(&self) -> Option<&dyn GpuEncoder> {
         self.gpu_encoder.as_ref().map(|e| e.as_ref())
     }
-    
+
     pub fn cpu_head(&self) -> Option<&CpuSequenceClassificationHead> {
         self.cpu_head.as_ref()
     }
-    
+
     pub fn context(&self) -> Option<&Arc<WgpuContext>> {
         self.context.as_ref()
     }
-    
+
     pub fn has_head(&self) -> bool {
         self.cpu_head.is_some()
     }
-    
+
     pub fn num_layers(&self) -> usize {
         self.config.num_layers
     }
-    
+
     pub fn hidden_size(&self) -> usize {
         self.config.hidden_size
     }
-    
+
     pub fn vocab_size(&self) -> usize {
         self.config.vocab_size
     }
-    
+
     pub fn max_seq_length(&self) -> usize {
         self.config.max_seq_length
     }
-    
+
     pub fn pooling_strategy(&self) -> PoolingStrategy {
         self.config.pooling_strategy.clone()
     }
-    
+
     pub fn num_labels(&self) -> Option<usize> {
         self.cpu_head.as_ref().map(|h| h.num_classes())
     }
-    
+
     pub fn labels(&self) -> Option<&[String]> {
         self.cpu_head.as_ref().and_then(|h| h.labels())
     }

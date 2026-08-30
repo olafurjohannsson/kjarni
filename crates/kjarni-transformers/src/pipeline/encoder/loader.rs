@@ -5,6 +5,7 @@ use std::{
 
 use tokenizers::Tokenizer;
 
+use crate::models::get_default_cache_dir;
 use crate::{
     Device, ModelType, WgpuContext,
     cpu::encoder::{
@@ -18,7 +19,6 @@ use crate::{
     weights::ModelWeights,
 };
 use anyhow::{Result, anyhow};
-use crate::models::get_default_cache_dir;
 
 /// Factory trait for encoder-based models.
 pub trait EncoderModelFactory: Sized {
@@ -61,7 +61,6 @@ pub struct EncoderLoader;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::{download_model_files, registry::WeightsFormat};
-
 
 /// The sequence length a sentence-transformers model was actually tuned for.
 ///
@@ -234,7 +233,7 @@ impl EncoderLoader {
             &weights,
             &meta,
             &layout,
-            load_config.clone(),
+            load_config,
             context.as_ref(),
             device,
         )?;
@@ -294,14 +293,8 @@ impl EncoderLoader {
         }));
 
         // WASM is always CPU, no GPU context
-        let (cpu_encoder, gpu_encoder) = M::build_backends(
-            &weights,
-            &meta,
-            &layout,
-            load_config.clone(),
-            None,
-            Device::Cpu,
-        )?;
+        let (cpu_encoder, gpu_encoder) =
+            M::build_backends(&weights, &meta, &layout, load_config, None, Device::Cpu)?;
 
         let cpu_head = M::build_head(&weights, &load_config)?;
 

@@ -334,7 +334,7 @@ impl ModelType {
                     config_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/config.json",
                     gguf_url: None,
                 },
-                description: "Compact cross-encoder for passage reranking.",
+                description: "Cross-encoder for passage reranking. Use for search result reordering, NOT sentiment.",
                 size_mb: 90,
                 params_millions: 22,
             },
@@ -470,19 +470,6 @@ impl ModelType {
                 description: "Toxic comment classifier. Detects: toxic, severe_toxic, obscene, threat, insult, identity_hate.",
                 size_mb: 438,
                 params_millions: 110,
-            },
-            Self::MiniLML6V2CrossEncoder => ModelInfo {
-                architecture: ModelArchitecture::Bert,
-                task: ModelTask::ReRanking,
-                paths: ModelPaths {
-                    weights_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/config.json",
-                    gguf_url: None,
-                },
-                description: "Cross-encoder for passage reranking. Use for search result reordering, NOT sentiment.",
-                size_mb: 90,
-                params_millions: 22,
             },
             Self::Qwen2_5_0_5B_Instruct => ModelInfo {
                 architecture: ModelArchitecture::Qwen2,
@@ -778,19 +765,23 @@ impl ModelType {
             | "bert-base-multilingual-uncased-sentiment-safetensors" => {
                 Some(Self::BertMultilingualSentiment)
             }
-            "toxic-bert" | "toxic-bert-safetensors" | "unitary/toxic-bert" => Some(Self::ToxicBertMultilingual),
+            "toxic-bert" | "toxic-bert-safetensors" | "unitary/toxic-bert" => {
+                Some(Self::ToxicBertMultilingual)
+            }
             "roberta-base-go_emotions" | "samlowe/roberta-base-go_emotions" => {
                 Some(Self::RobertaGoEmotions)
             }
             "emotion-english-distilroberta-base" => Some(Self::DistilRobertaEmotion),
 
-            "distilbart-cnn" | "olafuraron/distilbart-cnn-12-6" | "distilbart-cnn-12-6" => Some(Self::DistilBartCnn),
+            "distilbart-cnn" | "olafuraron/distilbart-cnn-12-6" | "distilbart-cnn-12-6" => {
+                Some(Self::DistilBartCnn)
+            }
             "bart-large-cnn" | "facebook/bart-large-cnn" => Some(Self::BartLargeCnn),
             "whisper-small" | "openai/whisper-small" => Some(Self::WhisperSmall),
             "whisper-large-v3" | "openai/whisper-large-v3" => Some(Self::WhisperLargeV3),
             "distilgpt2" | "distilgpt2/resolve/main/model.safetensors" => Some(Self::DistilGpt2),
             "gpt2" | "gpt2/resolve/main/model.safetensors" => Some(Self::Gpt2),
-            
+
             _ => None,
         }
     }
@@ -1026,5 +1017,8 @@ pub fn model_cache_dir(model_dir: &str) -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cache").join("kjarni").join(model_dir)
+    PathBuf::from(home)
+        .join(".cache")
+        .join("kjarni")
+        .join(model_dir)
 }

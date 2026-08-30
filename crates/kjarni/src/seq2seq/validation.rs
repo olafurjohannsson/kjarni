@@ -58,8 +58,7 @@ pub fn validate_for_seq2seq(model_type: ModelType) -> Seq2SeqResult<Seq2SeqValid
                 cli_name
             ));
         }
-        ModelTask::Translation => {
-        }
+        ModelTask::Translation => {}
         _ => {
             return Err(Seq2SeqError::IncompatibleModel {
                 model: cli_name.to_string(),
@@ -85,9 +84,9 @@ pub fn get_seq2seq_models() -> Vec<&'static str> {
 /// Get suggested models for seq2seq tasks.
 pub fn suggest_seq2seq_models() -> Vec<&'static str> {
     vec![
-        "flan-t5-base",    // Good general-purpose
-        "flan-t5-large",   // Higher quality
-        "distilbart-cnn",  // Fast summarization
-        "bart-large-cnn",  // Quality summarization
+        "flan-t5-base",   // Good general-purpose
+        "flan-t5-large",  // Higher quality
+        "distilbart-cnn", // Fast summarization
+        "bart-large-cnn", // Quality summarization
     ]
 }

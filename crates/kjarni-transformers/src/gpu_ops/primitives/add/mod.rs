@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::gpu::{GpuTensor, Kernel};
 use crate::WgpuContext;
+use crate::gpu::{GpuTensor, Kernel};
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct AddBroadcastRowUniforms {
@@ -18,8 +18,8 @@ struct AddBroadcastOffsetUniforms {
     b_row_offset: u32,
     seq_len: u32,
     hidden_size: u32,
-    b_stride_0: u32,    
-    _padding: [u32; 3], 
+    b_stride_0: u32,
+    _padding: [u32; 3],
 }
 
 #[repr(C)]
@@ -114,7 +114,7 @@ impl GpuAdd {
         });
         cpass.set_pipeline(&self.broadcast_row_pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (a.num_elements() as u32 + 255) / 256;
+        let workgroups = (a.num_elements() as u32).div_ceil(256);
         cpass.dispatch_workgroups(workgroups, 1, 1);
     }
     /// Encodes standard element-wise addition: `output = a + b`.
@@ -185,7 +185,7 @@ impl GpuAdd {
         });
         compute_pass.set_pipeline(&self.elementwise_pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (size + 255) / 256;
+        let workgroups = size.div_ceil(256);
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
     /// Encodes broadcast addition with an offset: `output[i,j,k] = a[i,j,k] + b[j + offset, k]`.
@@ -266,7 +266,7 @@ impl GpuAdd {
         });
         compute_pass.set_pipeline(&self.broadcast_offset_pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (uniforms.output_size + 255) / 256;
+        let workgroups = uniforms.output_size.div_ceil(256);
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }

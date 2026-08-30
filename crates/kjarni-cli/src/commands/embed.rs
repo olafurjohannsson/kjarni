@@ -1,6 +1,6 @@
 //! Text embedding command with colored output.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use colored::*;
 use kjarni::{PoolingStrategy, embedder::Embedder};
 
@@ -100,11 +100,7 @@ fn format_single(
                     "Embedded".dimmed(),
                     truncate(text, 50).white()
                 ));
-                output.push_str(&format!(
-                    "  {} {}\n",
-                    "Model:".dimmed(),
-                    model.cyan()
-                ));
+                output.push_str(&format!("  {} {}\n", "Model:".dimmed(), model.cyan()));
                 output.push_str(&format!(
                     "  {} {} dimensions\n\n",
                     "Dim:".dimmed(),

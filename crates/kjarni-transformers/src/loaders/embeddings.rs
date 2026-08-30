@@ -7,6 +7,8 @@ use anyhow::{Result, anyhow};
 use ndarray::Array2;
 
 #[cfg(not(target_arch = "wasm32"))]
+use crate::WgpuContext;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuEmbeddingWeights, GpuEmbeddings};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuTensor, GpuTensorPool};
@@ -16,8 +18,6 @@ use crate::models::base::ModelInput;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
 use crate::{EmbeddingData, Embeddings};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::WgpuContext;
 
 /// Configuration for embedding loading.
 #[derive(Debug, Clone, Default)]
@@ -253,7 +253,10 @@ impl LoadedEmbeddings {
                 ctx,
                 weights,
                 shared,
-                config.position_embedding.as_deref().filter(|k| !k.is_empty()),
+                config
+                    .position_embedding
+                    .as_deref()
+                    .filter(|k| !k.is_empty()),
                 config.type_embedding.as_deref().filter(|k| !k.is_empty()),
                 target_dtype,
             )?;
@@ -278,10 +281,10 @@ impl LoadedEmbeddings {
 
     /// Returns the raw word embedding weights for CPU weight sharing.
     pub fn word_embeddings_cpu(&self) -> Option<LinearLayer> {
-        self.cpu.as_ref().and_then(|e| match &e.word_embeddings {
-            EmbeddingData::F32(arc_w) => Some(LinearLayer::from_arc_f32(arc_w.clone(), None)),
-            EmbeddingData::BF16(arc_w) => Some(LinearLayer::from_arc_bf16(arc_w.clone(), None)),
-            EmbeddingData::Q8_0(arc_q) => Some(LinearLayer::from_arc_q8_0(arc_q.clone(), None)),
+        self.cpu.as_ref().map(|e| match &e.word_embeddings {
+            EmbeddingData::F32(arc_w) => LinearLayer::from_arc_f32(arc_w.clone(), None),
+            EmbeddingData::BF16(arc_w) => LinearLayer::from_arc_bf16(arc_w.clone(), None),
+            EmbeddingData::Q8_0(arc_q) => LinearLayer::from_arc_q8_0(arc_q.clone(), None),
         })
     }
 
@@ -422,9 +425,7 @@ impl LoadedEmbeddings {
                         pool,
                     );
                 } else {
-                    return Err(anyhow!(
-                        "tokens on GPU but embeddings are CPU-only"
-                    ));
+                    return Err(anyhow!("tokens on GPU but embeddings are CPU-only"));
                 }
             }
             _ => unreachable!(),
@@ -447,23 +448,23 @@ impl LoadedEmbeddings {
             .as_ref()
             .ok_or_else(|| anyhow!("no GPU context"))?;
 
-        if let EmbeddingInput::Cpu(cpu_ids) = input {
-            if let Some(cpu_layer) = &self.cpu {
-                let cpu_types = match token_type_ids {
-                    Some(EmbeddingInput::Cpu(t)) => Some(t),
-                    None => None,
-                    _ => return Err(anyhow!("cannot mix CPU tokens with GPU token types")),
-                };
+        if let EmbeddingInput::Cpu(cpu_ids) = input
+            && let Some(cpu_layer) = &self.cpu
+        {
+            let cpu_types = match token_type_ids {
+                Some(EmbeddingInput::Cpu(t)) => Some(t),
+                None => None,
+                _ => return Err(anyhow!("cannot mix CPU tokens with GPU token types")),
+            };
 
-                let hidden = cpu_layer.forward(
-                    cpu_ids,
-                    cpu_types,
-                    position_offset + self.config.position_offset,
-                    self.config.scale_embeddings,
-                );
+            let hidden = cpu_layer.forward(
+                cpu_ids,
+                cpu_types,
+                position_offset + self.config.position_offset,
+                self.config.scale_embeddings,
+            );
 
-                return GpuTensor::from_ndarray(ctx, &hidden);
-            }
+            return GpuTensor::from_ndarray(ctx, &hidden);
         }
 
         let ids_gpu = match input {

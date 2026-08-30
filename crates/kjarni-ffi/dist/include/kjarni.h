@@ -60,6 +60,12 @@ typedef enum KjarniErrorCode {
    */
   KJARNI_ERROR_CODE_STREAM_ENDED = 10,
   /**
+   * A panic in the engine was caught at the ABI boundary. The library is in an
+   * unspecified state for the operation that failed; the handle itself remains
+   * valid to free. `kjarni_last_error_message` names the entry point.
+   */
+  KJARNI_ERROR_CODE_PANIC = 11,
+  /**
    * Unknown error
    */
   KJARNI_ERROR_CODE_UNKNOWN = 255,
@@ -166,34 +172,77 @@ typedef struct KjarniStringArray {
 } KjarniStringArray;
 
 /**
- * Configuration for creating an Embedder.
+ * Configuration for creating a Chat instance.
  */
-typedef struct KjarniEmbedderConfig {
+typedef struct KjarniChatConfig {
   /**
-   * Device to use (CPU or GPU)
+   * Device to use (0 = CPU, 1 = GPU)
    */
   enum KjarniDevice device;
   /**
-   * Cache directory for models (NULL = default)
+   * Cache directory (NULL = default)
    */
   const char *cache_dir;
   /**
-   * Model name from registry (NULL = "minilm-l6-v2")
+   * Model name (required) - e.g. "llama3.2-1b-instruct"
    */
   const char *model_name;
   /**
-   * Path to local model (NULL = use registry)
+   * Model path (NULL = use registry)
    */
   const char *model_path;
   /**
-   * Whether to L2-normalize embeddings (1 = yes, 0 = no)
+   * System prompt (NULL = use model default)
    */
-  int32_t normalize;
+  const char *system_prompt;
   /**
-   * Suppress progress output (1 = quiet, 0 = verbose)
+   * Chat mode: 0 = default, 1 = creative, 2 = reasoning
+   */
+  int32_t mode;
+  /**
+   * Suppress output
    */
   int32_t quiet;
-} KjarniEmbedderConfig;
+} KjarniChatConfig;
+
+/**
+ * Generation parameters. Use -1 sentinel values to keep model defaults.
+ */
+typedef struct KjarniGenerationConfig {
+  /**
+   * Sampling temperature. -1.0 = use default.
+   */
+  float temperature;
+  /**
+   * Top-k sampling. -1 = use default.
+   */
+  int32_t top_k;
+  /**
+   * Top-p (nucleus) sampling. -1.0 = use default.
+   */
+  float top_p;
+  /**
+   * Min-p sampling threshold. -1.0 = use default.
+   */
+  float min_p;
+  /**
+   * Repetition penalty. -1.0 = use default.
+   */
+  float repetition_penalty;
+  /**
+   * Max new tokens to generate. -1 = use default.
+   */
+  int32_t max_new_tokens;
+  /**
+   * Sampling mode. -1 = default, 0 = greedy, 1 = sample.
+   */
+  int32_t do_sample;
+} KjarniGenerationConfig;
+
+/**
+ * Token callback for streaming. Return false to stop generation.
+ */
+typedef bool (*KjarniStreamCallbackFn)(const char *text, void *user_data);
 
 /**
  * Single classification result (label + score).
@@ -244,31 +293,34 @@ typedef struct KjarniClassifierConfig {
 } KjarniClassifierConfig;
 
 /**
- * Single rerank result
+ * Configuration for creating an Embedder.
  */
-typedef struct KjarniRerankResult {
-  uintptr_t index;
-  float score;
-} KjarniRerankResult;
-
-/**
- * Array of rerank results
- */
-typedef struct KjarniRerankResults {
-  struct KjarniRerankResult *results;
-  uintptr_t len;
-} KjarniRerankResults;
-
-/**
- * Configuration for Reranker
- */
-typedef struct KjarniRerankerConfig {
+typedef struct KjarniEmbedderConfig {
+  /**
+   * Device to use (CPU or GPU)
+   */
   enum KjarniDevice device;
+  /**
+   * Cache directory for models (NULL = default)
+   */
   const char *cache_dir;
+  /**
+   * Model name from registry (NULL = "minilm-l6-v2")
+   */
   const char *model_name;
+  /**
+   * Path to local model (NULL = use registry)
+   */
   const char *model_path;
+  /**
+   * Whether to L2-normalize embeddings (1 = yes, 0 = no)
+   */
+  int32_t normalize;
+  /**
+   * Suppress progress output (1 = quiet, 0 = verbose)
+   */
   int32_t quiet;
-} KjarniRerankerConfig;
+} KjarniEmbedderConfig;
 
 /**
  * Information about an existing index
@@ -400,6 +452,33 @@ typedef struct KjarniProgress {
  */
 typedef void (*KjarniProgressCallbackFn)(struct KjarniProgress progress, void *user_data);
 
+/**
+ * Single rerank result
+ */
+typedef struct KjarniRerankResult {
+  uintptr_t index;
+  float score;
+} KjarniRerankResult;
+
+/**
+ * Array of rerank results
+ */
+typedef struct KjarniRerankResults {
+  struct KjarniRerankResult *results;
+  uintptr_t len;
+} KjarniRerankResults;
+
+/**
+ * Configuration for Reranker
+ */
+typedef struct KjarniRerankerConfig {
+  enum KjarniDevice device;
+  const char *cache_dir;
+  const char *model_name;
+  const char *model_path;
+  int32_t quiet;
+} KjarniRerankerConfig;
+
 typedef struct KjarniSearchResult {
   float score;
   uintptr_t document_id;
@@ -432,79 +511,6 @@ typedef struct KjarniSearcherConfig {
   int32_t quiet;
 } KjarniSearcherConfig;
 
-/**
- * Configuration for creating a Chat instance.
- */
-typedef struct KjarniChatConfig {
-  /**
-   * Device to use (0 = CPU, 1 = GPU)
-   */
-  enum KjarniDevice device;
-  /**
-   * Cache directory (NULL = default)
-   */
-  const char *cache_dir;
-  /**
-   * Model name (required) - e.g. "llama3.2-1b-instruct"
-   */
-  const char *model_name;
-  /**
-   * Model path (NULL = use registry)
-   */
-  const char *model_path;
-  /**
-   * System prompt (NULL = use model default)
-   */
-  const char *system_prompt;
-  /**
-   * Chat mode: 0 = default, 1 = creative, 2 = reasoning
-   */
-  int32_t mode;
-  /**
-   * Suppress output
-   */
-  int32_t quiet;
-} KjarniChatConfig;
-
-/**
- * Generation parameters. Use -1 sentinel values to keep model defaults.
- */
-typedef struct KjarniGenerationConfig {
-  /**
-   * Sampling temperature. -1.0 = use default.
-   */
-  float temperature;
-  /**
-   * Top-k sampling. -1 = use default.
-   */
-  int32_t top_k;
-  /**
-   * Top-p (nucleus) sampling. -1.0 = use default.
-   */
-  float top_p;
-  /**
-   * Min-p sampling threshold. -1.0 = use default.
-   */
-  float min_p;
-  /**
-   * Repetition penalty. -1.0 = use default.
-   */
-  float repetition_penalty;
-  /**
-   * Max new tokens to generate. -1 = use default.
-   */
-  int32_t max_new_tokens;
-  /**
-   * Sampling mode. -1 = default, 0 = greedy, 1 = sample.
-   */
-  int32_t do_sample;
-} KjarniGenerationConfig;
-
-/**
- * Token callback for streaming. Return false to stop generation.
- */
-typedef bool (*KjarniStreamCallbackFn)(const char *text, void *user_data);
-
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -526,349 +532,85 @@ const char *kjarni_version(void);
 
 /**
  * Free a float array allocated by Kjarni.
+ *
+ * # Safety
+ *
+ * - `arr` must be a value returned by a search/embedding call, passed here exactly once. Its
+ *   buffers are invalid to read afterwards.
  */
 void kjarni_float_array_free(struct KjarniFloatArray arr);
 
 /**
  * Free a 2D float array allocated by Kjarni.
+ *
+ * # Safety
+ *
+ * - `arr` must be a value returned by `kjarni_embedder_encode_batch`, passed here exactly once.
+ *   Its buffers are invalid to read afterwards.
  */
 void kjarni_float_2d_array_free(struct KjarniFloat2DArray arr);
 
 /**
  * Free a string allocated by Kjarni.
+ *
+ * # Safety
+ *
+ * - `s` must be a valid, writable pointer to a `std::ffi::c_char`. It is written on both
+ *   success and failure, and any buffers it receives are owned by the caller.
  */
 void kjarni_string_free(char *s);
 
 /**
  * Free a string array allocated by Kjarni.
+ *
+ * # Safety
+ *
+ * - `arr` must be a value returned by a call that returns one, passed here exactly once. Its
+ *   buffers are invalid to read afterwards.
  */
 void kjarni_string_array_free(struct KjarniStringArray arr);
 
+/**
+ * # Safety
+ *
+ * - `a` must be null, or point to at least `len` readable `f32` values.
+ * - `b` must be null, or point to at least `len` readable `f32` values.
+ */
 float kjarni_cosine_similarity(const float *a, const float *b, uintptr_t len);
 
 struct KjarniCancelToken *kjarni_cancel_token_new(void);
 
+/**
+ * # Safety
+ *
+ * - `token` must be null, or a live handle returned by `kjarni_cancel_token_new` that has not
+ *   been freed.
+ */
 void kjarni_cancel_token_cancel(struct KjarniCancelToken *token);
 
+/**
+ * # Safety
+ *
+ * - `token` must be null, or a live handle returned by `kjarni_cancel_token_new` that has not
+ *   been freed.
+ */
 bool kjarni_cancel_token_is_cancelled(const struct KjarniCancelToken *token);
 
+/**
+ * # Safety
+ *
+ * - `token` must be null, or a live handle returned by `kjarni_cancel_token_new` that has not
+ *   been freed.
+ */
 void kjarni_cancel_token_reset(struct KjarniCancelToken *token);
 
-void kjarni_cancel_token_free(struct KjarniCancelToken *token);
-
-const char *kjarni_error_code_to_string(enum KjarniErrorCode err);
-
 /**
- * Get the name of an error code as a C string.
- */
-const char *kjarni_error_name(enum KjarniErrorCode err);
-
-/**
- * Get the last error message. Returns NULL if no error.
- */
-const char *kjarni_last_error_message(void);
-
-/**
- * Clear the last error.
- */
-void kjarni_clear_error(void);
-
-/**
- * Get default embedder configuration.
- */
-struct KjarniEmbedderConfig kjarni_embedder_config_default(void);
-
-/**
- * Create a new Embedder.
- */
-enum KjarniErrorCode kjarni_embedder_new(const struct KjarniEmbedderConfig *config,
-                                         struct KjarniEmbedder **out);
-
-/**
- * Free an Embedder instance.
- */
-void kjarni_embedder_free(struct KjarniEmbedder *embedder);
-
-/**
- * Encode a single text to an embedding vector.
- */
-enum KjarniErrorCode kjarni_embedder_encode(struct KjarniEmbedder *embedder,
-                                            const char *text,
-                                            struct KjarniFloatArray *out);
-
-/**
- * Encode multiple texts to embedding vectors.
- */
-enum KjarniErrorCode kjarni_embedder_encode_batch(struct KjarniEmbedder *embedder,
-                                                  const char *const *texts,
-                                                  uintptr_t num_texts,
-                                                  struct KjarniFloat2DArray *out);
-
-/**
- * Compute cosine similarity between two texts.
- */
-enum KjarniErrorCode kjarni_embedder_similarity(struct KjarniEmbedder *embedder,
-                                                const char *text1,
-                                                const char *text2,
-                                                float *out);
-
-/**
- * Get the embedding dimension.
- */
-uintptr_t kjarni_embedder_dim(const struct KjarniEmbedder *embedder);
-
-void kjarni_class_results_free(struct KjarniClassResults results);
-
-/**
- * Get default classifier configuration.
- */
-struct KjarniClassifierConfig kjarni_classifier_config_default(void);
-
-/**
- * Create a new Classifier.
+ * # Safety
  *
- * # Safety
- * - `config` must be valid or NULL
- * - `out` must be a valid pointer
- * - The returned handle must be freed with `kjarni_classifier_free`
+ * - `token` must be null, or a handle returned by `kjarni_cancel_token_new` that has not
+ *   already been passed to this function. It is invalid to use afterwards.
  */
-enum KjarniErrorCode kjarni_classifier_new(const struct KjarniClassifierConfig *config,
-                                           struct KjarniClassifier **out);
-
-/**
- * Free a Classifier.
- */
-void kjarni_classifier_free(struct KjarniClassifier *classifier);
-
-/**
- * Classify a single text.
- */
-enum KjarniErrorCode kjarni_classifier_classify(struct KjarniClassifier *classifier,
-                                                const char *text,
-                                                struct KjarniClassResults *out);
-
-/**
- * Get the classifier's labels.
- */
-enum KjarniErrorCode kjarni_classifier_labels(const struct KjarniClassifier *classifier,
-                                              struct KjarniStringArray *out);
-
-/**
- * Get number of labels.
- */
-uintptr_t kjarni_classifier_num_labels(const struct KjarniClassifier *classifier);
-
-/**
- * Free rerank results
- */
-void kjarni_rerank_results_free(struct KjarniRerankResults results);
-
-/**
- * Get default reranker configuration
- */
-struct KjarniRerankerConfig kjarni_reranker_config_default(void);
-
-/**
- * Create a new Reranker
- */
-enum KjarniErrorCode kjarni_reranker_new(const struct KjarniRerankerConfig *config,
-                                         struct KjarniReranker **out);
-
-/**
- * Free a Reranker
- */
-void kjarni_reranker_free(struct KjarniReranker *reranker);
-
-/**
- * Score a single query-document pair
- */
-enum KjarniErrorCode kjarni_reranker_score(struct KjarniReranker *reranker,
-                                           const char *query,
-                                           const char *document,
-                                           float *out);
-
-/**
- * Rerank documents by relevance to query
- */
-enum KjarniErrorCode kjarni_reranker_rerank(struct KjarniReranker *reranker,
-                                            const char *query,
-                                            const char *const *documents,
-                                            uintptr_t num_docs,
-                                            struct KjarniRerankResults *out);
-
-/**
- * Rerank and return top-k results
- */
-enum KjarniErrorCode kjarni_reranker_rerank_top_k(struct KjarniReranker *reranker,
-                                                  const char *query,
-                                                  const char *const *documents,
-                                                  uintptr_t num_docs,
-                                                  uintptr_t top_k,
-                                                  struct KjarniRerankResults *out);
-
-/**
- * Free memory allocated for index info strings
- */
-void kjarni_index_info_free(struct KjarniIndexInfo info);
-
-/**
- * Get default indexer configuration
- */
-struct KjarniIndexerConfig kjarni_indexer_config_default(void);
-
-/**
- * Create a new Indexer
- */
-enum KjarniErrorCode kjarni_indexer_new(const struct KjarniIndexerConfig *config,
-                                        struct KjarniIndexer **out);
-
-/**
- * Free an Indexer handle
- */
-void kjarni_indexer_free(struct KjarniIndexer *indexer);
-
-/**
- * Create a new index from files/directories
- */
-enum KjarniErrorCode kjarni_indexer_create(struct KjarniIndexer *indexer,
-                                           const char *index_path,
-                                           const char *const *inputs,
-                                           uintptr_t num_inputs,
-                                           int32_t force,
-                                           struct KjarniIndexStats *out);
-
-/**
- * Create a new index with progress callback and cancellation support.
- */
-enum KjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniIndexer *indexer,
-                                                         const char *index_path,
-                                                         const char *const *inputs,
-                                                         uintptr_t num_inputs,
-                                                         int32_t force,
-                                                         KjarniProgressCallbackFn progress_callback,
-                                                         void *user_data,
-                                                         const struct KjarniCancelToken *cancel_token,
-                                                         struct KjarniIndexStats *out);
-
-/**
- * Add documents to an existing index 
- */
-enum KjarniErrorCode kjarni_indexer_add(struct KjarniIndexer *indexer,
-                                        const char *index_path,
-                                        const char *const *inputs,
-                                        uintptr_t num_inputs,
-                                        uintptr_t *documents_added);
-
-/**
- * Add documents to an existing index with progress callback and cancellation support.
- */
-enum KjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniIndexer *indexer,
-                                                      const char *index_path,
-                                                      const char *const *inputs,
-                                                      uintptr_t num_inputs,
-                                                      KjarniProgressCallbackFn progress_callback,
-                                                      void *user_data,
-                                                      const struct KjarniCancelToken *cancel_token,
-                                                      uintptr_t *documents_added);
-
-/**
- * Get information about an existing index
- */
-enum KjarniErrorCode kjarni_index_info(const char *index_path, struct KjarniIndexInfo *out);
-
-/**
- * Delete an index.
- */
-enum KjarniErrorCode kjarni_index_delete(const char *index_path);
-
-/**
- * Get the embedding model name used by the indexer.
- */
-uintptr_t kjarni_indexer_model_name(const struct KjarniIndexer *indexer,
-                                    char *buf,
-                                    uintptr_t buf_len);
-
-/**
- * Get the embedding dimension used by the indexer.
- */
-uintptr_t kjarni_indexer_dimension(const struct KjarniIndexer *indexer);
-
-/**
- * Get the chunk size configured for the indexer.
- */
-uintptr_t kjarni_indexer_chunk_size(const struct KjarniIndexer *indexer);
-
-/**
- * # Safety
- * Must only be called once per `KjarniSearchResults` returned from search functions.
- */
-void kjarni_search_results_free(struct KjarniSearchResults results);
-
-struct KjarniSearchOptions kjarni_search_options_default(void);
-
-struct KjarniSearcherConfig kjarni_searcher_config_default(void);
-
-/**
- * - The returned handle must be freed with `kjarni_searcher_free`
- */
-enum KjarniErrorCode kjarni_searcher_new(const struct KjarniSearcherConfig *config,
-                                         struct KjarniSearcher **out);
-
-void kjarni_searcher_free(struct KjarniSearcher *searcher);
-
-/**
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
- */
-enum KjarniErrorCode kjarni_searcher_search(struct KjarniSearcher *searcher,
-                                            const char *index_path,
-                                            const char *query,
-                                            struct KjarniSearchResults *out);
-
-/**
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
- */
-enum KjarniErrorCode kjarni_searcher_search_with_options(struct KjarniSearcher *searcher,
-                                                         const char *index_path,
-                                                         const char *query,
-                                                         const struct KjarniSearchOptions *options,
-                                                         struct KjarniSearchResults *out);
-
-/**
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
- */
-enum KjarniErrorCode kjarni_search_keywords(const char *index_path,
-                                            const char *query,
-                                            uintptr_t top_k,
-                                            struct KjarniSearchResults *out);
-
-/**
- * `searcher` must be a valid handle or null.
- */
-bool kjarni_searcher_has_reranker(const struct KjarniSearcher *searcher);
-
-/**
- * `searcher` must be a valid handle or null.
- */
-enum KjarniSearchMode kjarni_searcher_default_mode(const struct KjarniSearcher *searcher);
-
-/**
- * `searcher` must be a valid handle or null.
- */
-uintptr_t kjarni_searcher_default_top_k(const struct KjarniSearcher *searcher);
-
-/**
- * Get searcher model name into caller-provided buffer
- */
-uintptr_t kjarni_searcher_model_name(const struct KjarniSearcher *searcher,
-                                     char *buf,
-                                     uintptr_t buf_len);
-
-/**
- * Get reranker model name into caller-provided buffer
- */
-uintptr_t kjarni_searcher_reranker_model(const struct KjarniSearcher *searcher,
-                                         char *buf,
-                                         uintptr_t buf_len);
+void kjarni_cancel_token_free(struct KjarniCancelToken *token);
 
 /**
  * Get default chat configuration.
@@ -1020,6 +762,607 @@ uintptr_t kjarni_chat_model_name(const struct KjarniChat *chat, char *buf, uintp
  * Get the context window size.
  */
 uintptr_t kjarni_chat_context_size(const struct KjarniChat *chat);
+
+/**
+ * # Safety
+ *
+ * - `results` must be a value returned by `kjarni_classifier_classify`, passed here exactly
+ *   once. Its buffers are invalid to read afterwards.
+ */
+void kjarni_class_results_free(struct KjarniClassResults results);
+
+/**
+ * Get default classifier configuration.
+ */
+struct KjarniClassifierConfig kjarni_classifier_config_default(void);
+
+/**
+ * Create a new Classifier.
+ *
+ * # Safety
+ * - `config` must be valid or NULL
+ * - `out` must be a valid pointer
+ * - The returned handle must be freed with `kjarni_classifier_free`
+ */
+enum KjarniErrorCode kjarni_classifier_new(const struct KjarniClassifierConfig *config,
+                                           struct KjarniClassifier **out);
+
+/**
+ * Free a Classifier.
+ *
+ * # Safety
+ *
+ * - `classifier` must be null, or a handle returned by `kjarni_classifier_new` that has not
+ *   already been passed to this function. It is invalid to use afterwards.
+ */
+void kjarni_classifier_free(struct KjarniClassifier *classifier);
+
+/**
+ * Classify a single text.
+ *
+ * # Safety
+ *
+ * - `classifier` must be null, or a live handle returned by `kjarni_classifier_new` that has
+ *   not been freed.
+ * - `text` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniClassResults`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_classifier_classify(struct KjarniClassifier *classifier,
+                                                const char *text,
+                                                struct KjarniClassResults *out);
+
+/**
+ * Get the classifier's labels.
+ *
+ * # Safety
+ *
+ * - `classifier` must be null, or a live handle returned by `kjarni_classifier_new` that has
+ *   not been freed.
+ * - `out` must be a valid, writable pointer to a `KjarniStringArray`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_classifier_labels(const struct KjarniClassifier *classifier,
+                                              struct KjarniStringArray *out);
+
+/**
+ * Get number of labels.
+ *
+ * # Safety
+ *
+ * - `classifier` must be null, or a live handle returned by `kjarni_classifier_new` that has
+ *   not been freed.
+ */
+uintptr_t kjarni_classifier_num_labels(const struct KjarniClassifier *classifier);
+
+/**
+ * Get default embedder configuration.
+ */
+struct KjarniEmbedderConfig kjarni_embedder_config_default(void);
+
+/**
+ * Create a new Embedder.
+ *
+ * # Safety
+ *
+ * - `out` must be null, or a live handle returned by `kjarni_embedder_new` that has not been
+ *   freed.
+ */
+enum KjarniErrorCode kjarni_embedder_new(const struct KjarniEmbedderConfig *config,
+                                         struct KjarniEmbedder **out);
+
+/**
+ * Free an Embedder instance.
+ *
+ * # Safety
+ *
+ * - `embedder` must be null, or a handle returned by `kjarni_embedder_new` that has not
+ *   already been passed to this function. It is invalid to use afterwards.
+ */
+void kjarni_embedder_free(struct KjarniEmbedder *embedder);
+
+/**
+ * Encode a single text to an embedding vector.
+ *
+ * # Safety
+ *
+ * - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+ *   been freed.
+ * - `text` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniFloatArray`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_embedder_encode(struct KjarniEmbedder *embedder,
+                                            const char *text,
+                                            struct KjarniFloatArray *out);
+
+/**
+ * Encode multiple texts to embedding vectors.
+ *
+ * # Safety
+ *
+ * - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+ *   been freed.
+ * - `texts` must point to `num_texts` readable pointers, each null or a valid nul-terminated
+ *   C string that stays valid for the call.
+ * - `out` must be a valid, writable pointer to a `KjarniFloat2DArray`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_embedder_encode_batch(struct KjarniEmbedder *embedder,
+                                                  const char *const *texts,
+                                                  uintptr_t num_texts,
+                                                  struct KjarniFloat2DArray *out);
+
+/**
+ * Compute cosine similarity between two texts.
+ *
+ * # Safety
+ *
+ * - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+ *   been freed.
+ * - `text1` must be null, or a valid pointer to a nul-terminated C string.
+ * - `text2` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `c_float`. It is written on both success and
+ *   failure, and any buffers it receives are owned by the caller.
+ */
+enum KjarniErrorCode kjarni_embedder_similarity(struct KjarniEmbedder *embedder,
+                                                const char *text1,
+                                                const char *text2,
+                                                float *out);
+
+/**
+ * Get the embedding dimension.
+ *
+ * # Safety
+ *
+ * - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+ *   been freed.
+ */
+uintptr_t kjarni_embedder_dim(const struct KjarniEmbedder *embedder);
+
+const char *kjarni_error_code_to_string(enum KjarniErrorCode err);
+
+/**
+ * Get the name of an error code as a C string.
+ */
+const char *kjarni_error_name(enum KjarniErrorCode err);
+
+/**
+ * Get the last error message. Returns NULL if no error.
+ */
+const char *kjarni_last_error_message(void);
+
+/**
+ * Clear the last error.
+ */
+void kjarni_clear_error(void);
+
+/**
+ * Free memory allocated for index info strings
+ *
+ * # Safety
+ *
+ * - `info` must be a value returned by `kjarni_index_info`, passed here exactly once. Its
+ *   buffers are invalid to read afterwards.
+ */
+void kjarni_index_info_free(struct KjarniIndexInfo info);
+
+/**
+ * Get default indexer configuration
+ */
+struct KjarniIndexerConfig kjarni_indexer_config_default(void);
+
+/**
+ * Create a new Indexer
+ *
+ * # Safety
+ *
+ * - `out` must be null, or a live handle returned by `kjarni_indexer_new` that has not been
+ *   freed.
+ */
+enum KjarniErrorCode kjarni_indexer_new(const struct KjarniIndexerConfig *config,
+                                        struct KjarniIndexer **out);
+
+/**
+ * Free an Indexer handle
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a handle returned by `kjarni_indexer_new` that has not already
+ *   been passed to this function. It is invalid to use afterwards.
+ */
+void kjarni_indexer_free(struct KjarniIndexer *indexer);
+
+/**
+ * Create a new index from files/directories
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+ *   nul-terminated C string that stays valid for the call.
+ * - `out` must be a valid, writable pointer to a `KjarniIndexStats`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_indexer_create(struct KjarniIndexer *indexer,
+                                           const char *index_path,
+                                           const char *const *inputs,
+                                           uintptr_t num_inputs,
+                                           int32_t force,
+                                           struct KjarniIndexStats *out);
+
+/**
+ * Create a new index with progress callback and cancellation support.
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+ *   nul-terminated C string that stays valid for the call.
+ * - `user_data` must be a valid, writable pointer to a `c_void`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ * - `cancel_token` must be null, or a live handle returned by `kjarni_cancel_token_new` that
+ *   has not been freed.
+ * - `out` must be a valid, writable pointer to a `KjarniIndexStats`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniIndexer *indexer,
+                                                         const char *index_path,
+                                                         const char *const *inputs,
+                                                         uintptr_t num_inputs,
+                                                         int32_t force,
+                                                         KjarniProgressCallbackFn progress_callback,
+                                                         void *user_data,
+                                                         const struct KjarniCancelToken *cancel_token,
+                                                         struct KjarniIndexStats *out);
+
+/**
+ * Add documents to an existing index
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+ *   nul-terminated C string that stays valid for the call.
+ * - `documents_added` must be a valid, writable pointer to a `usize`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_indexer_add(struct KjarniIndexer *indexer,
+                                        const char *index_path,
+                                        const char *const *inputs,
+                                        uintptr_t num_inputs,
+                                        uintptr_t *documents_added);
+
+/**
+ * Add documents to an existing index with progress callback and cancellation support.
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+ *   nul-terminated C string that stays valid for the call.
+ * - `user_data` must be a valid, writable pointer to a `c_void`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ * - `cancel_token` must be null, or a live handle returned by `kjarni_cancel_token_new` that
+ *   has not been freed.
+ * - `documents_added` must be a valid, writable pointer to a `usize`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniIndexer *indexer,
+                                                      const char *index_path,
+                                                      const char *const *inputs,
+                                                      uintptr_t num_inputs,
+                                                      KjarniProgressCallbackFn progress_callback,
+                                                      void *user_data,
+                                                      const struct KjarniCancelToken *cancel_token,
+                                                      uintptr_t *documents_added);
+
+/**
+ * Get information about an existing index
+ *
+ * # Safety
+ *
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniIndexInfo`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_index_info(const char *index_path, struct KjarniIndexInfo *out);
+
+/**
+ * Delete an index.
+ *
+ * # Safety
+ *
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ */
+enum KjarniErrorCode kjarni_index_delete(const char *index_path);
+
+/**
+ * Get the embedding model name used by the indexer.
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ * - `buf` must be null, or point to at least `buf_len` writable bytes. When it is null the
+ *   required size is returned and nothing is written.
+ */
+uintptr_t kjarni_indexer_model_name(const struct KjarniIndexer *indexer,
+                                    char *buf,
+                                    uintptr_t buf_len);
+
+/**
+ * Get the embedding dimension used by the indexer.
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ */
+uintptr_t kjarni_indexer_dimension(const struct KjarniIndexer *indexer);
+
+/**
+ * Get the chunk size configured for the indexer.
+ *
+ * # Safety
+ *
+ * - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+ *   been freed.
+ */
+uintptr_t kjarni_indexer_chunk_size(const struct KjarniIndexer *indexer);
+
+/**
+ * Free rerank results
+ *
+ * # Safety
+ *
+ * - `results` must be a value returned by a rerank call, passed here exactly once. Its
+ *   buffers are invalid to read afterwards.
+ */
+void kjarni_rerank_results_free(struct KjarniRerankResults results);
+
+/**
+ * Get default reranker configuration
+ */
+struct KjarniRerankerConfig kjarni_reranker_config_default(void);
+
+/**
+ * Create a new Reranker
+ *
+ * # Safety
+ *
+ * - `out` must be null, or a live handle returned by `kjarni_reranker_new` that has not been
+ *   freed.
+ */
+enum KjarniErrorCode kjarni_reranker_new(const struct KjarniRerankerConfig *config,
+                                         struct KjarniReranker **out);
+
+/**
+ * Free a Reranker
+ *
+ * # Safety
+ *
+ * - `reranker` must be null, or a handle returned by `kjarni_reranker_new` that has not
+ *   already been passed to this function. It is invalid to use afterwards.
+ */
+void kjarni_reranker_free(struct KjarniReranker *reranker);
+
+/**
+ * Score a single query-document pair
+ *
+ * # Safety
+ *
+ * - `reranker` must be null, or a live handle returned by `kjarni_reranker_new` that has not
+ *   been freed.
+ * - `query` must be null, or a valid pointer to a nul-terminated C string.
+ * - `document` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `c_float`. It is written on both success and
+ *   failure, and any buffers it receives are owned by the caller.
+ */
+enum KjarniErrorCode kjarni_reranker_score(struct KjarniReranker *reranker,
+                                           const char *query,
+                                           const char *document,
+                                           float *out);
+
+/**
+ * Rerank documents by relevance to query
+ *
+ * # Safety
+ *
+ * - `reranker` must be null, or a live handle returned by `kjarni_reranker_new` that has not
+ *   been freed.
+ * - `query` must be null, or a valid pointer to a nul-terminated C string.
+ * - `documents` must point to `num_docs` readable pointers, each null or a valid
+ *   nul-terminated C string that stays valid for the call.
+ * - `out` must be a valid, writable pointer to a `KjarniRerankResults`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_reranker_rerank(struct KjarniReranker *reranker,
+                                            const char *query,
+                                            const char *const *documents,
+                                            uintptr_t num_docs,
+                                            struct KjarniRerankResults *out);
+
+/**
+ * Rerank and return top-k results
+ *
+ * # Safety
+ *
+ * - `reranker` must be null, or a live handle returned by `kjarni_reranker_new` that has not
+ *   been freed.
+ * - `query` must be null, or a valid pointer to a nul-terminated C string.
+ * - `documents` must point to `num_docs` readable pointers, each null or a valid
+ *   nul-terminated C string that stays valid for the call.
+ * - `out` must be a valid, writable pointer to a `KjarniRerankResults`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_reranker_rerank_top_k(struct KjarniReranker *reranker,
+                                                  const char *query,
+                                                  const char *const *documents,
+                                                  uintptr_t num_docs,
+                                                  uintptr_t top_k,
+                                                  struct KjarniRerankResults *out);
+
+/**
+ * # Safety
+ * Must only be called once per `KjarniSearchResults` returned from search functions.
+ */
+void kjarni_search_results_free(struct KjarniSearchResults results);
+
+struct KjarniSearchOptions kjarni_search_options_default(void);
+
+struct KjarniSearcherConfig kjarni_searcher_config_default(void);
+
+/**
+ * - The returned handle must be freed with `kjarni_searcher_free`
+ *
+ * # Safety
+ *
+ * - `out` must be null, or a live handle returned by `kjarni_searcher_new` that has not been
+ *   freed.
+ */
+enum KjarniErrorCode kjarni_searcher_new(const struct KjarniSearcherConfig *config,
+                                         struct KjarniSearcher **out);
+
+/**
+ * # Safety
+ *
+ * - `searcher` must be null, or a handle returned by `kjarni_searcher_new` that has not
+ *   already been passed to this function. It is invalid to use afterwards.
+ */
+void kjarni_searcher_free(struct KjarniSearcher *searcher);
+
+/**
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `query` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniSearchResults`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_searcher_search(struct KjarniSearcher *searcher,
+                                            const char *index_path,
+                                            const char *query,
+                                            struct KjarniSearchResults *out);
+
+/**
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `query` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniSearchResults`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_searcher_search_with_options(struct KjarniSearcher *searcher,
+                                                         const char *index_path,
+                                                         const char *query,
+                                                         const struct KjarniSearchOptions *options,
+                                                         struct KjarniSearchResults *out);
+
+/**
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
+ *
+ * # Safety
+ *
+ * - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+ * - `query` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniSearchResults`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with the matching `*_free`; on
+ *   failure it is either cleared or left unmodified, and must not be read.
+ */
+enum KjarniErrorCode kjarni_search_keywords(const char *index_path,
+                                            const char *query,
+                                            uintptr_t top_k,
+                                            struct KjarniSearchResults *out);
+
+/**
+ * `searcher` must be a valid handle or null.
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ */
+bool kjarni_searcher_has_reranker(const struct KjarniSearcher *searcher);
+
+/**
+ * `searcher` must be a valid handle or null.
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ */
+enum KjarniSearchMode kjarni_searcher_default_mode(const struct KjarniSearcher *searcher);
+
+/**
+ * `searcher` must be a valid handle or null.
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ */
+uintptr_t kjarni_searcher_default_top_k(const struct KjarniSearcher *searcher);
+
+/**
+ * Get searcher model name into caller-provided buffer
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ * - `buf` must be null, or point to at least `buf_len` writable bytes. When it is null the
+ *   required size is returned and nothing is written.
+ */
+uintptr_t kjarni_searcher_model_name(const struct KjarniSearcher *searcher,
+                                     char *buf,
+                                     uintptr_t buf_len);
+
+/**
+ * Get reranker model name into caller-provided buffer
+ *
+ * # Safety
+ *
+ * - `searcher` must be null, or a live handle returned by `kjarni_searcher_new` that has not
+ *   been freed.
+ * - `buf` must be null, or point to at least `buf_len` writable bytes. When it is null the
+ *   required size is returned and nothing is written.
+ */
+uintptr_t kjarni_searcher_reranker_model(const struct KjarniSearcher *searcher,
+                                         char *buf,
+                                         uintptr_t buf_len);
 
 #ifdef __cplusplus
 }  // extern "C"

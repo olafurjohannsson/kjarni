@@ -1,5 +1,5 @@
-use crate::gpu::{GpuTensor, Kernel};
 use crate::WgpuContext;
+use crate::gpu::{GpuTensor, Kernel};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
@@ -38,17 +38,20 @@ impl Kernel for GpuAddBias {
     ///   - `input` can be any rank.
     ///   - `bias` must be a 1D tensor.
     /// * `output` - The tensor where the result is written. Must have the same shape as `input`.
-    fn encode(
-        &self,
-        encoder: &mut CommandEncoder,
-        inputs: &[&GpuTensor],
-        output: &GpuTensor,
-    ) {
+    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
         let input = inputs[0];
         let bias = inputs[1];
 
-        assert_eq!(inputs.len(), 2, "GpuAddBias kernel expects 2 inputs: [input, bias]");
-        assert_eq!(input.shape(), output.shape(), "Input and output shapes must match for AddBias");
+        assert_eq!(
+            inputs.len(),
+            2,
+            "GpuAddBias kernel expects 2 inputs: [input, bias]"
+        );
+        assert_eq!(
+            input.shape(),
+            output.shape(),
+            "Input and output shapes must match for AddBias"
+        );
         assert_eq!(bias.rank(), 1, "Bias tensor must be 1D");
         assert_eq!(
             input.shape().last().unwrap(),
@@ -81,7 +84,10 @@ fn run_internal_add_bias(
     size: u32,
 ) {
     let device = &context.device;
-    let uniforms = Uniforms { size, _padding: [0; 3] };
+    let uniforms = Uniforms {
+        size,
+        _padding: [0; 3],
+    };
 
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("AddBias Uniforms"),
@@ -93,19 +99,31 @@ fn run_internal_add_bias(
         label: Some("AddBias Bind Group"),
         layout: bind_group_layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: bias.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: output.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: input.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: bias.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: output.as_entire_binding(),
+            },
         ],
     });
 
-    let label = format!("AddBias");
+    let label = "AddBias".to_string();
     context.profiler.profile(encoder, &label, |compute_pass| {
         compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        
-        let workgroup_x = (size + 255) / 256;
+
+        let workgroup_x = size.div_ceil(256);
         compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
     });
 }
@@ -122,28 +140,44 @@ fn compile_add_bias_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGro
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             },
             // Input Tensor
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             },
             // Bias Vector
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             },
             // Output Tensor
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             },
         ],

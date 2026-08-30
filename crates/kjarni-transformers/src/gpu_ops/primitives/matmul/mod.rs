@@ -1,8 +1,8 @@
 //! Matrix multiplication with multi-dtype support
 
+use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
 use crate::tensor::DType;
-use crate::WgpuContext;
 use std::sync::Arc;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
@@ -277,8 +277,8 @@ fn run_internal_matmul(
         pass.set_bind_group(0, &bind_group, &[offset]);
 
         const TILE_DIM: u32 = 32;
-        let workgroup_x = (n + TILE_DIM - 1) / TILE_DIM;
-        let workgroup_y = (m + TILE_DIM - 1) / TILE_DIM;
+        let workgroup_x = n.div_ceil(TILE_DIM);
+        let workgroup_y = m.div_ceil(TILE_DIM);
         pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
     });
 }

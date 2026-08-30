@@ -216,15 +216,15 @@ mod tests {
     #[test]
     fn test_kjarni_device_clone() {
         let cpu = KjarniDevice::Cpu;
-        let cpu_clone = cpu.clone();
+        let cpu_clone = cpu;
         assert_eq!(cpu, cpu_clone);
 
         let gpu = KjarniDevice::Gpu;
-        let gpu_clone = gpu.clone();
+        let gpu_clone = gpu;
         assert_eq!(gpu, gpu_clone);
 
         let auto = KjarniDevice::Auto;
-        let auto_clone = auto.clone();
+        let auto_clone = auto;
         assert_eq!(auto, auto_clone);
     }
 
@@ -321,11 +321,7 @@ mod tests {
     }
     #[test]
     fn test_kjarni_device_all_variants() {
-        let variants = [
-            KjarniDevice::Cpu,
-            KjarniDevice::Gpu,
-            KjarniDevice::Auto,
-        ];
+        let variants = [KjarniDevice::Cpu, KjarniDevice::Gpu, KjarniDevice::Auto];
         for (i, v1) in variants.iter().enumerate() {
             for (j, v2) in variants.iter().enumerate() {
                 if i == j {
@@ -339,16 +335,16 @@ mod tests {
     #[test]
     fn test_device_workflow() {
         let user_wants_gpu = true;
-        
+
         let device = if user_wants_gpu {
             KjarniDevice::Gpu
         } else {
             KjarniDevice::Cpu
         };
-        
+
         let resolved = device.resolve();
         let low_level: Device = resolved.into();
-        
+
         assert_eq!(resolved, KjarniDevice::Gpu);
         assert_eq!(low_level, Device::Wgpu);
     }
@@ -376,7 +372,7 @@ mod tests {
         let r1 = auto.resolve();
         let r2 = r1.resolve();
         let r3 = r2.resolve();
-        
+
         assert_eq!(r1, r2);
         assert_eq!(r2, r3);
     }
@@ -385,7 +381,7 @@ mod tests {
     fn test_is_methods_after_resolve() {
         let auto = KjarniDevice::Auto;
         let resolved = auto.resolve();
-        
+
         assert_eq!(auto.is_cpu(), resolved.is_cpu());
         assert_eq!(auto.is_gpu(), resolved.is_gpu());
     }

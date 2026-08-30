@@ -11,11 +11,13 @@ use crate::cpu::encoder::traits::CpuEncoderOutput;
 use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
+use crate::cpu::normalization::RMSNorm;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
-use crate::cpu::normalization::RMSNorm;
 use crate::rope::RoPE;
-use crate::traits::{CpuTransformerCore, Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
+use crate::traits::{
+    CpuTransformerCore, Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy,
+};
 use crate::weights::ModelWeights;
 use crate::{FeedForward, cpu::normalization::LayerNorm};
 
@@ -60,7 +62,7 @@ impl CpuTransformerEncoder {
         for i in 0..meta.num_layers {
             let idx = i.to_string();
             let name = |template: &String| template.replace("{}", &idx);
-            let resolve_bias = |opt: &Option<String>| opt.as_ref().map(|s| name(s));
+            let resolve_bias = |opt: &Option<String>| opt.as_ref().map(&name);
 
             let f32_strategy = F32MatmulStrategy::CustomSimd;
 
@@ -184,7 +186,7 @@ impl CpuTransformerEncoder {
                 if meta.normalization_strategy == NormalizationStrategy::LayerNorm {
                     Normalization::LayerNorm(LayerNorm::new(
                         weights.get_array1(&attn_norm_w)?,
-                        weights.get_array1(&attn_norm_b.unwrap())?, 
+                        weights.get_array1(&attn_norm_b.unwrap())?,
                         meta.norm_eps,
                     ))
                 } else {
@@ -245,6 +247,7 @@ impl CpuTransformerEncoder {
         end_layer: usize,
         buffers: &mut EncoderBuffers,
     ) -> Result<()> {
+        #[cfg_attr(not(debug_assertions), allow(unused_variables))]
         let (batch, seq, _) = hidden_states.dim();
 
         #[cfg(debug_assertions)]
@@ -291,7 +294,8 @@ impl InferenceModel for CpuTransformerEncoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
-    fn as_any(&self) -> &dyn std::any::Any { // TODO REMOVE
+    fn as_any(&self) -> &dyn std::any::Any {
+        // TODO REMOVE
         self
     }
 }
@@ -339,7 +343,7 @@ impl CpuEncoder for CpuTransformerEncoder {
         buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
         let mut hidden = hidden_states.clone();
-        
+
         self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
 
         Ok(CpuEncoderOutput {
@@ -355,7 +359,7 @@ impl CpuEncoder for CpuTransformerEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
-        for (_i, layer) in self.layers[start_layer..end_layer].iter().enumerate() {
+        for layer in self.layers[start_layer..end_layer].iter() {
             hidden = layer.forward(
                 hidden,
                 attention_mask,
@@ -366,6 +370,4 @@ impl CpuEncoder for CpuTransformerEncoder {
         }
         Ok(hidden)
     }
-
-    
 }

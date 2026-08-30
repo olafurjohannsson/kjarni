@@ -99,7 +99,7 @@ impl Default for GenerationConfig {
 pub struct SpeculationParams {
     /// Number of tokens to speculate per iteration
     pub num_tokens: usize,
-    
+
     /// Use probability-based acceptance to preserve exact target distribution.
     /// If false, uses greedy acceptance
     pub probabilistic: bool,
@@ -129,7 +129,7 @@ pub struct HFGenerationConfig {
     pub forced_bos_token_id: Option<u32>,
     #[serde(default)]
     pub forced_eos_token_id: Option<u32>,
-    
+
     // Length controls
     #[serde(default)]
     pub max_length: Option<usize>,
@@ -139,7 +139,7 @@ pub struct HFGenerationConfig {
     pub min_length: Option<usize>,
     #[serde(default)]
     pub min_new_tokens: Option<usize>,
-    
+
     // Sampling params
     #[serde(default)]
     pub do_sample: Option<bool>,
@@ -149,7 +149,7 @@ pub struct HFGenerationConfig {
     pub top_p: Option<f32>,
     #[serde(default)]
     pub top_k: Option<usize>,
-    
+
     // Beam search params
     #[serde(default)]
     pub num_beams: Option<usize>,
@@ -159,7 +159,7 @@ pub struct HFGenerationConfig {
     pub length_penalty: Option<f32>,
     #[serde(default)]
     pub early_stopping: Option<bool>,
-    
+
     // Penalties
     #[serde(default)]
     pub repetition_penalty: Option<f32>,
@@ -167,13 +167,13 @@ pub struct HFGenerationConfig {
     pub no_repeat_ngram_size: Option<usize>,
     #[serde(default)]
     pub encoder_no_repeat_ngram_size: Option<usize>,
-    
+
     // Other
     #[serde(default)]
     pub diversity_penalty: Option<f32>,
     #[serde(default)]
     pub num_return_sequences: Option<usize>,
-    
+
     // Metadata (ignored but parsed)
     #[serde(default)]
     pub _from_model_config: Option<bool>,
@@ -196,7 +196,7 @@ impl EosTokenId {
             EosTokenId::Multiple(ids) => ids.first().copied().unwrap_or(1),
         }
     }
-    
+
     pub fn all(&self) -> Vec<u32> {
         match self {
             EosTokenId::Single(id) => vec![*id],
@@ -212,16 +212,19 @@ impl HFGenerationConfig {
         let config: Self = serde_json::from_reader(file)?;
         Ok(config)
     }
-    
+
     /// Try to load from model directory, return default if not found
     pub fn load_or_default(model_dir: &std::path::Path) -> Self {
         let path = model_dir.join("generation_config.json");
         Self::load(&path).unwrap_or_default()
     }
-    
-    pub fn to_generation_config(&self, model_defaults: &ModelGenerationDefaults) -> GenerationConfig {
+
+    pub fn to_generation_config(
+        &self,
+        model_defaults: &ModelGenerationDefaults,
+    ) -> GenerationConfig {
         let strategy = self.determine_strategy(model_defaults);
-        
+
         GenerationConfig {
             max_length: self.max_length.unwrap_or(model_defaults.max_length),
             min_length: self.min_length.unwrap_or(0),
@@ -233,11 +236,11 @@ impl HFGenerationConfig {
             speculation: None,
         }
     }
-    
+
     fn determine_strategy(&self, defaults: &ModelGenerationDefaults) -> DecodingStrategy {
         let num_beams = self.num_beams.unwrap_or(defaults.num_beams);
         let do_sample = self.do_sample.unwrap_or(false);
-        
+
         if num_beams > 1 {
             DecodingStrategy::BeamSearch(BeamSearchParams {
                 num_beams,
@@ -283,7 +286,7 @@ impl ModelGenerationDefaults {
             add_bos_token: false,
         }
     }
-    
+
     pub fn for_llama() -> Self {
         Self {
             max_length: 4096,

@@ -1,8 +1,7 @@
-mod pipeline;
 mod builder;
 mod loader;
+mod pipeline;
 
-
-pub use builder::{DecoderPipelineBuilder};
+pub use builder::DecoderPipelineBuilder;
+pub use loader::{DecoderLoader, DecoderModelFactory};
 pub use pipeline::{DecoderPipeline, DecoderPipelineConfig};
-pub use loader::{DecoderModelFactory, DecoderLoader};

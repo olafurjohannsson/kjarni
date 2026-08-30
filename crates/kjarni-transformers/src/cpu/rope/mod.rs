@@ -121,8 +121,14 @@ impl RoPE {
 
         if x.is_standard_layout() {
             let x_slice = x.as_slice_mut().expect("array should be contiguous");
-            let cos_slice = self.cos_cache.as_slice().expect("cache should be contiguous");
-            let sin_slice = self.sin_cache.as_slice().expect("cache should be contiguous");
+            let cos_slice = self
+                .cos_cache
+                .as_slice()
+                .expect("cache should be contiguous");
+            let sin_slice = self
+                .sin_cache
+                .as_slice()
+                .expect("cache should be contiguous");
 
             #[cfg(target_arch = "x86_64")]
             if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {

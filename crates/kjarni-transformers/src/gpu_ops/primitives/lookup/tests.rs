@@ -1,10 +1,7 @@
 use super::*;
 use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{arr2, arr3, Array2, Array3};
-
-#[path = "../../../tests/common.rs"]
-mod common;
+use ndarray::{Array2, Array3, arr2, arr3};
 
 #[ignore = "GPU required"]
 #[tokio::test]

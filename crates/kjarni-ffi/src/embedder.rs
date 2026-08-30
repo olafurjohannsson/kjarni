@@ -53,223 +53,305 @@ pub struct KjarniEmbedder {
 }
 
 /// Create a new Embedder.
+///
+/// # Safety
+///
+/// - `out` must be null, or a live handle returned by `kjarni_embedder_new` that has not been
+///   freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_new(
     config: *const KjarniEmbedderConfig,
     out: *mut *mut KjarniEmbedder,
-) -> KjarniErrorCode { unsafe {
-    if out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_embedder_new",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    // Use defaults if config is null
-    let default_config = kjarni_embedder_config_default();
-    let config = if config.is_null() {
-        &default_config
-    } else {
-        &*config
-    };
+                // Use defaults if config is null
+                let default_config = kjarni_embedder_config_default();
+                let config = if config.is_null() {
+                    &default_config
+                } else {
+                    &*config
+                };
 
-    let result = get_runtime().block_on(async {
-        let mut builder = Embedder::builder("minilm-l6-v2");
+                let result = get_runtime().block_on(async {
+                    let mut builder = Embedder::builder("minilm-l6-v2");
 
-        // Device
-        match config.device {
-            KjarniDevice::Gpu => builder = builder.gpu(),
-            KjarniDevice::Cpu => builder = builder.cpu(),
-        }
+                    // Device
+                    match config.device {
+                        KjarniDevice::Gpu => builder = builder.gpu(),
+                        KjarniDevice::Cpu => builder = builder.cpu(),
+                    }
 
-        // Cache dir
-        if !config.cache_dir.is_null() {
-            match CStr::from_ptr(config.cache_dir).to_str() {
-                Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                    // Cache dir
+                    if !config.cache_dir.is_null() {
+                        match CStr::from_ptr(config.cache_dir).to_str() {
+                            Ok(s) => builder = builder.cache_dir(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Model name
+                    if !config.model_name.is_null() {
+                        match CStr::from_ptr(config.model_name).to_str() {
+                            Ok(s) => builder = builder.model(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Model path
+                    if !config.model_path.is_null() {
+                        match CStr::from_ptr(config.model_path).to_str() {
+                            Ok(s) => builder = builder.model_path(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Options
+                    builder = builder.normalize(config.normalize != 0);
+                    builder = builder.quiet(config.quiet != 0);
+
+                    // Build
+                    builder.build().await.map_err(|e| {
+                        set_last_error(e.to_string());
+                        match &e {
+                            EmbedderError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
+                            EmbedderError::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
+                            EmbedderError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
+                            EmbedderError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+                            _ => KjarniErrorCode::LoadFailed,
+                        }
+                    })
+                });
+
+                match result {
+                    Ok(embedder) => {
+                        let handle = Box::new(KjarniEmbedder { inner: embedder });
+                        *out = Box::into_raw(handle);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => e,
+                }
             }
-        }
-
-        // Model name
-        if !config.model_name.is_null() {
-            match CStr::from_ptr(config.model_name).to_str() {
-                Ok(s) => builder = builder.model(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Model path
-        if !config.model_path.is_null() {
-            match CStr::from_ptr(config.model_path).to_str() {
-                Ok(s) => builder = builder.model_path(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Options
-        builder = builder.normalize(config.normalize != 0);
-        builder = builder.quiet(config.quiet != 0);
-
-        // Build
-        builder.build().await.map_err(|e| {
-            set_last_error(e.to_string());
-            match &e {
-                EmbedderError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
-                EmbedderError::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
-                EmbedderError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
-                EmbedderError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
-                _ => KjarniErrorCode::LoadFailed,
-            }
-        })
-    });
-
-    match result {
-        Ok(embedder) => {
-            let handle = Box::new(KjarniEmbedder { inner: embedder });
-            *out = Box::into_raw(handle);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => e,
-    }
-}}
+        },
+    )
+}
 
 /// Free an Embedder instance.
+///
+/// # Safety
+///
+/// - `embedder` must be null, or a handle returned by `kjarni_embedder_new` that has not
+///   already been passed to this function. It is invalid to use afterwards.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_embedder_free(embedder: *mut KjarniEmbedder) { unsafe {
-    if !embedder.is_null() {
-        let _ = Box::from_raw(embedder);
-    }
-}}
+pub unsafe extern "C" fn kjarni_embedder_free(embedder: *mut KjarniEmbedder) {
+    crate::panic::guard("kjarni_embedder_free", (), || unsafe {
+        if !embedder.is_null() {
+            let _ = Box::from_raw(embedder);
+        }
+    })
+}
 
 /// Encode a single text to an embedding vector.
+///
+/// # Safety
+///
+/// - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+///   been freed.
+/// - `text` must be null, or a valid pointer to a nul-terminated C string.
+/// - `out` must be a valid, writable pointer to a `KjarniFloatArray`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_encode(
     embedder: *mut KjarniEmbedder,
     text: *const c_char,
     out: *mut KjarniFloatArray,
-) -> KjarniErrorCode { unsafe {
-    if embedder.is_null() || text.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_embedder_encode",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if embedder.is_null() || text.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let embedder = &(*embedder).inner;
-    let text = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let embedder = &(*embedder).inner;
+                let text = match CStr::from_ptr(text).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let result = get_runtime().block_on(async { embedder.embed(text).await });
+                let result = get_runtime().block_on(async { embedder.embed(text).await });
 
-    match result {
-        Ok(embedding) => {
-            *out = KjarniFloatArray::from_vec(embedding);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = KjarniFloatArray::empty();
-            KjarniErrorCode::InferenceFailed
-        }
-    }
-}}
+                match result {
+                    Ok(embedding) => {
+                        *out = KjarniFloatArray::from_vec(embedding);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = KjarniFloatArray::empty();
+                        KjarniErrorCode::InferenceFailed
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Encode multiple texts to embedding vectors.
+///
+/// # Safety
+///
+/// - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+///   been freed.
+/// - `texts` must point to `num_texts` readable pointers, each null or a valid nul-terminated
+///   C string that stays valid for the call.
+/// - `out` must be a valid, writable pointer to a `KjarniFloat2DArray`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     embedder: *mut KjarniEmbedder,
     texts: *const *const c_char,
     num_texts: usize,
     out: *mut KjarniFloat2DArray,
-) -> KjarniErrorCode { unsafe {
-    if embedder.is_null() || texts.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_embedder_encode_batch",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if embedder.is_null() || texts.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    if num_texts == 0 {
-        *out = KjarniFloat2DArray::empty();
-        return KjarniErrorCode::Ok;
-    }
+                if num_texts == 0 {
+                    *out = KjarniFloat2DArray::empty();
+                    return KjarniErrorCode::Ok;
+                }
 
-    let embedder_ref = &(*embedder).inner;
+                let embedder_ref = &(*embedder).inner;
 
-    // Convert C strings to Rust
-    let mut text_vec = Vec::with_capacity(num_texts);
-    for i in 0..num_texts {
-        let text_ptr = *texts.add(i);
-        if text_ptr.is_null() {
-            return KjarniErrorCode::NullPointer;
-        }
-        match CStr::from_ptr(text_ptr).to_str() {
-            Ok(s) => text_vec.push(s.to_string()),
-            Err(_) => return KjarniErrorCode::InvalidUtf8,
-        }
-    }
+                // Convert C strings to Rust
+                let mut text_vec = Vec::with_capacity(num_texts);
+                for i in 0..num_texts {
+                    let text_ptr = *texts.add(i);
+                    if text_ptr.is_null() {
+                        return KjarniErrorCode::NullPointer;
+                    }
+                    match CStr::from_ptr(text_ptr).to_str() {
+                        Ok(s) => text_vec.push(s.to_string()),
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    }
+                }
 
-    let text_refs: Vec<&str> = text_vec.iter().map(|s| s.as_str()).collect();
+                let text_refs: Vec<&str> = text_vec.iter().map(|s| s.as_str()).collect();
 
-    let result = get_runtime().block_on(async {
-        embedder_ref.embed_batch_flat(&text_refs).await
-        // embedder_ref.embed_batch(&text_refs).await
-    });
+                let result = get_runtime().block_on(async {
+                    embedder_ref.embed_batch_flat(&text_refs).await
+                    // embedder_ref.embed_batch(&text_refs).await
+                });
 
-    match result {
-        Ok((embeddings, rows, cols)) => {
-            // *out = KjarniFloat2DArray::from_vecs(embeddings);
-            *out = KjarniFloat2DArray::from_flat(embeddings, rows, cols);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = KjarniFloat2DArray::empty();
-            KjarniErrorCode::InferenceFailed
-        }
-    }
-}}
+                match result {
+                    Ok((embeddings, rows, cols)) => {
+                        // *out = KjarniFloat2DArray::from_vecs(embeddings);
+                        *out = KjarniFloat2DArray::from_flat(embeddings, rows, cols);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = KjarniFloat2DArray::empty();
+                        KjarniErrorCode::InferenceFailed
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Compute cosine similarity between two texts.
+///
+/// # Safety
+///
+/// - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+///   been freed.
+/// - `text1` must be null, or a valid pointer to a nul-terminated C string.
+/// - `text2` must be null, or a valid pointer to a nul-terminated C string.
+/// - `out` must be a valid, writable pointer to a `c_float`. It is written on both success and
+///   failure, and any buffers it receives are owned by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_similarity(
     embedder: *mut KjarniEmbedder,
     text1: *const c_char,
     text2: *const c_char,
     out: *mut c_float,
-) -> KjarniErrorCode { unsafe {
-    if embedder.is_null() || text1.is_null() || text2.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_embedder_similarity",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if embedder.is_null() || text1.is_null() || text2.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let embedder_ref = &(*embedder).inner;
+                let embedder_ref = &(*embedder).inner;
 
-    let text1 = match CStr::from_ptr(text1).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let text1 = match CStr::from_ptr(text1).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let text2 = match CStr::from_ptr(text2).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let text2 = match CStr::from_ptr(text2).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let result = get_runtime().block_on(async { embedder_ref.similarity(text1, text2).await });
+                let result =
+                    get_runtime().block_on(async { embedder_ref.similarity(text1, text2).await });
 
-    match result {
-        Ok(sim) => {
-            *out = sim;
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = 0.0;
-            KjarniErrorCode::InferenceFailed
-        }
-    }
-}}
+                match result {
+                    Ok(sim) => {
+                        *out = sim;
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = 0.0;
+                        KjarniErrorCode::InferenceFailed
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Get the embedding dimension.
+///
+/// # Safety
+///
+/// - `embedder` must be null, or a live handle returned by `kjarni_embedder_new` that has not
+///   been freed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) -> usize { unsafe {
-    if embedder.is_null() {
-        return 0;
-    }
+pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) -> usize {
+    crate::panic::guard("kjarni_embedder_dim", 0, || -> usize {
+        unsafe {
+            if embedder.is_null() {
+                return 0;
+            }
 
-    let embedder_ref = &(*embedder).inner;
+            let embedder_ref = &(*embedder).inner;
 
-    get_runtime().block_on(async { embedder_ref.dimension() })
-}}
+            get_runtime().block_on(async { embedder_ref.dimension() })
+        }
+    })
+}

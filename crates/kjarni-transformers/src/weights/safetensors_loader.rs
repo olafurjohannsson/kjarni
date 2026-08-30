@@ -20,7 +20,6 @@ use safetensors::SafeTensors;
 use crate::tensor::DType;
 use crate::tensor::raw_tensor::TensorView;
 
-
 use crate::weights::WeightLoader;
 
 /// A loader for `.safetensors` files with mmap caching
@@ -39,13 +38,18 @@ struct ShardInfo {
     tensors: SafeTensors<'static>,
 }
 
-
-
-
 #[derive(Debug)]
 enum BackingMemory {
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     #[cfg(not(target_arch = "wasm32"))]
     Mmap(Arc<Mmap>),
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     Owned(Arc<Vec<u8>>),
 }
 
@@ -80,14 +84,14 @@ impl SafeTensorsLoader {
         })
     }
 
-    /// Load from raw bytes 
+    /// Load from raw bytes
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         let owned: Arc<Vec<u8>> = Arc::new(data.to_vec());
         let static_slice: &'static [u8] =
             unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&owned[..]) };
 
-        let tensors = SafeTensors::deserialize(static_slice)
-            .context("failed to parse safetensors bytes")?;
+        let tensors =
+            SafeTensors::deserialize(static_slice).context("failed to parse safetensors bytes")?;
 
         let tensor_to_shard = tensors
             .names()
@@ -159,7 +163,12 @@ impl SafeTensorsLoader {
             shards.push(Self::load_shard(&shard_path)?);
             file_to_shard_idx.insert(filename.clone(), idx);
 
-            log::debug!("loaded shard {}/{}: {}", idx + 1, unique_files.len(), filename);
+            log::debug!(
+                "loaded shard {}/{}: {}",
+                idx + 1,
+                unique_files.len(),
+                filename
+            );
         }
 
         let tensor_to_shard = weight_map

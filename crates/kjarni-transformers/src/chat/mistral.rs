@@ -1,6 +1,5 @@
 use crate::{ChatTemplate, Conversation, Role};
 
-
 /// Mistral Instruct Template (v0.1, v0.2, v0.3)
 ///
 /// Format:
@@ -45,11 +44,11 @@ impl ChatTemplate for MistralChatTemplate {
 
         let mut is_first_user = true;
 
-        while let Some(msg) = msg_iter.next() {
+        for msg in msg_iter {
             match msg.role {
                 Role::User => {
                     prompt.push_str("[INST] ");
-                    
+
                     if is_first_user {
                         if let Some(sys) = system_content {
                             prompt.push_str(sys);
@@ -65,7 +64,7 @@ impl ChatTemplate for MistralChatTemplate {
                     prompt.push(' ');
                     prompt.push_str(&msg.content);
                     prompt.push_str("</s>");
-                    // If there is another user message coming, we usually don't add BOS again 
+                    // If there is another user message coming, we usually don't add BOS again
                     // in standard Mistral format, just straight to [INST].
                 }
                 Role::System => {

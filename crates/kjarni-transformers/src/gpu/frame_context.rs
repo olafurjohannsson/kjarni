@@ -1,5 +1,5 @@
-use crate::gpu::GpuTensorPool;
 use crate::WgpuContext;
+use crate::gpu::GpuTensorPool;
 use std::sync::Arc;
 use tokio::sync::MutexGuard;
 use wgpu::CommandEncoder;

@@ -1,17 +1,13 @@
-
-#[path = "../../../../tests/common.rs"]
-mod common;
-
+use crate::tests::common;
 
 use super::GpuPermute;
 use crate::gpu::{DType, GpuTensor};
 use anyhow::Result;
-use common::{read_gpu_tensor_to_vec};
-use ndarray::{Array, Array2, Array4};
-use ndarray_rand::rand_distr::Uniform;
-use ndarray_rand::RandomExt;
 use common::get_test_context;
-
+use common::read_gpu_tensor_to_vec;
+use ndarray::{Array, Array2, Array4};
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Uniform;
 
 fn assert_all_close<D: ndarray::Dimension>(a: &Array<f32, D>, b: &Array<f32, D>, tolerance: f32) {
     assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
@@ -47,7 +43,6 @@ async fn test_permute_2d_transpose() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn test_permute_4d_attention_reshape() -> Result<()> {
@@ -70,11 +65,14 @@ async fn test_permute_4d_attention_reshape() -> Result<()> {
     let cpu_result = cpu_input.permuted_axes(*perm);
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_output).await?;
     let gpu_result = Array4::from_shape_vec((shape[0], shape[1], shape[2], shape[3]), gpu_vec)?;
-    
-    assert_all_close(&gpu_result, &cpu_result.as_standard_layout().to_owned(), 1e-6);
+
+    assert_all_close(
+        &gpu_result,
+        &cpu_result.as_standard_layout().to_owned(),
+        1e-6,
+    );
     Ok(())
 }
-
 
 #[tokio::test]
 #[ignore = "GPU required"]
@@ -97,7 +95,11 @@ async fn test_permute_4d_attention_k_transpose() -> Result<()> {
     let cpu_result = cpu_input.permuted_axes(*perm);
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_output).await?;
     let gpu_result = Array4::from_shape_vec((shape[0], shape[1], shape[2], shape[3]), gpu_vec)?;
-    
-    assert_all_close(&gpu_result, &cpu_result.as_standard_layout().to_owned(), 1e-6);
+
+    assert_all_close(
+        &gpu_result,
+        &cpu_result.as_standard_layout().to_owned(),
+        1e-6,
+    );
     Ok(())
 }

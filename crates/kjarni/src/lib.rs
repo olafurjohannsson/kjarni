@@ -1,39 +1,37 @@
-
-
-mod utils;
 pub mod chat;
 pub mod classifier;
+pub mod common;
 pub mod embedder;
-pub mod reranker;
 pub mod generation;
 pub mod indexer;
-pub mod translator;
+pub mod reranker;
 pub mod searcher;
 pub mod seq2seq;
-pub mod common;
 pub mod summarizer;
 pub mod transcriber;
+pub mod translator;
+mod utils;
 
 pub use kjarni_transformers::PoolingStrategy;
 // Re-export main API
 pub use utils::*;
 
+pub use kjarni_models::SequenceClassifier;
 pub use kjarni_models::models::cross_encoder::CrossEncoder;
 pub use kjarni_models::models::sentence_encoder::SentenceEncoder;
-pub use kjarni_models::SequenceClassifier;
 
-pub use crate::summarizer::Summarizer;
-pub use crate::translator::Translator;
 pub use crate::classifier::Classifier;
 pub use crate::embedder::Embedder;
-pub use crate::reranker::Reranker;
 pub use crate::indexer::Indexer;
+pub use crate::reranker::Reranker;
 pub use crate::searcher::Searcher;
+pub use crate::summarizer::Summarizer;
+pub use crate::translator::Translator;
 
 // Re-export core types
+pub use kjarni_transformers::models::base::DType;
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
 pub use kjarni_transformers::traits::Device;
-pub use kjarni_transformers::models::base::DType;
 // Re-export generation
 pub use kjarni_transformers::common::{
     BeamSearchParams, DecodingStrategy, GenerationConfig, SamplingParams, StreamedToken, TokenType,
@@ -55,11 +53,7 @@ pub use kjarni_transformers::cpu::encoder::traits::EncoderLanguageModel;
 
 pub use kjarni_rag::{
     DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
-    ProgressCallback, ProgressStage,
-    SearchIndex,
-    SplitterConfig,
-    TextSplitter,
-    
+    ProgressCallback, ProgressStage, SearchIndex, SplitterConfig, TextSplitter,
 };
 
 pub use kjarni_rag::MetadataFilter;
@@ -75,10 +69,10 @@ pub mod models {
     pub use kjarni_models::models::llama::{LlamaConfig, LlamaModel};
     pub use kjarni_models::models::qwen::{QwenConfig, QwenModel};
 }
-pub mod registry;
 pub mod kjarni_config;
-pub mod kjarni_config_resolve;
 pub mod kjarni_config_loader;
+pub mod kjarni_config_resolve;
+pub mod registry;
 
 pub mod generator;
 
@@ -86,8 +80,6 @@ pub mod generator;
 
 #[cfg(any(feature = "python", feature = "c-bindings"))]
 pub mod ffi;
-
-
 
 // Prelude
 pub mod prelude {
@@ -121,11 +113,14 @@ pub async fn embed(model: &str, text: &str) -> anyhow::Result<Vec<f32>> {
 }
 
 /// Classify text (convenience wrapper).
-//// # Example
+/// # Example
 /// ```ignore
 /// let result = kjarni::classify("distilbert-base-uncased-finetuned-sst-2-english", "I love programming!").await?;
 /// ```
-pub async fn classify(model: &str, text: &str) -> anyhow::Result<crate::classifier::ClassificationResult> {
+pub async fn classify(
+    model: &str,
+    text: &str,
+) -> anyhow::Result<crate::classifier::ClassificationResult> {
     let classifier = crate::classifier::Classifier::new(model).await?;
     let result = classifier.classify(text).await?;
     Ok(result)

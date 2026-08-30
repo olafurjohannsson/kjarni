@@ -126,13 +126,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
         };
         let plan = ExecutionPlan::from_load_config(primary_device, &self.load_config);
 
-        let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size);
-        if let Some(pos) = &dec_layout.position_embedding {
-            emb_builder = emb_builder.position_embedding(pos);
-        }
-        if let Some(tok) = &dec_layout.token_type_embedding {
-            emb_builder = emb_builder.type_embedding(tok);
-        }
         let tied_weights = layout.lm_head == layout.token_embedding;
         let emb_load_cpu =
             plan.embeddings == Device::Cpu || (tied_weights && plan.lm_head == Device::Cpu);
@@ -164,7 +157,7 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
                     self.load_config.target_dtype,
                 )?)
             } else {
-                None 
+                None
             }
         } else {
             None

@@ -153,6 +153,10 @@ impl QKVProjection {
         self.forward(hidden)
     }
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     /// split of fused QKV buffer
     #[inline]
     fn split_qkv_buffer(
@@ -381,11 +385,10 @@ mod tests {
 
 // TESTS
 
-
 #[cfg(test)]
 mod qkv_projection_tests {
     use super::*;
-    
+
     fn make_linear_layer(
         out_features: usize,
         in_features: usize,
@@ -746,4 +749,3 @@ mod qkv_projection_tests {
         assert!(v_diff < 1e-4, "V mismatch: {}", v_diff);
     }
 }
-

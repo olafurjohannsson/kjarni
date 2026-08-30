@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    
+
+    use crate::WgpuContext;
     use crate::gpu::DType;
     use crate::gpu_ops::primitives::broadcast::BroadcastUniforms;
     use crate::{gpu::GpuTensor, gpu_ops::primitives::broadcast::GpuBroadcast};
-    use crate::WgpuContext;
     use anyhow::Result;
     use ndarray::Array3;
     use std::sync::Arc;
@@ -57,9 +57,7 @@ mod tests {
         let hidden = 8;
         let num_beams = 4;
 
-        let src_data = Array3::from_shape_fn((1, seq, hidden), |(_, s, h)| {
-            (s * hidden + h) as f32
-        });
+        let src_data = Array3::from_shape_fn((1, seq, hidden), |(_, s, h)| (s * hidden + h) as f32);
 
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![num_beams, seq, hidden], DType::F32, "")?;
@@ -77,7 +75,9 @@ mod tests {
                         result[[beam, s, h]],
                         src_data[[0, s, h]],
                         "Mismatch at beam={}, seq={}, hidden={}",
-                        beam, s, h
+                        beam,
+                        s,
+                        h
                     );
                 }
             }
