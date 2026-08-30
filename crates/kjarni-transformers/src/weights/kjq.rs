@@ -107,7 +107,9 @@ pub fn unpack(data: &[u8]) -> Result<KjqUnpacked> {
         }
 
         if cursor >= data.len() {
-            return Err(anyhow!("truncated .kjq: tensor '{name}' has no storage flag"));
+            return Err(anyhow!(
+                "truncated .kjq: tensor '{name}' has no storage flag"
+            ));
         }
         let quantized = data[cursor] != 0;
         cursor += 1;
@@ -225,8 +227,10 @@ mod tests {
         let st = safetensors::SafeTensors::deserialize(&unpacked.safetensors).unwrap();
         let view = st.tensor(name).unwrap();
         view.data()
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect()
     }
 

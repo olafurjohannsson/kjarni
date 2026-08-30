@@ -58,44 +58,35 @@ mod tests {
 
     #[test]
     fn test_cpu_pooler_cls() {
-        let hidden = array![
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[5.0, 6.0], [7.0, 8.0]]
-        ];
+        let hidden = array![[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]];
         let mask = array![[1.0, 1.0], [1.0, 0.0]];
         let pooler = StandardCpuPooler;
 
         let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::Cls).unwrap();
-        assert_eq!(pooled[[0,0]], 1.0);
-        assert_eq!(pooled[[1,1]], 6.0);
+        assert_eq!(pooled[[0, 0]], 1.0);
+        assert_eq!(pooled[[1, 1]], 6.0);
     }
 
     #[test]
     fn test_cpu_pooler_mean() {
-        let hidden = array![
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[5.0, 6.0], [7.0, 8.0]]
-        ];
+        let hidden = array![[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]];
         let mask = array![[1.0, 1.0], [1.0, 0.0]];
         let pooler = StandardCpuPooler;
 
         let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::Mean).unwrap();
-        assert!((pooled[[0,0]] - 2.0).abs() < 1e-6);
-        assert!((pooled[[1,1]] - 6.0).abs() < 1e-6);
+        assert!((pooled[[0, 0]] - 2.0).abs() < 1e-6);
+        assert!((pooled[[1, 1]] - 6.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_cpu_pooler_max() {
-        let hidden = array![
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[5.0, 6.0], [7.0, 8.0]]
-        ];
+        let hidden = array![[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]];
         let mask = array![[1.0, 1.0], [1.0, 0.0]];
         let pooler = StandardCpuPooler;
 
         let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::Max).unwrap();
-        assert_eq!(pooled[[0,0]], 3.0);
-        assert_eq!(pooled[[1,1]], 6.0);
+        assert_eq!(pooled[[0, 0]], 3.0);
+        assert_eq!(pooled[[1, 1]], 6.0);
     }
 
     #[test]
@@ -107,8 +98,10 @@ mod tests {
         let mask = array![[1.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
         let pooler = StandardCpuPooler;
 
-        let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::LastToken).unwrap();
-        assert_eq!(pooled[[0,0]], 3.0);
-        assert_eq!(pooled[[1,1]], 12.0);
+        let pooled = pooler
+            .pool(&hidden, &mask, &PoolingStrategy::LastToken)
+            .unwrap();
+        assert_eq!(pooled[[0, 0]], 3.0);
+        assert_eq!(pooled[[1, 1]], 12.0);
     }
 }

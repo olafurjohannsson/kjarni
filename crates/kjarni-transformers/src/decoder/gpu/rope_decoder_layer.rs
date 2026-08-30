@@ -1,8 +1,8 @@
 use crate::{
     WgpuContext,
-    decoder::prelude::*,
     gpu::{
-        GpuKVCache, GpuRoPEAttention, GpuTensor, GpuTensorPool, Kernel, normalization::{GpuNormalization, GpuNormalizationWeights, GpuRMSNorm}
+        GpuKVCache, GpuRoPEAttention, GpuTensor, GpuTensorPool, Kernel,
+        normalization::{GpuNormalization, GpuNormalizationWeights, GpuRMSNorm},
     },
     gpu_ops::{
         blocks::{
@@ -287,8 +287,7 @@ mod rope_decoder_gpu_test {
         let mut k_cache_cpu = Array3::<f32>::zeros((batch, seq_len, kv_heads * head_dim));
         let mut v_cache_cpu = Array3::<f32>::zeros((batch, seq_len, kv_heads * head_dim));
 
-        let mut gpu_cache =
-            GpuKVCache::new(&context, 1, batch, kv_heads, head_dim, seq_len)?;
+        let mut gpu_cache = GpuKVCache::new(&context, 1, batch, kv_heads, head_dim, seq_len)?;
 
         // CPU Forward
         let cpu_out = cpu_layer.forward(

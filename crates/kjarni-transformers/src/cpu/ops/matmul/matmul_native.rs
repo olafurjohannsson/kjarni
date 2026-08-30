@@ -1,4 +1,3 @@
-
 use crate::cpu::kernels::q_common::BlockQ6_K;
 use crate::cpu::kernels::{
     self,
@@ -9,8 +8,6 @@ use crate::cpu::kernels::{
 use half::bf16;
 use ndarray::{Array2, ArrayView2};
 use rayon::prelude::*;
-
-
 
 /// Computes `C = A @ B^T` for F32 input `A` and Q8_0 quantized weight matrix `B`.
 pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array2<f32> {
@@ -41,7 +38,7 @@ pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array
 
         // Divide output evenly among available threads
         let num_threads = rayon::current_num_threads();
-        let chunk_size = (n + num_threads - 1) / num_threads;
+        let chunk_size = n.div_ceil(num_threads);
 
         out_slice
             .par_chunks_mut(chunk_size)
@@ -63,12 +60,7 @@ pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array
                             k,
                         );
                     }
-                    kernels::scalar::matmul_vec_q8_0_scalar(
-                        out_chunk,
-                        a_slice,
-                        b_blocks_chunk,
-                        k,
-                    );
+                    kernels::scalar::matmul_vec_q8_0_scalar(out_chunk, a_slice, b_blocks_chunk, k);
                 }
             });
     } else {
@@ -115,7 +107,7 @@ pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> 
     if m == 1 {
         let out_slice = c.as_slice_mut().unwrap();
         let num_threads = rayon::current_num_threads();
-        let chunk_size = (n + num_threads - 1) / num_threads;
+        let chunk_size = n.div_ceil(num_threads);
 
         out_slice
             .par_chunks_mut(chunk_size)
@@ -149,7 +141,7 @@ pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> 
                     kernels::scalar::matmul_vec_bf16_scalar(
                         out_chunk,
                         a_slice,
-                        std::mem::transmute(b_rows),
+                        std::mem::transmute::<&[half::bf16], &[u16]>(b_rows),
                         k,
                     );
                 }
@@ -185,7 +177,7 @@ pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> 
                     kernels::scalar::matmul_vec_bf16_scalar(
                         out_slice,
                         a_row_slice,
-                        std::mem::transmute(b_slice),
+                        std::mem::transmute::<&[half::bf16], &[u16]>(b_slice),
                         k,
                     );
                 }
@@ -233,9 +225,20 @@ pub fn matmul_2d_f32_noalloc(
 ) {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim();
-    
-    debug_assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
-    debug_assert_eq!(output.dim(), (m, n), "Output shape mismatch: expected ({}, {}), got {:?}", m, n, output.dim());
+
+    debug_assert_eq!(
+        k, k2,
+        "Matmul dimension mismatch: A[k]={} != B[k]={}",
+        k, k2
+    );
+    debug_assert_eq!(
+        output.dim(),
+        (m, n),
+        "Output shape mismatch: expected ({}, {}), got {:?}",
+        m,
+        n,
+        output.dim()
+    );
     if let Some(b) = bias {
         debug_assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
     }
@@ -244,12 +247,14 @@ pub fn matmul_2d_f32_noalloc(
     let a_s = a.as_standard_layout();
     let b_s = b_weights.as_standard_layout();
     let a_slice = a_s.as_slice().expect("Input tensor 'a' must be contiguous");
-    let b_slice = b_s.as_slice().expect("Weight tensor 'b' must be contiguous");
+    let b_slice = b_s
+        .as_slice()
+        .expect("Weight tensor 'b' must be contiguous");
 
     if m == 1 {
         let out_slice = output.as_slice_mut().unwrap();
         let num_threads = rayon::current_num_threads();
-        let chunk_size = (n + num_threads - 1) / num_threads;
+        let chunk_size = n.div_ceil(num_threads);
 
         out_slice
             .par_chunks_mut(chunk_size)
@@ -267,7 +272,7 @@ pub fn matmul_2d_f32_noalloc(
                             b_chunk_ptr,
                             k,
                         );
-                        
+
                         // Fuse bias addition
                         if let Some(bias) = bias {
                             let bias_start = b_row_start_idx;
@@ -277,7 +282,7 @@ pub fn matmul_2d_f32_noalloc(
                         }
                         return;
                     }
-                    
+
                     #[cfg(target_arch = "aarch64")]
                     if std::arch::is_aarch64_feature_detected!("neon") {
                         kernels::aarch64::f32::matmul_vec_f32_neon(
@@ -286,7 +291,7 @@ pub fn matmul_2d_f32_noalloc(
                             b_chunk_ptr,
                             k,
                         );
-                        
+
                         if let Some(bias) = bias {
                             let bias_start = b_row_start_idx;
                             for (i, val) in out_chunk.iter_mut().enumerate() {
@@ -295,11 +300,11 @@ pub fn matmul_2d_f32_noalloc(
                         }
                         return;
                     }
-                    
+
                     // Scalar fallback
                     let b_rows = &b_slice[b_row_start_idx * k..];
                     kernels::scalar::matmul_vec_f32_scalar(out_chunk, a_slice, b_rows, k);
-                    
+
                     if let Some(bias) = bias {
                         let bias_start = b_row_start_idx;
                         for (i, val) in out_chunk.iter_mut().enumerate() {
@@ -310,7 +315,7 @@ pub fn matmul_2d_f32_noalloc(
             });
     } else {
         let bias_slice = bias;
-        
+
         output
             .outer_iter_mut()
             .into_par_iter()
@@ -328,7 +333,7 @@ pub fn matmul_2d_f32_noalloc(
                             b_slice.as_ptr(),
                             k,
                         );
-                        
+
                         if let Some(bias) = bias_slice {
                             for (val, &b) in out_slice.iter_mut().zip(bias.iter()) {
                                 *val += b;
@@ -336,7 +341,7 @@ pub fn matmul_2d_f32_noalloc(
                         }
                         return;
                     }
-                    
+
                     #[cfg(target_arch = "aarch64")]
                     if std::arch::is_aarch64_feature_detected!("neon") {
                         kernels::aarch64::f32::matmul_vec_f32_neon(
@@ -345,7 +350,7 @@ pub fn matmul_2d_f32_noalloc(
                             b_slice.as_ptr(),
                             k,
                         );
-                        
+
                         if let Some(bias) = bias_slice {
                             for (val, &b) in out_slice.iter_mut().zip(bias.iter()) {
                                 *val += b;
@@ -353,9 +358,9 @@ pub fn matmul_2d_f32_noalloc(
                         }
                         return;
                     }
-                    
+
                     kernels::scalar::matmul_vec_f32_scalar(out_slice, a_row_slice, b_slice, k);
-                    
+
                     if let Some(bias) = bias_slice {
                         for (val, &b) in out_slice.iter_mut().zip(bias.iter()) {
                             *val += b;
@@ -375,9 +380,20 @@ pub fn matmul_2d_f32_batched_noalloc(
 ) {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim();
-    
-    debug_assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
-    debug_assert_eq!(output.dim(), (m, n), "Output shape mismatch: expected ({}, {}), got {:?}", m, n, output.dim());
+
+    debug_assert_eq!(
+        k, k2,
+        "Matmul dimension mismatch: A[k]={} != B[k]={}",
+        k, k2
+    );
+    debug_assert_eq!(
+        output.dim(),
+        (m, n),
+        "Output shape mismatch: expected ({}, {}), got {:?}",
+        m,
+        n,
+        output.dim()
+    );
     if let Some(b) = bias {
         debug_assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
     }
@@ -497,7 +513,7 @@ pub fn matmul_2d_cpu_f32(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Ar
     if m == 1 {
         let out_slice = c.as_slice_mut().unwrap();
         let num_threads = rayon::current_num_threads();
-        let chunk_size = (n + num_threads - 1) / num_threads;
+        let chunk_size = n.div_ceil(num_threads);
 
         out_slice
             .par_chunks_mut(chunk_size)
@@ -569,14 +585,18 @@ pub fn matmul_2d_cpu_f32(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Ar
 
 /// Computes `C = A @ B^T` for F32 input `A` and F32 weight matrix `B`.
 pub fn matmul_2d_cpu_f32_batched(
-    a: &ArrayView2<f32>, 
+    a: &ArrayView2<f32>,
     b_weights: &ArrayView2<f32>,
     bias: Option<&[f32]>,
 ) -> Array2<f32> {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim();
-    assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
-    
+    assert_eq!(
+        k, k2,
+        "Matmul dimension mismatch: A[k]={} != B[k]={}",
+        k, k2
+    );
+
     if let Some(b) = bias {
         assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
     }
@@ -593,7 +613,7 @@ pub fn matmul_2d_cpu_f32_batched(
     }
 
     let mut c = Array2::<f32>::zeros((m, n));
-    
+
     let a_s = a.as_standard_layout();
     let b_s = b_weights.as_standard_layout();
     let a_slice = a_s.as_slice().expect("Input must be contiguous");
@@ -702,7 +722,7 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
         let a_slice = a_s.as_slice().unwrap();
         let out_slice = c.as_slice_mut().unwrap();
         let num_threads = rayon::current_num_threads();
-        let chunk_size = (n + num_threads - 1) / num_threads;
+        let chunk_size = n.div_ceil(num_threads);
 
         out_slice
             .par_chunks_mut(chunk_size)
@@ -719,12 +739,12 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
                 unsafe {
                     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
                     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                        return kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                        kernels::x86::q4_k::matmul_vec_q4_k_avx2(
                             out_chunk,
                             a_slice.as_ptr(),
                             b_blocks_chunk,
                             k,
-                        );
+                        )
                     }
                     // TODO: Add scalar fallback for non-x86 platforms
                 }
@@ -741,12 +761,12 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
                 unsafe {
                     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
                     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                        return kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                        kernels::x86::q4_k::matmul_vec_q4_k_avx2(
                             out_slice,
                             a_row_slice.as_ptr(),
                             b_weights,
                             k,
-                        );
+                        )
                     }
                 }
             });
@@ -780,12 +800,12 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
                         let block_start = start_row * num_blocks_per_row;
                         let block_count = out_chunk.len() * num_blocks_per_row;
 
-                        return kernels::x86::q6_k::matmul_vec_q6_k_avx2(
+                        kernels::x86::q6_k::matmul_vec_q6_k_avx2(
                             out_chunk,
                             a_slice.as_ptr(),
                             &weights[block_start..block_start + block_count],
                             k,
-                        );
+                        )
                     }
                     // scalar fallback ?
                 }
@@ -836,7 +856,7 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
 
         // Divide output evenly among threads
         let num_threads = rayon::current_num_threads();
-        let chunk_size = (out_features + num_threads - 1) / num_threads;
+        let chunk_size = out_features.div_ceil(num_threads);
 
         out_slice
             .par_chunks_mut(chunk_size)
@@ -876,7 +896,6 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
 
     output
 }
-
 
 #[cfg(test)]
 mod matmul_tests {
@@ -965,7 +984,10 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Tiny No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched Parity Tiny No Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
     }
@@ -981,7 +1003,10 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Tiny With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched Parity Tiny With Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
     }
@@ -996,7 +1021,10 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Small No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched Parity Small No Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1012,7 +1040,13 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Small Remainder Outputs (m={}, k={}, n={}, n%3={}) ===", m, k, n, n % 3);
+        println!(
+            "\n=== Batched Parity Small Remainder Outputs (m={}, k={}, n={}, n%3={}) ===",
+            m,
+            k,
+            n,
+            n % 3
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1028,7 +1062,12 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Small Remainder Tokens (m={}, k={}, m%4={}) ===", m, k, m % 4);
+        println!(
+            "\n=== Batched Parity Small Remainder Tokens (m={}, k={}, m%4={}) ===",
+            m,
+            k,
+            m % 4
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1045,8 +1084,14 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Both Remainders (m={}, k={}, n={}, m%4={}, n%3={}) ===", 
-                 m, k, n, m % 4, n % 3);
+        println!(
+            "\n=== Batched Parity Both Remainders (m={}, k={}, n={}, m%4={}, n%3={}) ===",
+            m,
+            k,
+            n,
+            m % 4,
+            n % 3
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1062,7 +1107,10 @@ mod matmul_tests {
 
         let diff = max_diff(&expected, &actual);
         let mean = mean_diff(&expected, &actual);
-        println!("\n=== Batched Parity Medium No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched Parity Medium No Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff:  {:.2e}", diff);
         println!("Mean diff: {:.2e}", mean);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
@@ -1080,7 +1128,10 @@ mod matmul_tests {
 
         let diff = max_diff(&expected, &actual);
         let mean = mean_diff(&expected, &actual);
-        println!("\n=== Batched Parity Medium With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched Parity Medium With Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff:  {:.2e}", diff);
         println!("Mean diff: {:.2e}", mean);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
@@ -1115,7 +1166,10 @@ mod matmul_tests {
 
         let diff = max_diff(&expected, &actual);
         let mean = mean_diff(&expected, &actual);
-        println!("\n=== Batched Parity MiniLM FFN (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched Parity MiniLM FFN (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff:  {:.2e}", diff);
         println!("Mean diff: {:.2e}", mean);
         assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
@@ -1131,7 +1185,11 @@ mod matmul_tests {
         let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
 
         let diff = max_diff(&expected, &actual);
-        println!("\n=== Batched Parity Non-Aligned K (k={}, k%8={}) ===", k, k % 8);
+        println!(
+            "\n=== Batched Parity Non-Aligned K (k={}, k%8={}) ===",
+            k,
+            k % 8
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1156,7 +1214,7 @@ mod matmul_tests {
     #[test]
     fn test_bf16_decode() {
         use half::bf16;
-        
+
         let (m, k, n) = (1, 384, 1536);
         let a = make_input(m, k, 0);
         let b_f32 = make_input(n, k, 100);
@@ -1174,7 +1232,7 @@ mod matmul_tests {
     #[test]
     fn test_bf16_prefill() {
         use half::bf16;
-        
+
         let (m, k, n) = (32, 384, 1536);
         let a = make_input(m, k, 0);
         let b_f32 = make_input(n, k, 100);
@@ -1200,7 +1258,10 @@ mod matmul_tests {
         matmul_2d_f32_noalloc(&a.view(), &b.view(), None, &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== No-Alloc Decode No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== No-Alloc Decode No Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1217,7 +1278,10 @@ mod matmul_tests {
         matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== No-Alloc Decode With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== No-Alloc Decode With Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1235,7 +1299,10 @@ mod matmul_tests {
         matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== No-Alloc Decode FFN Dims (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== No-Alloc Decode FFN Dims (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1251,7 +1318,10 @@ mod matmul_tests {
         matmul_2d_f32_noalloc(&a.view(), &b.view(), None, &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== No-Alloc Small Batch No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== No-Alloc Small Batch No Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
     }
@@ -1268,7 +1338,10 @@ mod matmul_tests {
         matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== No-Alloc Small Batch With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== No-Alloc Small Batch With Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
     }
@@ -1285,7 +1358,10 @@ mod matmul_tests {
         matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== No-Alloc Medium Batch (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== No-Alloc Medium Batch (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
     }
@@ -1319,7 +1395,10 @@ mod matmul_tests {
         matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), None, &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Tiny No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched No-Alloc Tiny No Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
     }
@@ -1336,7 +1415,10 @@ mod matmul_tests {
         matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Tiny With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched No-Alloc Tiny With Bias (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
     }
@@ -1354,7 +1436,11 @@ mod matmul_tests {
         matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Remainder Outputs (n={}, n%3={}) ===", n, n % 3);
+        println!(
+            "\n=== Batched No-Alloc Remainder Outputs (n={}, n%3={}) ===",
+            n,
+            n % 3
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1372,7 +1458,11 @@ mod matmul_tests {
         matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Remainder Tokens (m={}, m%4={}) ===", m, m % 4);
+        println!(
+            "\n=== Batched No-Alloc Remainder Tokens (m={}, m%4={}) ===",
+            m,
+            m % 4
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1390,7 +1480,11 @@ mod matmul_tests {
         matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Both Remainders (m%4={}, n%3={}) ===", m % 4, n % 3);
+        println!(
+            "\n=== Batched No-Alloc Both Remainders (m%4={}, n%3={}) ===",
+            m % 4,
+            n % 3
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1408,7 +1502,10 @@ mod matmul_tests {
 
         let diff = max_diff(&expected, &output);
         let mean = mean_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Medium (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched No-Alloc Medium (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff:  {:.2e}", diff);
         println!("Mean diff: {:.2e}", mean);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
@@ -1428,7 +1525,10 @@ mod matmul_tests {
 
         let diff = max_diff(&expected, &output);
         let mean = mean_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Large MiniLM (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched No-Alloc Large MiniLM (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff:  {:.2e}", diff);
         println!("Mean diff: {:.2e}", mean);
         assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
@@ -1448,7 +1548,10 @@ mod matmul_tests {
 
         let diff = max_diff(&expected, &output);
         let mean = mean_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc MiniLM FFN (m={}, k={}, n={}) ===", m, k, n);
+        println!(
+            "\n=== Batched No-Alloc MiniLM FFN (m={}, k={}, n={}) ===",
+            m, k, n
+        );
         println!("Max diff:  {:.2e}", diff);
         println!("Mean diff: {:.2e}", mean);
         assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
@@ -1466,7 +1569,11 @@ mod matmul_tests {
         matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), None, &mut output);
 
         let diff = max_diff(&expected, &output);
-        println!("\n=== Batched No-Alloc Non-Aligned K (k={}, k%8={}) ===", k, k % 8);
+        println!(
+            "\n=== Batched No-Alloc Non-Aligned K (k={}, k%8={}) ===",
+            k,
+            k % 8
+        );
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
@@ -1513,5 +1620,4 @@ mod matmul_tests {
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "No-alloc should match allocating exactly");
     }
-
 }

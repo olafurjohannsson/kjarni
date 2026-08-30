@@ -119,7 +119,10 @@ impl<'a> DecoderPipelineBuilder<'a> {
             mid_ram - start_ram
         );
 
-        log::debug!("LM head quantization: {:?}", self.load_config.quantize_lm_head);
+        log::debug!(
+            "LM head quantization: {:?}",
+            self.load_config.quantize_lm_head
+        );
 
         // Tied weights alias the embedding tensors, which needs the GPU-aware
         // constructor; on wasm the head is simply loaded from the weights.

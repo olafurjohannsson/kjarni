@@ -6,11 +6,10 @@ use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
 
 use super::*;
-use crate::gpu::DType;
 use crate::WgpuContext;
+use crate::gpu::DType;
 
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 use common::read_gpu_tensor_to_vec;
 
 async fn get_test_context() -> Arc<WgpuContext> {

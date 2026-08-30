@@ -1,6 +1,5 @@
 //! Core Embedder implementation.
 
-
 use kjarni_transformers::{LanguageModel, WgpuContext, models::ModelType, traits::Device};
 
 use crate::SentenceEncoder;
@@ -50,8 +49,7 @@ impl Embedder {
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: EmbedderBuilder) -> EmbedderResult<Self> {
         // Resolve model type
-        let model_type =
-            ModelType::resolve(&builder.model).map_err(|msg| EmbedderError::UnknownModel(msg))?;
+        let model_type = ModelType::resolve(&builder.model).map_err(EmbedderError::UnknownModel)?;
 
         validate_for_embedding(model_type)?;
 

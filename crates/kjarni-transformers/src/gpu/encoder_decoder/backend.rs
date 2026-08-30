@@ -1,9 +1,9 @@
 use crate::WgpuContext;
 use crate::cache::Cache;
+use crate::encoder_decoder::traits::GpuCrossAttentionKVCache;
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
-use crate::encoder_decoder::traits::GpuCrossAttentionKVCache;
 use crate::gpu::cache::GpuBeamKVCache;
 use crate::gpu::{GpuFrameContext, GpuTensor};
 use crate::models::base::ModelInput;
@@ -97,7 +97,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             seq2seq_ops.decoder().precompute_cross_attention_kv(
                 encoder_cmd,
                 pool_ref,
-                &final_hidden_states, 
+                &final_hidden_states,
             )?
         };
 
@@ -149,7 +149,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         let embed = ops.embed_decoder_tokens(
             encoder_cmd,
             pool_ref,
-            ModelInput::TokensGpu(&decoder_input_ids),
+            ModelInput::TokensGpu(decoder_input_ids),
             position_offset,
         )?;
 
@@ -164,7 +164,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             &attention_mask,
             position_offset,
             Some(cache),
-            Some(&cross_attention_kv_cache),
+            Some(cross_attention_kv_cache),
             0,
             ops.decoder().num_layers(),
         )?;
@@ -200,11 +200,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
     }
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor> {
-        let seq_len = if num_beams > 0 {
-            tokens.len() / num_beams
-        } else {
-            tokens.len()
-        };
+        let seq_len = tokens.len().checked_div(num_beams).unwrap_or(tokens.len());
         let tokens_ndarray = Array2::from_shape_vec((num_beams, seq_len), tokens.to_vec())?;
         let tensor = GpuTensor::from_ndarray(&self.context, &tokens_ndarray)?;
         Ok(GpuSeq2SeqState::TokenIds(tensor))
@@ -385,8 +381,7 @@ mod tests {
             Ok(GpuSeq2SeqState::TokenIds(t)) => {
                 assert_eq!(t.shape()[0], 0); // 0 beams
             }
-            Err(_) => {
-            }
+            Err(_) => {}
             _ => panic!("Unexpected state type"),
         }
     }

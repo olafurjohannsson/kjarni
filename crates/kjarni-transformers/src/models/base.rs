@@ -1,11 +1,11 @@
 //! Base traits and types for language model inference.
 
-pub use crate::tensor::DType;
 use crate::Cache;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::GpuTensor;
+pub use crate::tensor::DType;
 use crate::traits::InferenceModel;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, ArrayView2, ArrayView3};
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,6 @@ pub enum PaddingSide {
     Left,
     Right,
 }
-
 
 /// Defines the autoregressive generation loop strategy for decoder models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +137,7 @@ impl<'a> ModelInput<'a> {
     }
 }
 /// Configuration for model loading and device placement.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ModelLoadConfig {
     /// Keep embedding layer on CPU to save VRAM (500MB-2GB).
     pub offload_embeddings: bool,
@@ -156,21 +155,6 @@ pub struct ModelLoadConfig {
     pub max_sequence_length: Option<usize>,
     /// Use gguf
     pub use_gguf: bool,
-}
-
-impl Default for ModelLoadConfig {
-    fn default() -> Self {
-        Self {
-            offload_embeddings: false,
-            offload_lm_head: false,
-            target_dtype: None, // Default to "detect from file"
-            quantize_lm_head: None,
-            quantize_embeddings: None,
-            max_batch_size: None,
-            max_sequence_length: None,
-            use_gguf: false,
-        }
-    }
 }
 
 impl ModelLoadConfig {
@@ -225,7 +209,6 @@ impl ModelLoadConfig {
         self
     }
 }
-
 
 /// Core trait for all language models providing tokenization and metadata.
 #[async_trait]
@@ -301,7 +284,8 @@ pub trait LanguageModel: InferenceModel {
 
     /// Tokenizes a single text string into token IDs.
     fn tokenize(&self, text: &str) -> Result<Array2<u32>> {
-        let encoding = self.tokenizer()
+        let encoding = self
+            .tokenizer()
             .encode(text, true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
         let ids = encoding.get_ids().to_vec();

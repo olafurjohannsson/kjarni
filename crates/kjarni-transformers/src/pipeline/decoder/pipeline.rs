@@ -1,6 +1,6 @@
+use crate::LoadedEmbeddings;
 use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
-use crate::LoadedEmbeddings;
 use crate::execution::ExecutionPlan;
 use crate::loaders::LoadedLMHead;
 use crate::prelude::Device;
@@ -180,7 +180,7 @@ mod decoder_pipeline_test {
     use crate::tensor::DType;
     use crate::traits::{ModelLayout, ModelMetadata};
     use crate::weights::ModelWeights;
-    use crate::{Cache, gpu::cache::GpuKVCache, WgpuContext};
+    use crate::{Cache, WgpuContext, gpu::cache::GpuKVCache};
     use std::sync::Arc;
 
     struct MockCpuDecoder {
@@ -375,7 +375,6 @@ mod decoder_pipeline_test {
     ) -> (tempfile::TempDir, ModelWeights) {
         use safetensors::serialize;
         use safetensors::tensor::{Dtype, TensorView};
-        
 
         let dir = tempfile::TempDir::new().unwrap();
         let model_path = dir.path().join("model.safetensors");
@@ -406,13 +405,11 @@ mod decoder_pipeline_test {
         let hidden = 32;
         let vocab = 100;
 
-        let (_dir, weights) = create_dummy_weights(vec![
-            (
-                "token_embd.weight",
-                vec![1.0; vocab * hidden],
-                vec![vocab, hidden],
-            ),
-        ]);
+        let (_dir, weights) = create_dummy_weights(vec![(
+            "token_embd.weight",
+            vec![1.0; vocab * hidden],
+            vec![vocab, hidden],
+        )]);
 
         let config = Arc::new(MockConfig {
             hidden,
@@ -425,7 +422,7 @@ mod decoder_pipeline_test {
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
             .with_load_config(load_config)
-            .with_backends(cpu, gpu) 
+            .with_backends(cpu, gpu)
             .build()
             .expect("Failed to build pipeline");
 
@@ -485,7 +482,7 @@ mod decoder_pipeline_test {
         });
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
-            .with_backends(cpu, gpu) 
+            .with_backends(cpu, gpu)
             .build()
             .expect("Failed to build pipeline");
 
@@ -532,7 +529,7 @@ mod decoder_pipeline_test {
         });
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
-            .with_backends(cpu, gpu) 
+            .with_backends(cpu, gpu)
             .with_context_opt(Some(context))
             .build()?;
         assert!(pipeline.plan().embeddings.is_gpu());
@@ -564,7 +561,7 @@ mod decoder_pipeline_test {
         };
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
-            .with_backends(cpu, gpu) 
+            .with_backends(cpu, gpu)
             .with_load_config(load_config)
             .build()
             .unwrap();
@@ -603,7 +600,7 @@ mod decoder_pipeline_test {
         };
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
-            .with_backends(cpu, gpu) 
+            .with_backends(cpu, gpu)
             .with_load_config(load_config)
             .build()
             .unwrap();

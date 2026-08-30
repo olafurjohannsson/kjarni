@@ -1,29 +1,35 @@
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+// Only the wasm32 arms use the macro, so importing it unconditionally reads as an
+// unused import on native and gets pruned, which breaks the WebAssembly build.
+#[cfg(target_arch = "wasm32")]
+use anyhow::anyhow;
 use async_trait::async_trait;
 use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
 // Reuse Llama Decoders
-use crate::models::llama::{cpu_decoder::LlamaCpuDecoder};
+use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+use crate::models::mistral::config::MistralConfig;
 #[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
-use crate::models::mistral::config::MistralConfig;
 
 use kjarni_transformers::{
     ChatTemplate, WgpuContext,
     cache::{Cache, CpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
+    loaders::LoadedRoPE,
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
-    loaders::LoadedRoPE,
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
@@ -33,6 +39,10 @@ pub struct MistralModel {
     tokenizer: Tokenizer,
     config: Arc<MistralConfig>,
     chat_template: Option<Box<dyn ChatTemplate>>,
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     generation_defaults: Option<HFGenerationDefaults>,
 }
 
@@ -40,9 +50,15 @@ impl DecoderModelFactory for MistralModel {
     type Config = MistralConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        MistralConfig::from_loader(&*weights.loader(), Some(&weights.config_json()))
+        MistralConfig::from_loader(weights.loader(), Some(weights.config_json()))
     }
 
+    // On wasm there is no GPU backend, so `context` goes unread and the
+    // locals are never reassigned. The signature is shared with native.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(unused_variables, unused_mut, unused_assignments)
+    )]
     fn build_backends(
         weights: &ModelWeights,
         meta: &ModelMetadata,
@@ -77,7 +93,6 @@ impl DecoderModelFactory for MistralModel {
             }
             #[cfg(target_arch = "wasm32")]
             return Err(anyhow!("GPU decoding is not available in WebAssembly"));
-        } else {
         }
 
         Ok((cpu, gpu))
@@ -184,9 +199,7 @@ impl LanguageModel for MistralModel {
                 )?))
             }
             #[cfg(target_arch = "wasm32")]
-            Device::Wgpu => Err(anyhow!(
-                "GPU cache is not available in WebAssembly"
-            )),
+            Device::Wgpu => Err(anyhow!("GPU cache is not available in WebAssembly")),
         }
     }
     fn tokenizer(&self) -> &Tokenizer {
@@ -301,12 +314,7 @@ impl GpuDecoderOps for MistralModel {
     ) -> Result<GpuTensor> {
         let mask: Vec<f32> = (0..max).map(|i| if i < seq { 1.0 } else { 0.0 }).collect();
 
-        GpuTensor::create(
-            ctx.context,
-            &mask,
-            vec![1, max],
-            "AttentionMask"
-        )
+        GpuTensor::create(ctx.context, &mask, vec![1, max], "AttentionMask")
 
         // GpuTensor::from_raw(
         //     ctx.context,

@@ -19,7 +19,5 @@ colored = "2"
 bincode = "1"
 walkdir = "2.5.0"
 tempfile = "3.23.0"
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
+[lints]
+workspace = true

@@ -36,7 +36,6 @@ pub struct Seq2SeqGPUEncoder {
     final_layer_norm: Option<GpuNormalization>,
     final_ln_weights: Option<GpuNormalizationWeights>,
 
-    
     pre_norm: bool,
 
     sinusoidal_cache: Option<Array2<f32>>, // cpu cache
@@ -389,7 +388,7 @@ impl Seq2SeqGPUEncoder {
     pub fn has_final_norm(&self) -> bool {
         self.final_layer_norm.is_some()
     }
-    
+
     pub fn apply_sinusoidal_positions(
         &self,
         hidden_states: &Array3<f32>,
@@ -452,9 +451,7 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
                 norm.encode(cmd_encoder, weights, hidden_states, &output);
                 Ok(output)
             }
-            _ => {
-                Ok(hidden_states.clone())
-            }
+            _ => Ok(hidden_states.clone()),
         }
     }
 
@@ -517,9 +514,7 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
                 norm.encode(cmd_encoder, weights, hidden_states, &output);
                 Ok(output)
             }
-            _ => {
-                Ok(hidden_states.clone())
-            }
+            _ => Ok(hidden_states.clone()),
         }
     }
 

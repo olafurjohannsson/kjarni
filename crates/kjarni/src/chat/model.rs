@@ -2,9 +2,7 @@
 
 use futures::{Stream, StreamExt};
 
-use kjarni_transformers::{
-    ChatTemplate, Conversation, models::ModelType, traits::Device,
-};
+use kjarni_transformers::{ChatTemplate, Conversation, models::ModelType, traits::Device};
 
 use crate::generation::{GenerationOverrides, ResolvedGenerationConfig};
 use crate::generator::{Generator, GeneratorBuilder};
@@ -54,9 +52,17 @@ pub struct Chat {
     /// Default system prompt.
     system_prompt: Option<String>,
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     /// Resolved generation config.
     generation_config: ResolvedGenerationConfig,
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     /// User-provided overrides.
     user_overrides: GenerationOverrides,
 
@@ -206,20 +212,18 @@ impl Chat {
         }
 
         // If no system in history, use default
-        if !has_system {
-            if let Some(system) = &self.system_prompt {
-                let mut with_system = Conversation::with_system(system);
-                for msg in conversation.messages() {
-                    match msg.role {
-                        kjarni_transformers::Role::User => with_system.push_user(&msg.content),
-                        kjarni_transformers::Role::Assistant => {
-                            with_system.push_assistant(&msg.content)
-                        }
-                        _ => {}
+        if !has_system && let Some(system) = &self.system_prompt {
+            let mut with_system = Conversation::with_system(system);
+            for msg in conversation.messages() {
+                match msg.role {
+                    kjarni_transformers::Role::User => with_system.push_user(&msg.content),
+                    kjarni_transformers::Role::Assistant => {
+                        with_system.push_assistant(&msg.content)
                     }
+                    _ => {}
                 }
-                return with_system;
             }
+            return with_system;
         }
 
         conversation
@@ -275,8 +279,7 @@ impl Chat {
     pub async fn stream(
         &self,
         message: &str,
-    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
-    {
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
 
@@ -290,8 +293,7 @@ impl Chat {
         &self,
         history: &History,
         message: &str,
-    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
-    {
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         let mut conversation = self.history_to_conversation(history);
         conversation.push_user(message);
 
@@ -305,8 +307,7 @@ impl Chat {
         &self,
         message: &str,
         overrides: GenerationOverrides,
-    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
-    {
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
 
@@ -355,8 +356,7 @@ impl Chat {
         &self,
         prompt: String,
         runtime_overrides: GenerationOverrides,
-    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
-    {
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         let inner_stream = self
             .generator
             .stream_with_config(&prompt, runtime_overrides)

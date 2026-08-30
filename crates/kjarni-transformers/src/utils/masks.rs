@@ -70,7 +70,7 @@ pub fn last_token_pool(hidden_states: &Array3<f32>, attention_mask: &Array2<f32>
             .row(i)
             .iter()
             .rposition(|&x| x == 1.0)
-            .unwrap_or(0); 
+            .unwrap_or(0);
 
         let last_token_hidden_state = hidden_states.slice(s![i, last_token_index, ..]);
 
@@ -200,7 +200,7 @@ mod masking_tests {
     #[test]
     fn test_apply_padding_mask_shape_mismatch() {
         let scores = Array4::zeros((1, 1, 2, 3));
-        let mask = arr2(&[[1.0, 1.0]]); 
+        let mask = arr2(&[[1.0, 1.0]]);
 
         let result = apply_padding_mask(scores, &mask);
         assert!(result.is_err());
@@ -231,7 +231,7 @@ mod masking_tests {
         let result = apply_bias_mask(scores.clone(), &mask).unwrap();
 
         assert_eq!(result[[0, 0, 0, 1]], MASK_VALUE);
-        assert_eq!(result[[0, 0, 1, 0]], 0.0); 
+        assert_eq!(result[[0, 0, 1, 0]], 0.0);
 
         assert_eq!(result[[1, 0, 0, 1]], MASK_VALUE);
     }
@@ -254,7 +254,7 @@ mod masking_tests {
         let causal_mask = arr2(&[[1.0, 0.0], [1.0, 1.0]]);
         let res_causal = apply_attention_mask(scores.clone(), &causal_mask);
         assert_eq!(res_causal[[0, 0, 0, 1]], MASK_VALUE);
-    
+
         assert_eq!(res_causal[[0, 0, 1, 0]], 0.0);
     }
 
@@ -294,9 +294,9 @@ mod masking_tests {
 
         apply_causal_mask(&mut scores, 0);
 
-        assert_eq!(scores[[0, 0, 0, 1]], MASK_VALUE); 
-        assert_eq!(scores[[0, 0, 1, 2]], MASK_VALUE); 
-        assert_eq!(scores[[0, 0, 2, 0]], 0.0); 
+        assert_eq!(scores[[0, 0, 0, 1]], MASK_VALUE);
+        assert_eq!(scores[[0, 0, 1, 2]], MASK_VALUE);
+        assert_eq!(scores[[0, 0, 2, 0]], 0.0);
     }
 
     #[test]
@@ -341,7 +341,7 @@ mod masking_tests {
         let mask = create_batched_causal_mask(2, 4);
 
         assert_eq!(mask.dim(), (2, 4, 4));
-            for b in 0..2 {
+        for b in 0..2 {
             for i in 0..4 {
                 for j in 0..4 {
                     if j <= i {

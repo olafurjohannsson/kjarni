@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::gpu::{DType, GpuTensor};
 use crate::WgpuContext;
+use crate::gpu::{DType, GpuTensor};
 
 #[cfg(debug_assertions)]
 #[derive(Default, Debug)]
@@ -54,6 +54,7 @@ impl GpuTensorPool {
                 self.create_and_store_tensor(shape)
             });
 
+        #[cfg_attr(not(debug_assertions), allow(unused_variables))]
         let was_newly_inserted = self.current_frame_ids.insert(tensor.buffer_id());
 
         #[cfg(debug_assertions)]
@@ -69,22 +70,21 @@ impl GpuTensorPool {
     }
 
     fn try_reuse_from_pool(&mut self, needed_size: usize, shape: Vec<usize>) -> Option<GpuTensor> {
-        if let Some(buffers) = self.buffer_pool.get(&needed_size) {
-            if let Some(tensor_to_reuse) = buffers
+        if let Some(buffers) = self.buffer_pool.get(&needed_size)
+            && let Some(tensor_to_reuse) = buffers
                 .iter()
                 .find(|t| !self.current_frame_ids.contains(&t.buffer_id()))
+        {
+            #[cfg(debug_assertions)]
             {
-                #[cfg(debug_assertions)]
-                {
-                    self.stats.reuses += 1;
-                }
-
-                return Some(if tensor_to_reuse.shape() == shape.as_slice() {
-                    tensor_to_reuse.clone()
-                } else {
-                    tensor_to_reuse.view(shape)
-                });
+                self.stats.reuses += 1;
             }
+
+            return Some(if tensor_to_reuse.shape() == shape.as_slice() {
+                tensor_to_reuse.clone()
+            } else {
+                tensor_to_reuse.view(shape)
+            });
         }
 
         None

@@ -3,9 +3,19 @@ target/
 Cargo.lock
 *.safetensors
 vocab.txt
-*.json
+# Not a blanket *.json: that silently swallowed every package.json and
+# tsconfig.json in the repo, so the TypeScript package could not be committed and
+# its publish job had nothing to build. Ignore the generated ones by path instead.
+**/obj/*.json
+**/bin/*.json
+
+# Personal editor and tool state, previously hidden by the blanket *.json.
+.claude/settings.local.json
+.vscode/
 pkg/
 bin/
 obj/
 *.pyc
 node_modules/
+.test-venv/
+.test-logs/

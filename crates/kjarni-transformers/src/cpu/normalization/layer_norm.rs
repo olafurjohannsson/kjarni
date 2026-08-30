@@ -8,7 +8,6 @@ use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
 
 use crate::tensor::CpuTensor;
 
-
 /// Layer normalization
 pub struct LayerNorm {
     pub weight: Array1<f32>,
@@ -30,8 +29,13 @@ unsafe fn hsum_avx(v: __m256) -> f32 {
 }
 
 impl LayerNorm {
-
-
+    /// # Safety
+    ///
+    /// The caller must be running on a CPU with AVX2 and FMA. This is compiled with
+    /// `#[target_feature]`, so executing it on a CPU without them is undefined
+    /// behaviour; check with `is_x86_feature_detected!` first.
+    ///
+    /// `output` must have the same shape as `input`.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2", enable = "fma")]
     pub unsafe fn forward_2d_noalloc_simd(
@@ -43,7 +47,7 @@ impl LayerNorm {
         let hidden = input.shape()[1];
 
         // Fall back to scalar for non-aligned or small hidden dims
-        if hidden % 8 != 0 || hidden < 64 {
+        if !hidden.is_multiple_of(8) || hidden < 64 {
             return self.forward_2d_noalloc_scalar(input, output);
         }
 
@@ -112,12 +116,20 @@ impl LayerNorm {
             let out_slice = output_row.as_slice_mut().unwrap();
 
             let mut sum = 0.0f32;
+            #[allow(
+                clippy::needless_range_loop,
+                reason = "indexed numeric loop; the index addresses more than the iterated slice"
+            )]
             for i in 0..hidden {
                 sum += in_slice[i];
             }
             let mean = sum / hidden as f32;
 
             let mut var_sum = 0.0f32;
+            #[allow(
+                clippy::needless_range_loop,
+                reason = "indexed numeric loop; the index addresses more than the iterated slice"
+            )]
             for i in 0..hidden {
                 let diff = in_slice[i] - mean;
                 var_sum += diff * diff;
@@ -374,7 +386,6 @@ mod layer_norm_tests {
         unsafe {
             ln.forward_2d_noalloc_simd(&input.view(), &mut output_simd.view_mut());
         }
-        
 
         ln.forward_2d_noalloc_scalar(&input.view(), &mut output_scalar.view_mut());
 
@@ -414,7 +425,7 @@ mod layer_norm_tests {
     #[test]
     fn test_simd_scalar_equivalence_hidden_384_minilm() {
         let hidden = 384;
-        let tokens = 120; 
+        let tokens = 120;
 
         let weight = Array1::from_vec((0..hidden).map(|i| 0.9 + (i as f32) * 0.001).collect());
         let bias = Array1::from_vec((0..hidden).map(|i| -0.5 + (i as f32) * 0.002).collect());
@@ -807,8 +818,7 @@ mod layer_norm_tests {
         let ln = LayerNorm::new(weight, bias, 1e-5);
 
         let input = Array2::from_shape_fn((tokens, hidden), |(t, h)| {
-            let base = ((t * hidden + h) as f32 * 0.37).sin() * 100.0;
-            base
+            ((t * hidden + h) as f32 * 0.37).sin() * 100.0
         });
         let mut output = Array2::<f32>::zeros((tokens, hidden));
 

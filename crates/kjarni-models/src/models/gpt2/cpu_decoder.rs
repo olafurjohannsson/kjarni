@@ -1,11 +1,16 @@
-
-use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use log::debug;
 use ndarray::{Array1, Array2, Array3, s};
+use std::sync::Arc;
 
 use kjarni_transformers::{
-    Embeddings, FeedForward, MultiHeadAttention, Normalization, cache::{Cache, CpuKVCache}, decoder::prelude::*, feedforward::LegacyFeedForward, normalization::LayerNorm, traits::{ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
+    Embeddings, FeedForward, MultiHeadAttention, Normalization,
+    cache::{Cache, CpuKVCache},
+    decoder::prelude::*,
+    feedforward::LegacyFeedForward,
+    normalization::LayerNorm,
+    traits::{ModelConfig, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 use crate::models::gpt2::config::Gpt2Config;
@@ -14,8 +19,20 @@ pub struct Gpt2CpuDecoder {
     pub embeddings: Embeddings,
     pub layers: Vec<GptPreNormDecoderLayer>,
     pub final_layer_norm: Normalization,
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     pub config: Arc<Gpt2Config>,
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     pub meta: ModelMetadata,
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     pub layout: ModelLayout,
 }
 
@@ -263,7 +280,6 @@ impl Gpt2CpuDecoder {
 }
 
 impl CpuDecoder for Gpt2CpuDecoder {
-   
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -271,7 +287,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
         self
     }
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        Ok(self.final_layer_norm.forward(&hidden_states))
+        Ok(self.final_layer_norm.forward(hidden_states))
     }
     fn head_dim(&self) -> usize {
         0
@@ -345,7 +361,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
         cache: Option<&mut dyn Cache>,
     ) -> Result<Array3<f32>> {
         let mut output = self.forward_layers(
-            &hidden,
+            hidden,
             attention_mask,
             position_offset,
             cache,
@@ -358,7 +374,6 @@ impl CpuDecoder for Gpt2CpuDecoder {
         Ok(output)
     }
 }
-
 
 pub struct GptPreNormDecoderLayer {
     pub self_attn: MultiHeadAttention,

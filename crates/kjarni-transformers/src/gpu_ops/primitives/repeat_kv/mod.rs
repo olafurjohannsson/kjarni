@@ -143,13 +143,13 @@ impl GpuRepeatKV {
         //     label: Some("RepeatKV Pass"),
         //     timestamp_writes: None,
         // });
-        let label = format!("RepeatKV");
+        let label = "RepeatKV".to_string();
         self.context
             .profiler
             .profile(encoder, &label, |compute_pass| {
                 compute_pass.set_pipeline(&self.pipeline);
                 compute_pass.set_bind_group(0, &bind_group, &[]);
-                let workgroups = (output_kv.num_elements() as u32 + 255) / 256;
+                let workgroups = (output_kv.num_elements() as u32).div_ceil(256);
                 compute_pass.dispatch_workgroups(workgroups, 1, 1);
             });
     }

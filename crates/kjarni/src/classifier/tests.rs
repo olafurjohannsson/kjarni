@@ -1,8 +1,6 @@
 //! Tests for the classifier module.
 use super::*;
-use crate::classifier::{
-    ClassificationMode, ClassificationOverrides, Classifier, ClassifierError,
-};
+use crate::classifier::{ClassificationMode, ClassificationOverrides, Classifier, ClassifierError};
 use crate::common::{DownloadPolicy, KjarniDevice};
 
 // PyTorch Reference Constants
@@ -28,7 +26,9 @@ mod expected {
     pub const DISTILBERT_SENTIMENT_NEUTRAL_SCORE: f32 = 0.98554265;
     pub const DISTILBERT_SENTIMENT_NEUTRAL_LABEL_INDEX: usize = 1;
     pub const DISTILBERT_SENTIMENT_POSITIVE_SCORES: &[f32] = &[0.00012436, 0.99987566];
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const DISTILBERT_SENTIMENT_NEGATIVE_SCORES: &[f32] = &[0.99950767, 0.00049234];
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const DISTILBERT_SENTIMENT_NEUTRAL_SCORES: &[f32] = &[0.01445730, 0.98554265];
     pub const ROBERTA_SENTIMENT_POSITIVE_LABEL: &str = "positive";
     pub const ROBERTA_SENTIMENT_POSITIVE_SCORE: f32 = 0.98318094;
@@ -40,7 +40,9 @@ mod expected {
     pub const ROBERTA_SENTIMENT_NEUTRAL_SCORE: f32 = 0.92984450;
     pub const ROBERTA_SENTIMENT_NEUTRAL_LABEL_INDEX: usize = 1;
     pub const ROBERTA_SENTIMENT_POSITIVE_SCORES: &[f32] = &[0.00723555, 0.00958345, 0.98318094];
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const ROBERTA_SENTIMENT_NEGATIVE_SCORES: &[f32] = &[0.94799244, 0.04338233, 0.00862524];
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const ROBERTA_SENTIMENT_NEUTRAL_SCORES: &[f32] = &[0.01340395, 0.92984450, 0.05675153];
     pub const BERT_MULTILINGUAL_POSITIVE_LABEL: &str = "5 stars";
     pub const BERT_MULTILINGUAL_POSITIVE_SCORE: f32 = 0.96888399;
@@ -72,9 +74,11 @@ mod expected {
     pub const DISTILROBERTA_EMOTION_NEUTRAL_LABEL: &str = "neutral";
     pub const DISTILROBERTA_EMOTION_NEUTRAL_SCORE: f32 = 0.73899311;
     pub const DISTILROBERTA_EMOTION_NEUTRAL_LABEL_INDEX: usize = 4;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const DISTILROBERTA_EMOTION_POSITIVE_SCORES: &[f32] = &[
         0.00477491, 0.00191224, 0.00230405, 0.86246377, 0.01962744, 0.00249050, 0.10642719,
     ];
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const DISTILROBERTA_EMOTION_NEGATIVE_SCORES: &[f32] = &[
         0.11187306, 0.78679681, 0.07801756, 0.00140430, 0.00470836, 0.01464303, 0.00255702,
     ];
@@ -84,6 +88,7 @@ mod expected {
     pub const DISTILROBERTA_EMOTION_SAD_SCORES: &[f32] = &[
         0.00093757, 0.00351960, 0.00305090, 0.00237514, 0.01091948, 0.96455652, 0.01464079,
     ];
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const DISTILROBERTA_EMOTION_NEUTRAL_SCORES: &[f32] = &[
         0.01819254, 0.00930141, 0.04236472, 0.10131434, 0.73899311, 0.03730628, 0.05252752,
     ];
@@ -91,8 +96,11 @@ mod expected {
     pub const ROBERTA_EMOTIONS_POSITIVE_LABEL: &str = "love";
     pub const ROBERTA_EMOTIONS_POSITIVE_SCORE: f32 = 0.87999564;
     pub const ROBERTA_EMOTIONS_POSITIVE_LABEL_INDEX: usize = 18;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const ROBERTA_EMOTIONS_NEGATIVE_LABEL: &str = "fear";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const ROBERTA_EMOTIONS_NEGATIVE_SCORE: f32 = 0.42559999;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const ROBERTA_EMOTIONS_NEGATIVE_LABEL_INDEX: usize = 14;
     pub const ROBERTA_EMOTIONS_HAPPY_LABEL: &str = "excitement";
     pub const ROBERTA_EMOTIONS_HAPPY_SCORE: f32 = 0.74202043;
@@ -106,11 +114,15 @@ mod expected {
     pub const TOXIC_BERT_TOXIC_LABEL: &str = "toxic";
     pub const TOXIC_BERT_TOXIC_SCORE: f32 = 0.99004936;
     pub const TOXIC_BERT_TOXIC_LABEL_INDEX: usize = 0;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const TOXIC_BERT_NON_TOXIC_LABEL: &str = "toxic";
     pub const TOXIC_BERT_NON_TOXIC_SCORE: f32 = 0.00050768;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const TOXIC_BERT_NON_TOXIC_LABEL_INDEX: usize = 0;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const TOXIC_BERT_POSITIVE_LABEL: &str = "toxic";
     pub const TOXIC_BERT_POSITIVE_SCORE: f32 = 0.00057647;
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const TOXIC_BERT_POSITIVE_LABEL_INDEX: usize = 0;
 }
 
@@ -205,9 +217,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Builder Tests
-    
 
     mod builder_tests {
         use super::*;
@@ -461,9 +471,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Validation Tests
-    
 
     mod validation_tests {
         use super::*;
@@ -529,9 +537,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Error Tests
-    
 
     mod error_tests {
         use super::*;
@@ -565,6 +571,7 @@ mod classifier_tests {
     mod classifier_golden_values_test {
         use crate::Classifier;
 
+        #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
         fn assert_approx_eq(actual: &[f32], expected: &[f32], tolerance: f32, label: &str) {
             assert_eq!(actual.len(), expected.len(), "{label}: length mismatch");
             for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
@@ -673,9 +680,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Convenience Function Tests
-    
 
     mod convenience_tests {
         use super::*;
@@ -689,21 +694,27 @@ mod classifier_tests {
         #[test]
         fn test_available_models_returns_list() {
             let models = available_models();
-            assert!(models.len() >= 0);
+            assert!(!models.is_empty());
         }
     }
 
-    
     // Test Utilities
-    
 
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_POSITIVE: &str = "I absolutely love this, it's amazing!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_NEGATIVE: &str = "This is terrible, I hate it so much.";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_NEUTRAL: &str = "The meeting is scheduled for Tuesday.";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_GERMAN_POSITIVE: &str = "Das ist wunderbar, ich liebe es!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_FRENCH_NEGATIVE: &str = "C'est terrible, je déteste ça.";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_SPANISH_POSITIVE: &str = "¡Esto es increíble, me encanta!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_TOXIC: &str = "I hate you, you're worthless garbage.";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     const TEST_TEXT_NON_TOXIC: &str = "Thank you for your help today.";
 
     fn assert_valid_probability(score: f32, context: &str) {
@@ -719,9 +730,7 @@ mod classifier_tests {
         (a - b).abs() < eps
     }
 
-    
     // distilbert-sentiment Integration Tests
-    
 
     mod distilbert_sentiment_tests {
         use super::*;
@@ -857,9 +866,7 @@ mod classifier_tests {
         }
     }
 
-    
     // roberta-sentiment Integration Tests
-    
 
     mod roberta_sentiment_tests {
         use super::*;
@@ -976,9 +983,7 @@ mod classifier_tests {
         }
     }
 
-    
     // bert-sentiment-multilingual Integration Tests
-    
 
     mod bert_multilingual_tests {
         use super::*;
@@ -1195,9 +1200,7 @@ mod classifier_tests {
         }
     }
 
-    
     // distilroberta-emotion Integration Tests
-    
 
     mod distilroberta_emotion_tests {
         use super::*;
@@ -1397,9 +1400,7 @@ mod classifier_tests {
         }
     }
 
-    
     // roberta-emotions (Multi-Label) Integration Tests
-    
 
     mod roberta_emotions_tests {
         use super::*;
@@ -1543,9 +1544,7 @@ mod classifier_tests {
         }
     }
 
-    
     // toxic-bert (Multi-Label) Integration Tests
-    
 
     mod toxic_bert_tests {
         use super::*;
@@ -1636,7 +1635,7 @@ mod classifier_tests {
             // Check above_threshold for toxic text
             let above_50 = result.above_threshold(0.5);
             assert!(
-                above_50.len() >= 1,
+                !above_50.is_empty(),
                 "Should have at least one toxicity category above 0.5"
             );
             assert!(
@@ -1646,9 +1645,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Batch Classification Tests
-    
 
     mod batch_tests {
         use kjarni_transformers::LanguageModel;
@@ -1850,9 +1847,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Error Handling Tests
-    
 
     mod error_handling_tests {
         use super::*;
@@ -1915,9 +1910,7 @@ mod classifier_tests {
         }
     }
 
-    
     // GPU Parity Tests
-    
 
     mod gpu_tests {
         use super::*;
@@ -1975,9 +1968,7 @@ mod classifier_tests {
         }
     }
 
-    
     // F16 Precision Tests
-    
 
     mod f16_tests {
         use super::*;
@@ -2013,9 +2004,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Accessor Tests
-    
 
     mod accessor_tests {
         use super::*;
@@ -2069,9 +2058,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Convenience Function Tests
-    
 
     mod convenience_function_tests {
         use super::*;
@@ -2086,9 +2073,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Override Tests
-    
 
     mod override_tests {
         use super::*;
@@ -2163,9 +2148,7 @@ mod classifier_tests {
         }
     }
 
-    
     // Loading Tests
-    
 
     mod loading_tests {
         use super::*;

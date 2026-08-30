@@ -99,6 +99,10 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         // create decoder padding mask, usually all 1s during auto regressive decode
         let attention_mask = Array2::ones(tokens.dim());
 
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let decoder_output = ops.decoder().forward(
             tokens,
             enc_state,
@@ -126,11 +130,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
     }
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor> {
-        let seq_len = if num_beams > 0 {
-            tokens.len() / num_beams
-        } else {
-            0
-        };
+        let seq_len = tokens.len().checked_div(num_beams).unwrap_or(0);
         let tokens_ndarray = Array2::from_shape_vec((num_beams, seq_len), tokens.to_vec())?;
         Ok(CpuSeq2SeqState::U32(tokens_ndarray))
     }
@@ -448,7 +448,7 @@ mod tests {
         for layer in 0..num_layers {
             cache.update(layer, &k, &v).unwrap();
         }
-        cache.increment_len(1); 
+        cache.increment_len(1);
         let reorder_indices = vec![2, 2, 0, 1];
         backend.reorder_cache(&mut cache, &reorder_indices).unwrap();
     }
@@ -518,6 +518,4 @@ mod tests {
             _ => panic!("Expected U32"),
         }
     }
-
-
 }

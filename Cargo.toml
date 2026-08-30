@@ -59,19 +59,81 @@ libm = "0.2.0"
 
 memmap2 = "0.9.9"
 
-[profile.release]
-opt-level = 3       
-lto = "fat"         
-codegen-units = 1   
-panic = "abort"     
-strip = true        
+# Lint policy for the workspace. CI runs `cargo clippy --workspace --all-targets
+# -- -D warnings`, so anything not allowed here has to be fixed rather than ignored.
+# Each allow is a deliberate exemption with a reason, not a backlog.
+[workspace.lints.clippy]
+# The engine is transcribed from reference implementations, and its constants are
+# copied at the precision the reference states them: `0.7978845608` for the GELU
+# tanh approximation, `0.7071067811865475` for 1/sqrt(2), and ~1100 golden values
+# captured from PyTorch. Clippy is right that an f32 cannot hold all those digits;
+# truncating them to what it can is exactly what the parity tests exist to detect,
+# and it would make the literals no longer match the source they were taken from.
+excessive_precision = "allow"
 
+# Attention and encoder kernels take the arguments they take -- `forward(q, k, v,
+# mask, cache, layer_idx, scale, ...)` is 8 to 11 parameters because the operation
+# has 8 to 11 inputs. Folding them into config structs would add an indirection to
+# the hottest paths in the engine to satisfy a threshold of 7.
+too_many_arguments = "allow"
+
+# Same reason: the kernel signatures return and accept nested tuples of tensor
+# views. Naming each one would spread the shapes across the crate rather than
+# keeping them where they are used.
+type_complexity = "allow"
+
+# `scalar/mod.rs` declaring `mod scalar`, and a `tests.rs` declaring a matching
+# `mod *_tests`, are the layout this codebase uses throughout.
+module_inception = "allow"
+
+# The profile CI tests run under. Tests used to run in the dev profile, where an
+# unoptimised decode loop is roughly twenty times slower -- one generation test
+# measured 110s debug against 5s release -- and that is what pushed the job past its
+# timeout.
+#
+# It inherits release for the optimisation but overrides the parts of release that
+# are wrong for a test run:
+#
+#   lto/codegen-units  fat LTO with a single codegen unit is the slowest part of a
+#                      release build and buys nothing for correctness testing.
+#   debug-assertions   release silences all 51 `debug_assert!`s and the 20
+#                      `#[cfg(debug_assertions)]` blocks -- the GPU buffer-aliasing
+#                      check, the FFN dimension check, the encoder capacity check.
+#                      Those are exactly what a test run wants live, and no test is
+#                      gated on the flag, so turning it on costs nothing.
+#   overflow-checks    on, matching what the dev profile gave CI before. Cargo would
+#                      otherwise default it to `debug-assertions`; it is set
+#                      explicitly so the coupling is visible.
+#   strip              release strips symbols, which turns a CI panic into an
+#                      address. Keep them.
 [profile.ci]
 inherits = "release"
 lto = false
 codegen-units = 16
 debug-assertions = true
 overflow-checks = true
-panic = "unwind"
 strip = false
 debug = "line-tables-only"
+
+# Cargo honours `[profile.*]` only here, at the workspace root. Member crates used
+# to carry their own copies -- `opt-level = "z"` in kjarni-cli, kjarni-rag and
+# kjarni-search, and a full release profile in kjarni-wasm -- and Cargo ignored every
+# one of them while warning about it on each build. They have been removed rather
+# than hoisted: kjarni-wasm's copy set `panic = "abort"`, which must not come back
+# (see the note below), and the `opt-level = "z"` intent for the CLI is a separate
+# decision, expressible as `[profile.release.package.kjarni-cli]` if still wanted.
+[profile.release]
+opt-level = 3       
+lto = "fat"         
+codegen-units = 1   
+strip = true        
+# `panic = "abort"` was set here and is deliberately absent now. Cargo has no
+# per-package panic strategy, so the setting applied to `kjarni-ffi` too — and that
+# crate is a cdylib loaded into someone else's process. Any panic in the engine,
+# reached through any of the 80 `extern "C"` entry points, aborted the host: a .NET
+# service, a Go binary, a Qt application. `catch_unwind` cannot intercept an abort,
+# so the barrier in `kjarni-ffi/src/panic.rs` needs unwinding to exist at all.
+#
+# The cost is a larger binary and landing pads the optimiser must preserve. That is
+# the correct trade for a library whose entire premise is running in-process.
+

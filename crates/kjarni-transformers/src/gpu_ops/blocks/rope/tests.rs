@@ -1,14 +1,13 @@
-use crate::gpu_ops::blocks::rope::GpuRoPE;
-use crate::gpu::GpuTensor;
-use crate::rope::RoPE as CpuRoPE;
 use crate::WgpuContext;
+use crate::gpu::GpuTensor;
+use crate::gpu_ops::blocks::rope::GpuRoPE;
+use crate::rope::RoPE as CpuRoPE;
 use anyhow::Result;
 use common::assert_tensors_are_close_4d;
 use ndarray::Array;
-use ndarray_rand::{rand_distr::Uniform, RandomExt};
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 #[ignore = "GPU required"]
 #[tokio::test]

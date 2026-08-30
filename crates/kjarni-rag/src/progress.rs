@@ -290,7 +290,7 @@ mod progress_tests {
     #[test]
     fn test_progress_stage_clone() {
         let stage = ProgressStage::Embedding;
-        let cloned = stage.clone();
+        let cloned = stage;
         assert_eq!(stage, cloned);
     }
 

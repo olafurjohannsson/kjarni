@@ -1,47 +1,60 @@
 use super::*;
 use futures::StreamExt;
 
-
 // Expected Outputs from PyTorch Reference
-
 
 mod expected {
     pub const FLAN_T5_BASE_EN_TO_DE_HELLO_GREEDY: &str = "Hello,";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_DE_HELLO_BEAM: &str = "Hello!";
     pub const FLAN_T5_BASE_EN_TO_DE_HOW_OLD_GREEDY: &str = "Wie old sind Sie?";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_DE_HOW_OLD_BEAM: &str = "How old are you?";
     pub const FLAN_T5_BASE_EN_TO_DE_GOOD_MORNING_GREEDY: &str = "Good morning!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_DE_GOOD_MORNING_BEAM: &str = "Good morning!";
     pub const FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY: &str = "Vielen Dank!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_DE_THANK_YOU_BEAM: &str = "Dankeschön!";
     pub const FLAN_T5_BASE_EN_TO_FR_HELLO_GREEDY: &str = "Bonjour,";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_FR_HELLO_BEAM: &str = "Bonjour!";
     pub const FLAN_T5_BASE_EN_TO_FR_GOOD_MORNING_GREEDY: &str = "Good morning";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_FR_GOOD_MORNING_BEAM: &str = "Good morning";
     pub const FLAN_T5_BASE_EN_TO_ES_HELLO_GREEDY: &str = "Hi,";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_ES_HELLO_BEAM: &str = "Hombre!";
     pub const FLAN_T5_BASE_EN_TO_ES_THANK_YOU_GREEDY: &str = "Gracias";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_BASE_EN_TO_ES_THANK_YOU_BEAM: &str = "Gracias";
     pub const FLAN_T5_LARGE_EN_TO_DE_HELLO_GREEDY: &str = "Hello!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_DE_HELLO_BEAM: &str = "Hello!";
     pub const FLAN_T5_LARGE_EN_TO_DE_HOW_OLD_GREEDY: &str = "Wie alte sind Sie?";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_DE_HOW_OLD_BEAM: &str = "Wie alte sind Sie?";
     pub const FLAN_T5_LARGE_EN_TO_DE_GOOD_MORNING_GREEDY: &str =
         "Ich freue mich, dass Sie daran reisen.";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_DE_GOOD_MORNING_BEAM: &str = "Sehr gute Morgen!";
     pub const FLAN_T5_LARGE_EN_TO_DE_THANK_YOU_GREEDY: &str = "Danke!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_DE_THANK_YOU_BEAM: &str = "Vielen Dank!";
     pub const FLAN_T5_LARGE_EN_TO_FR_HELLO_GREEDY: &str = "Hello!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_FR_HELLO_BEAM: &str = "Hello!";
     pub const FLAN_T5_LARGE_EN_TO_FR_GOOD_MORNING_GREEDY: &str =
         " l'heure actuelle, il y a d'autres possibilités de l'emploi.";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_FR_GOOD_MORNING_BEAM: &str = "Bienvenue !";
     pub const FLAN_T5_LARGE_EN_TO_ES_HELLO_GREEDY: &str = "Hello!";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_ES_HELLO_BEAM: &str = "Hello!";
     pub const FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_GREEDY: &str = "Gracias";
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     pub const FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_BEAM: &str = "Gracias";
 }
-
 
 mod language_tests {
     use crate::translator::languages::*;
@@ -159,15 +172,14 @@ mod language_tests {
     }
 }
 
-
 // Unit Tests - Validation
-
 
 mod validation_tests {
     use crate::translator::TranslatorError;
     use crate::translator::validation::*;
     use kjarni_transformers::models::ModelType;
 
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     fn test_validate_t5_models_accepted() {
         let t5_base = ModelType::from_cli_name("flan-t5-base").unwrap();
         let result = crate::summarizer::validate_for_summarization(t5_base);
@@ -207,9 +219,7 @@ mod validation_tests {
     }
 }
 
-
 // Unit Tests - Presets
-
 
 mod preset_tests {
     use crate::translator::presets::*;
@@ -219,15 +229,15 @@ mod preset_tests {
         assert_eq!(TRANSLATION_FAST_V1.model, "flan-t5-base");
         assert_eq!(TRANSLATION_FAST_V1.architecture, "t5");
         assert!(TRANSLATION_FAST_V1.supported_languages.len() == 6);
-        assert!(TRANSLATION_FAST_V1.memory_mb >= 500);
-        assert!(TRANSLATION_FAST_V1.memory_mb <= 2000);
+        const { assert!(TRANSLATION_FAST_V1.memory_mb >= 500) };
+        const { assert!(TRANSLATION_FAST_V1.memory_mb <= 2000) };
     }
 
     #[test]
     fn test_preset_quality_values() {
         assert_eq!(TRANSLATION_QUALITY_V1.model, "flan-t5-large");
         assert_eq!(TRANSLATION_QUALITY_V1.architecture, "t5");
-        assert!(TRANSLATION_QUALITY_V1.memory_mb > TRANSLATION_FAST_V1.memory_mb);
+        const { assert!(TRANSLATION_QUALITY_V1.memory_mb > TRANSLATION_FAST_V1.memory_mb) };
         assert!(
             TRANSLATION_QUALITY_V1.supported_languages.len()
                 >= TRANSLATION_FAST_V1.supported_languages.len()
@@ -249,9 +259,7 @@ mod preset_tests {
     }
 }
 
-
 // Unit Tests - Builder
-
 
 mod builder_tests {
     use crate::common::KjarniDevice;
@@ -355,9 +363,7 @@ mod error_tests {
     }
 }
 
-
 // Unit Tests - Module Functions
-
 
 mod module_function_tests {
     use crate::translator::{available_models, is_translation_model};
@@ -389,9 +395,7 @@ mod module_function_tests {
     }
 }
 
-
 // Integration Tests - Model Output Verification (flan-t5-base)
-
 
 #[cfg(test)]
 mod flan_t5_base_tests {
@@ -586,9 +590,7 @@ mod flan_t5_base_tests {
     }
 }
 
-
 // Integration Tests - Model Output Verification (flan-t5-large)
-
 
 #[cfg(test)]
 mod flan_t5_large_tests {
@@ -783,9 +785,7 @@ mod flan_t5_large_tests {
     }
 }
 
-
 // Integration Tests - Error Handling
-
 
 #[cfg(test)]
 mod error_handling_tests {
@@ -898,9 +898,7 @@ mod error_handling_tests {
     }
 }
 
-
 // Integration Tests - Default Languages
-
 
 #[cfg(test)]
 mod default_language_tests {
@@ -976,9 +974,7 @@ mod default_language_tests {
     }
 }
 
-
 // Integration Tests - Accessors
-
 
 #[cfg(test)]
 mod accessor_tests {
@@ -1019,9 +1015,7 @@ mod accessor_tests {
     }
 }
 
-
 // Integration Tests - Concurrent Usage
-
 
 #[cfg(test)]
 mod concurrency_tests {

@@ -1,9 +1,8 @@
 #![allow(unsafe_code)]
-pub mod q_common;
-pub mod scalar;
-pub mod quantize;
 pub mod dequantize;
-
+pub mod q_common;
+pub mod quantize;
+pub mod scalar;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub(crate) mod x86;

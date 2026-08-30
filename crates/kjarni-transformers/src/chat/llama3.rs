@@ -203,7 +203,7 @@ impl ChatTemplate for Llama2ChatTemplate {
 
         let mut is_first_user = true;
 
-        while let Some(msg) = msg_iter.next() {
+        for msg in msg_iter {
             match msg.role {
                 Role::User => {
                     if self.add_bos || !is_first_user {

@@ -1,7 +1,6 @@
 use super::*;
 use crate::common::{DownloadPolicy, KjarniDevice};
 
-
 mod types_tests {
     use kjarni_transformers::PoolingStrategy;
 
@@ -76,8 +75,6 @@ mod types_tests {
         assert!(overrides.max_length.is_none());
     }
 }
-
-
 
 mod builder_tests {
     use kjarni_transformers::PoolingStrategy;
@@ -283,9 +280,7 @@ mod preset_tests {
     }
 }
 
-
 // Validation Tests
-
 
 mod validation_tests {
     use super::*;
@@ -310,7 +305,7 @@ mod validation_tests {
     #[test]
     fn test_get_embedding_models() {
         let models = validation::get_embedding_models();
-        assert!(models.len() >= 0);
+        assert!(!models.is_empty());
     }
 }
 
@@ -492,7 +487,6 @@ mod embedder_golden_values_test {
     }
 }
 
-
 mod error_tests {
     use super::*;
 
@@ -528,13 +522,11 @@ mod convenience_tests {
     #[test]
     fn test_available_models_returns_list() {
         let models = available_models();
-        assert!(models.len() >= 0);
+        assert!(!models.is_empty());
     }
 }
 
-
 // Cosine Similarity Tests
-
 
 mod similarity_tests {
     #[test]
@@ -577,8 +569,6 @@ mod similarity_tests {
         assert_eq!(sim, 0.0);
     }
 }
-
-
 
 mod integration_tests {
     use kjarni_transformers::PoolingStrategy;
@@ -790,7 +780,7 @@ mod integration_tests {
         let sim = similarity("minilm-l6-v2", "Hello", "Hi there")
             .await
             .expect("Similarity function failed");
-        assert!(sim >= -1.0 && sim <= 1.0);
+        assert!((-1.0..=1.0).contains(&sim));
     }
 
     #[tokio::test]

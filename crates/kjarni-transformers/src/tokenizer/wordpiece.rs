@@ -8,6 +8,9 @@ use std::collections::HashMap;
 /// A lightweight, WASM-compatible WordPiece tokenizer
 pub struct WordPieceTokenizer {
     vocab: HashMap<String, u32>,
+    /// Reverse of `vocab`, for `decode`. Built once at load: without it every id
+    /// would need a linear scan of the whole vocabulary.
+    id_to_token: HashMap<u32, String>,
     unk_token_id: u32,
     cls_token_id: u32,
     sep_token_id: u32,
@@ -18,7 +21,7 @@ impl ModelTokenizer for WordPieceTokenizer {
         Ok(self.encode(text, 1024)?.get_ids().clone())
     }
     fn decode(&self, ids: &[u32], skip_special_tokens: bool) -> anyhow::Result<String> {
-        self.decode(ids, skip_special_tokens)
+        WordPieceTokenizer::decode(self, ids, skip_special_tokens)
     }
 }
 impl WordPieceTokenizer {
@@ -44,8 +47,11 @@ impl WordPieceTokenizer {
         let pad_token_id = get_token_id("[PAD]")?;
         let unk_token_id = get_token_id("[UNK]")?;
 
+        let id_to_token = vocab.iter().map(|(t, id)| (*id, t.clone())).collect();
+
         Ok(Self {
             vocab,
+            id_to_token,
             unk_token_id,
             cls_token_id,
             sep_token_id,
@@ -66,7 +72,7 @@ impl WordPieceTokenizer {
 
             for i in (1..=remaining.len()).rev() {
                 let prefix = &remaining[0..i];
-                
+
                 let token_to_check = if remaining.len() != word.len() {
                     format!("##{}", prefix)
                 } else {
@@ -132,6 +138,51 @@ impl WordPieceTokenizer {
 
     pub fn encode_batch(&self, texts: Vec<&str>, max_len: usize) -> Result<Vec<Encoding>> {
         texts.iter().map(|t| self.encode(t, max_len)).collect()
+    }
+
+    /// Turn token ids back into text.
+    ///
+    /// WordPiece marks a continuation of the previous word with a `##` prefix, so a
+    /// token joins the one before it when it carries that prefix and starts a new
+    /// word otherwise. `encode` lowercases and pads its input, so this does not
+    /// round-trip to the original string: casing is gone, and punctuation comes back
+    /// space-separated the way `encode` split it.
+    ///
+    /// With `skip_special_tokens` the `[CLS]`, `[SEP]` and `[PAD]` markers are
+    /// dropped; without it they appear as their literal vocabulary entries. An id
+    /// outside the vocabulary decodes to `[UNK]` rather than failing, which is what
+    /// a model that emitted it meant by it.
+    pub fn decode(&self, ids: &[u32], skip_special_tokens: bool) -> Result<String> {
+        let unk = self
+            .id_to_token
+            .get(&self.unk_token_id)
+            .map(String::as_str)
+            .unwrap_or("[UNK]");
+
+        let mut out = String::new();
+        for id in ids {
+            if skip_special_tokens
+                && (*id == self.cls_token_id
+                    || *id == self.sep_token_id
+                    || *id == self.pad_token_id)
+            {
+                continue;
+            }
+
+            let token = self.id_to_token.get(id).map(String::as_str).unwrap_or(unk);
+
+            match token.strip_prefix("##") {
+                Some(suffix) => out.push_str(suffix),
+                None => {
+                    if !out.is_empty() {
+                        out.push(' ');
+                    }
+                    out.push_str(token);
+                }
+            }
+        }
+
+        Ok(out)
     }
 }
 
@@ -199,13 +250,13 @@ mod tests {
 
         assert_eq!(encoding.ids.len(), max_len);
         assert_eq!(encoding.ids[0], tokenizer.cls_token_id);
-        
+
         assert_eq!(encoding.ids[1], 4);
         assert_eq!(encoding.ids[2], 5);
         assert_eq!(encoding.ids[3], 7);
-        
-        assert_eq!(encoding.ids[4], tokenizer.sep_token_id); 
-        
+
+        assert_eq!(encoding.ids[4], tokenizer.sep_token_id);
+
         for i in 5..10 {
             assert_eq!(encoding.ids[i], tokenizer.pad_token_id);
         }
@@ -224,7 +275,7 @@ mod tests {
 
         if let Some(attn) = &encoding.attention_mask {
             assert_eq!(attn.len(), max_len);
-            assert!(attn[max_len - 1] == 1); 
+            assert!(attn[max_len - 1] == 1);
         }
 
         Ok(())
@@ -232,9 +283,9 @@ mod tests {
     #[test]
     fn test_encode_batch() -> Result<()> {
         let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
-        let texts = vec!["hello", "world"];
+        let texts = ["hello", "world"];
         let max_len = 5;
-        let encodings = tokenizer.encode_batch(texts.iter().map(|s| *s).collect(), max_len)?;
+        let encodings = tokenizer.encode_batch(texts.to_vec(), max_len)?;
 
         assert_eq!(encodings.len(), 2);
 
@@ -249,7 +300,73 @@ mod tests {
         assert_eq!(e1.ids[0], 0);
         assert_eq!(e1.ids[1], 5);
         assert_eq!(e1.ids[2], 1);
-        
+
+        Ok(())
+    }
+
+    /// `ModelTokenizer::decode` used to call itself: there was no inherent `decode`
+    /// for `self.decode(..)` to resolve to, so every call recursed until the stack
+    /// ran out. A stack overflow aborts the process rather than unwinding, so no
+    /// error handling anywhere above it could have contained this.
+    #[test]
+    fn decode_returns_instead_of_recursing() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        assert_eq!(tokenizer.decode(&[4], true)?, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn decode_joins_continuations_and_separates_words() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        // hello world ##s !  ->  "##s" continues "world", the rest are new words.
+        assert_eq!(tokenizer.decode(&[4, 5, 6, 7], true)?, "hello worlds !");
+        Ok(())
+    }
+
+    #[test]
+    fn decode_skips_special_tokens_only_when_asked() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        let ids = [0, 4, 5, 1, 2, 2];
+
+        assert_eq!(tokenizer.decode(&ids, true)?, "hello world");
+        assert_eq!(
+            tokenizer.decode(&ids, false)?,
+            "[CLS] hello world [SEP] [PAD] [PAD]"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn decode_maps_an_unknown_id_to_unk_rather_than_failing() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        assert_eq!(tokenizer.decode(&[4, 9999], true)?, "hello [UNK]");
+        Ok(())
+    }
+
+    #[test]
+    fn decode_of_an_empty_slice_is_empty() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        assert_eq!(tokenizer.decode(&[], true)?, "");
+        Ok(())
+    }
+
+    /// The lossy parts are deliberate and worth pinning: `encode` lowercases and
+    /// spaces out punctuation, so a round trip returns normalised text, not the
+    /// original string.
+    #[test]
+    fn encode_then_decode_returns_normalised_text() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        let encoded = tokenizer.encode("Hello world!", 16)?;
+        assert_eq!(tokenizer.decode(&encoded.ids, true)?, "hello world !");
+        Ok(())
+    }
+
+    /// Reached through the trait, which is how every model calls it.
+    #[test]
+    fn decode_through_the_trait_object_matches_the_inherent_method() -> Result<()> {
+        let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
+        let as_trait: &dyn ModelTokenizer = &tokenizer;
+        assert_eq!(as_trait.decode(&[4, 5], true)?, "hello world");
         Ok(())
     }
 }

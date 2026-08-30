@@ -292,10 +292,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(layer.dtype(), DType::BF16);
-        match layer.data {
-            LinearData::BF16(_) => assert!(true),
-            _ => panic!("Expected BF16 data"),
-        }
+        assert!(
+            matches!(layer.data, LinearData::BF16(_)),
+            "expected BF16 data, got {:?}",
+            layer.dtype()
+        );
     }
 
     #[test]

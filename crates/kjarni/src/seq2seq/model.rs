@@ -80,7 +80,10 @@ impl Seq2SeqGenerator {
         }
 
         // Determine cache directory
-        let cache_dir = builder.cache_dir.clone().unwrap_or_else(get_default_cache_dir);
+        let cache_dir = builder
+            .cache_dir
+            .clone()
+            .unwrap_or_else(get_default_cache_dir);
 
         // Check if model is downloaded
         let is_downloaded = model_type.is_downloaded(&cache_dir);
@@ -250,7 +253,11 @@ impl Seq2SeqGenerator {
         debug!(
             "Generate: input_len={} chars, config={}",
             input.len(),
-            if config.is_some() { "custom" } else { "model defaults" }
+            if config.is_some() {
+                "custom"
+            } else {
+                "model defaults"
+            }
         );
 
         let output = self
@@ -296,7 +303,11 @@ impl Seq2SeqGenerator {
         debug!(
             "Stream: input_len={} chars, config={}",
             input.len(),
-            if config.is_some() { "custom" } else { "model defaults" }
+            if config.is_some() {
+                "custom"
+            } else {
+                "model defaults"
+            }
         );
 
         // Clone/own everything we need for the spawned task

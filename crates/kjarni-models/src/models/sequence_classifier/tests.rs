@@ -6,7 +6,6 @@ use kjarni_transformers::traits::Device;
 use tokio;
 
 mod cross_encoder_tests {
-    
 
     use super::*;
     #[ignore = "GPU required"]
@@ -122,7 +121,7 @@ mod cross_encoder_tests {
 
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_rerank_returns_scores() -> Result<()> {
         let encoder = CrossEncoder::from_registry(
@@ -166,11 +165,11 @@ mod cross_encoder_tests {
         .await?;
         let query = "machine learning";
         let documents = vec![
-            "Machine learning is awesome",          
-            "The weather is nice today",            
-            "Deep learning uses neural networks",   
-            "I like pizza",                         
-            "AI and ML are transforming the world", 
+            "Machine learning is awesome",
+            "The weather is nice today",
+            "Deep learning uses neural networks",
+            "I like pizza",
+            "AI and ML are transforming the world",
         ];
         let top_2 = encoder.rerank_top_k(query, &documents, 2).await?;
         assert_eq!(top_2.len(), 2, "Should return exactly 2 results");

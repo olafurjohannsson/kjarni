@@ -20,8 +20,8 @@ mod tests {
     /// directory cargo happened to run the test binary from, and pointed at a
     /// file that was never committed.
     fn speech_fixture() -> std::path::PathBuf {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/speech.wav");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speech.wav");
 
         assert!(
             path.exists(),
@@ -81,7 +81,7 @@ mod tests {
         let p = TranscriptionProgress::loading_audio();
         assert_eq!(p.stage, TranscriptionStage::LoadingAudio);
     }
-    
+
     #[tokio::test]
     #[ignore = "requires model weights"]
     async fn test_transcribe_file() {

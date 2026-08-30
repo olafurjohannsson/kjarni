@@ -1,7 +1,7 @@
-use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::tensor::DType;
-use crate::{gpu_profile, WgpuContext};
+use crate::{WgpuContext, gpu_profile};
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -49,7 +49,6 @@ pub struct GpuSwiGLUFFN {
 impl GpuSwiGLUFFN {
     pub fn new(context: &Arc<WgpuContext>) -> Result<Self> {
         let device = &context.device;
-
 
         let _elementwise_bind_group_layout =
             context
@@ -388,14 +387,13 @@ impl GpuSwiGLUFFN {
                 if is_gemv {
                     pass.dispatch_workgroups(n, 1, 1);
                 } else {
-                    let groups_x = (n + 15) / 16;
-                    let groups_y = (m + 15) / 16;
+                    let groups_x = n.div_ceil(16);
+                    let groups_y = m.div_ceil(16);
                     pass.dispatch_workgroups(groups_x, groups_y, 1);
                 }
             }
         );
     }
- 
 }
 
 #[cfg(test)]

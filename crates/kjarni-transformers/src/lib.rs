@@ -12,9 +12,9 @@ pub mod chat;
 
 pub mod cpu;
 
-
 pub mod execution;
 
+pub mod common;
 pub mod decoder;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod encoder_decoder;
@@ -22,7 +22,6 @@ pub mod encoder_decoder;
 pub mod gpu;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_ops;
-pub mod common;
 
 pub mod linear_layer;
 pub mod loaders;
@@ -55,8 +54,8 @@ pub mod attention {
 }
 
 pub use audio::{
-    AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig,
-    create_sine_wave, load_audio, load_audio_bytes, load_audio_for_whisper,
+    AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig, create_sine_wave,
+    load_audio, load_audio_bytes, load_audio_for_whisper,
 };
 
 pub use crate::{
@@ -102,13 +101,13 @@ pub use gpu_ops::context::WgpuContext;
 #[cfg(target_arch = "wasm32")]
 pub enum WgpuContext {}
 
-pub use traits::Device;
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
+pub use traits::Device;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache};
-    pub use crate::gpu::cache::{GpuKVCache, GpuBeamKVCache};
+    pub use crate::gpu::cache::{GpuBeamKVCache, GpuKVCache};
     pub use crate::gpu_ops::context::WgpuContext;
     pub use crate::models::LanguageModel;
     pub use crate::traits::Device;

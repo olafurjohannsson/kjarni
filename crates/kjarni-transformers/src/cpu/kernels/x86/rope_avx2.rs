@@ -12,7 +12,7 @@ pub unsafe fn rotate_half_avx2(x: &mut [f32], cos: &[f32], sin: &[f32]) {
 
     debug_assert_eq!(cos.len(), head_dim);
     debug_assert_eq!(sin.len(), head_dim);
-    debug_assert!(head_dim % 2 == 0);
+    debug_assert!(head_dim.is_multiple_of(2));
     unsafe {
         let x0_ptr = x.as_ptr();
         let x1_ptr = x.as_ptr().add(half_dim);
@@ -70,43 +70,49 @@ pub unsafe fn rotate_half_avx2(x: &mut [f32], cos: &[f32], sin: &[f32]) {
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn rotate_4d_avx2(
     x: &mut [f32],
-    cos_cache: &[f32],  // Flattened [max_seq_len, head_dim]
+    cos_cache: &[f32], // Flattened [max_seq_len, head_dim]
     sin_cache: &[f32],
     batch_size: usize,
     num_heads: usize,
     seq_len: usize,
     head_dim: usize,
-    cache_stride: usize,  // head_dim (row stride in cache)
+    cache_stride: usize, // head_dim (row stride in cache)
     position_offset: usize,
-) { unsafe {
-    let _half_dim = head_dim / 2;
+) {
+    unsafe {
+        let _half_dim = head_dim / 2;
 
-    // x is [batch, heads, seq, head_dim] in row-major
-    // Stride calculations
-    let head_stride = seq_len * head_dim;
-    let batch_stride = num_heads * head_stride;
+        // x is [batch, heads, seq, head_dim] in row-major
+        // Stride calculations
+        let head_stride = seq_len * head_dim;
+        let batch_stride = num_heads * head_stride;
 
-    for b in 0..batch_size {
-        for h in 0..num_heads {
-            for s in 0..seq_len {
-                let pos = position_offset + s;
+        for b in 0..batch_size {
+            for h in 0..num_heads {
+                for s in 0..seq_len {
+                    let pos = position_offset + s;
 
-                // Calculate offset into x
-                let x_offset = b * batch_stride + h * head_stride + s * head_dim;
-                let x_slice = &mut x[x_offset..x_offset + head_dim];
+                    // Calculate offset into x
+                    let x_offset = b * batch_stride + h * head_stride + s * head_dim;
+                    let x_slice = &mut x[x_offset..x_offset + head_dim];
 
-                // Calculate offset into cache
-                let cache_offset = pos * cache_stride;
-                let cos_slice = &cos_cache[cache_offset..cache_offset + head_dim];
-                let sin_slice = &sin_cache[cache_offset..cache_offset + head_dim];
+                    // Calculate offset into cache
+                    let cache_offset = pos * cache_stride;
+                    let cos_slice = &cos_cache[cache_offset..cache_offset + head_dim];
+                    let sin_slice = &sin_cache[cache_offset..cache_offset + head_dim];
 
-                // Apply rotation to this head
-                rotate_half_avx2(x_slice, cos_slice, sin_slice);
+                    // Apply rotation to this head
+                    rotate_half_avx2(x_slice, cos_slice, sin_slice);
+                }
             }
         }
     }
-}}
+}
 
+#[allow(
+    dead_code,
+    reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+)]
 /// Scalar fallback for non-AVX2 systems or testing.
 pub fn rotate_half_scalar(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     let head_dim = x.len();
@@ -123,6 +129,10 @@ pub fn rotate_half_scalar(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+)]
 /// Dispatches to AVX2 or scalar based on CPU features.
 pub fn rotate_half(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     #[cfg(target_arch = "x86_64")]
@@ -318,7 +328,11 @@ mod tests {
 
         rotate_half(&mut x, &cos, &sin);
 
-        assert!(approx_eq(x[0], 0.0, 1e-5), "x[0] should be ~0, got {}", x[0]);
+        assert!(
+            approx_eq(x[0], 0.0, 1e-5),
+            "x[0] should be ~0, got {}",
+            x[0]
+        );
         assert!(
             approx_eq(x[half_dim], 1.0, 1e-5),
             "x[half] should be ~1, got {}",

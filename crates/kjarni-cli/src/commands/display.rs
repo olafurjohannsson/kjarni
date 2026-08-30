@@ -7,11 +7,7 @@ pub fn score_bar(score: f32, width: usize) -> ColoredString {
     let filled = ((score * width as f32).round() as usize).min(width);
     let empty = width - filled;
 
-    let bar = format!(
-        "{}{}",
-        "█".repeat(filled),
-        "░".repeat(empty),
-    );
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty),);
 
     colorize_by_score(&bar, score)
 }
@@ -51,6 +47,10 @@ pub fn snippet(text: &str, max_len: usize) -> ColoredString {
     truncated.dimmed()
 }
 
+#[expect(
+    dead_code,
+    reason = "not referenced yet; kept until the path that needs it lands"
+)]
 /// Horizontal separator
 pub fn separator(width: usize) -> ColoredString {
     "─".repeat(width).dimmed()

@@ -48,3 +48,6 @@ tokio-stream = "0.1.18"
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 tokio-stream = "0.1.18"
 getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[lints]
+workspace = true

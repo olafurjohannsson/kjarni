@@ -43,13 +43,13 @@ impl T5Task {
     fn parse_translation(input: &str) -> Self {
         // Parse "translate {from} to {to}:"
         let input = input.strip_prefix("translate ").unwrap_or(input);
-        if let Some((from_part, rest)) = input.split_once(" to ") {
-            if let Some((to_part, _)) = rest.split_once(':') {
-                return T5Task::TranslationCustom {
-                    from: from_part.trim().to_string(),
-                    to: to_part.trim().to_string(),
-                };
-            }
+        if let Some((from_part, rest)) = input.split_once(" to ")
+            && let Some((to_part, _)) = rest.split_once(':')
+        {
+            return T5Task::TranslationCustom {
+                from: from_part.trim().to_string(),
+                to: to_part.trim().to_string(),
+            };
         }
         T5Task::Unknown
     }
@@ -59,7 +59,6 @@ impl T5Task {
 mod t5_generation_test {
     use crate::models::t5::model::T5Model;
 
-    
     use anyhow::Result;
     use kjarni_transformers::{Device, ModelType, encoder_decoder::EncoderDecoderGenerator};
 

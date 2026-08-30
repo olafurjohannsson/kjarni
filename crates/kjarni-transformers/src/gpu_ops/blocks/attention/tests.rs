@@ -5,16 +5,14 @@ use ndarray::{Array1, Array2, Array3, Axis};
 
 use common::assert_tensors_are_close;
 
+use crate::WgpuContext;
 use crate::attention::MultiHeadAttention;
-use crate::cache::{Cache};
 use crate::gpu::cache::GpuKVCache;
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::gpu::{GpuTensor, GpuTensorPool};
-use crate::WgpuContext;
 
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 fn create_cpu_attention(
     h: usize,
@@ -159,7 +157,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     let q_proj_cpu = crate::utils::linear_algebra::matmul_3d_2d(&query_cpu, &q_w) + &q_b;
 
     let cpu_output = cpu_attn.attend(
-        &q_proj_cpu, 
+        &q_proj_cpu,
         &full_k_cpu,
         &full_v_cpu,
         Some(&mask_cpu),
@@ -178,8 +176,14 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     gpu_cache.update(&mut encoder, 0, &prompt_k_gpu, &prompt_v_gpu, 0)?;
     gpu_cache.increment_len(prompt_len);
 
-    let (gpu_new_k, gpu_new_v) =
-        gpu_attn.project_kv(&mut encoder, &query_gpu, &gpu_weights, prompt_len, &mut pool, None);
+    let (gpu_new_k, gpu_new_v) = gpu_attn.project_kv(
+        &mut encoder,
+        &query_gpu,
+        &gpu_weights,
+        prompt_len,
+        &mut pool,
+        None,
+    );
     gpu_cache.update(&mut encoder, 0, &gpu_new_k, &gpu_new_v, prompt_len)?;
     gpu_cache.increment_len(gen_len);
 

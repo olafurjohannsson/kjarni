@@ -1,4 +1,3 @@
-
 //! Generator presets for common use cases.
 
 use crate::common::KjarniDevice;
@@ -24,9 +23,7 @@ pub struct GeneratorPreset {
     pub description: &'static str,
 }
 
-
 // V1 Presets
-
 
 /// Fast text generation - smallest model, quick responses.
 pub const GENERATOR_FAST_V1: GeneratorPreset = GeneratorPreset {
@@ -166,7 +163,7 @@ impl GeneratorTier {
 /// Find a preset by name (case-insensitive).
 pub fn find_preset(name: &str) -> Option<&'static GeneratorPreset> {
     let name_lower = name.to_lowercase();
-    
+
     ALL_V1_PRESETS
         .iter()
         .find(|p| p.name.to_lowercase() == name_lower)
@@ -185,8 +182,8 @@ mod tests {
     #[test]
     fn test_preset_fast() {
         assert!(!GENERATOR_FAST_V1.model.is_empty());
-        assert!(GENERATOR_FAST_V1.memory_mb > 0);
-        assert!(GENERATOR_FAST_V1.default_max_tokens > 0);
+        const { assert!(GENERATOR_FAST_V1.memory_mb > 0) };
+        const { assert!(GENERATOR_FAST_V1.default_max_tokens > 0) };
         assert!(!GENERATOR_FAST_V1.name.is_empty());
         assert!(!GENERATOR_FAST_V1.architecture.is_empty());
     }
@@ -194,14 +191,16 @@ mod tests {
     #[test]
     fn test_preset_quality() {
         assert!(!GENERATOR_QUALITY_V1.model.is_empty());
-        assert!(GENERATOR_QUALITY_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb);
-        assert!(GENERATOR_QUALITY_V1.default_max_tokens >= GENERATOR_FAST_V1.default_max_tokens);
+        const { assert!(GENERATOR_QUALITY_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb) };
+        const {
+            assert!(GENERATOR_QUALITY_V1.default_max_tokens >= GENERATOR_FAST_V1.default_max_tokens)
+        };
     }
 
     #[test]
     fn test_preset_balanced() {
         assert!(!GENERATOR_BALANCED_V1.model.is_empty());
-        assert!(GENERATOR_BALANCED_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb);
+        const { assert!(GENERATOR_BALANCED_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb) };
     }
 
     #[test]
@@ -214,7 +213,7 @@ mod tests {
     fn test_preset_code() {
         assert!(!GENERATOR_CODE_V1.model.is_empty());
         assert!(GENERATOR_CODE_V1.temperature.unwrap() < 0.5);
-        assert!(GENERATOR_CODE_V1.default_max_tokens >= 1024);
+        const { assert!(GENERATOR_CODE_V1.default_max_tokens >= 1024) };
     }
 
     #[test]
@@ -231,11 +230,11 @@ mod tests {
         let fast = GeneratorTier::Fast.resolve();
         let balanced = GeneratorTier::Balanced.resolve();
         let quality = GeneratorTier::Quality.resolve();
-        
+
         assert!(!fast.model.is_empty());
         assert!(!balanced.model.is_empty());
         assert!(!quality.model.is_empty());
-        
+
         assert_eq!(fast.name, "GENERATOR_FAST_V1");
         assert_eq!(balanced.name, "GENERATOR_BALANCED_V1");
         assert_eq!(quality.name, "GENERATOR_QUALITY_V1");
@@ -251,10 +250,22 @@ mod tests {
         for preset in ALL_V1_PRESETS {
             assert!(!preset.name.is_empty(), "Preset name should not be empty");
             assert!(!preset.model.is_empty(), "Preset model should not be empty");
-            assert!(!preset.architecture.is_empty(), "Preset architecture should not be empty");
-            assert!(preset.memory_mb > 0, "Preset should have memory requirement");
-            assert!(preset.default_max_tokens > 0, "Preset should have max tokens");
-            assert!(!preset.description.is_empty(), "Preset should have description");
+            assert!(
+                !preset.architecture.is_empty(),
+                "Preset architecture should not be empty"
+            );
+            assert!(
+                preset.memory_mb > 0,
+                "Preset should have memory requirement"
+            );
+            assert!(
+                preset.default_max_tokens > 0,
+                "Preset should have max tokens"
+            );
+            assert!(
+                !preset.description.is_empty(),
+                "Preset should have description"
+            );
         }
     }
 
@@ -262,7 +273,11 @@ mod tests {
     fn test_all_presets_unique_names() {
         let names: Vec<_> = ALL_V1_PRESETS.iter().map(|p| p.name).collect();
         let unique: std::collections::HashSet<_> = names.iter().collect();
-        assert_eq!(names.len(), unique.len(), "All preset names should be unique");
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "All preset names should be unique"
+        );
     }
 
     #[test]

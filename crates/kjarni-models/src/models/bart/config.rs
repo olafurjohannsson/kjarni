@@ -101,7 +101,11 @@ impl BartConfig {
             .clone()
             .unwrap_or_else(|| "model.shared.weight".to_string())
     }
-    
+
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     fn is_sequence_classifier(&self) -> bool {
         self.architectures
             .as_ref()
@@ -140,9 +144,9 @@ impl ModelConfig for BartConfig {
                 Some("gelu") => Activation::Gelu,
                 Some("gelu_new") => Activation::GeluNew,
                 Some("silu") => Activation::SilU,
-                _ => Activation::Gelu, 
+                _ => Activation::Gelu,
             },
-            rope_theta: None, 
+            rope_theta: None,
             rope_scaling: None,
             scale_embeddings: self.scale_embedding,
             normalize_embedding: self.normalize_embedding,

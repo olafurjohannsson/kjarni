@@ -6,11 +6,11 @@ pub mod llama;
 // needs more than cfg attributes to build for wasm. It is also not a chat model, so
 // it earns nothing in a browser. Left native-only.
 #[cfg(not(target_arch = "wasm32"))]
-pub mod gpt2;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod bart;
-pub mod qwen;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpt2;
 pub mod mistral;
+pub mod qwen;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod t5;
 #[cfg(not(target_arch = "wasm32"))]

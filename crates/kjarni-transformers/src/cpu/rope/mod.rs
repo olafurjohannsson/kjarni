@@ -116,13 +116,25 @@ impl RoPE {
         (cos_cache, sin_cache)
     }
 
+    // The destructured dims and the cache slices below feed the x86_64 and
+    // aarch64 SIMD paths only; on any other target they are all unread.
+    #[cfg_attr(
+        not(any(target_arch = "x86_64", target_arch = "aarch64")),
+        allow(unused_variables)
+    )]
     fn rotate_4d_in_place(&self, x: &mut Array4<f32>, position_offset: usize) {
         let (batch, num_heads, seq_len, head_dim) = x.dim();
 
         if x.is_standard_layout() {
             let x_slice = x.as_slice_mut().expect("array should be contiguous");
-            let cos_slice = self.cos_cache.as_slice().expect("cache should be contiguous");
-            let sin_slice = self.sin_cache.as_slice().expect("cache should be contiguous");
+            let cos_slice = self
+                .cos_cache
+                .as_slice()
+                .expect("cache should be contiguous");
+            let sin_slice = self
+                .sin_cache
+                .as_slice()
+                .expect("cache should be contiguous");
 
             #[cfg(target_arch = "x86_64")]
             if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {

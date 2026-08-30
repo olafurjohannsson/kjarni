@@ -1,6 +1,6 @@
 //! Transcription command using Whisper models
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::{StreamExt, pin_mut};
 use std::io::{self, Write};
 use std::path::Path;

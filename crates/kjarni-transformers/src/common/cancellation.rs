@@ -120,7 +120,6 @@ impl std::fmt::Display for CancellationError {
 
 impl std::error::Error for CancellationError {}
 
-
 /// Extension trait for creating timeout-based cancellation.
 impl CancellationHandle {
     /// Creates a handle that auto-cancels after a timeout.

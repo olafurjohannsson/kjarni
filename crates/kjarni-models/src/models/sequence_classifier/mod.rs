@@ -9,25 +9,33 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 #[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
+#[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::models::base::ModelInput;
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::cpu::encoder::traits::GpuEncoderOps;
+#[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::encoder::GpuTransformerEncoder;
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::pipeline::EncoderLoader;
 use kjarni_transformers::{
     WgpuContext,
     activations::softmax_inplace,
     cpu::encoder::{
-        CpuTransformerEncoder, 
+        CpuTransformerEncoder,
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
-        traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},
+        traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder},
     },
     models::base::ModelLoadConfig,
     models::{LanguageModel, ModelType},
-    pipeline::{EncoderLoader, EncoderModelFactory, EncoderPipeline},
+    pipeline::{EncoderModelFactory, EncoderPipeline},
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
@@ -39,7 +47,6 @@ mod tests;
 
 use crate::models::sequence_classifier::configs::RobertaConfig;
 use crate::{BertConfig, DistilBertConfig};
-
 
 /// A generic sequence classifier for encoder-only models.
 pub struct SequenceClassifier {
@@ -65,6 +72,12 @@ impl EncoderModelFactory for SequenceClassifier {
         }
     }
 
+    // On wasm there is no GPU backend, so `context` goes unread and the
+    // locals are never reassigned. The signature is shared with native.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(unused_variables, unused_mut, unused_assignments)
+    )]
     fn build_backends(
         weights: &ModelWeights,
         meta: &ModelMetadata,
@@ -180,16 +193,19 @@ impl SequenceClassifier {
             .pipeline
             .context()
             .ok_or_else(|| anyhow!("GPU context required for GPU encoder"))?;
-        let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> =
-            context.get_inference_pool();
+        let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> = context.get_inference_pool();
         let pool_guard = pool.lock().await;
-        let mut frame = GpuFrameContext::new(&context, pool_guard);
+        let mut frame = GpuFrameContext::new(context, pool_guard);
         let (encoder_cmd, pool_ref) = frame.resources();
 
-        let input_ids_gpu = GpuTensor::from_ndarray(&context, input_ids)?;
-        let attention_mask_gpu = GpuTensor::from_ndarray(&context, attention_mask)?;
-        let token_types_gpu = GpuTensor::from_ndarray(&context, token_type_ids)?;
+        let input_ids_gpu = GpuTensor::from_ndarray(context, input_ids)?;
+        let attention_mask_gpu = GpuTensor::from_ndarray(context, attention_mask)?;
+        let token_types_gpu = GpuTensor::from_ndarray(context, token_type_ids)?;
 
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let gpu_output = gpu_encoder.forward(
             encoder_cmd,
             pool_ref,
@@ -392,6 +408,10 @@ impl SequenceClassifier {
         Ok(logits.outer_iter().map(|row| row.to_vec()).collect())
     }
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     fn scores_to_top_result(&self, scores: &[f32]) -> Result<ClassificationResult> {
         let (idx, &score) = scores
             .iter()

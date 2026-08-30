@@ -1,7 +1,6 @@
-
 //! Common data structures and constants for quantized kernels.
 
-use bytemuck::{Pod, Zeroable}; 
+use bytemuck::{Pod, Zeroable};
 use half::f16;
 
 pub const QK_K: usize = 256;
@@ -31,7 +30,7 @@ pub struct BlockQ8_K {
 
 /// A 4-bitquantization block.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)] 
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct BlockQ4_K {
     /// Super-block scale and min, used to derive sub-block scales/mins.
     pub d: f16,
@@ -46,10 +45,10 @@ pub struct BlockQ4_K {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BlockQ6_K {
-    pub ql: [u8; 128],      // Lower 4 bits of the 6-bit values
-    pub qh: [u8; 64],       // Upper 2 bits of the 6-bit values
-    pub scales: [i8; 16],   // 8-bit scales
-    pub d: f16,             // Global scale (f16)
+    pub ql: [u8; 128],    // Lower 4 bits of the 6-bit values
+    pub qh: [u8; 64],     // Upper 2 bits of the 6-bit values
+    pub scales: [i8; 16], // 8-bit scales
+    pub d: f16,           // Global scale (f16)
 }
 
 const _: () = assert!(std::mem::size_of::<BlockQ6_K>() == 210);

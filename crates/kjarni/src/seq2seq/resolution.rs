@@ -6,7 +6,7 @@ use super::types::Seq2SeqOverrides;
 
 /// Apply user overrides to a generation config.
 ///
-/// Only modifies values that the user explicitly set (Some(...)). 
+/// Only modifies values that the user explicitly set (Some(...)).
 /// Model defaults are preserved for everything else.
 pub fn apply_overrides(config: &mut GenerationConfig, overrides: &Seq2SeqOverrides) {
     // Length control
@@ -46,14 +46,14 @@ pub fn apply_overrides(config: &mut GenerationConfig, overrides: &Seq2SeqOverrid
         }
     } else {
         // No num_beams override, but maybe other beam params
-        if overrides.length_penalty.is_some() || overrides.early_stopping.is_some() {
-            if let DecodingStrategy::BeamSearch(ref mut params) = config.strategy {
-                if let Some(v) = overrides.length_penalty {
-                    params.length_penalty = v;
-                }
-                if let Some(v) = overrides.early_stopping {
-                    params.early_stopping = v;
-                }
+        if (overrides.length_penalty.is_some() || overrides.early_stopping.is_some())
+            && let DecodingStrategy::BeamSearch(ref mut params) = config.strategy
+        {
+            if let Some(v) = overrides.length_penalty {
+                params.length_penalty = v;
+            }
+            if let Some(v) = overrides.early_stopping {
+                params.early_stopping = v;
             }
         }
     }
@@ -100,7 +100,7 @@ mod tests {
         apply_overrides(&mut config, &overrides);
 
         assert_eq!(config.max_length, 256); // Changed
-        assert_eq!(config.min_length, 10);  // Preserved
+        assert_eq!(config.min_length, 10); // Preserved
         assert_eq!(config.no_repeat_ngram_size, 3); // Preserved
     }
 

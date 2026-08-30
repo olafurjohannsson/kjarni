@@ -64,7 +64,10 @@ pub use types::{TranslatorError, TranslatorResult};
 /// let german = kjarni::translator::translate("flan-t5-base", "Hello", "en", "de").await?;
 /// ```
 pub async fn translate(model: &str, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
-    Translator::new(model).await?.translate(text, from, to).await
+    Translator::new(model)
+        .await?
+        .translate(text, from, to)
+        .await
 }
 
 /// Translate using a preset.
@@ -104,7 +107,6 @@ pub fn is_translation_model(model: &str) -> TranslatorResult<()> {
 }
 
 use kjarni_transformers::models::ModelType;
-
 
 #[cfg(test)]
 mod tests;

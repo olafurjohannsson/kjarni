@@ -94,7 +94,7 @@ impl T5RelativePositionBias {
         Ok(bias)
     }
     fn relative_position_bucket(&self, relative_position: i32) -> usize {
-        let mut num_buckets = self.num_buckets as i32; 
+        let mut num_buckets = self.num_buckets as i32;
         let max_distance = self.max_distance as i32;
 
         let mut n = -relative_position;
@@ -134,7 +134,7 @@ impl T5RelativePositionBias {
 
 #[cfg(test)]
 mod t5_bias_tests {
-    
+
     use crate::cpu::encoder_decoder::relative_position_bias::T5RelativePositionBias;
     use crate::weights::ModelWeights;
     use anyhow::Result;

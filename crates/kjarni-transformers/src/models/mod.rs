@@ -1,4 +1,3 @@
-
 pub mod base;
 pub mod registry;
 
@@ -6,14 +5,8 @@ pub mod registry;
 pub use base::LanguageModel;
 
 pub use registry::{
-    format_params,
-    format_size,
+    ModelArchitecture, ModelInfo, ModelPaths, ModelTask, ModelType, format_params, format_size,
     get_default_cache_dir,
-    ModelArchitecture,
-    ModelInfo,
-    ModelPaths,
-    ModelTask,
-    ModelType,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

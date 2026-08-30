@@ -9,7 +9,7 @@ use crate::traits::{
 };
 use crate::{ChatTemplate, Conversation, Device, LanguageModel, WgpuContext};
 use anyhow::Result;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use ndarray::{Array2, Array3};
 use std::any::Any;
 use std::collections::HashSet;
@@ -107,6 +107,7 @@ struct MockDecoderModel {
     pub context_size_override: Option<usize>,
 
     decoder: MockCpuDecoder,
+    #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     config: MockConfig,
 }
 
@@ -283,22 +284,22 @@ impl CpuDecoder for MockCpuDecoder {
         Ok(hidden_states.clone())
     }
     fn forward(
-            &self,
-            hidden_states: &Array3<f32>,
-            _attention_mask: &Array2<f32>,
-            _position_offset: usize,
-            _cache: Option<&mut dyn Cache>,
-        ) -> Result<Array3<f32>> {
+        &self,
+        hidden_states: &Array3<f32>,
+        _attention_mask: &Array2<f32>,
+        _position_offset: usize,
+        _cache: Option<&mut dyn Cache>,
+    ) -> Result<Array3<f32>> {
         // Just pass through
         Ok(hidden_states.clone())
     }
     fn forward_all_layers(
-            &self,
-            hidden_states: &Array3<f32>,
-            _attention_mask: &Array2<f32>,
-            _position_offset: usize,
-            _cache: Option<&mut dyn Cache>,
-        ) -> Result<Array3<f32>> {
+        &self,
+        hidden_states: &Array3<f32>,
+        _attention_mask: &Array2<f32>,
+        _position_offset: usize,
+        _cache: Option<&mut dyn Cache>,
+    ) -> Result<Array3<f32>> {
         // Just pass through
         Ok(hidden_states.clone())
     }
@@ -385,7 +386,6 @@ async fn test_encode_with_bos() {
 
 #[tokio::test]
 async fn test_generation_flow_control() {
-
     let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).unwrap();
 

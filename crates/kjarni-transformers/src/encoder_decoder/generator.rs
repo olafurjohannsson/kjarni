@@ -192,13 +192,12 @@ impl EncoderDecoderGenerator {
             config.map_or_else(|| self.model.get_default_generation_config(), |c| c.clone());
 
         try_stream! {
-            if let DecodingStrategy::BeamSearch(params) = &owned_config.strategy {
-                if params.num_beams > 1 {
+            if let DecodingStrategy::BeamSearch(params) = &owned_config.strategy
+                && params.num_beams > 1 {
                     log::warn!(
                         "streaming with beam search enabled, output may differ from non-streaming generate"
                     );
                 }
-            }
 
             let stream = run_beam_search_stream(
                 self.model.as_ref(),
@@ -231,7 +230,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    
+
     use tokenizers::Tokenizer;
 
     use super::*;
@@ -442,7 +441,7 @@ mod tests {
         for layer in 0..num_layers {
             let k = Array3::<f32>::ones((batch_size, num_heads, head_dim));
             let v = Array3::<f32>::ones((batch_size, num_heads, head_dim));
-            cache.update(layer, &k, &v);
+            cache.update(layer, &k, &v).unwrap();
         }
         cache.increment_len(seq_len);
 

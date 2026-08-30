@@ -1,5 +1,5 @@
-use crate::gpu::GpuTensor;
 use crate::WgpuContext;
+use crate::gpu::GpuTensor;
 use std::sync::Arc;
 
 /// A GPU kernel for applying the Tanh activation function element-wise.
@@ -77,7 +77,7 @@ impl GpuTanh {
 
         let num_elements = tensor.num_elements() as u32;
         let workgroup_size = 256;
-        let workgroups = (num_elements + workgroup_size - 1) / workgroup_size;
+        let workgroups = num_elements.div_ceil(workgroup_size);
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }

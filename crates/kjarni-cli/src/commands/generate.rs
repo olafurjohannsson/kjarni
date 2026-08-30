@@ -1,13 +1,13 @@
 //! Text generation command using decoder models
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::{StreamExt, pin_mut};
 
 use kjarni::{
-    models::{Gpt2Model, LlamaModel}, registry, DecoderGenerator, DecoderLanguageModel, DecodingStrategy,
-    Device, GenerationConfig, ModelArchitecture, ModelType,
-    SamplingParams,
-    TokenType,
+    DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig,
+    ModelArchitecture, ModelType, SamplingParams, TokenType,
+    models::{Gpt2Model, LlamaModel},
+    registry,
 };
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -45,7 +45,8 @@ pub async fn run(
     if !is_supported_decoder_architecture(model_type.architecture()) {
         return Err(anyhow!(
             "Model '{}' is not a decoder. Use a decoder model for generation. Detected architecture: {:?}",
-            model, model_type.architecture()
+            model,
+            model_type.architecture()
         ));
     }
 
@@ -193,7 +194,9 @@ mod tests {
 
     #[test]
     fn test_supported_mistral() {
-        assert!(is_supported_decoder_architecture(ModelArchitecture::Mistral));
+        assert!(is_supported_decoder_architecture(
+            ModelArchitecture::Mistral
+        ));
     }
 
     #[test]
@@ -218,12 +221,16 @@ mod tests {
 
     #[test]
     fn test_unsupported_whisper() {
-        assert!(!is_supported_decoder_architecture(ModelArchitecture::Whisper));
+        assert!(!is_supported_decoder_architecture(
+            ModelArchitecture::Whisper
+        ));
     }
 
     #[test]
     fn test_unsupported_nomic_bert() {
-        assert!(!is_supported_decoder_architecture(ModelArchitecture::NomicBert));
+        assert!(!is_supported_decoder_architecture(
+            ModelArchitecture::NomicBert
+        ));
     }
 
     #[test]
@@ -245,7 +252,7 @@ mod tests {
     #[test]
     fn test_strategy_sampling_default() {
         let strategy = build_decoding_strategy(0.7, None, None, None, false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 0.7);
@@ -260,7 +267,7 @@ mod tests {
     #[test]
     fn test_strategy_sampling_custom_top_k() {
         let strategy = build_decoding_strategy(0.7, Some(100), None, None, false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.top_k, Some(100));
@@ -272,7 +279,7 @@ mod tests {
     #[test]
     fn test_strategy_sampling_custom_top_p() {
         let strategy = build_decoding_strategy(0.7, None, Some(0.95), None, false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.top_p, Some(0.95));
@@ -284,7 +291,7 @@ mod tests {
     #[test]
     fn test_strategy_sampling_custom_min_p() {
         let strategy = build_decoding_strategy(0.7, None, None, Some(0.05), false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.min_p, Some(0.05));
@@ -296,7 +303,7 @@ mod tests {
     #[test]
     fn test_strategy_sampling_all_custom() {
         let strategy = build_decoding_strategy(1.0, Some(40), Some(0.8), Some(0.02), false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 1.0);
@@ -317,7 +324,7 @@ mod tests {
     #[test]
     fn test_generation_config_basic() {
         let config = build_generation_config(100, 0.7, None, None, None, 1.1, false);
-        
+
         assert_eq!(config.max_new_tokens, Some(100));
         assert_eq!(config.repetition_penalty, 1.1);
         assert!(matches!(config.strategy, DecodingStrategy::Sample(_)));
@@ -326,7 +333,7 @@ mod tests {
     #[test]
     fn test_generation_config_greedy() {
         let config = build_generation_config(50, 0.7, None, None, None, 1.0, true);
-        
+
         assert_eq!(config.max_new_tokens, Some(50));
         assert!(matches!(config.strategy, DecodingStrategy::Greedy));
     }
@@ -334,7 +341,7 @@ mod tests {
     #[test]
     fn test_generation_config_zero_temp_greedy() {
         let config = build_generation_config(200, 0.0, None, None, None, 1.2, false);
-        
+
         assert!(matches!(config.strategy, DecodingStrategy::Greedy));
     }
 
@@ -358,8 +365,9 @@ mod tests {
 
     #[test]
     fn test_generation_config_sampling_params_passed_through() {
-        let config = build_generation_config(100, 0.9, Some(40), Some(0.85), Some(0.05), 1.1, false);
-        
+        let config =
+            build_generation_config(100, 0.9, Some(40), Some(0.85), Some(0.05), 1.1, false);
+
         match config.strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 0.9);
@@ -373,7 +381,7 @@ mod tests {
     #[test]
     fn test_very_low_temperature() {
         let strategy = build_decoding_strategy(0.001, None, None, None, false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 0.001);
@@ -385,7 +393,7 @@ mod tests {
     #[test]
     fn test_very_high_temperature() {
         let strategy = build_decoding_strategy(5.0, None, None, None, false);
-        
+
         match strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 5.0);
@@ -427,7 +435,7 @@ mod tests {
     #[test]
     fn test_typical_creative_writing_params() {
         let config = build_generation_config(512, 1.0, None, Some(0.95), Some(0.05), 1.1, false);
-        
+
         match config.strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 1.0);
@@ -442,7 +450,7 @@ mod tests {
     fn test_typical_code_generation_params() {
         // Lower temperature, stricter sampling
         let config = build_generation_config(256, 0.3, Some(40), Some(0.9), None, 1.0, false);
-        
+
         match config.strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 0.3);
@@ -463,10 +471,10 @@ mod tests {
     fn test_chatbot_params() {
         // Balanced settings
         let config = build_generation_config(512, 0.7, Some(50), Some(0.9), Some(0.1), 1.1, false);
-        
+
         assert_eq!(config.max_new_tokens, Some(512));
         assert_eq!(config.repetition_penalty, 1.1);
-        
+
         match config.strategy {
             DecodingStrategy::Sample(params) => {
                 assert_eq!(params.temperature, 0.7);

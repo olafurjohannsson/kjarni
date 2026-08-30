@@ -260,12 +260,12 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
                 return;
             }
 
-            if step == 0 {
-                if let Some(forced_bos_id) = ctx.forced_bos_token_id {
-                    logits_row.fill(f32::NEG_INFINITY);
-                    logits_row[forced_bos_id as usize] = 0.0;
-                    return;
-                }
+            if step == 0
+                && let Some(forced_bos_id) = ctx.forced_bos_token_id
+            {
+                logits_row.fill(f32::NEG_INFINITY);
+                logits_row[forced_bos_id as usize] = 0.0;
+                return;
             }
 
             if current_len < ctx.config.min_length {
@@ -287,11 +287,11 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
                 );
             }
 
-            if current_len >= ctx.config.max_length - 1 {
-                if let Some(forced_eos_id) = ctx.forced_eos_token_id {
-                    logits_row.fill(f32::NEG_INFINITY);
-                    logits_row[forced_eos_id as usize] = 0.0;
-                }
+            if current_len >= ctx.config.max_length - 1
+                && let Some(forced_eos_id) = ctx.forced_eos_token_id
+            {
+                logits_row.fill(f32::NEG_INFINITY);
+                logits_row[forced_eos_id as usize] = 0.0;
             }
         });
 
@@ -396,10 +396,10 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
     let tokens = &best_beam.tokens;
 
     let mut start = 0;
-    if let Some(first) = tokens.first() {
-        if *first == ctx.decoder_start_token_id {
-            start += 1;
-        }
+    if let Some(first) = tokens.first()
+        && *first == ctx.decoder_start_token_id
+    {
+        start += 1;
     }
 
     let end = if tokens.last() == Some(&ctx.eos_token_id) {
@@ -485,9 +485,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        Device, LanguageModel, WgpuContext, common::BeamSearchParams, cpu::encoder::{CpuEncoderOps, GpuEncoderOps, traits::EncoderLanguageModel}, encoder_decoder::traits::{
+        Device, LanguageModel, WgpuContext,
+        common::BeamSearchParams,
+        cpu::encoder::{CpuEncoderOps, GpuEncoderOps, traits::EncoderLanguageModel},
+        encoder_decoder::traits::{
             CpuEncoderDecoderOps, EncoderDecoderGenerationBackend, GpuEncoderDecoderOps,
-        }, traits::InferenceModel
+        },
+        traits::InferenceModel,
     };
 
     #[test]
@@ -1093,6 +1097,10 @@ mod tests {
         assert!((candidates[0].0.score - expected_score).abs() < 0.01);
     }
     struct MockBackendWithForcedBos {
+        #[expect(
+            dead_code,
+            reason = "not referenced yet; kept until the path that needs it lands"
+        )]
         forced_token: u32,
     }
 
@@ -1264,12 +1272,14 @@ mod tests {
         };
         let backend = MockBackendReturnsEos;
 
-        let mut config = GenerationConfig::default();
-        config.min_length = 10;
-        config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
-            num_beams,
+        let config = GenerationConfig {
+            min_length: 10,
+            strategy: DecodingStrategy::BeamSearch(BeamSearchParams {
+                num_beams,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
 
         // Create beams matching num_beams
         let beams = vec![
@@ -1359,8 +1369,11 @@ mod tests {
         let logits = Array3::<f32>::zeros((1, 1, 10));
         let backend = MockBackendWithLogits { logits };
 
-        let mut config = GenerationConfig::default();
-        config.max_length = 3; // current_len will be step + 2 = 0 + 2 = 2, then 3 at step 1
+        // current_len will be step + 2 = 0 + 2 = 2, then 3 at step 1
+        let config = GenerationConfig {
+            max_length: 3,
+            ..Default::default()
+        };
 
         let beams = vec![BeamHypothesis {
             tokens: vec![0, 5], // Already have 2 tokens

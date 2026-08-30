@@ -65,7 +65,7 @@ fn reorder_q8_0_blocks(blocks: Vec<BlockQ8_0>, rows: usize, cols: usize) -> Vec<
 
         for b in 0..blocks_per_row {
             let src_idx = gguf_block_group * blocks_per_row + b;
-            reordered.push(blocks[src_idx].clone());
+            reordered.push(blocks[src_idx]);
         }
     }
 
@@ -91,7 +91,7 @@ fn reorder_q4k_blocks(
         let src_base = src_r * blocks_per_row;
 
         for b in 0..blocks_per_row {
-            reordered.push(blocks[src_base + b].clone());
+            reordered.push(blocks[src_base + b]);
         }
     }
 
@@ -108,7 +108,11 @@ pub fn reorder_q_k_blocks3(
     let blocks_per_row = cols / QK_K;
 
     debug_assert_eq!(blocks.len(), rows * blocks_per_row);
-    debug_assert_eq!(rows % head_dim, 0, "rows must be a multiple of head dimension");
+    debug_assert_eq!(
+        rows % head_dim,
+        0,
+        "rows must be a multiple of head dimension"
+    );
 
     let mut reordered = vec![blocks[0]; blocks.len()];
 
@@ -138,17 +142,26 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
     match raw.dtype {
         DType::F32 => {
             let data: Vec<f32> = cast_or_copy(&raw.bytes);
-            Ok(CpuTensor::F32(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
+            Ok(CpuTensor::F32(ArrayD::from_shape_vec(
+                IxDyn(&raw.shape),
+                data,
+            )?))
         }
 
         DType::F16 => {
             let data: Vec<f16> = cast_or_copy(&raw.bytes);
-            Ok(CpuTensor::F16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
+            Ok(CpuTensor::F16(ArrayD::from_shape_vec(
+                IxDyn(&raw.shape),
+                data,
+            )?))
         }
 
         DType::BF16 => {
             let data: Vec<bf16> = cast_or_copy(&raw.bytes);
-            Ok(CpuTensor::BF16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
+            Ok(CpuTensor::BF16(ArrayD::from_shape_vec(
+                IxDyn(&raw.shape),
+                data,
+            )?))
         }
 
         DType::Q8_0 => {
@@ -158,7 +171,9 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
             let blocks = if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) {
                 log::debug!(
                     "reordering Q8_0 blocks for '{}' [{}, {}]",
-                    raw.name, shape[0], shape[1]
+                    raw.name,
+                    shape[0],
+                    shape[1]
                 );
                 reorder_q8_0_blocks(blocks, shape[0], shape[1])
             } else {
@@ -172,22 +187,25 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
             let mut blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
             let shape = [raw.shape[0], raw.shape[1]];
 
-            if let Some(attn) = attn {
-                if needs_gguf_reordering(&raw.name, raw.shape[0]) {
-                    let head_dim = attn.head_dim;
-                    debug_assert!(
-                        head_dim == 64 || head_dim == 128,
-                        "unexpected head_dim {}",
-                        head_dim
-                    );
+            if let Some(attn) = attn
+                && needs_gguf_reordering(&raw.name, raw.shape[0])
+            {
+                let head_dim = attn.head_dim;
+                debug_assert!(
+                    head_dim == 64 || head_dim == 128,
+                    "unexpected head_dim {}",
+                    head_dim
+                );
 
-                    log::debug!(
-                        "reordering Q4_K blocks for '{}' [{}, {}] with head_dim={}",
-                        raw.name, shape[0], shape[1], head_dim
-                    );
+                log::debug!(
+                    "reordering Q4_K blocks for '{}' [{}, {}] with head_dim={}",
+                    raw.name,
+                    shape[0],
+                    shape[1],
+                    head_dim
+                );
 
-                    blocks = reorder_q4k_blocks(blocks, raw.shape[0], raw.shape[1], head_dim);
-                }
+                blocks = reorder_q4k_blocks(blocks, raw.shape[0], raw.shape[1], head_dim);
             }
 
             Ok(CpuTensor::Q4_K(QuantizedMatrix { blocks, shape }))
@@ -197,15 +215,18 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
             let mut blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
             let shape = [raw.shape[0], raw.shape[1]];
 
-            if let Some(attn) = attn {
-                if needs_gguf_reordering(&raw.name, shape[0]) {
-                    log::debug!(
-                        "reordering Q6_K blocks for '{}' [{}, {}] with head_dim={}",
-                        raw.name, shape[0], shape[1], attn.head_dim
-                    );
+            if let Some(attn) = attn
+                && needs_gguf_reordering(&raw.name, shape[0])
+            {
+                log::debug!(
+                    "reordering Q6_K blocks for '{}' [{}, {}] with head_dim={}",
+                    raw.name,
+                    shape[0],
+                    shape[1],
+                    attn.head_dim
+                );
 
-                    blocks = reorder_q_k_blocks3(blocks, shape[0], shape[1], attn.head_dim);
-                }
+                blocks = reorder_q_k_blocks3(blocks, shape[0], shape[1], attn.head_dim);
             }
 
             Ok(CpuTensor::Q6_K(QuantizedMatrix { blocks, shape }))
@@ -213,7 +234,8 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
 
         _ => Err(anyhow!(
             "unsupported dtype {:?} for tensor '{}'",
-            raw.dtype, raw.name
+            raw.dtype,
+            raw.name
         )),
     }
 }
@@ -264,14 +286,29 @@ mod tests {
 
     #[test]
     fn test_needs_gguf_reordering() {
-        assert!(needs_gguf_reordering("model.layers.0.self_attn.q_proj.weight", 2048));
-        assert!(needs_gguf_reordering("model.layers.0.self_attn.k_proj.weight", 2048));
+        assert!(needs_gguf_reordering(
+            "model.layers.0.self_attn.q_proj.weight",
+            2048
+        ));
+        assert!(needs_gguf_reordering(
+            "model.layers.0.self_attn.k_proj.weight",
+            2048
+        ));
         assert!(needs_gguf_reordering("blk.0.attn_q.weight", 2048));
         assert!(needs_gguf_reordering("blk.0.attn_k.weight", 2048));
 
-        assert!(!needs_gguf_reordering("model.layers.0.self_attn.v_proj.weight", 2048));
-        assert!(!needs_gguf_reordering("model.layers.0.self_attn.o_proj.weight", 2048));
-        assert!(!needs_gguf_reordering("model.layers.0.mlp.gate_proj.weight", 2048));
+        assert!(!needs_gguf_reordering(
+            "model.layers.0.self_attn.v_proj.weight",
+            2048
+        ));
+        assert!(!needs_gguf_reordering(
+            "model.layers.0.self_attn.o_proj.weight",
+            2048
+        ));
+        assert!(!needs_gguf_reordering(
+            "model.layers.0.mlp.gate_proj.weight",
+            2048
+        ));
         assert!(!needs_gguf_reordering("model.embed_tokens.weight", 128256));
     }
 }

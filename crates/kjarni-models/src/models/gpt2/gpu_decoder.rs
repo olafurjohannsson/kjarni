@@ -5,18 +5,14 @@ use ndarray::s;
 
 use kjarni_transformers::{
     WgpuContext,
-    
     decoder::prelude::*,
     gpu::normalization::{
         GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
     },
     gpu::{GpuTensor, GpuTensorPool, cache::GpuKVCache},
-    gpu_ops::{
-        
-        blocks::{
-            GpuFeedForward, GpuFeedForwardStd as GpuStandardFFN, GpuFeedForwardWeights,
-            GpuFeedForwardWeightsStd as GpuStandardFFNWeights, attention::GpuAttentionWeights,
-        },
+    gpu_ops::blocks::{
+        GpuFeedForward, GpuFeedForwardStd as GpuStandardFFN, GpuFeedForwardWeights,
+        GpuFeedForwardWeightsStd as GpuStandardFFNWeights, attention::GpuAttentionWeights,
     },
     models::base::{ModelInput, ModelLoadConfig},
     traits::{ModelConfig, ModelLayout, ModelMetadata},
@@ -31,17 +27,39 @@ pub struct Gpt2GpuDecoder {
     final_layer_norm: GpuNormalization,
     final_ln_weights: GpuNormalizationWeights,
 
+    // `allow` rather than `expect`: this field is read under `--all-targets`,
+    // so an `expect` goes unfulfilled and fails the lint-gated build.
+    #[allow(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     context: Arc<WgpuContext>,
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     config: Arc<Gpt2Config>,
 
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     load_config: ModelLoadConfig,
 
     pub meta: ModelMetadata,
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     pub layout: ModelLayout,
     embeddings: LoadedEmbeddings,
 }
 
 impl Gpt2GpuDecoder {
+    #[expect(
+        dead_code,
+        reason = "held for the decoder path; read once GPT-2 generation uses it"
+    )]
     pub fn context(&self) -> &Arc<WgpuContext> {
         &self.context
     }
@@ -231,7 +249,7 @@ impl Gpt2GpuDecoder {
         )?);
         let ffn_norm = GpuNormalization::LayerNorm(GpuLayerNorm::new(&context, meta.norm_eps));
 
-        Ok(GpuPreNormDecoderLayer::new(
+        GpuPreNormDecoderLayer::new(
             &context,
             self_attn_weights,
             self_attn_norm,
@@ -243,7 +261,7 @@ impl Gpt2GpuDecoder {
             meta.hidden_size,
             meta.num_attention_heads,
             meta.num_kv_heads,
-        )?)
+        )
     }
 }
 

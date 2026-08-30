@@ -2,8 +2,8 @@
 
 mod cpu;
 mod cpu_beam;
-pub use cpu_beam::CpuBeamKVCache;
 pub use cpu::CpuKVCache;
+pub use cpu_beam::CpuBeamKVCache;
 
 use std::any::Any;
 

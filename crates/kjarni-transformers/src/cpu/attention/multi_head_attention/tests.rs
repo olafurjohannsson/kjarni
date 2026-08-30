@@ -1,10 +1,10 @@
 use anyhow::Result;
-use ndarray::{s, Array1, Array2, Array3, Array4};
+use ndarray::{Array1, Array2, Array3, Array4, s};
 
 use super::*;
 use crate::rope::RoPE;
 use crate::utils::linear_algebra::matmul_3d_2d;
-use crate::utils::masks::{apply_causal_mask, apply_padding_mask, MASK_VALUE};
+use crate::utils::masks::{MASK_VALUE, apply_causal_mask, apply_padding_mask};
 
 #[cfg(test)]
 mod tests {
@@ -418,19 +418,11 @@ mod tests {
         let rope = RoPE::new(head_dim, max_seq_len, 10000.0);
 
         let input1 = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(_, _, i)| {
-            if i % 2 == 0 {
-                1.0
-            } else {
-                0.5
-            }
+            if i % 2 == 0 { 1.0 } else { 0.5 }
         });
 
         let input2 = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(_, _, i)| {
-            if i % 2 == 0 {
-                0.8
-            } else {
-                0.6
-            }
+            if i % 2 == 0 { 0.8 } else { 0.6 }
         });
 
         let result1 = attention.forward_with_cache(&input1, None, None, true, None, Some(&rope));

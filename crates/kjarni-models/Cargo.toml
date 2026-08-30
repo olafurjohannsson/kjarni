@@ -56,3 +56,6 @@ env_logger = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Unique deps
+
+[lints]
+workspace = true

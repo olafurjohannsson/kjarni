@@ -1,12 +1,12 @@
+pub mod buffers;
 pub mod classifier;
 pub mod config;
-mod transformer_encoder;
 pub mod encoder_layer;
 pub mod encoder_self_attention;
 pub mod pooler;
-pub mod traits;
-pub mod buffers;
 pub mod qkv_projection;
+pub mod traits;
+mod transformer_encoder;
 pub use encoder_self_attention::EncoderSelfAttention;
 pub use traits::{CpuEncoder, CpuEncoderOps, SentenceEncoderModel};
 #[cfg(not(target_arch = "wasm32"))]

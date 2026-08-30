@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use kjarni_transformers::{Device, ModelType, WgpuContext};
 use kjarni_models::models::whisper::WhisperModel;
+use kjarni_transformers::{Device, ModelType, WgpuContext};
 
 use super::model::Transcriber;
-use super::types::{
-    Task, TranscriberError, TranscriberResult, TranscriptionProgressCallback,
-};
+use super::types::{Task, TranscriberError, TranscriberResult, TranscriptionProgressCallback};
 use super::validation;
 
 pub struct TranscriberBuilder {
@@ -146,7 +144,6 @@ impl TranscriberBuilder {
         ))
     }
 }
-
 
 fn resolve_model_type(id: &str) -> Option<ModelType> {
     match id.to_lowercase().as_str() {

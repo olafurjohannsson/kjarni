@@ -56,7 +56,7 @@ impl<'a> CpuLayerFactory<'a> {
 
     pub fn build_norm(
         &self,
-        w_template: &String,
+        w_template: &str,
         b_template: &Option<String>,
         eps: f32,
         idx: usize,
@@ -83,10 +83,9 @@ impl<'a> CpuLayerFactory<'a> {
             .gate_weight
             .as_ref()
             .ok_or_else(|| anyhow!("SwiGLU requires gate_weight"))?;
-        let gate = Self::build_linear(&self, gate_template, layout.gate_bias.as_deref(), idx)?;
-        let up = Self::build_linear(&self, &layout.up_weight, layout.up_bias.as_deref(), idx)?;
-        let down =
-            Self::build_linear(&self, &layout.down_weight, layout.down_bias.as_deref(), idx)?;
+        let gate = Self::build_linear(self, gate_template, layout.gate_bias.as_deref(), idx)?;
+        let up = Self::build_linear(self, &layout.up_weight, layout.up_bias.as_deref(), idx)?;
+        let down = Self::build_linear(self, &layout.down_weight, layout.down_bias.as_deref(), idx)?;
 
         Ok(SwiGluFeedForward::new(gate, up, down, activation))
     }
@@ -100,28 +99,28 @@ impl<'a> CpuLayerFactory<'a> {
         let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &i_str));
 
         let q = Self::build_linear(
-            &self,
+            self,
             &layout.q_weight,
             opt_name(&layout.q_bias).as_deref(),
             idx,
         )?;
 
         let k = Self::build_linear(
-            &self,
+            self,
             &layout.k_weight,
             opt_name(&layout.k_bias).as_deref(),
             idx,
         )?;
 
         let v = Self::build_linear(
-            &self,
+            self,
             &layout.v_weight,
             opt_name(&layout.v_bias).as_deref(),
             idx,
         )?;
 
         let o = Self::build_linear(
-            &self,
+            self,
             &layout.o_weight,
             opt_name(&layout.o_bias).as_deref(),
             idx,
@@ -137,7 +136,6 @@ impl<'a> CpuLayerFactory<'a> {
             Some(meta.num_kv_heads),
         ))
     }
-
 }
 
 #[cfg(test)]
@@ -147,7 +145,7 @@ mod tests {
     use crate::traits::{ModelMetadata, NormalizationStrategy};
     use safetensors::serialize;
     use safetensors::tensor::{Dtype, TensorView};
-    
+
     use tempfile::TempDir;
     fn create_dummy_weights(tensors: Vec<(&str, Vec<f32>, Vec<usize>)>) -> (TempDir, ModelWeights) {
         let dir = TempDir::new().unwrap();
@@ -217,12 +215,7 @@ mod tests {
         let factory = CpuLayerFactory::new(&weights);
 
         let norm = factory
-            .build_norm(
-                &"layer.{}.norm.weight".to_string(),
-                &None,
-                1e-5,
-                0,
-            )
+            .build_norm("layer.{}.norm.weight", &None, 1e-5, 0)
             .unwrap();
 
         match norm {
@@ -245,7 +238,7 @@ mod tests {
 
         let norm = factory
             .build_norm(
-                &"layer.{}.ln.weight".to_string(),
+                "layer.{}.ln.weight",
                 &Some("layer.{}.ln.bias".to_string()), // Bias -> LayerNorm
                 1e-5,
                 0,
@@ -350,38 +343,40 @@ mod tests {
     fn test_factory_new() {
         let (_dir, weights) = create_dummy_weights(vec![]);
         let factory = CpuLayerFactory::new(&weights);
-        
+
         assert!(factory.target_dtype.is_none());
-        assert!(matches!(factory.f32_strategy, Some(F32MatmulStrategy::CustomSimd)));
+        assert!(matches!(
+            factory.f32_strategy,
+            Some(F32MatmulStrategy::CustomSimd)
+        ));
     }
 
     #[test]
     fn test_factory_with_target_dtype() {
         let (_dir, weights) = create_dummy_weights(vec![]);
-        let factory = CpuLayerFactory::new(&weights)
-            .with_target_dtype(Some(DType::F32));
-        
+        let factory = CpuLayerFactory::new(&weights).with_target_dtype(Some(DType::F32));
+
         assert_eq!(factory.target_dtype, Some(DType::F32));
     }
 
     #[test]
     fn test_factory_with_target_dtype_none() {
         let (_dir, weights) = create_dummy_weights(vec![]);
-        let factory = CpuLayerFactory::new(&weights)
-            .with_target_dtype(None);
-        
+        let factory = CpuLayerFactory::new(&weights).with_target_dtype(None);
+
         assert!(factory.target_dtype.is_none());
     }
 
     #[test]
     fn test_factory_with_load_config() {
         let (_dir, weights) = create_dummy_weights(vec![]);
-        let mut load_config = ModelLoadConfig::default();
-        load_config.target_dtype = Some(DType::F32);
-        
-        let factory = CpuLayerFactory::new(&weights)
-            .with_load_config(&load_config);
-        
+        let load_config = ModelLoadConfig {
+            target_dtype: Some(DType::F32),
+            ..Default::default()
+        };
+
+        let factory = CpuLayerFactory::new(&weights).with_load_config(&load_config);
+
         assert_eq!(factory.target_dtype, Some(DType::F32));
     }
 
@@ -417,13 +412,12 @@ mod tests {
 
     #[test]
     fn test_build_linear_weight_only() {
-        let (_dir, weights) = create_dummy_weights(vec![
-            ("layer.0.weight", vec![0.1; 16], vec![4, 4]),
-        ]);
-        
+        let (_dir, weights) =
+            create_dummy_weights(vec![("layer.0.weight", vec![0.1; 16], vec![4, 4])]);
+
         let factory = CpuLayerFactory::new(&weights);
         let linear = factory.build_linear("layer.{}.weight", None, 0).unwrap();
-        
+
         assert_eq!(linear.shape(), [4, 4]);
         assert!(!linear.has_bias());
     }
@@ -434,14 +428,12 @@ mod tests {
             ("layer.0.weight", vec![0.1; 16], vec![4, 4]),
             ("layer.0.bias", vec![0.0; 4], vec![4]),
         ]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
-        let linear = factory.build_linear(
-            "layer.{}.weight",
-            Some("layer.{}.bias"),
-            0
-        ).unwrap();
-        
+        let linear = factory
+            .build_linear("layer.{}.weight", Some("layer.{}.bias"), 0)
+            .unwrap();
+
         assert_eq!(linear.shape(), [4, 4]);
         assert!(linear.has_bias());
     }
@@ -453,13 +445,13 @@ mod tests {
             ("layer.1.weight", vec![0.2; 16], vec![4, 4]),
             ("layer.2.weight", vec![0.3; 16], vec![4, 4]),
         ]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
-        
+
         let linear0 = factory.build_linear("layer.{}.weight", None, 0).unwrap();
         let linear1 = factory.build_linear("layer.{}.weight", None, 1).unwrap();
         let linear2 = factory.build_linear("layer.{}.weight", None, 2).unwrap();
-        
+
         assert_eq!(linear0.shape(), [4, 4]);
         assert_eq!(linear1.shape(), [4, 4]);
         assert_eq!(linear2.shape(), [4, 4]);
@@ -468,10 +460,10 @@ mod tests {
     #[test]
     fn test_build_linear_missing_weight() {
         let (_dir, weights) = create_dummy_weights(vec![]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
         let result = factory.build_linear("nonexistent.{}.weight", None, 0);
-        
+
         assert!(result.is_err());
     }
 
@@ -480,35 +472,27 @@ mod tests {
         let (_dir, weights) = create_dummy_weights(vec![
             ("proj.0.weight", vec![0.1; 32], vec![8, 4]), // [out, in]
         ]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
         let linear = factory.build_linear("proj.{}.weight", None, 0).unwrap();
-        
+
         assert_eq!(linear.shape(), [8, 4]);
     }
 
     #[test]
     fn test_build_norm_different_eps() {
-        let (_dir, weights) = create_dummy_weights(vec![
-            ("norm.0.weight", vec![1.0; 8], vec![8]),
-        ]);
-        
+        let (_dir, weights) = create_dummy_weights(vec![("norm.0.weight", vec![1.0; 8], vec![8])]);
+
         let factory = CpuLayerFactory::new(&weights);
-        
-        let norm1 = factory.build_norm(
-            &"norm.{}.weight".to_string(),
-            &None,
-            1e-5,
-            0
-        ).unwrap();
-        
-        let norm2 = factory.build_norm(
-            &"norm.{}.weight".to_string(),
-            &None,
-            1e-6,
-            0
-        ).unwrap();
-        
+
+        let norm1 = factory
+            .build_norm("norm.{}.weight", &None, 1e-5, 0)
+            .unwrap();
+
+        let norm2 = factory
+            .build_norm("norm.{}.weight", &None, 1e-6, 0)
+            .unwrap();
+
         match (norm1, norm2) {
             (Normalization::RMSNorm(rms1), Normalization::RMSNorm(rms2)) => {
                 assert_eq!(rms1.eps, 1e-5);
@@ -524,23 +508,17 @@ mod tests {
             ("layer.0.norm.weight", vec![1.0; 4], vec![4]),
             ("layer.1.norm.weight", vec![2.0; 4], vec![4]),
         ]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
-        
-        let norm0 = factory.build_norm(
-            &"layer.{}.norm.weight".to_string(),
-            &None,
-            1e-5,
-            0
-        ).unwrap();
-        
-        let norm1 = factory.build_norm(
-            &"layer.{}.norm.weight".to_string(),
-            &None,
-            1e-5,
-            1
-        ).unwrap();
-        
+
+        let norm0 = factory
+            .build_norm("layer.{}.norm.weight", &None, 1e-5, 0)
+            .unwrap();
+
+        let norm1 = factory
+            .build_norm("layer.{}.norm.weight", &None, 1e-5, 1)
+            .unwrap();
+
         match (norm0, norm1) {
             (Normalization::RMSNorm(rms0), Normalization::RMSNorm(rms1)) => {
                 assert_eq!(rms0.weight[0], 1.0);
@@ -553,15 +531,10 @@ mod tests {
     #[test]
     fn test_build_norm_missing_weight() {
         let (_dir, weights) = create_dummy_weights(vec![]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
-        let result = factory.build_norm(
-            &"nonexistent.{}.weight".to_string(),
-            &None,
-            1e-5,
-            0
-        );
-        
+        let result = factory.build_norm("nonexistent.{}.weight", &None, 1e-5, 0);
+
         assert!(result.is_err());
     }
 
@@ -571,15 +544,15 @@ mod tests {
             ("layer.0.ln.weight", vec![1.0; 4], vec![4]),
             // Missing bias!
         ]);
-        
+
         let factory = CpuLayerFactory::new(&weights);
         let result = factory.build_norm(
-            &"layer.{}.ln.weight".to_string(),
+            "layer.{}.ln.weight",
             &Some("layer.{}.ln.bias".to_string()),
             1e-5,
-            0
+            0,
         );
-        
+
         assert!(result.is_err());
     }
     #[test]
@@ -706,7 +679,7 @@ mod tests {
 
         let meta = dummy_metadata();
         let factory = CpuLayerFactory::new(&weights);
-        
+
         let attn0 = factory.build_decoder_attention(&meta, &layout, 0).unwrap();
         let attn1 = factory.build_decoder_attention(&meta, &layout, 1).unwrap();
 
@@ -737,7 +710,9 @@ mod tests {
         };
 
         let factory = CpuLayerFactory::new(&weights);
-        let ffn = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
+        let ffn = factory
+            .build_swiglu_ffn(&layout, Activation::SilU, 0)
+            .unwrap();
 
         assert!(ffn.gate.has_bias());
         assert!(ffn.up.has_bias());
@@ -764,11 +739,15 @@ mod tests {
         };
 
         let factory = CpuLayerFactory::new(&weights);
-        
-        let ffn_silu = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
+
+        let ffn_silu = factory
+            .build_swiglu_ffn(&layout, Activation::SilU, 0)
+            .unwrap();
         assert_eq!(ffn_silu.activation, Activation::SilU);
-        
-        let ffn_gelu = factory.build_swiglu_ffn(&layout, Activation::Gelu, 0).unwrap();
+
+        let ffn_gelu = factory
+            .build_swiglu_ffn(&layout, Activation::Gelu, 0)
+            .unwrap();
         assert_eq!(ffn_gelu.activation, Activation::Gelu);
     }
 
@@ -795,9 +774,13 @@ mod tests {
         };
 
         let factory = CpuLayerFactory::new(&weights);
-        
-        let ffn0 = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
-        let ffn1 = factory.build_swiglu_ffn(&layout, Activation::SilU, 1).unwrap();
+
+        let ffn0 = factory
+            .build_swiglu_ffn(&layout, Activation::SilU, 0)
+            .unwrap();
+        let ffn1 = factory
+            .build_swiglu_ffn(&layout, Activation::SilU, 1)
+            .unwrap();
 
         assert_eq!(ffn0.gate.shape(), [8, 4]);
         assert_eq!(ffn1.gate.shape(), [8, 4]);
@@ -907,20 +890,28 @@ mod tests {
         let meta = dummy_metadata();
         let factory = CpuLayerFactory::new(&weights);
 
-        let attn = factory.build_decoder_attention(&meta, &attn_layout, 0).unwrap();
-        let ffn = factory.build_swiglu_ffn(&ffn_layout, Activation::SilU, 0).unwrap();
-        let attn_norm = factory.build_norm(
-            &attn_layout.norm_weight,
-            &attn_layout.norm_bias,
-            meta.norm_eps,
-            0
-        ).unwrap();
-        let ffn_norm = factory.build_norm(
-            &ffn_layout.norm_weight,
-            &ffn_layout.norm_bias,
-            meta.norm_eps,
-            0
-        ).unwrap();
+        let attn = factory
+            .build_decoder_attention(&meta, &attn_layout, 0)
+            .unwrap();
+        let ffn = factory
+            .build_swiglu_ffn(&ffn_layout, Activation::SilU, 0)
+            .unwrap();
+        let attn_norm = factory
+            .build_norm(
+                &attn_layout.norm_weight,
+                &attn_layout.norm_bias,
+                meta.norm_eps,
+                0,
+            )
+            .unwrap();
+        let ffn_norm = factory
+            .build_norm(
+                &ffn_layout.norm_weight,
+                &ffn_layout.norm_bias,
+                meta.norm_eps,
+                0,
+            )
+            .unwrap();
 
         assert_eq!(attn.q_proj.shape(), [4, 4]);
         assert_eq!(ffn.gate.shape(), [8, 4]);

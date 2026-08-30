@@ -37,7 +37,10 @@ fn test_matmul_3d_2d_transposed() {
     let result = matmul_3d_2d_transposed(&a, &b);
 
     assert_eq!(result.shape(), &[1, 2, 2]);
-    assert_eq!(result.into_shape((2, 2)).unwrap(), arr2(&[[1.0, 2.0], [3.0, 4.0]]));
+    assert_eq!(
+        result.into_shape_with_order((2, 2)).unwrap(),
+        arr2(&[[1.0, 2.0], [3.0, 4.0]])
+    );
 }
 
 #[test]

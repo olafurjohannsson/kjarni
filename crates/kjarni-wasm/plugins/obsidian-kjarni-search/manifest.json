@@ -1,0 +1,10 @@
+{
+	"id": "kjarni-search",
+	"name": "Kjarni Search",
+	"version": "0.1.0",
+	"minAppVersion": "1.0.0",
+	"description": "Hybrid semantic + keyword search with reranking. Fully local, no API keys, no cloud.",
+	"author": "Kjarni",
+	"authorUrl": "https://kjarni.ai",
+	"isDesktopOnly": true
+}

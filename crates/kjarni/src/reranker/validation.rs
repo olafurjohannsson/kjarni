@@ -30,8 +30,7 @@ pub fn validate_for_reranking(model_type: ModelType) -> RerankerResult<()> {
         ModelTask::ReRanking => {
             // Ideal - explicitly trained for reranking
         }
-        ModelTask::Classification | ModelTask::SentimentAnalysis => {
-        }
+        ModelTask::Classification | ModelTask::SentimentAnalysis => {}
         _ => {
             return Err(RerankerError::IncompatibleModel {
                 model: cli_name.to_string(),
@@ -54,6 +53,10 @@ pub fn get_reranking_models() -> Vec<&'static str> {
         .collect()
 }
 
+#[expect(
+    dead_code,
+    reason = "not referenced yet; kept until the path that needs it lands"
+)]
 /// Check if a model is specifically designed for reranking (vs just compatible).
 pub fn is_dedicated_reranker(model_type: ModelType) -> bool {
     model_type.info().task == ModelTask::ReRanking

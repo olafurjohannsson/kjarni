@@ -1,6 +1,6 @@
 //! Chat FFI bindings for decoder model inference.
 
-use crate::callback::{is_cancelled, KjarniCancelToken};
+use crate::callback::{KjarniCancelToken, is_cancelled};
 use crate::error::set_last_error;
 use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
 use futures::StreamExt;
@@ -178,85 +178,95 @@ pub struct KjarniChatConversation {
 pub unsafe extern "C" fn kjarni_chat_new(
     config: *const KjarniChatConfig,
     out: *mut *mut KjarniChat,
-) -> KjarniErrorCode { unsafe {
-    if out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_new",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let default_config = kjarni_chat_config_default();
-    let config = if config.is_null() {
-        &default_config
-    } else {
-        &*config
-    };
+                let default_config = kjarni_chat_config_default();
+                let config = if config.is_null() {
+                    &default_config
+                } else {
+                    &*config
+                };
 
-    // Model name is required
-    if config.model_name.is_null() {
-        set_last_error("model_name is required".to_string());
-        return KjarniErrorCode::InvalidConfig;
-    }
+                // Model name is required
+                if config.model_name.is_null() {
+                    set_last_error("model_name is required".to_string());
+                    return KjarniErrorCode::InvalidConfig;
+                }
 
-    let model_name = match CStr::from_ptr(config.model_name).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let model_name = match CStr::from_ptr(config.model_name).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let result = get_runtime().block_on(async {
-        let mut builder = Chat::builder(model_name);
+                let result = get_runtime().block_on(async {
+                    let mut builder = Chat::builder(model_name);
 
-        // Device
-        match config.device {
-            KjarniDevice::Gpu => builder = builder.gpu(),
-            KjarniDevice::Cpu => builder = builder.cpu(),
-        }
+                    // Device
+                    match config.device {
+                        KjarniDevice::Gpu => builder = builder.gpu(),
+                        KjarniDevice::Cpu => builder = builder.cpu(),
+                    }
 
-        // Cache dir
-        if !config.cache_dir.is_null() {
-            match CStr::from_ptr(config.cache_dir).to_str() {
-                Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                    // Cache dir
+                    if !config.cache_dir.is_null() {
+                        match CStr::from_ptr(config.cache_dir).to_str() {
+                            Ok(s) => builder = builder.cache_dir(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // System prompt
+                    if !config.system_prompt.is_null() {
+                        match CStr::from_ptr(config.system_prompt).to_str() {
+                            Ok(s) => builder = builder.system(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Mode
+                    builder = builder.mode(to_chat_mode(config.mode));
+
+                    // Quiet
+                    if config.quiet != 0 {
+                        builder = builder.quiet();
+                    }
+
+                    builder.build().await.map_err(|e| {
+                        set_last_error(e.to_string());
+                        chat_error_to_code(&e)
+                    })
+                });
+
+                match result {
+                    Ok(chat) => {
+                        let handle = Box::new(KjarniChat { inner: chat });
+                        *out = Box::into_raw(handle);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => e,
+                }
             }
-        }
-
-        // System prompt
-        if !config.system_prompt.is_null() {
-            match CStr::from_ptr(config.system_prompt).to_str() {
-                Ok(s) => builder = builder.system(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Mode
-        builder = builder.mode(to_chat_mode(config.mode));
-
-        // Quiet
-        if config.quiet != 0 {
-            builder = builder.quiet();
-        }
-
-        builder.build().await.map_err(|e| {
-            set_last_error(e.to_string());
-            chat_error_to_code(&e)
-        })
-    });
-
-    match result {
-        Ok(chat) => {
-            let handle = Box::new(KjarniChat { inner: chat });
-            *out = Box::into_raw(handle);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => e,
-    }
-}}
+        },
+    )
+}
 
 /// Free a Chat instance.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_chat_free(chat: *mut KjarniChat) { unsafe {
-    if !chat.is_null() {
-        let _ = Box::from_raw(chat);
-    }
-}}
+pub unsafe extern "C" fn kjarni_chat_free(chat: *mut KjarniChat) {
+    crate::panic::guard("kjarni_chat_free", (), || unsafe {
+        if !chat.is_null() {
+            let _ = Box::from_raw(chat);
+        }
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Chat: send (blocking)
@@ -275,47 +285,53 @@ pub unsafe extern "C" fn kjarni_chat_send(
     message: *const c_char,
     gen_config: *const KjarniGenerationConfig,
     out: *mut *mut c_char,
-) -> KjarniErrorCode { unsafe {
-    if chat.is_null() || message.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
-
-    let chat_ref = &(*chat).inner;
-
-    let message = match CStr::from_ptr(message).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
-
-    let result = get_runtime().block_on(async {
-        if gen_config.is_null() {
-            chat_ref.send(message).await
-        } else {
-            let overrides = to_overrides(&*gen_config);
-            chat_ref.send_with_config(message, &overrides).await
-        }
-    });
-
-    match result {
-        Ok(response) => {
-            match CString::new(response) {
-                Ok(cstr) => {
-                    *out = cstr.into_raw();
-                    KjarniErrorCode::Ok
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_send",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if chat.is_null() || message.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
                 }
-                Err(_) => {
-                    set_last_error("Response contained null byte".to_string());
-                    KjarniErrorCode::InferenceFailed
+
+                let chat_ref = &(*chat).inner;
+
+                let message = match CStr::from_ptr(message).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
+
+                let result = get_runtime().block_on(async {
+                    if gen_config.is_null() {
+                        chat_ref.send(message).await
+                    } else {
+                        let overrides = to_overrides(&*gen_config);
+                        chat_ref.send_with_config(message, &overrides).await
+                    }
+                });
+
+                match result {
+                    Ok(response) => match CString::new(response) {
+                        Ok(cstr) => {
+                            *out = cstr.into_raw();
+                            KjarniErrorCode::Ok
+                        }
+                        Err(_) => {
+                            set_last_error("Response contained null byte".to_string());
+                            KjarniErrorCode::InferenceFailed
+                        }
+                    },
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = ptr::null_mut();
+                        chat_error_to_code(&e)
+                    }
                 }
             }
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = ptr::null_mut();
-            chat_error_to_code(&e)
-        }
-    }
-}}
+        },
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Chat: stream (callback per token)
@@ -339,66 +355,74 @@ pub unsafe extern "C" fn kjarni_chat_stream(
     callback: KjarniStreamCallbackFn,
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
-) -> KjarniErrorCode { unsafe {
-    if chat.is_null() || message.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_stream",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if chat.is_null() || message.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let cb = match callback {
-        Some(cb) => cb,
-        None => return KjarniErrorCode::NullPointer,
-    };
+                let cb = match callback {
+                    Some(cb) => cb,
+                    None => return KjarniErrorCode::NullPointer,
+                };
 
-    let chat_ref = &(*chat).inner;
+                let chat_ref = &(*chat).inner;
 
-    let message = match CStr::from_ptr(message).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let message = match CStr::from_ptr(message).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let result = get_runtime().block_on(async {
-        let stream_result = if gen_config.is_null() {
-            chat_ref.stream(message).await
-        } else {
-            let overrides = to_overrides(&*gen_config);
-            chat_ref.stream_with_config(message, overrides).await
-        };
+                let result = get_runtime().block_on(async {
+                    let stream_result = if gen_config.is_null() {
+                        chat_ref.stream(message).await
+                    } else {
+                        let overrides = to_overrides(&*gen_config);
+                        chat_ref.stream_with_config(message, overrides).await
+                    };
 
-        let mut stream = stream_result?;
+                    let mut stream = stream_result?;
 
-        while let Some(token_result) = stream.next().await {
-            // Check cancellation
-            if is_cancelled(cancel_token) {
-                break;
-            }
-
-            match token_result {
-                Ok(text) => {
-                    if let Ok(cstr) = CString::new(text) {
-                        let should_continue = cb(cstr.as_ptr(), user_data);
-                        if !should_continue {
+                    while let Some(token_result) = stream.next().await {
+                        // Check cancellation
+                        if is_cancelled(cancel_token) {
                             break;
                         }
+
+                        match token_result {
+                            Ok(text) => {
+                                if let Ok(cstr) = CString::new(text) {
+                                    let should_continue = cb(cstr.as_ptr(), user_data);
+                                    if !should_continue {
+                                        break;
+                                    }
+                                }
+                                // Skip tokens with null bytes (shouldn't happen, but be safe)
+                            }
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        }
                     }
-                    // Skip tokens with null bytes (shouldn't happen, but be safe)
-                }
-                Err(e) => {
-                    return Err(e);
+
+                    Ok(())
+                });
+
+                match result {
+                    Ok(()) => KjarniErrorCode::Ok,
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        chat_error_to_code(&e)
+                    }
                 }
             }
-        }
-
-        Ok(())
-    });
-
-    match result {
-        Ok(()) => KjarniErrorCode::Ok,
-        Err(e) => {
-            set_last_error(e.to_string());
-            chat_error_to_code(&e)
-        }
-    }
-}}
+        },
+    )
+}
 /// Send a message with explicit history. Does not modify the history
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_send_with_history(
@@ -409,79 +433,87 @@ pub unsafe extern "C" fn kjarni_chat_send_with_history(
     message: *const c_char,
     gen_config: *const KjarniGenerationConfig,
     out: *mut *mut c_char,
-) -> KjarniErrorCode { unsafe {
-    if chat.is_null() || message.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_send_with_history",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if chat.is_null() || message.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    if history_len > 0 && (roles.is_null() || contents.is_null()) {
-        return KjarniErrorCode::NullPointer;
-    }
+                if history_len > 0 && (roles.is_null() || contents.is_null()) {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let chat_ref = &(*chat).inner;
+                let chat_ref = &(*chat).inner;
 
-    let message = match CStr::from_ptr(message).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let message = match CStr::from_ptr(message).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    // Build History from arrays
-    let mut history = kjarni::chat::types::History::new();
-    for i in 0..history_len {
-        let role = *roles.add(i);
-        let content_ptr = *contents.add(i);
-        if content_ptr.is_null() {
-            return KjarniErrorCode::NullPointer;
-        }
-        let content = match CStr::from_ptr(content_ptr).to_str() {
-            Ok(s) => s,
-            Err(_) => return KjarniErrorCode::InvalidUtf8,
-        };
+                // Build History from arrays
+                let mut history = kjarni::chat::types::History::new();
+                for i in 0..history_len {
+                    let role = *roles.add(i);
+                    let content_ptr = *contents.add(i);
+                    if content_ptr.is_null() {
+                        return KjarniErrorCode::NullPointer;
+                    }
+                    let content = match CStr::from_ptr(content_ptr).to_str() {
+                        Ok(s) => s,
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    };
 
-        match role {
-            0 => {
-                // System - rebuild history with system prompt
-                history = kjarni::chat::types::History::with_system(content);
-            }
-            1 => history.push_user(content),
-            2 => history.push_assistant(content),
-            _ => {
-                set_last_error(format!("Invalid role: {}", role));
-                return KjarniErrorCode::InvalidConfig;
-            }
-        }
-    }
+                    match role {
+                        0 => {
+                            // System - rebuild history with system prompt
+                            history = kjarni::chat::types::History::with_system(content);
+                        }
+                        1 => history.push_user(content),
+                        2 => history.push_assistant(content),
+                        _ => {
+                            set_last_error(format!("Invalid role: {}", role));
+                            return KjarniErrorCode::InvalidConfig;
+                        }
+                    }
+                }
 
-    let result = get_runtime().block_on(async {
-        if gen_config.is_null() {
-            chat_ref.send_with_history(&history, message).await
-        } else {
-            let mut conversation = chat_ref.history_to_conversation(&history);
-            conversation.push_user(message);
-            let prompt = chat_ref.format_prompt(&conversation);
-            let overrides = to_overrides(&*gen_config);
-            chat_ref.generate(&prompt, &overrides).await
-        }
-    });
+                let result = get_runtime().block_on(async {
+                    if gen_config.is_null() {
+                        chat_ref.send_with_history(&history, message).await
+                    } else {
+                        let mut conversation = chat_ref.history_to_conversation(&history);
+                        conversation.push_user(message);
+                        let prompt = chat_ref.format_prompt(&conversation);
+                        let overrides = to_overrides(&*gen_config);
+                        chat_ref.generate(&prompt, &overrides).await
+                    }
+                });
 
-    match result {
-        Ok(response) => match CString::new(response) {
-            Ok(cstr) => {
-                *out = cstr.into_raw();
-                KjarniErrorCode::Ok
-            }
-            Err(_) => {
-                set_last_error("Response contained null byte".to_string());
-                KjarniErrorCode::InferenceFailed
+                match result {
+                    Ok(response) => match CString::new(response) {
+                        Ok(cstr) => {
+                            *out = cstr.into_raw();
+                            KjarniErrorCode::Ok
+                        }
+                        Err(_) => {
+                            set_last_error("Response contained null byte".to_string());
+                            KjarniErrorCode::InferenceFailed
+                        }
+                    },
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = ptr::null_mut();
+                        chat_error_to_code(&e)
+                    }
+                }
             }
         },
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = ptr::null_mut();
-            chat_error_to_code(&e)
-        }
-    }
-}}
+    )
+}
 
 /// Stream a response with explicit history. Does not modify the history.
 ///
@@ -503,132 +535,150 @@ pub unsafe extern "C" fn kjarni_chat_stream_with_history(
     callback: KjarniStreamCallbackFn,
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
-) -> KjarniErrorCode { unsafe {
-    if chat.is_null() || message.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_stream_with_history",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if chat.is_null() || message.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    if history_len > 0 && (roles.is_null() || contents.is_null()) {
-        return KjarniErrorCode::NullPointer;
-    }
+                if history_len > 0 && (roles.is_null() || contents.is_null()) {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let cb = match callback {
-        Some(cb) => cb,
-        None => return KjarniErrorCode::NullPointer,
-    };
+                let cb = match callback {
+                    Some(cb) => cb,
+                    None => return KjarniErrorCode::NullPointer,
+                };
 
-    let chat_ref = &(*chat).inner;
+                let chat_ref = &(*chat).inner;
 
-    let message = match CStr::from_ptr(message).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let message = match CStr::from_ptr(message).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    let mut history = kjarni::chat::types::History::new();
-    for i in 0..history_len {
-        let role = *roles.add(i);
-        let content_ptr = *contents.add(i);
-        if content_ptr.is_null() {
-            return KjarniErrorCode::NullPointer;
-        }
-        let content = match CStr::from_ptr(content_ptr).to_str() {
-            Ok(s) => s,
-            Err(_) => return KjarniErrorCode::InvalidUtf8,
-        };
+                let mut history = kjarni::chat::types::History::new();
+                for i in 0..history_len {
+                    let role = *roles.add(i);
+                    let content_ptr = *contents.add(i);
+                    if content_ptr.is_null() {
+                        return KjarniErrorCode::NullPointer;
+                    }
+                    let content = match CStr::from_ptr(content_ptr).to_str() {
+                        Ok(s) => s,
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    };
 
-        match role {
-            0 => {
-                // System - rebuild history with system prompt
-                history = kjarni::chat::types::History::with_system(content);
-            }
-            1 => history.push_user(content),
-            2 => history.push_assistant(content),
-            _ => {
-                set_last_error(format!("Invalid role: {}", role));
-                return KjarniErrorCode::InvalidConfig;
-            }
-        }
-    }
-
-    let result = get_runtime().block_on(async {
-        let stream_result = if gen_config.is_null() {
-            chat_ref.stream_with_history(&history, message).await
-        } else {
-            let mut conversation = chat_ref.history_to_conversation(&history);
-            conversation.push_user(message);
-            let prompt = chat_ref.format_prompt(&conversation);
-            let overrides = to_overrides(&*gen_config);
-            chat_ref.generate_stream(prompt, overrides).await
-        };
-
-        let mut stream = stream_result?;
-
-        while let Some(token_result) = stream.next().await {
-            if is_cancelled(cancel_token) {
-                break;
-            }
-
-            match token_result {
-                Ok(text) => {
-                    if let Ok(cstr) = CString::new(text) {
-                        let should_continue = cb(cstr.as_ptr(), user_data);
-                        if !should_continue {
-                            break;
+                    match role {
+                        0 => {
+                            // System - rebuild history with system prompt
+                            history = kjarni::chat::types::History::with_system(content);
+                        }
+                        1 => history.push_user(content),
+                        2 => history.push_assistant(content),
+                        _ => {
+                            set_last_error(format!("Invalid role: {}", role));
+                            return KjarniErrorCode::InvalidConfig;
                         }
                     }
                 }
-                Err(e) => {
-                    return Err(e);
+
+                let result = get_runtime().block_on(async {
+                    let stream_result = if gen_config.is_null() {
+                        chat_ref.stream_with_history(&history, message).await
+                    } else {
+                        let mut conversation = chat_ref.history_to_conversation(&history);
+                        conversation.push_user(message);
+                        let prompt = chat_ref.format_prompt(&conversation);
+                        let overrides = to_overrides(&*gen_config);
+                        chat_ref.generate_stream(prompt, overrides).await
+                    };
+
+                    let mut stream = stream_result?;
+
+                    while let Some(token_result) = stream.next().await {
+                        if is_cancelled(cancel_token) {
+                            break;
+                        }
+
+                        match token_result {
+                            Ok(text) => {
+                                if let Ok(cstr) = CString::new(text) {
+                                    let should_continue = cb(cstr.as_ptr(), user_data);
+                                    if !should_continue {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        }
+                    }
+
+                    Ok(())
+                });
+
+                match result {
+                    Ok(()) => KjarniErrorCode::Ok,
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        chat_error_to_code(&e)
+                    }
                 }
             }
-        }
-
-        Ok(())
-    });
-
-    match result {
-        Ok(()) => KjarniErrorCode::Ok,
-        Err(e) => {
-            set_last_error(e.to_string());
-            chat_error_to_code(&e)
-        }
-    }
-}}
+        },
+    )
+}
 
 /// Create a new stateful conversation from a Chat instance
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_new(
     chat: *mut KjarniChat,
     out: *mut *mut KjarniChatConversation,
-) -> KjarniErrorCode { unsafe {
-    if chat.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_conversation_new",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if chat.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let chat_ref = &(*chat).inner;
+                let chat_ref = &(*chat).inner;
 
-    let history = if let Some(system) = chat_ref.system_prompt() {
-        kjarni::chat::types::History::with_system(system)
-    } else {
-        kjarni::chat::types::History::new()
-    };
+                let history = if let Some(system) = chat_ref.system_prompt() {
+                    kjarni::chat::types::History::with_system(system)
+                } else {
+                    kjarni::chat::types::History::new()
+                };
 
-    let handle = Box::new(KjarniChatConversation {
-        chat: chat as *const KjarniChat,
-        history,
-    });
+                let handle = Box::new(KjarniChatConversation {
+                    chat: chat as *const KjarniChat,
+                    history,
+                });
 
-    *out = Box::into_raw(handle);
-    KjarniErrorCode::Ok
-}}
+                *out = Box::into_raw(handle);
+                KjarniErrorCode::Ok
+            }
+        },
+    )
+}
 
 /// Free a ChatConversation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_chat_conversation_free(convo: *mut KjarniChatConversation) { unsafe {
-    if !convo.is_null() {
-        let _ = Box::from_raw(convo);
-    }
-}}
+pub unsafe extern "C" fn kjarni_chat_conversation_free(convo: *mut KjarniChatConversation) {
+    crate::panic::guard("kjarni_chat_conversation_free", (), || unsafe {
+        if !convo.is_null() {
+            let _ = Box::from_raw(convo);
+        }
+    })
+}
 /// Send a message in a conversation and get the response
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_send(
@@ -636,65 +686,72 @@ pub unsafe extern "C" fn kjarni_chat_conversation_send(
     message: *const c_char,
     gen_config: *const KjarniGenerationConfig,
     out: *mut *mut c_char,
-) -> KjarniErrorCode { unsafe {
-    if convo.is_null() || message.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
-
-    let convo_ref = &mut *convo;
-
-    // Get parent Chat reference
-    if convo_ref.chat.is_null() {
-        set_last_error("Parent chat has been freed".to_string());
-        return KjarniErrorCode::NullPointer;
-    }
-    let chat_ref = &(*convo_ref.chat).inner;
-
-    let message = match CStr::from_ptr(message).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
-
-    // Add user message to history
-    convo_ref.history.push_user(message);
-
-    // Build prompt from full history
-    let conversation = chat_ref.history_to_conversation(&convo_ref.history);
-    let prompt = chat_ref.format_prompt(&conversation);
-
-    let overrides = if gen_config.is_null() {
-        GenerationOverrides::default()
-    } else {
-        to_overrides(&*gen_config)
-    };
-
-    let result = get_runtime().block_on(async {
-        chat_ref.generate(&prompt, &overrides).await
-    });
-
-    match result {
-        Ok(response) => {
-            // Add assistant response to history
-            convo_ref.history.push_assistant(&response);
-
-            match CString::new(response) {
-                Ok(cstr) => {
-                    *out = cstr.into_raw();
-                    KjarniErrorCode::Ok
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_conversation_send",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if convo.is_null() || message.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
                 }
-                Err(_) => {
-                    set_last_error("Response contained null byte".to_string());
-                    KjarniErrorCode::InferenceFailed
+
+                let convo_ref = &mut *convo;
+
+                // Get parent Chat reference
+                if convo_ref.chat.is_null() {
+                    set_last_error("Parent chat has been freed".to_string());
+                    return KjarniErrorCode::NullPointer;
+                }
+                let chat_ref = &(*convo_ref.chat).inner;
+
+                let message = match CStr::from_ptr(message).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
+
+                // Add user message to history
+                convo_ref.history.push_user(message);
+
+                // Build prompt from full history
+                let conversation = chat_ref.history_to_conversation(&convo_ref.history);
+                let prompt = chat_ref.format_prompt(&conversation);
+
+                let overrides = if gen_config.is_null() {
+                    GenerationOverrides::default()
+                } else {
+                    to_overrides(&*gen_config)
+                };
+
+                let result =
+                    get_runtime().block_on(async { chat_ref.generate(&prompt, &overrides).await });
+
+                match result {
+                    Ok(response) => {
+                        // Add assistant response to history
+                        convo_ref.history.push_assistant(&response);
+
+                        match CString::new(response) {
+                            Ok(cstr) => {
+                                *out = cstr.into_raw();
+                                KjarniErrorCode::Ok
+                            }
+                            Err(_) => {
+                                set_last_error("Response contained null byte".to_string());
+                                KjarniErrorCode::InferenceFailed
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *out = ptr::null_mut();
+                        chat_error_to_code(&e)
+                    }
                 }
             }
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *out = ptr::null_mut();
-            chat_error_to_code(&e)
-        }
-    }
-}}
+        },
+    )
+}
 
 // ---------------------------------------------------------------------------
 // ChatConversation: stream (callback per token)
@@ -716,91 +773,97 @@ pub unsafe extern "C" fn kjarni_chat_conversation_stream(
     callback: KjarniStreamCallbackFn,
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
-) -> KjarniErrorCode { unsafe {
-    if convo.is_null() || message.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_chat_conversation_stream",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if convo.is_null() || message.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let cb = match callback {
-        Some(cb) => cb,
-        None => return KjarniErrorCode::NullPointer,
-    };
+                let cb = match callback {
+                    Some(cb) => cb,
+                    None => return KjarniErrorCode::NullPointer,
+                };
 
-    let convo_ref = &mut *convo;
+                let convo_ref = &mut *convo;
 
-    if convo_ref.chat.is_null() {
-        set_last_error("Parent chat has been freed".to_string());
-        return KjarniErrorCode::NullPointer;
-    }
-    let chat_ref = &(*convo_ref.chat).inner;
+                if convo_ref.chat.is_null() {
+                    set_last_error("Parent chat has been freed".to_string());
+                    return KjarniErrorCode::NullPointer;
+                }
+                let chat_ref = &(*convo_ref.chat).inner;
 
-    let message = match CStr::from_ptr(message).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let message = match CStr::from_ptr(message).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    // Add user message
-    convo_ref.history.push_user(message);
+                // Add user message
+                convo_ref.history.push_user(message);
 
-    // Build prompt
-    let conversation = chat_ref.history_to_conversation(&convo_ref.history);
-    let prompt = chat_ref.format_prompt(&conversation);
+                // Build prompt
+                let conversation = chat_ref.history_to_conversation(&convo_ref.history);
+                let prompt = chat_ref.format_prompt(&conversation);
 
-    let overrides = if gen_config.is_null() {
-        GenerationOverrides::default()
-    } else {
-        to_overrides(&*gen_config)
-    };
+                let overrides = if gen_config.is_null() {
+                    GenerationOverrides::default()
+                } else {
+                    to_overrides(&*gen_config)
+                };
 
-    let result = get_runtime().block_on(async {
-        let mut stream = chat_ref
-            .generate_stream(prompt, overrides)
-            .await?;
+                let result = get_runtime().block_on(async {
+                    let mut stream = chat_ref.generate_stream(prompt, overrides).await?;
 
-        let mut full_response = String::new();
+                    let mut full_response = String::new();
 
-        while let Some(token_result) = stream.next().await {
-            if is_cancelled(cancel_token) {
-                break;
-            }
-
-            match token_result {
-                Ok(text) => {
-                    full_response.push_str(&text);
-                    if let Ok(cstr) = CString::new(text) {
-                        let should_continue = cb(cstr.as_ptr(), user_data);
-                        if !should_continue {
+                    while let Some(token_result) = stream.next().await {
+                        if is_cancelled(cancel_token) {
                             break;
                         }
+
+                        match token_result {
+                            Ok(text) => {
+                                full_response.push_str(&text);
+                                if let Ok(cstr) = CString::new(text) {
+                                    let should_continue = cb(cstr.as_ptr(), user_data);
+                                    if !should_continue {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // Still save partial response to history
+                                if !full_response.is_empty() {
+                                    convo_ref.history.push_assistant(&full_response);
+                                }
+                                return Err(e);
+                            }
+                        }
+                    }
+
+                    Ok(full_response)
+                });
+
+                match result {
+                    Ok(response) => {
+                        // Add full response to history
+                        if !response.is_empty() {
+                            convo_ref.history.push_assistant(&response);
+                        }
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        chat_error_to_code(&e)
                     }
                 }
-                Err(e) => {
-                    // Still save partial response to history
-                    if !full_response.is_empty() {
-                        convo_ref.history.push_assistant(&full_response);
-                    }
-                    return Err(e);
-                }
             }
-        }
-
-        Ok(full_response)
-    });
-
-    match result {
-        Ok(response) => {
-            // Add full response to history
-            if !response.is_empty() {
-                convo_ref.history.push_assistant(&response);
-            }
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            chat_error_to_code(&e)
-        }
-    }
-}}
+        },
+    )
+}
 
 // ---------------------------------------------------------------------------
 // ChatConversation: history management
@@ -810,12 +873,16 @@ pub unsafe extern "C" fn kjarni_chat_conversation_stream(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_len(
     convo: *const KjarniChatConversation,
-) -> usize { unsafe {
-    if convo.is_null() {
-        return 0;
-    }
-    (*convo).history.len()
-}}
+) -> usize {
+    crate::panic::guard("kjarni_chat_conversation_len", 0, || -> usize {
+        unsafe {
+            if convo.is_null() {
+                return 0;
+            }
+            (*convo).history.len()
+        }
+    })
+}
 
 /// Clear the conversation history.
 ///
@@ -824,11 +891,13 @@ pub unsafe extern "C" fn kjarni_chat_conversation_len(
 pub unsafe extern "C" fn kjarni_chat_conversation_clear(
     convo: *mut KjarniChatConversation,
     keep_system: i32,
-) { unsafe {
-    if !convo.is_null() {
-        (*convo).history.clear(keep_system != 0);
-    }
-}}
+) {
+    crate::panic::guard("kjarni_chat_conversation_clear", (), || unsafe {
+        if !convo.is_null() {
+            (*convo).history.clear(keep_system != 0);
+        }
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Chat: info
@@ -842,30 +911,38 @@ pub unsafe extern "C" fn kjarni_chat_model_name(
     chat: *const KjarniChat,
     buf: *mut c_char,
     buf_len: usize,
-) -> usize { unsafe {
-    if chat.is_null() {
-        return 0;
-    }
+) -> usize {
+    crate::panic::guard("kjarni_chat_model_name", 0, || -> usize {
+        unsafe {
+            if chat.is_null() {
+                return 0;
+            }
 
-    let name = (*chat).inner.model_name();
-    let name_bytes = name.as_bytes();
+            let name = (*chat).inner.model_name();
+            let name_bytes = name.as_bytes();
 
-    if buf.is_null() || buf_len == 0 {
-        return name_bytes.len();
-    }
+            if buf.is_null() || buf_len == 0 {
+                return name_bytes.len();
+            }
 
-    let copy_len = std::cmp::min(name_bytes.len(), buf_len.saturating_sub(1));
-    std::ptr::copy_nonoverlapping(name_bytes.as_ptr(), buf as *mut u8, copy_len);
-    *buf.add(copy_len) = 0; // null terminate
+            let copy_len = std::cmp::min(name_bytes.len(), buf_len.saturating_sub(1));
+            std::ptr::copy_nonoverlapping(name_bytes.as_ptr(), buf as *mut u8, copy_len);
+            *buf.add(copy_len) = 0; // null terminate
 
-    copy_len
-}}
+            copy_len
+        }
+    })
+}
 
 /// Get the context window size.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_chat_context_size(chat: *const KjarniChat) -> usize { unsafe {
-    if chat.is_null() {
-        return 0;
-    }
-    (*chat).inner.context_size()
-}}
+pub unsafe extern "C" fn kjarni_chat_context_size(chat: *const KjarniChat) -> usize {
+    crate::panic::guard("kjarni_chat_context_size", 0, || -> usize {
+        unsafe {
+            if chat.is_null() {
+                return 0;
+            }
+            (*chat).inner.context_size()
+        }
+    })
+}

@@ -1,11 +1,7 @@
 #[cfg(test)]
 mod seq2seq_tests {
     use crate::seq2seq::{Seq2SeqError, generate};
-    use crate::seq2seq::{
-        Seq2SeqGenerator, Seq2SeqOverrides, available_models, is_seq2seq_model,
-    };
-
-    
+    use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqOverrides, available_models, is_seq2seq_model};
 
     #[tokio::test]
     async fn test_t5_full_workflow() {
@@ -87,7 +83,6 @@ mod seq2seq_tests {
 
         assert!(is_seq2seq_model("not-a-real-model").is_err());
     }
-
 
     fn model_available(model: &str) -> bool {
         let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
@@ -323,6 +318,4 @@ mod seq2seq_tests {
             println!("Concurrent output: {}", output);
         }
     }
-
-  
 }

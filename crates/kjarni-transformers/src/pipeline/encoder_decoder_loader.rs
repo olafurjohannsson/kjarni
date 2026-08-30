@@ -94,7 +94,6 @@ impl Seq2SeqLoader {
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
-
         // Build Backends
         let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = M::build_backends(
             &weights,
@@ -138,7 +137,7 @@ mod tests {
     use crate::common::HFGenerationConfig;
     use crate::cpu::encoder::CpuEncoder;
     use crate::cpu::encoder::traits::CpuEncoderOutput;
-    
+
     use crate::encoder_decoder::traits::{
         CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput,
     };
@@ -281,6 +280,10 @@ mod tests {
     }
 
     impl MockCpuDecoder {
+        #[expect(
+            dead_code,
+            reason = "held for the GPU decoder path, which is not wired up yet"
+        )]
         fn new(hidden_size: usize) -> Self {
             Self { hidden_size }
         }
@@ -322,7 +325,6 @@ mod tests {
         }
 
         fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-
             Ok(hidden_states.clone())
         }
 
@@ -335,15 +337,26 @@ mod tests {
     }
 
     struct MockSeq2SeqModel {
+        #[expect(
+            dead_code,
+            reason = "held for the GPU decoder path, which is not wired up yet"
+        )]
         pipeline: EncoderDecoderPipeline,
+        #[expect(
+            dead_code,
+            reason = "held for the GPU decoder path, which is not wired up yet"
+        )]
         tokenizer: Tokenizer,
+        #[expect(
+            dead_code,
+            reason = "held for the GPU decoder path, which is not wired up yet"
+        )]
         config: Arc<MockConfig>,
     }
 
     impl std::fmt::Debug for MockSeq2SeqModel {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("MockSeq2SeqModel")
-                .finish()
+            f.debug_struct("MockSeq2SeqModel").finish()
         }
     }
 
@@ -751,9 +764,6 @@ mod tests {
         assert!(config.max_length.is_none() || config.max_length.unwrap() > 0);
     }
 
-
- 
-
     #[test]
     fn test_mock_decoder_hidden_size() {
         let decoder = MockCpuDecoder { hidden_size: 128 };
@@ -815,6 +825,6 @@ mod tests {
         let err = result.unwrap_err();
         let err_string = err.to_string();
 
-        assert!(err_string.len() > 0, "Error message should not be empty");
+        assert!(!err_string.is_empty(), "Error message should not be empty");
     }
 }

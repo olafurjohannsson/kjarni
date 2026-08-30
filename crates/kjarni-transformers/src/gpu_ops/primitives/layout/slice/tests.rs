@@ -5,8 +5,7 @@ use anyhow::Result;
 use common::read_gpu_tensor;
 use ndarray::{Array4, s};
 
-#[path = "../../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 #[ignore = "GPU required"]
 #[tokio::test]

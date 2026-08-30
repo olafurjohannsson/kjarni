@@ -1,9 +1,9 @@
 //! Classification command with colored terminal output.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use colored::*;
 use kjarni::DType;
-use kjarni::classifier::{Classifier, ClassificationResult};
+use kjarni::classifier::{ClassificationResult, Classifier};
 
 use crate::commands::display;
 
@@ -93,7 +93,10 @@ pub async fn run(
     // Run classification
     if is_batch {
         if !quiet {
-            eprintln!("{}", format!("Classifying {} texts...", lines.len()).dimmed());
+            eprintln!(
+                "{}",
+                format!("Classifying {} texts...", lines.len()).dimmed()
+            );
         }
         let results = classifier
             .classify_batch(&lines)
@@ -196,10 +199,7 @@ fn format_pretty_single(text: &str, result: &ClassificationResult) -> String {
             format!("{:>14}", label).dimmed()
         };
 
-        output.push_str(&format!(
-            "  {} {}  {}  {}\n",
-            prefix, label_str, bar, pct
-        ));
+        output.push_str(&format!("  {} {}  {}  {}\n", prefix, label_str, bar, pct));
     }
 
     output.push('\n');
@@ -257,10 +257,8 @@ fn format_batch_results(
                     let truncated = truncate_clean(text, 40);
                     let bar = display::score_bar(result.score, 15);
                     let pct = display::score_pct(result.score);
-                    let label_colored = display::colorize_by_score(
-                        &format!("{:>14}", result.label),
-                        result.score,
-                    );
+                    let label_colored =
+                        display::colorize_by_score(&format!("{:>14}", result.label), result.score);
 
                     output.push_str(&format!(
                         "  {}  {}  {}  \"{}\"\n",
@@ -290,7 +288,6 @@ fn truncate_clean(text: &str, max_len: usize) -> String {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,10 +296,7 @@ mod tests {
             label: label.to_string(),
             score,
             label_index,
-            all_scores: vec![
-                ("positive".to_string(), 0.8),
-                ("negative".to_string(), 0.2),
-            ],
+            all_scores: vec![("positive".to_string(), 0.8), ("negative".to_string(), 0.2)],
         }
     }
 
@@ -386,10 +380,12 @@ mod tests {
 
     #[test]
     fn test_format_single_result_text_verbose() {
-        let result = mock_result_with_scores("positive", 0.8, 0, vec![
-            ("positive", 0.8),
-            ("negative", 0.2),
-        ]);
+        let result = mock_result_with_scores(
+            "positive",
+            0.8,
+            0,
+            vec![("positive", 0.8), ("negative", 0.2)],
+        );
         let output = format_single_result("test", &result, "text", false).unwrap();
 
         assert!(output.contains("positive"));
@@ -428,10 +424,7 @@ mod tests {
     #[test]
     fn test_format_batch_results_jsonl() {
         let texts = vec!["a", "b"];
-        let results = vec![
-            mock_result("pos", 0.9, 0),
-            mock_result("neg", 0.1, 1),
-        ];
+        let results = vec![mock_result("pos", 0.9, 0), mock_result("neg", 0.1, 1)];
 
         let output = format_batch_results(&texts, &results, "jsonl", false).unwrap();
         let lines: Vec<&str> = output.trim().lines().collect();
@@ -514,7 +507,9 @@ mod tests {
     #[test]
     fn test_format_single_result_special_characters() {
         let result = mock_result("label", 0.5, 0);
-        let output = format_single_result("text with \"quotes\" and\nnewlines", &result, "json", false).unwrap();
+        let output =
+            format_single_result("text with \"quotes\" and\nnewlines", &result, "json", false)
+                .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert!(parsed["text"].as_str().unwrap().contains("quotes"));
     }

@@ -1,16 +1,13 @@
-
 use anyhow::Result;
 use ndarray::{Array, Array2};
-use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Uniform;
 
 use super::*;
 use crate::gpu::{DType, GpuTensor};
 
-#[path = "../../../tests/common.rs"]
-mod common;
-use common::{read_gpu_tensor_to_vec, assert_arrays_are_close_2d, get_test_context};
-
+use crate::tests::common;
+use common::{assert_arrays_are_close_2d, get_test_context, read_gpu_tensor_to_vec};
 
 #[tokio::test]
 #[ignore = "GPU required"]

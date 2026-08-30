@@ -14,6 +14,10 @@ pub struct Indexer {
     embedder: Embedder,
     loader_config: LoaderConfig,
     chunk_size: usize,
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     chunk_overlap: usize,
     max_docs_per_segment: usize,
     batch_size: usize,
@@ -132,7 +136,7 @@ impl Indexer {
         std::fs::remove_dir_all(index_path).map_err(|e| IndexerError::IndexingFailed(e.into()))
     }
 
-    /// Report progress 
+    /// Report progress
     fn report_stored_progress(
         &self,
         stage: ProgressStage,
@@ -755,12 +759,11 @@ impl Indexer {
                         continue;
                     }
 
-                    if !self.loader_config.include_hidden {
-                        if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-                            if name.starts_with('.') {
-                                continue;
-                            }
-                        }
+                    if !self.loader_config.include_hidden
+                        && let Some(name) = entry_path.file_name().and_then(|n| n.to_str())
+                        && name.starts_with('.')
+                    {
+                        continue;
                     }
 
                     let path_str = entry_path.to_string_lossy();
@@ -773,12 +776,11 @@ impl Indexer {
                         continue;
                     }
 
-                    if let Some(max_size) = self.loader_config.max_file_size {
-                        if let Ok(metadata) = entry_path.metadata() {
-                            if metadata.len() as usize > max_size {
-                                continue;
-                            }
-                        }
+                    if let Some(max_size) = self.loader_config.max_file_size
+                        && let Ok(metadata) = entry_path.metadata()
+                        && metadata.len() as usize > max_size
+                    {
+                        continue;
                     }
 
                     if self.is_supported_file(entry_path) {
@@ -842,7 +844,7 @@ impl Indexer {
 
 #[cfg(test)]
 mod indexer_tests {
-    
+
     use std::fs::{self, File};
     use std::io::Write;
     use std::path::PathBuf;
@@ -1303,7 +1305,7 @@ mod indexer_tests {
         let dir = TempDir::new().unwrap();
         create_test_files(&dir);
 
-        let extensions = vec!["txt".to_string()];
+        let extensions = ["txt".to_string()];
 
         let is_supported = |path: &std::path::Path| -> bool {
             path.extension()
@@ -1335,7 +1337,7 @@ mod indexer_tests {
 
     #[test]
     fn test_exclude_pattern_matching() {
-        let patterns = vec!["*.log".to_string(), "temp/*".to_string()];
+        let patterns = ["*.log".to_string(), "temp/*".to_string()];
 
         let is_excluded = |path: &str| -> bool {
             patterns
@@ -1368,8 +1370,8 @@ mod indexer_tests {
         let max_size_small = 100;
         let max_size_large = 1000;
 
-        assert!(file_size > max_size_small); 
-        assert!(file_size <= max_size_large); 
+        assert!(file_size > max_size_small);
+        assert!(file_size <= max_size_large);
     }
 
     #[test]
@@ -1420,8 +1422,8 @@ mod indexer_tests {
             }
         }
 
-        assert_eq!(count_recursive, 4); 
-        assert_eq!(count_shallow, 1); 
+        assert_eq!(count_recursive, 4);
+        assert_eq!(count_shallow, 1);
     }
 
     #[test]
@@ -1518,7 +1520,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    
+
     async fn test_indexer_info() {
         use crate::Indexer;
 
@@ -1663,7 +1665,7 @@ mod indexer_tests {
             .create_with_options(
                 index_path.to_str().unwrap(),
                 &[docs_dir.to_str().unwrap()],
-                true, 
+                true,
             )
             .await;
 

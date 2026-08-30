@@ -3,7 +3,7 @@
 //! This module provides C-compatible bindings that can be used from C, C++, and other languages.
 
 use crate::edge_gpt::EdgeGPT;
-use crate::ffi::types::{FloatArray, string_to_c, c_to_string, free_c_string};
+use crate::ffi::types::{FloatArray, c_to_string, free_c_string, string_to_c};
 use edgetransformers::prelude::Device;
 use std::ffi::c_char;
 use std::ptr;
@@ -20,7 +20,6 @@ pub struct EdgeGPTHandle {
 pub struct EdgeGPTIndex {
     _private: [u8; 0],
 }
-
 
 /// Error codes
 #[repr(C)]
@@ -49,9 +48,9 @@ pub unsafe extern "C" fn edge_gpt_new_cpu() -> *mut EdgeGPTHandle {
         Ok(rt) => rt,
         Err(_) => return ptr::null_mut(),
     };
-    
+
     let edge_gpt = EdgeGPT::new(Device::Cpu, None);
-    
+
     let ctx = Box::new(EdgeGPTContext { edge_gpt, runtime });
     Box::into_raw(ctx) as *mut EdgeGPTHandle
 }
@@ -67,7 +66,7 @@ pub unsafe extern "C" fn edge_gpt_new_gpu() -> *mut EdgeGPTHandle {
         Err(_) => return ptr::null_mut(),
     };
     let edge_gpt = EdgeGPT::new(Device::Wgpu, None);
-    
+
     let ctx = Box::new(EdgeGPTContext { edge_gpt, runtime });
     Box::into_raw(ctx) as *mut EdgeGPTHandle
 }
@@ -100,19 +99,18 @@ pub unsafe extern "C" fn edge_gpt_encode(
     if handle.is_null() || text.is_null() || out_embedding.is_null() || out_len.is_null() {
         return EdgeGPTError::NullPointer;
     }
-    
+
     let ctx = &*(handle as *const EdgeGPTContext);
     let text_str = match std::panic::catch_unwind(|| c_to_string(text)) {
         Ok(s) => s,
         Err(_) => return EdgeGPTError::InvalidUtf8,
     };
-    
+
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.runtime.block_on(async {
-            ctx.edge_gpt.encode(&text_str).await
-        })
+        ctx.runtime
+            .block_on(async { ctx.edge_gpt.encode(&text_str).await })
     }));
-    
+
     match result {
         Ok(embedding) => {
             let e = embedding.unwrap();
@@ -144,9 +142,8 @@ pub unsafe extern "C" fn edge_gpt_generate(
     };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.runtime.block_on(async {
-            ctx.edge_gpt.generate(&prompt_str).await
-        })
+        ctx.runtime
+            .block_on(async { ctx.edge_gpt.generate(&prompt_str).await })
     }));
 
     match result {
@@ -177,9 +174,8 @@ pub unsafe extern "C" fn edge_gpt_summarize(
     };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.runtime.block_on(async {
-            ctx.edge_gpt.summarize(&text_str).await
-        })
+        ctx.runtime
+            .block_on(async { ctx.edge_gpt.summarize(&text_str).await })
     }));
 
     match result {
@@ -211,9 +207,9 @@ pub unsafe extern "C" fn edge_gpt_encode_batch(
     if handle.is_null() || texts.is_null() || out_embeddings.is_null() || out_lens.is_null() {
         return EdgeGPTError::NullPointer;
     }
-    
+
     let ctx = &*(handle as *const EdgeGPTContext);
-    
+
     // Convert C strings to Rust strings
     let mut text_vec = Vec::with_capacity(num_texts);
     for i in 0..num_texts {
@@ -226,32 +222,32 @@ pub unsafe extern "C" fn edge_gpt_encode_batch(
             Err(_) => return EdgeGPTError::InvalidUtf8,
         }
     }
-    
+
     let text_refs: Vec<&str> = text_vec.iter().map(|s| s.as_str()).collect();
-    
-    let result = ctx.runtime.block_on(async {
-        ctx.edge_gpt.encode_batch(&text_refs).await
-    });
-    
+
+    let result = ctx
+        .runtime
+        .block_on(async { ctx.edge_gpt.encode_batch(&text_refs).await });
+
     match result {
         Ok(embeddings) => {
             let dim = embeddings[0].len();
-            
+
             // Allocate array of pointers
             let mut emb_ptrs = Vec::with_capacity(num_texts);
             let mut lens = Vec::with_capacity(num_texts);
-            
+
             for embedding in embeddings {
                 let len = embedding.len();
                 let array = FloatArray::from_vec(embedding);
                 emb_ptrs.push(array.data);
                 lens.push(len);
             }
-            
+
             *out_embeddings = Box::into_raw(emb_ptrs.into_boxed_slice()) as *mut *mut f32;
             *out_lens = Box::into_raw(lens.into_boxed_slice()) as *mut usize;
             *embedding_dim = dim;
-            
+
             EdgeGPTError::Success
         }
         Err(_) => EdgeGPTError::InferenceError,
@@ -274,7 +270,7 @@ pub unsafe extern "C" fn edge_gpt_similarity(
     if handle.is_null() || text1.is_null() || text2.is_null() || out_similarity.is_null() {
         return EdgeGPTError::NullPointer;
     }
-    
+
     let ctx = &*(handle as *const EdgeGPTContext);
     let text1_str = match std::panic::catch_unwind(|| c_to_string(text1)) {
         Ok(s) => s,
@@ -284,11 +280,11 @@ pub unsafe extern "C" fn edge_gpt_similarity(
         Ok(s) => s,
         Err(_) => return EdgeGPTError::InvalidUtf8,
     };
-    
-    let result = ctx.runtime.block_on(async {
-        ctx.edge_gpt.similarity(&text1_str, &text2_str).await
-    });
-    
+
+    let result = ctx
+        .runtime
+        .block_on(async { ctx.edge_gpt.similarity(&text1_str, &text2_str).await });
+
     match result {
         Ok(sim) => {
             *out_similarity = sim;
@@ -314,16 +310,21 @@ pub unsafe extern "C" fn edge_gpt_rerank(
     out_indices: *mut *mut usize,
     out_scores: *mut *mut f32,
 ) -> EdgeGPTError {
-    if handle.is_null() || query.is_null() || documents.is_null() || out_indices.is_null() || out_scores.is_null() {
+    if handle.is_null()
+        || query.is_null()
+        || documents.is_null()
+        || out_indices.is_null()
+        || out_scores.is_null()
+    {
         return EdgeGPTError::NullPointer;
     }
-    
+
     let ctx = &*(handle as *const EdgeGPTContext);
     let query_str = match std::panic::catch_unwind(|| c_to_string(query)) {
         Ok(s) => s,
         Err(_) => return EdgeGPTError::InvalidUtf8,
     };
-    
+
     // Convert documents
     let mut doc_vec = Vec::with_capacity(num_docs);
     for i in 0..num_docs {
@@ -336,26 +337,26 @@ pub unsafe extern "C" fn edge_gpt_rerank(
             Err(_) => return EdgeGPTError::InvalidUtf8,
         }
     }
-    
+
     let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
-    
-    let result = ctx.runtime.block_on(async {
-        ctx.edge_gpt.rerank(&query_str, &doc_refs).await
-    });
-    
+
+    let result = ctx
+        .runtime
+        .block_on(async { ctx.edge_gpt.rerank(&query_str, &doc_refs).await });
+
     match result {
         Ok(ranked) => {
             let mut indices = Vec::with_capacity(num_docs);
             let mut scores = Vec::with_capacity(num_docs);
-            
+
             for (idx, score) in ranked {
                 indices.push(idx);
                 scores.push(score);
             }
-            
+
             *out_indices = Box::into_raw(indices.into_boxed_slice()) as *mut usize;
             *out_scores = Box::into_raw(scores.into_boxed_slice()) as *mut f32;
-            
+
             EdgeGPTError::Success
         }
         Err(_) => EdgeGPTError::InferenceError,
@@ -375,12 +376,14 @@ pub unsafe extern "C" fn edge_gpt_build_index(
     }
 
     let ctx = &*(handle as *const EdgeGPTContext);
-    
+
     // Convert C strings
     let mut doc_vec = Vec::with_capacity(num_docs);
     for i in 0..num_docs {
         let ptr = *documents.add(i);
-        if ptr.is_null() { return EdgeGPTError::NullPointer; }
+        if ptr.is_null() {
+            return EdgeGPTError::NullPointer;
+        }
         match std::panic::catch_unwind(|| c_to_string(ptr)) {
             Ok(s) => doc_vec.push(s),
             Err(_) => return EdgeGPTError::InvalidUtf8,
@@ -389,9 +392,8 @@ pub unsafe extern "C" fn edge_gpt_build_index(
     let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.runtime.block_on(async {
-            ctx.edge_gpt.build_index(&doc_refs).await
-        })
+        ctx.runtime
+            .block_on(async { ctx.edge_gpt.build_index(&doc_refs).await })
     }));
 
     match result {
@@ -422,7 +424,7 @@ pub unsafe extern "C" fn edge_gpt_search(
 
     // let ctx = &*(handle as *const EdgeGPTContext);
     // let index = &*(index_handle as *const SearchIndex);
-    
+
     // let query_str = match std::panic::catch_unwind(|| c_to_string(query)) {
     //     Ok(s) => s,
     //     Err(_) => return EdgeGPTError::InvalidUtf8,
@@ -464,7 +466,7 @@ pub unsafe extern "C" fn edge_gpt_save_index(
     unimplemented!()
     // let index = &*(index_handle as *const SearchIndex);
     // let path_str = c_to_string(path);
-    
+
     // // Serialize to JSON and write
     // match index.save_json() {
     //     Ok(json) => {
@@ -538,7 +540,7 @@ pub unsafe extern "C" fn edge_gpt_free_batch_embeddings(
             }
         }
     }
-    
+
     if !lens.is_null() {
         let _ = Vec::from_raw_parts(lens, num_texts, num_texts);
     }

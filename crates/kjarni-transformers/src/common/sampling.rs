@@ -141,7 +141,6 @@ pub fn min_p_filtering(mut logits: Array1<f32>, min_p: f32) -> Array1<f32> {
     logits
 }
 
-
 pub fn top_k_filtering(mut logits: Array1<f32>, k: usize) -> Array1<f32> {
     let mut indices: Vec<usize> = (0..logits.len()).collect();
     indices.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
@@ -154,7 +153,7 @@ pub fn top_k_filtering(mut logits: Array1<f32>, k: usize) -> Array1<f32> {
 pub fn top_p_filtering(mut logits: Array1<f32>, p: f32) -> Array1<f32> {
     let mut indices: Vec<usize> = (0..logits.len()).collect();
     indices.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
-    
+
     let probs = softmax_1d(&logits);
 
     let mut cumulative = 0.0;
@@ -239,7 +238,6 @@ mod tests {
     use super::*;
     use ndarray::array;
 
-
     #[test]
     fn test_softmax_1d_basic() {
         let mut logits = array![1.0, 2.0, 3.0];
@@ -288,7 +286,6 @@ mod tests {
         assert!(probs[1] > probs[0]);
     }
 
-
     #[test]
     fn test_log_softmax_1d_basic() {
         let mut logits = array![1.0, 2.0, 3.0];
@@ -315,9 +312,9 @@ mod tests {
         let filtered = top_k_filtering(logits, 3);
 
         // Top 3 are indices 1 (5.0), 3 (4.0), 2 (3.0)
-        assert!(filtered[1].is_finite()); 
-        assert!(filtered[3].is_finite()); 
-        assert!(filtered[2].is_finite()); 
+        assert!(filtered[1].is_finite());
+        assert!(filtered[3].is_finite());
+        assert!(filtered[2].is_finite());
         assert!(filtered[0] == f32::NEG_INFINITY);
         assert!(filtered[4] == f32::NEG_INFINITY);
     }
@@ -364,7 +361,6 @@ mod tests {
         assert!(filtered[2].is_finite());
     }
 
-
     #[test]
     fn test_repetition_penalty_no_penalty() {
         let logits = array![1.0, 2.0, 3.0];
@@ -398,8 +394,8 @@ mod tests {
         let result = apply_repetition_penalty(logits, &[0, 2], 2.0);
 
         assert_eq!(result[0], -2.0);
-        assert_eq!(result[1], 0.0); 
-        assert_eq!(result[2], 1.0); 
+        assert_eq!(result[1], 0.0);
+        assert_eq!(result[2], 1.0);
     }
 
     #[test]
@@ -552,9 +548,9 @@ mod tests {
         let top_k = get_top_k_from_log_probs(&log_probs, 3);
 
         assert_eq!(top_k.len(), 3);
-        assert_eq!(top_k[0].0, 3); 
-        assert_eq!(top_k[1].0, 1); 
-        assert_eq!(top_k[2].0, 0); 
+        assert_eq!(top_k[0].0, 3);
+        assert_eq!(top_k[1].0, 1);
+        assert_eq!(top_k[2].0, 0);
     }
 
     #[test]

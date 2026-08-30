@@ -1,5 +1,5 @@
-use crate::gpu::GpuTensor;
 use crate::WgpuContext;
+use crate::gpu::GpuTensor;
 use std::borrow::Cow;
 
 pub struct GpuArgMax {
@@ -80,7 +80,6 @@ impl GpuArgMax {
         input_logits: &GpuTensor,    // Shape: [Batch, Vocab]
         output_index: &wgpu::Buffer, // A 4-byte buffer for the result
     ) {
-
         let bind_group = self
             .context
             .device
@@ -109,7 +108,6 @@ impl GpuArgMax {
         pass.dispatch_workgroups(1, 1, 1);
     }
 }
-
 
 #[cfg(test)]
 mod tests;

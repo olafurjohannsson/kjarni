@@ -2,7 +2,6 @@ use super::*;
 use crate::generation::GenerationOverrides;
 use crate::generator::{available_models, is_generator_model};
 
-
 mod types_tests {
     use super::*;
 
@@ -60,12 +59,10 @@ mod types_tests {
     }
 }
 
-
 // Unit Tests - Validation
 
-
 mod validation_tests {
-    
+
     use crate::generator::validation::*;
     use kjarni_transformers::models::ModelType;
 
@@ -121,19 +118,17 @@ mod validation_tests {
     }
 }
 
-
 // Unit Tests - Presets
 
-
 mod preset_tests {
-    
+
     use crate::generator::presets::*;
 
     #[test]
     fn test_preset_fast() {
         assert!(!GENERATOR_FAST_V1.model.is_empty());
-        assert!(GENERATOR_FAST_V1.memory_mb > 0);
-        assert!(GENERATOR_FAST_V1.default_max_tokens > 0);
+        const { assert!(GENERATOR_FAST_V1.memory_mb > 0) };
+        const { assert!(GENERATOR_FAST_V1.default_max_tokens > 0) };
         assert!(!GENERATOR_FAST_V1.name.is_empty());
         assert!(!GENERATOR_FAST_V1.architecture.is_empty());
     }
@@ -141,14 +136,16 @@ mod preset_tests {
     #[test]
     fn test_preset_quality() {
         assert!(!GENERATOR_QUALITY_V1.model.is_empty());
-        assert!(GENERATOR_QUALITY_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb);
-        assert!(GENERATOR_QUALITY_V1.default_max_tokens >= GENERATOR_FAST_V1.default_max_tokens);
+        const { assert!(GENERATOR_QUALITY_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb) };
+        const {
+            assert!(GENERATOR_QUALITY_V1.default_max_tokens >= GENERATOR_FAST_V1.default_max_tokens)
+        };
     }
 
     #[test]
     fn test_preset_balanced() {
         assert!(!GENERATOR_BALANCED_V1.model.is_empty());
-        assert!(GENERATOR_BALANCED_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb);
+        const { assert!(GENERATOR_BALANCED_V1.memory_mb >= GENERATOR_FAST_V1.memory_mb) };
     }
 
     #[test]
@@ -229,9 +226,7 @@ mod preset_tests {
     }
 }
 
-
 // Unit Tests - Builder
-
 
 mod builder_tests {
     use super::*;
@@ -332,7 +327,6 @@ mod module_function_tests {
         assert!(is_generator_model("minilm-l6-v2").is_err());
     }
 }
-
 
 #[cfg(test)]
 mod integration_tests {

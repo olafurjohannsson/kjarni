@@ -366,7 +366,6 @@ impl ModelConfig for BertConfig {
     }
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct MpnetConfig {
     pub hidden_size: usize,
@@ -466,8 +465,6 @@ impl ModelConfig for MpnetConfig {
         }
     }
 }
-
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DistilBertConfig {

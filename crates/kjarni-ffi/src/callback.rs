@@ -50,49 +50,83 @@ pub struct KjarniCancelToken {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_cancel_token_new() -> *mut KjarniCancelToken {
-    Box::into_raw(Box::new(KjarniCancelToken {
-        inner: Arc::new(AtomicBool::new(false)),
-    }))
+    crate::panic::guard(
+        "kjarni_cancel_token_new",
+        std::ptr::null_mut(),
+        || -> *mut KjarniCancelToken {
+            Box::into_raw(Box::new(KjarniCancelToken {
+                inner: Arc::new(AtomicBool::new(false)),
+            }))
+        },
+    )
 }
 
+/// # Safety
+///
+/// - `token` must be null, or a live handle returned by `kjarni_cancel_token_new` that has not
+///   been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_cancel(token: *mut KjarniCancelToken) {
-    if !token.is_null() {
-        unsafe {
-            (*token).inner.store(true, Ordering::SeqCst);
+    crate::panic::guard("kjarni_cancel_token_cancel", (), || {
+        if !token.is_null() {
+            unsafe {
+                (*token).inner.store(true, Ordering::SeqCst);
+            }
         }
-    }
+    })
 }
 
+/// # Safety
+///
+/// - `token` must be null, or a live handle returned by `kjarni_cancel_token_new` that has not
+///   been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_is_cancelled(token: *const KjarniCancelToken) -> bool {
-    if token.is_null() {
-        false
-    } else {
-        unsafe { (*token).inner.load(Ordering::SeqCst) }
-    }
+    crate::panic::guard("kjarni_cancel_token_is_cancelled", false, || -> bool {
+        if token.is_null() {
+            false
+        } else {
+            unsafe { (*token).inner.load(Ordering::SeqCst) }
+        }
+    })
 }
 
+/// # Safety
+///
+/// - `token` must be null, or a live handle returned by `kjarni_cancel_token_new` that has not
+///   been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_reset(token: *mut KjarniCancelToken) {
-    if !token.is_null() {
-        unsafe {
-            (*token).inner.store(false, Ordering::SeqCst);
+    crate::panic::guard("kjarni_cancel_token_reset", (), || {
+        if !token.is_null() {
+            unsafe {
+                (*token).inner.store(false, Ordering::SeqCst);
+            }
         }
-    }
+    })
 }
 
+/// # Safety
+///
+/// - `token` must be null, or a handle returned by `kjarni_cancel_token_new` that has not
+///   already been passed to this function. It is invalid to use afterwards.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_free(token: *mut KjarniCancelToken) {
-    if !token.is_null() {
-        unsafe {
-            let _ = Box::from_raw(token);
+    crate::panic::guard("kjarni_cancel_token_free", (), || {
+        if !token.is_null() {
+            unsafe {
+                let _ = Box::from_raw(token);
+            }
         }
-    }
+    })
 }
 
-/// Check if cancelled (internal helper)
-pub fn is_cancelled(token: *const KjarniCancelToken) -> bool {
+/// Check if cancelled (internal helper).
+///
+/// # Safety
+/// `token` must be null or a valid pointer to a live `KjarniCancelToken` obtained
+/// from `kjarni_cancel_token_new` and not yet freed.
+pub(crate) unsafe fn is_cancelled(token: *const KjarniCancelToken) -> bool {
     if token.is_null() {
         false
     } else {

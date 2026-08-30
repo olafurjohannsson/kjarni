@@ -1,10 +1,8 @@
-
 pub mod models;
-
 
 pub use models::cross_encoder::CrossEncoder;
 pub use models::sentence_encoder::{BertConfig, DistilBertConfig, MpnetConfig, SentenceEncoder};
-pub use models::sequence_classifier::{SequenceClassifier};
+pub use models::sequence_classifier::SequenceClassifier;
 
 /// A callback for streaming generated tokens
 pub type TokenCallback<'a> = Box<dyn FnMut(u32, &str) -> bool + 'a>;
@@ -17,9 +15,15 @@ pub use tokenizers::Tokenizer;
 
 #[cfg(test)]
 mod send_sync_tests {
-    use crate::{CrossEncoder, SentenceEncoder, SequenceClassifier, models::{bart::model::BartModel, gpt2::Gpt2Model, llama::LlamaModel, mistral::MistralModel, qwen::QwenModel, t5::T5Model}};
+    use crate::{
+        CrossEncoder, SentenceEncoder, SequenceClassifier,
+        models::{
+            bart::model::BartModel, gpt2::Gpt2Model, llama::LlamaModel, mistral::MistralModel,
+            qwen::QwenModel, t5::T5Model,
+        },
+    };
     // Compile time validation of send and sync
-     const _: () = {
+    const _: () = {
         const fn assert_send<T: Send>() {}
         const fn assert_sync<T: Sync>() {}
         assert_send::<CrossEncoder>();
@@ -49,5 +53,4 @@ mod send_sync_tests {
         assert_send::<BartModel>();
         assert_sync::<BartModel>();
     };
-
 }

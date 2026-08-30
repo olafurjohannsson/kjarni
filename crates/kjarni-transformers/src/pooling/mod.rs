@@ -23,7 +23,9 @@ pub fn mean_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<A
 
     for i in 0..batch_size {
         if attention_mask.row(i).sum() == 0.0 {
-            output.row_mut(i).assign(&hidden.slice(ndarray::s![i, 0, ..]));
+            output
+                .row_mut(i)
+                .assign(&hidden.slice(ndarray::s![i, 0, ..]));
         } else {
             output.row_mut(i).assign(&pooled.row(i));
         }

@@ -1,6 +1,5 @@
-
-use crate::prelude::Device;
 use crate::execution::ExecutionPlan;
+use crate::prelude::Device;
 
 #[test]
 fn test_execution_plan_full_gpu() {
@@ -80,7 +79,7 @@ fn test_execution_plan_equality() {
 #[test]
 fn test_execution_plan_clone() {
     let plan1 = ExecutionPlan::gpu_offload_ends();
-    let plan2 = plan1.clone();
+    let plan2 = plan1;
 
     assert_eq!(plan1, plan2);
 }

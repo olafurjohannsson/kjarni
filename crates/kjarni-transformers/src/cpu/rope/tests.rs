@@ -322,8 +322,16 @@ mod tests {
         let q_diff = (&q - &q_rotated).mapv(|x| x.abs()).sum();
         let k_diff = (&k - &k_rotated).mapv(|x| x.abs()).sum();
 
-        assert!(q_diff > 1e-3, "Q should be modified by RoPE, diff={}", q_diff);
-        assert!(k_diff > 1e-3, "K should be modified by RoPE, diff={}", k_diff);
+        assert!(
+            q_diff > 1e-3,
+            "Q should be modified by RoPE, diff={}",
+            q_diff
+        );
+        assert!(
+            k_diff > 1e-3,
+            "K should be modified by RoPE, diff={}",
+            k_diff
+        );
     }
 
     #[test]
@@ -512,14 +520,8 @@ mod tests {
 
         let rope = RoPE::new(head_dim, max_seq_len, theta);
 
-        let q = Array4::from_shape_vec(
-            (1, 1, 2, 4),
-            vec![
-                1.0, 0.0, 1.0, 0.0,
-                1.0, 0.0, 1.0, 0.0,
-            ],
-        )
-        .unwrap();
+        let q = Array4::from_shape_vec((1, 1, 2, 4), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0])
+            .unwrap();
         let k = q.clone();
 
         let (rotated_q_0, _) = rope.apply_4d(&q, &k, 0);
@@ -541,8 +543,7 @@ mod tests {
         let q = Array3::from_shape_vec(
             (1, 2, hidden_size),
             vec![
-                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
-                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
             ],
         )
         .unwrap();
@@ -608,8 +609,7 @@ mod tests {
         let q = Array4::from_shape_vec(
             (1, 1, 3, 8),
             vec![
-                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
-                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
                 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
             ],
         )

@@ -6,15 +6,13 @@ use anyhow::anyhow;
 use futures::{Stream, StreamExt, pin_mut};
 use tokio::sync::mpsc;
 
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
 use kjarni_transformers::traits::Device;
-use kjarni_transformers::WgpuContext;
 
 use crate::common::DownloadPolicy;
-use crate::generation::{
-    resolve_generation_config, GenerationOverrides, ResolvedGenerationConfig,
-};
+use crate::generation::{GenerationOverrides, ResolvedGenerationConfig, resolve_generation_config};
 use crate::{DecoderGenerator, DecoderLanguageModel, TokenType};
 
 use super::builder::GeneratorBuilder;
@@ -50,7 +48,7 @@ impl Generator {
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| GeneratorError::UnknownModel(builder.model.clone()))?;
 
-        let _validation = validate_for_generation(model_type)?;
+        validate_for_generation(model_type)?;
 
         // if !builder.quiet && !builder.allow_warnings {
         //     for warning in &validation.warnings {
@@ -58,7 +56,10 @@ impl Generator {
         //     }
         // }
 
-        let cache_dir = builder.cache_dir.clone().unwrap_or_else(get_default_cache_dir);
+        let cache_dir = builder
+            .cache_dir
+            .clone()
+            .unwrap_or_else(get_default_cache_dir);
 
         let is_downloaded = model_type.is_downloaded(&cache_dir);
 
@@ -115,12 +116,12 @@ impl Generator {
                     source: e,
                 })?;
 
-        let decoder = Arc::new(
-            DecoderGenerator::new(model.clone()).map_err(|e| GeneratorError::LoadFailed {
+        let decoder = Arc::new(DecoderGenerator::new(model.clone()).map_err(|e| {
+            GeneratorError::LoadFailed {
                 model: builder.model.clone(),
                 source: e,
-            })?,
-        );
+            }
+        })?);
 
         let model_defaults = model.get_default_generation_config();
         let generation_config = resolve_generation_config(
@@ -253,8 +254,9 @@ impl Generator {
     pub async fn stream(
         &self,
         prompt: &str,
-    ) -> GeneratorResult<std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<GeneratedToken>> + Send>>>
-    {
+    ) -> GeneratorResult<
+        std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<GeneratedToken>> + Send>>,
+    > {
         self.stream_with_config(prompt, GenerationOverrides::default())
             .await
     }
@@ -264,8 +266,9 @@ impl Generator {
         &self,
         prompt: &str,
         runtime_overrides: GenerationOverrides,
-    ) -> GeneratorResult<std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<GeneratedToken>> + Send>>>
-    {
+    ) -> GeneratorResult<
+        std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<GeneratedToken>> + Send>>,
+    > {
         let config = resolve_generation_config(
             self.generation_config.inner.clone(),
             &self.user_overrides,
@@ -360,11 +363,19 @@ impl Generator {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "not referenced yet; kept until the path that needs it lands"
+)]
 /// Generates text with default settings.
 pub async fn generate(model: &str, prompt: &str) -> GeneratorResult<String> {
     Generator::new(model).await?.generate(prompt).await
 }
 
+#[expect(
+    dead_code,
+    reason = "not referenced yet; kept until the path that needs it lands"
+)]
 /// Generates text with custom configuration.
 pub async fn generate_with_config(
     model: &str,

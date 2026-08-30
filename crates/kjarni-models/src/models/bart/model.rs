@@ -41,6 +41,10 @@ pub struct BartModel {
     tokenizer: Tokenizer,
     pub config: Arc<BartConfig>,
     pub pipeline: EncoderDecoderPipeline,
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     generation_defaults: Option<HFGenerationDefaults>,
 }
 
@@ -57,7 +61,7 @@ impl EncoderDecoderModelFactory for BartModel {
     type Config = BartConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        let mut config = BartConfig::from_json(&weights.config_json())?;
+        let mut config = BartConfig::from_json(weights.config_json())?;
         if config.shared_embedding_key.is_none() {
             let key = if weights.contains("model.shared.weight") {
                 "model.shared.weight"
@@ -404,7 +408,7 @@ impl GpuEncoderDecoderOps for BartModel {
 
         let mut expanded_shape = encoder_hidden_states.shape().to_vec();
         // Ensure the input has a batch size of 1
-        if expanded_shape.get(0) != Some(&1) {
+        if expanded_shape.first() != Some(&1) {
             return Err(anyhow!(
                 "Cannot broadcast encoder states with batch size != 1"
             ));
@@ -412,7 +416,7 @@ impl GpuEncoderDecoderOps for BartModel {
         expanded_shape[0] = num_beams;
 
         let expanded_states = GpuTensor::uninitialized(
-            &self.context().as_ref().unwrap(),
+            self.context().as_ref().unwrap(),
             expanded_shape,
             encoder_hidden_states.dtype(),
             "expanded_encoder_states",

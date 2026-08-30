@@ -1,17 +1,12 @@
 //! Shared attention primitives.
 
-use crate::gpu_ops::primitives::{
-    add_bias::GpuAddBias,
-    bmm::GpuBatchedMatMul,
-    linear::GpuLinearLayer,
-    layout::permute::GpuPermute,
-    layout::reshape::GpuReshape,
-    layout::unreshape::GpuUnreshape,
-    apply_mask::GpuApplyMask,
-    softmax::GpuSoftmax,
-};
-use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::WgpuContext;
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu_ops::primitives::{
+    add_bias::GpuAddBias, apply_mask::GpuApplyMask, bmm::GpuBatchedMatMul,
+    layout::permute::GpuPermute, layout::reshape::GpuReshape, layout::unreshape::GpuUnreshape,
+    linear::GpuLinearLayer, softmax::GpuSoftmax,
+};
 use std::sync::Arc;
 pub struct AttentionOps {
     // Compute kernels
@@ -167,7 +162,11 @@ impl AttentionOps {
     ) -> GpuTensor {
         let (b_size, h_size, m, k1) = a.dims4();
         let (_, _, k2, n) = b.dims4();
-        assert_eq!(k1, k2, "Matrix dimensions incompatible for BMM: {} vs {}", k1, k2);
+        assert_eq!(
+            k1, k2,
+            "Matrix dimensions incompatible for BMM: {} vs {}",
+            k1, k2
+        );
 
         // Flatten batch and head dimensions
         let a_3d = a.view(vec![b_size * h_size, m, k1]);

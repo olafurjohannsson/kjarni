@@ -6,13 +6,13 @@ mod cache_tests {
     use super::*;
 
     use anyhow::Result;
-    use ndarray::{s, Array, Array1, Array3, Array4};
-    use ndarray_rand::rand_distr::Uniform;
+    use ndarray::{Array, Array1, Array3, Array4, s};
     use ndarray_rand::RandomExt;
+    use ndarray_rand::rand_distr::Uniform;
 
-    use crate::cache::{CpuBeamKVCache};
-    use crate::gpu::{GpuKVCache, GpuTensor};
     use crate::WgpuContext;
+    use crate::cache::CpuBeamKVCache;
+    use crate::gpu::{GpuKVCache, GpuTensor};
 
     async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
         let shape = tensor.shape().to_vec();
@@ -232,8 +232,9 @@ mod cache_tests {
         let mut cpu_cache = CpuKVCache::new(num_layers, batch_size, max_len, hidden_size);
         let num_heads = 4;
         let head_dim = hidden_size / num_heads;
-        let mut gpu_cache =
-            GpuKVCache::new(&context, num_layers, batch_size, num_heads, head_dim, max_len)?;
+        let mut gpu_cache = GpuKVCache::new(
+            &context, num_layers, batch_size, num_heads, head_dim, max_len,
+        )?;
 
         let prompt_len = 3;
         let new_k_cpu_1 =
@@ -405,8 +406,9 @@ mod cache_tests {
         let head_dim = 32;
         let capacity = 16;
 
-        let cache =
-            GpuKVCache::new(&context, num_layers, batch_size, num_heads, head_dim, capacity)?;
+        let cache = GpuKVCache::new(
+            &context, num_layers, batch_size, num_heads, head_dim, capacity,
+        )?;
 
         let new_seq_len = 3;
         let position_offset = 5;
@@ -464,8 +466,9 @@ mod cache_tests {
         let (num_layers, batch_size, num_heads, head_dim, capacity) = (1, 1, 2, 4, 10);
         let layer_idx = 0;
 
-        let mut gpu_cache =
-            GpuKVCache::new(&context, num_layers, batch_size, num_heads, head_dim, capacity)?;
+        let mut gpu_cache = GpuKVCache::new(
+            &context, num_layers, batch_size, num_heads, head_dim, capacity,
+        )?;
 
         {
             let prompt_len = 3;
@@ -540,8 +543,9 @@ mod cache_tests {
         let context = WgpuContext::new().await?;
 
         let mut cpu_cache = CpuBeamKVCache::new(NUM_LAYERS, NUM_BEAMS, CAPACITY, HIDDEN_SIZE);
-        let mut gpu_cache =
-            GpuBeamKVCache::new(&context, NUM_LAYERS, NUM_BEAMS, NUM_HEADS, HEAD_DIM, CAPACITY)?;
+        let mut gpu_cache = GpuBeamKVCache::new(
+            &context, NUM_LAYERS, NUM_BEAMS, NUM_HEADS, HEAD_DIM, CAPACITY,
+        )?;
 
         for step in 0..NUM_STEPS_TO_POPULATE {
             let new_k_cpu = Array3::from_shape_fn((NUM_BEAMS, 1, HIDDEN_SIZE), |(b, _, h)| {
@@ -589,12 +593,16 @@ mod cache_tests {
             let p1 = gpu_k_4d.permuted_axes([0, 2, 1, 3]);
             let p2 = gpu_v_4d.permuted_axes([0, 2, 1, 3]);
 
-            let gpu_k_reshaped =
-                p1.as_standard_layout()
-                    .into_shape_with_order((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
-            let gpu_v_reshaped =
-                p2.as_standard_layout()
-                    .into_shape_with_order((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
+            let gpu_k_reshaped = p1.as_standard_layout().into_shape_with_order((
+                NUM_BEAMS,
+                CAPACITY,
+                HIDDEN_SIZE,
+            ))?;
+            let gpu_v_reshaped = p2.as_standard_layout().into_shape_with_order((
+                NUM_BEAMS,
+                CAPACITY,
+                HIDDEN_SIZE,
+            ))?;
 
             let active_slice = s![.., 0..NUM_STEPS_TO_POPULATE, ..];
             let cpu_k_active = cpu_k.slice(active_slice);

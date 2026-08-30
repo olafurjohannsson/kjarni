@@ -13,6 +13,16 @@ env:
 
 jobs:
   # ─── Lint ───────────────────────────────────────────────────────
+  #
+  # This job ended in `|| true` for as long as it existed, so it reported green on
+  # a workspace that clippy could not even compile: eight deny-by-default findings,
+  # including a `pub fn` in the C ABI that dereferenced a caller's raw pointer
+  # without being `unsafe`, and three `assert!(x.len() >= 0)` that are true for
+  # every possible input. A lint job that cannot fail is a lint job that is not run.
+  #
+  # `-D warnings` is what makes it real. Deliberate exemptions live in
+  # `[workspace.lints.clippy]` in the root Cargo.toml, each with the reason it is
+  # exempt, so an allow is a decision in the diff rather than an invisible default.
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -23,7 +33,23 @@ jobs:
           toolchain: "1.91.1"
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets 2>&1 || true
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ─── Format ─────────────────────────────────────────────────────
+  #
+  # Stock rustfmt defaults; there is no rustfmt.toml. This keeps a diff about one
+  # change from also carrying whatever a contributor's format-on-save did to the
+  # rest of the file.
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          components: rustfmt
+      - run: cargo fmt --all --check
 
   # ─── Test (CPU only, models cached) ────────────────────────────
   test:
@@ -291,8 +317,85 @@ jobs:
         with:
           key: wasm-check
 
-      - name: Check kjarni-transformers for wasm32
-        run: cargo check -p kjarni-transformers --target wasm32-unknown-unknown --no-default-features
+      # -D warnings on purpose. `cargo clippy --workspace` only ever lints the
+      # native target, so wasm-only warnings accumulated invisibly: unused imports
+      # behind cfg gates, dead code, and 26 `unsafe_op_in_unsafe_fn` in the SIMD
+      # kernels. Checking kjarni-wasm pulls in the whole dependency tree.
+      - name: Check for wasm32
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo check -p kjarni-wasm --target wasm32-unknown-unknown --no-default-features
+
+  # ─── Browser test (the actual WASM artifact) ────────────────────
+  #
+  # Everything else testing kjarni-wasm runs the Rust natively, which covers the
+  # engine and misses the artifact entirely: a broken import, a bundle built from
+  # stale sources, a binding that only throws through wasm-bindgen's glue. All of
+  # those ship green otherwise, which is how the live demo served a bundle with no
+  # classification or chat in it while CI stayed green.
+  wasm-browser-test:
+    name: Test (browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-browser-test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-browser-v3
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # The same flags the release build uses, so this exercises the artifact
+      # people actually download rather than a debug approximation of it.
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          RUSTFLAGS='-C target-feature=+simd128' \
+            wasm-pack build --release --target web -- --no-default-features --locked
+
+      - name: Build CLI and fetch the encoder weights
+        run: |
+          cargo build --release --package kjarni-cli
+          ./target/release/kjarni model download minilm-l6-v2
+
+      # Served locally rather than fetched from Hugging Face: the point of this
+      # job is the bundle, and a network hiccup should not turn into a red build.
+      - name: Export the .kjq fixture
+        run: |
+          pip install -r crates/kjarni-wasm/scripts/requirements.txt
+          mkdir -p /tmp/kjq
+          python3 crates/kjarni-wasm/scripts/quantize_model.py \
+            --model-dir ~/.cache/kjarni/sentence-transformers_all-MiniLM-L6-v2 \
+            --output /tmp/kjq/all-MiniLM-L6-v2-q8.kjq
+
+      - name: Install the browser
+        working-directory: crates/kjarni-wasm/tests/browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run
+        working-directory: crates/kjarni-wasm/tests/browser
+        env:
+          KJARNI_KJQ_DIR: /tmp/kjq
+        run: node run.mjs
 
   # ─── Linux x86_64 ──────────────────────────────────────────────
   build-linux:
@@ -472,6 +575,11 @@ jobs:
       [
         test,
         csharp-test,
+        # cpp-test gates the C ABI header against the library shipping beside it.
+        # Without it here, a stale or uncompilable kjarni.h reaches every release
+        # archive, which is the exact failure that job was added to catch.
+        cpp-test,
+        wasm-browser-test,
         build-linux,
         build-linux-arm,
         build-macos,
@@ -547,11 +655,22 @@ jobs:
           name: kjarni-wasm
           path: crates/kjarni-wasm/pkg/
 
+      # `npm run build` runs prebuild first, which copies ../pkg into the package.
+      # The bundle has to live inside the package directory: npm silently drops
+      # any `files` entry outside it, so publishing without this ships a package
+      # whose every import fails at runtime.
       - name: Build the TypeScript wrapper
         working-directory: crates/kjarni-wasm/ts
         run: |
           npm install --no-audit --no-fund
           npm run build
+          # Two ways this has already gone wrong: `files` pointing outside the
+          # package root (npm drops it silently), and wasm-pack's own .gitignore
+          # containing `*` (npm honours it when there is no .npmignore). Both
+          # produce a green publish of a package that cannot work, so check the
+          # tarball rather than the working directory.
+          npm pack --dry-run 2>&1 | grep -q 'pkg/kjarni_wasm_bg.wasm' || {
+            echo "::error::the wasm bundle is not in the npm tarball"; exit 1; }
 
       # npm versions are immutable like NuGet's, so the version has to come from
       # the tag rather than whatever is committed in package.json.

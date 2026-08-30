@@ -86,3 +86,6 @@ rubato = []
 symphonia = []
 tokio = []   # Defines the feature flag "tokio" (maybe it doesnt make sense to not hae it)
 nvidia = []  # Defines the feature flag "nvidia"
+
+[lints]
+workspace = true

@@ -1,6 +1,5 @@
 //! Unified search index combining BM25 and vector search
 use anyhow::Result;
-use bincode;
 use kjarni_search::{
     bm25::Bm25Index, hybrid::hybrid_search, types::SearchResult, vector::VectorStore,
 };

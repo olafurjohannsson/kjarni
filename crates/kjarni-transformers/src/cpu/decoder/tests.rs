@@ -1,12 +1,10 @@
-
 use crate::cache::Cache;
 use crate::cpu::decoder::CpuDecoderBackend;
 use crate::decoder::backend::AnyDecoderBackend;
 use crate::decoder::generator::DecoderGenerator;
 use crate::decoder::prelude::GpuDecoderBackend;
 use crate::decoder::traits::{
-    CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel,
-    GpuDecoderOps,
+    CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel, GpuDecoderOps,
 };
 use crate::gpu::GpuTensor;
 use crate::models::base::AutoregressiveLoop;
@@ -26,6 +24,7 @@ mod decoder_backend_tests {
     #[derive(Clone)]
     pub struct MockCpuCache {
         seq_length: usize,
+        #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
         max_seq_len: usize,
         increment_calls: Arc<AtomicUsize>,
     }
@@ -50,6 +49,7 @@ mod decoder_backend_tests {
             self
         }
 
+        #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
         pub fn get_increment_calls(&self) -> usize {
             self.increment_calls.load(Ordering::SeqCst)
         }
@@ -109,6 +109,7 @@ mod decoder_backend_tests {
             }
         }
 
+        #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
         pub fn get_forward_calls(&self) -> usize {
             self.forward_calls.load(Ordering::SeqCst)
         }

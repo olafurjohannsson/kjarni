@@ -4,8 +4,6 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
-
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct ScaleUniforms {
@@ -98,7 +96,7 @@ impl GpuScale {
         });
         compute_pass.set_pipeline(&self.out_of_place_pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (size + 255) / 256;
+        let workgroups = size.div_ceil(256);
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
@@ -145,7 +143,7 @@ fn run_internal_scale(
     });
     compute_pass.set_pipeline(pipeline);
     compute_pass.set_bind_group(0, &bind_group, &[]);
-    let workgroups = (size + 255) / 256;
+    let workgroups = size.div_ceil(256);
     compute_pass.dispatch_workgroups(workgroups, 1, 1);
 }
 
@@ -257,7 +255,6 @@ fn compile_in_place_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGro
     });
     (pipeline, bind_group_layout)
 }
-
 
 #[cfg(test)]
 mod tests;

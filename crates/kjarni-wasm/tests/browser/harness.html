@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>kjarni-wasm browser harness</title>
+<!--
+  Loads the bundle exactly as a page would and exposes one function for the test
+  driver to call. Deliberately no UI: this checks that the artifact works in a
+  real browser, which is the one thing the native Rust tests cannot tell us.
+-->
+<script type="module">
+  import init, {
+    WasmModel, WasmReranker, WasmClassifier, WasmChat, WasmSearch, WasmIndexBuilder,
+  } from "/pkg/kjarni_wasm.js";
+
+  // Named exports are checked by reference: a bundle built from stale sources
+  // is missing them, which is exactly how the live site ran for days without
+  // classification or chat while looking fine.
+  const EXPORTS = { WasmModel, WasmReranker, WasmClassifier, WasmChat, WasmSearch, WasmIndexBuilder };
+
+  window.__run = async () => {
+    await init();
+
+    const missing = Object.entries(EXPORTS)
+      .filter(([, v]) => typeof v !== "function")
+      .map(([k]) => k);
+
+    const res = await fetch("/models/all-MiniLM-L6-v2-q8.kjq");
+    if (!res.ok) throw new Error(`model fetch failed: HTTP ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    const model = WasmModel.from_quantized(bytes);
+    const texts = ["doctor", "physician", "banana"];
+    const flat = model.encode(texts, true);
+    const dim = flat.length / texts.length;
+
+    const vec = (i) => flat.slice(i * dim, (i + 1) * dim);
+    const cosine = (a, b) => {
+      let dot = 0, na = 0, nb = 0;
+      for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+      return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1e-9);
+    };
+
+    model.free();
+
+    return {
+      missing,
+      dim,
+      related: cosine(vec(0), vec(1)),
+      unrelated: cosine(vec(0), vec(2)),
+    };
+  };
+</script>

@@ -1,6 +1,6 @@
+use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
 use crate::utils::MASK_VALUE;
-use crate::{linear_layer::LinearLayer};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, s};
 
@@ -186,7 +186,6 @@ impl DecoderAttention {
     }
 }
 
-
 #[cfg(test)]
 mod decoder_attention_test {
     use super::*;
@@ -355,10 +354,10 @@ mod decoder_attention_test {
 
         let output = attn.forward(
             &hidden_in,
-            None, 
+            None,
             k_cache.view_mut(),
             v_cache.view_mut(),
-            2,    
+            2,
             None, // No RoPE
         )?;
 
@@ -457,7 +456,7 @@ mod decoder_attention_test {
 
         Ok(())
     }
-    
+
     fn create_dummy_attn(hidden: usize, heads: usize, kv_heads: usize) -> DecoderAttention {
         let eye = Array2::eye(hidden);
         let dummy_linear1 = LinearLayer::new_f32(eye.clone(), None);
@@ -626,4 +625,3 @@ mod decoder_attention_test {
         assert_eq!(output.shape(), &[batch, seq_len, hidden_size]);
     }
 }
-

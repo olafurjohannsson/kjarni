@@ -5,9 +5,9 @@ use half::bf16;
 use ndarray::{Array1, Array2, arr1, arr2};
 
 use crate::{
+    WgpuContext,
     linear_layer::{F32MatmulStrategy, LinearData, LinearLayer},
     tensor::DType,
-    WgpuContext,
 };
 
 fn create_f32_layer() -> LinearLayer {
@@ -110,7 +110,7 @@ fn test_matmul_f32_batch() {
 
 #[test]
 fn test_matmul_bf16_2() {
-    let data = vec![1.0f32, 2.0, 3.0, 4.0];
+    let data = [1.0f32, 2.0, 3.0, 4.0];
     let weights_bf16 =
         Array2::from_shape_vec((2, 2), data.iter().map(|&x| bf16::from_f32(x)).collect()).unwrap();
 
@@ -194,9 +194,7 @@ fn test_shape_metadata() {
     assert_eq!(layer.shape(), [10, 20]);
 }
 
-
 // LinearData::dtype() Tests
-
 
 #[test]
 fn test_linear_data_dtype_f32() {
@@ -222,9 +220,7 @@ fn test_linear_data_dtype_q8_0() {
     assert_eq!(layer.dtype(), DType::Q8_0);
 }
 
-
 // LinearLayer::new() Tests
-
 
 #[test]
 fn test_new_f32() {
@@ -248,9 +244,7 @@ fn test_new_quantized_panics() {
     let _ = LinearLayer::new(128, 64, DType::Q8_0);
 }
 
-
 // matmul_noalloc() Tests
-
 
 #[test]
 fn test_matmul_noalloc_f32_small_batch() {
@@ -310,9 +304,8 @@ fn test_matmul_noalloc_q8_0_fallback() {
 
 #[test]
 fn test_matmul_noalloc_faer_fallback() {
-    let weights = Array2::from_shape_fn((32, 64), |(i, j)| {
-        ((i * 17 + j * 13) % 1000) as f32 * 0.001
-    });
+    let weights =
+        Array2::from_shape_fn((32, 64), |(i, j)| ((i * 17 + j * 13) % 1000) as f32 * 0.001);
     let layer = LinearLayer::new_f32_with_strategy(weights, None, F32MatmulStrategy::Faer);
 
     let input = make_input(4, 32);
@@ -346,9 +339,8 @@ fn test_matmul_f32_batch_path() {
 
 #[test]
 fn test_matmul_faer_strategy() {
-    let weights = Array2::from_shape_fn((32, 64), |(i, j)| {
-        ((i * 17 + j * 13) % 1000) as f32 * 0.001
-    });
+    let weights =
+        Array2::from_shape_fn((32, 64), |(i, j)| ((i * 17 + j * 13) % 1000) as f32 * 0.001);
     let bias = Array1::from_shape_fn(64, |i| i as f32 * 0.01);
     let layer = LinearLayer::new_f32_with_strategy(weights, Some(bias), F32MatmulStrategy::Faer);
 
@@ -360,9 +352,8 @@ fn test_matmul_faer_strategy() {
 
 #[test]
 fn test_matmul_faer_out_in_strategy() {
-    let weights = Array2::from_shape_fn((64, 32), |(i, j)| {
-        ((i * 17 + j * 13) % 1000) as f32 * 0.001
-    });
+    let weights =
+        Array2::from_shape_fn((64, 32), |(i, j)| ((i * 17 + j * 13) % 1000) as f32 * 0.001);
     let bias = Array1::from_shape_fn(64, |i| i as f32 * 0.01);
     let layer =
         LinearLayer::new_f32_with_strategy(weights, Some(bias), F32MatmulStrategy::FaerOutIn);
@@ -541,9 +532,7 @@ fn test_has_bias() {
     assert!(with_bias.has_bias());
 }
 
-
 // From Implementations
-
 
 #[test]
 fn test_from_f32_array() {
@@ -583,9 +572,7 @@ fn test_from_bf16_array_with_bias() {
     assert!(layer.has_bias());
 }
 
-
 // Arc Constructors
-
 
 #[test]
 fn test_from_arc_f32() {
@@ -624,16 +611,15 @@ fn test_from_arc_q8_0() {
     assert_eq!(layer.dtype(), DType::Q8_0);
 }
 
-
 #[test]
 fn test_q8_0_matmul_accuracy() {
     let f32_layer = make_f32_layer(64, 32);
     let q8_layer = f32_layer.to_quantized(DType::Q8_0).unwrap();
-    
+
     let input = make_input(4, 32);
     let f32_output = f32_layer.matmul(&input.view());
     let q8_output = q8_layer.matmul(&input.view());
-    
+
     let mut max_rel_error = 0.0f32;
     for (f, q) in f32_output.iter().zip(q8_output.iter()) {
         if f.abs() > 1e-6 {
@@ -641,14 +627,13 @@ fn test_q8_0_matmul_accuracy() {
             max_rel_error = max_rel_error.max(rel_error);
         }
     }
-    
+
     assert!(
-        max_rel_error < 0.10, 
-        "Max relative error too high: {:.4} (expected < 10%)", 
+        max_rel_error < 0.10,
+        "Max relative error too high: {:.4} (expected < 10%)",
         max_rel_error
     );
 }
-
 
 #[test]
 fn test_linear_layer_clone() {
@@ -660,9 +645,7 @@ fn test_linear_layer_clone() {
     assert_eq!(layer.has_bias(), cloned.has_bias());
 }
 
-
 // GPU Tests
-
 
 pub async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()

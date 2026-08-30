@@ -1,18 +1,16 @@
-use std::sync::Arc;
+use crate::models::bart::config::BartConfig;
 use anyhow::Result;
+use kjarni_transformers::Embeddings;
 use kjarni_transformers::linear_layer::LinearLayer;
 use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::models::registry::model_cache_dir;
 use kjarni_transformers::traits::{ModelConfig, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;
-use kjarni_transformers::Embeddings;
-use kjarni_transformers::models::registry::model_cache_dir;
-use crate::models::bart::config::BartConfig;
-
+use std::sync::Arc;
 
 #[cfg(test)]
 mod cpu_seq2seq_decoder_test {
     use super::*;
-    
 
     use kjarni_transformers::cpu::encoder_decoder::{Seq2SeqCPUDecoder, Seq2SeqCPUEncoder};
     use kjarni_transformers::encoder_decoder::config::{
@@ -22,9 +20,6 @@ mod cpu_seq2seq_decoder_test {
     use ndarray::{Array2, s};
 
     use kjarni_transformers::traits::CpuTransformerCore;
-
-
-    
 
     const DISTILBART_PATH: &str = "olafuraron_distilbart-cnn-12-6";
 
@@ -213,6 +208,10 @@ mod cpu_seq2seq_decoder_test {
 
         let expected_tokens: [u32; 10] = [46541, 16, 10, 3228, 12, 5489, 625, 35045, 6, 3228];
 
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "indexed numeric loop; the index addresses more than the iterated slice"
+        )]
         for step in 0..10 {
             let dec_input = Array2::from_shape_vec((1, decoder_ids.len()), decoder_ids.clone())?;
 
@@ -273,9 +272,11 @@ mod cpu_seq2seq_decoder_test {
         let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";
         let p = model_cache_dir(DISTILBART_PATH);
         let path = p.as_path();
-        let tokenizer =
-            tokenizers::Tokenizer::from_file(format!("{}/tokenizer.json", path.as_os_str().to_str().unwrap()))
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let tokenizer = tokenizers::Tokenizer::from_file(format!(
+            "{}/tokenizer.json",
+            path.as_os_str().to_str().unwrap()
+        ))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
         let encoding = tokenizer
             .encode(text, true)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -308,6 +309,10 @@ mod cpu_seq2seq_decoder_test {
         let mut generated_tokens: Vec<u32> = Vec::new();
 
         println!("\nstep-by-step greedy generation:");
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "indexed numeric loop; the index addresses more than the iterated slice"
+        )]
         for step in 0..30 {
             let dec_input = Array2::from_shape_vec((1, decoder_ids.len()), decoder_ids.clone())?;
 
@@ -379,11 +384,11 @@ mod cpu_seq2seq_decoder_test {
         )?;
         let mask = Array2::<f32>::ones((1, 10));
 
-         let hidden_states =
-             embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
-        
+        let hidden_states =
+            embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
+
         let normalized = encoder.embed_norm(&hidden_states)?;
-        
+
         let encoder_output = encoder.forward(ModelInput::HiddenCpu(normalized.view()), &mask)?;
 
         let enc_actual: Vec<f32> = encoder_output

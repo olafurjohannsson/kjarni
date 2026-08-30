@@ -38,10 +38,7 @@ pub fn validate_for_classification(model_type: ModelType) -> ClassifierResult<()
         _ => {
             return Err(ClassifierError::IncompatibleModel {
                 model: cli_name.to_string(),
-                reason: format!(
-                    "Model is designed for {:?}, not classification.",
-                    info.task
-                ),
+                reason: format!("Model is designed for {:?}, not classification.", info.task),
             });
         }
     }

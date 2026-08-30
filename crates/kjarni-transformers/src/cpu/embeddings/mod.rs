@@ -12,8 +12,6 @@ use half::bf16;
 use ndarray::{Array2, Array3, Axis, s};
 use rayon::prelude::*;
 
-
-
 #[cfg(test)]
 mod tests;
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3, s};
 
 use crate::cpu::decoder::DecoderAttention;
 use crate::cpu::normalization::Normalization;
@@ -466,13 +466,7 @@ mod tests {
             let (w2, _c) = get_weights(count, hidden, inter);
             let b2 = Array1::from_elem(hidden, bias_val);
 
-            FeedForward::Standard(StdFeedForward::new(
-                w1,
-                b1,
-                w2,
-                b2,
-                Activation::Gelu,
-            ))
+            FeedForward::Standard(StdFeedForward::new(w1, b1, w2, b2, Activation::Gelu))
         };
 
         let ffn_norm = Normalization::LayerNorm(LayerNorm::new(
@@ -542,7 +536,11 @@ mod tests {
         let diff = (&output - &golden_out).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
-        assert!(max_diff < 1e-5, "output mismatch in pre-norm: {:.6}", max_diff);
+        assert!(
+            max_diff < 1e-5,
+            "output mismatch in pre-norm: {:.6}",
+            max_diff
+        );
 
         let golden_prenorm_k_cache_data = vec![
             0.100000, 0.100000, 0.200000, 0.200000, 0.000521, 0.000537, 0.300000, 0.300000,
@@ -553,7 +551,11 @@ mod tests {
         let cache_diff = (&k_cache - &golden_k_cache).mapv(|x| x.abs());
         let max_cache_diff = cache_diff.fold(0.0f32, |a, &b| a.max(b));
 
-        assert!(max_cache_diff < 1e-5, "k-cache mismatch in pre-norm: {:.6}", max_cache_diff);
+        assert!(
+            max_cache_diff < 1e-5,
+            "k-cache mismatch in pre-norm: {:.6}",
+            max_cache_diff
+        );
 
         Ok(())
     }
@@ -592,7 +594,11 @@ mod tests {
         let diff = (&output - &golden_out).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
-        assert!(max_diff < 1e-4, "output mismatch in post-norm: {:.6}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "output mismatch in post-norm: {:.6}",
+            max_diff
+        );
 
         Ok(())
     }

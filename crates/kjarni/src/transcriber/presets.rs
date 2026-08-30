@@ -5,9 +5,10 @@ use kjarni_transformers::ModelType;
 use super::types::Task;
 
 /// Pre-defined transcriber configurations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TranscriberPreset {
     /// Default: Whisper Small, transcribe, no timestamps, auto-detect language.
+    #[default]
     Default,
     /// English-only: Whisper Small, language forced to English.
     English,
@@ -53,11 +54,5 @@ impl TranscriberPreset {
             Self::Default | Self::English | Self::Translate => "whisper-small",
             Self::LargeV3 => "whisper-large-v3",
         }
-    }
-}
-
-impl Default for TranscriberPreset {
-    fn default() -> Self {
-        Self::Default
     }
 }

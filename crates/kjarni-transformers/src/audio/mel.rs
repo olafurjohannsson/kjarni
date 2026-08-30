@@ -1,8 +1,8 @@
 //! Audio preprocessing frontend
 
+use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, s};
-use crate::weights::ModelWeights;
 
 /// Configuration for mel spectrogram computation.
 #[derive(Debug, Clone)]
@@ -245,6 +245,10 @@ fn compute_fft_magnitude(samples: &[f32]) -> Result<Vec<f32>> {
     let n_bins = n / 2 + 1;
     let mut magnitudes = vec![0.0f32; n_bins];
 
+    #[allow(
+        clippy::needless_range_loop,
+        reason = "indexed numeric loop; the index addresses more than the iterated slice"
+    )]
     for k in 0..n_bins {
         let mut real = 0.0f32;
         let mut imag = 0.0f32;
@@ -271,7 +275,6 @@ pub struct AudioConvFrontend {
 }
 
 impl AudioConvFrontend {
-    
     /// Load from weights.
     pub fn from_weights(
         weights: &ModelWeights,

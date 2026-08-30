@@ -24,9 +24,7 @@ pub struct RerankerPreset {
     pub description: &'static str,
 }
 
-
 // V1 Presets
-
 
 /// MiniLM cross-encoder - small and fast.
 pub const RERANKER_MINILM_V1: RerankerPreset = RerankerPreset {
@@ -49,10 +47,7 @@ pub const RERANKER_MSMARCO_V1: RerankerPreset = RerankerPreset {
 };
 
 /// All V1 presets.
-pub const ALL_V1_PRESETS: &[&RerankerPreset] = &[
-    &RERANKER_MINILM_V1,
-    &RERANKER_MSMARCO_V1,
-];
+pub const ALL_V1_PRESETS: &[&RerankerPreset] = &[&RERANKER_MINILM_V1, &RERANKER_MSMARCO_V1];
 
 /// Find a preset by name.
 pub fn find_preset(name: &str) -> Option<&'static RerankerPreset> {
@@ -64,12 +59,13 @@ pub fn find_preset(name: &str) -> Option<&'static RerankerPreset> {
 }
 
 /// Tier-based preset selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RerankerTier {
     /// Smallest, fastest.
     Fast,
 
     /// Balanced quality/speed.
+    #[default]
     Balanced,
 
     /// Highest quality.
@@ -84,11 +80,5 @@ impl RerankerTier {
             Self::Balanced => &RERANKER_MSMARCO_V1,
             Self::Quality => &RERANKER_MSMARCO_V1,
         }
-    }
-}
-
-impl Default for RerankerTier {
-    fn default() -> Self {
-        Self::Balanced
     }
 }

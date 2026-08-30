@@ -27,7 +27,5 @@ features = ["console"]
 # getrandom 0.3 refuses to build for wasm without an explicit backend feature.
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
+[lints]
+workspace = true

@@ -17,7 +17,7 @@ pub struct EncoderBuffers {
 
     /// FFN intermediate activations [max_tokens, intermediate_dim]
     pub ffn_intermediate: Array2<f32>,
-    
+
     /// FFN output [max_tokens, hidden]
     pub ffn_output: Array2<f32>,
 
@@ -26,7 +26,7 @@ pub struct EncoderBuffers {
 
     /// Scratch buffer for merged heads [max_tokens, hidden]
     pub merge_scratch: Array2<f32>,
-    
+
     max_batch: usize,
     max_seq: usize,
     hidden: usize,
@@ -59,11 +59,11 @@ impl EncoderBuffers {
             } else {
                 None
             },
-            
+
             // Attention intermediates
             attn_scores: Array4::zeros((max_batch, num_heads, max_seq, max_seq)),
             attn_context: Array4::zeros((max_batch, num_heads, max_seq, head_dim)),
-            
+
             // Layer outputs
             attn_output: Array2::zeros((max_tokens, hidden)),
             ffn_intermediate: Array2::zeros((max_tokens, intermediate_dim)),
@@ -90,7 +90,14 @@ impl EncoderBuffers {
         intermediate_dim: usize,
     ) -> Self {
         let use_fused_qkv = hidden <= 512;
-        Self::new(max_batch, max_seq, hidden, num_heads, intermediate_dim, use_fused_qkv)
+        Self::new(
+            max_batch,
+            max_seq,
+            hidden,
+            num_heads,
+            intermediate_dim,
+            use_fused_qkv,
+        )
     }
 
     /// Ensures buffers have capacity for the given dimensions.
@@ -107,7 +114,10 @@ impl EncoderBuffers {
             {
                 log::warn!(
                     "EncoderBuffers resizing: (batch={}, seq={}) -> (batch={}, seq={})",
-                    self.max_batch, self.max_seq, batch, seq
+                    self.max_batch,
+                    self.max_seq,
+                    batch,
+                    seq
                 );
                 *self = Self::new(
                     batch.max(self.max_batch),
@@ -240,11 +250,11 @@ impl EncoderBuffers {
     pub fn use_fused_qkv(&self) -> bool {
         self.use_fused_qkv
     }
-    
+
     /// Returns total memory usage in bytes.
     pub fn memory_usage(&self) -> usize {
         let max_tokens = self.max_batch * self.max_seq;
-        
+
         // 2D buffers
         let qkv = max_tokens * self.hidden * 4 * 3; // q, k, v
         let outputs = max_tokens * self.hidden * 4 * 2; // attn_output, ffn_output
@@ -255,18 +265,18 @@ impl EncoderBuffers {
         } else {
             0
         };
-        
+
         // 4D buffers
         let attn_scores = self.max_batch * self.num_heads * self.max_seq * self.max_seq * 4;
         let attn_context = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4;
 
         qkv + outputs + ffn + qkv_scratch + attn_scores + attn_context + norm
     }
-    
+
     /// Returns memory usage breakdown as a formatted string.
     pub fn memory_breakdown(&self) -> String {
         let max_tokens = self.max_batch * self.max_seq;
-        
+
         let qkv = max_tokens * self.hidden * 4 * 3;
         let qkv_scratch = if self.use_fused_qkv {
             max_tokens * 3 * self.hidden * 4
@@ -317,7 +327,7 @@ mod tests {
     #[test]
     fn test_buffer_creation() {
         let buffers = EncoderBuffers::new(32, 128, 768, 12, 3072, false);
-        
+
         assert_eq!(buffers.q.dim(), (32 * 128, 768));
         assert_eq!(buffers.k.dim(), (32 * 128, 768));
         assert_eq!(buffers.v.dim(), (32 * 128, 768));
@@ -332,9 +342,12 @@ mod tests {
     #[test]
     fn test_buffer_creation_fused() {
         let buffers = EncoderBuffers::new(32, 128, 384, 6, 1536, true);
-        
+
         assert!(buffers.qkv_scratch.is_some());
-        assert_eq!(buffers.qkv_scratch.as_ref().unwrap().dim(), (32 * 128, 3 * 384));
+        assert_eq!(
+            buffers.qkv_scratch.as_ref().unwrap().dim(),
+            (32 * 128, 3 * 384)
+        );
     }
 
     #[test]
@@ -353,21 +366,23 @@ mod tests {
     #[test]
     fn test_memory_usage() {
         let buffers = EncoderBuffers::new(1, 128, 768, 12, 3072, false);
-        
+
         // Calculate expected
         let max_tokens = 128;
         let qkv = max_tokens * 768 * 4 * 3;
         let outputs = max_tokens * 768 * 4 * 2; // attn_output, ffn_output
         let ffn = max_tokens * 3072 * 4;
         let norm = max_tokens * 768 * 4; // norm_scratch - THIS WAS MISSING
-        let attn_scores = 1 * 12 * 128 * 128 * 4;
-        let attn_context = 1 * 12 * 128 * 64 * 4;
+        let attn_scores = 12 * 128 * 128 * 4;
+        let attn_context = 12 * 128 * 64 * 4;
         let expected = qkv + outputs + ffn + norm + attn_scores + attn_context;
-        
+
         assert_eq!(buffers.memory_usage(), expected);
-        
-        println!("Memory for batch=1, seq=128, BERT-base: {:.2} MB", 
-                buffers.memory_usage() as f64 / 1024.0 / 1024.0);
+
+        println!(
+            "Memory for batch=1, seq=128, BERT-base: {:.2} MB",
+            buffers.memory_usage() as f64 / 1024.0 / 1024.0
+        );
         println!("Breakdown: {}", buffers.memory_breakdown());
     }
 

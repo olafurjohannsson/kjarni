@@ -38,6 +38,10 @@ pub struct Seq2SeqCPUDecoder {
     layers: Vec<CrossDecoderLayer>,
     final_norm: Option<Normalization>,
     position_encoding: PositionEncoding,
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     pre_norm: bool,
     pub meta: ModelMetadata,
     pub layout: ModelLayout,
@@ -195,8 +199,7 @@ impl Seq2SeqCPUDecoder {
             PositionEncodingType::None => Ok(PositionEncoding::None),
         }
     }
-    
-    
+
     pub fn forward(
         &self,
         input_ids: &Array2<u32>,
@@ -324,7 +327,6 @@ impl Seq2SeqCPUDecoder {
     }
 }
 
-
 /// Runtime position encoding implementation.
 pub enum PositionEncoding {
     /// Learned absolute positions
@@ -399,12 +401,16 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         &self,
         decoder_input_ids: &Array2<u32>,
         encoder_hidden_states: &Array3<f32>,
-        decoder_padding_mask: Option<&Array2<f32>>, 
-        encoder_padding_mask: Option<&Array2<f32>>, 
+        decoder_padding_mask: Option<&Array2<f32>>,
+        encoder_padding_mask: Option<&Array2<f32>>,
         cache: Option<&mut dyn Cache>,
         cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
     ) -> Result<CpuCrossDecoderOutput> {
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
         self.forward_layers(
             &hidden,
@@ -476,9 +482,7 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
 
         // Combine with Decoder Padding Mask (Self-Attention Mask)
         let self_attn_mask = match decoder_padding_mask {
-            Some(pad) => {
-                Some(combine_masks(&causal_mask, pad))
-            }
+            Some(pad) => Some(combine_masks(&causal_mask, pad)),
             None => Some(causal_mask),
         };
 
@@ -511,10 +515,10 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
             new_self_attn_kvs.push(new_kv);
         }
 
-        if end_layer == self.layers.len() {
-            if let Some(norm) = &self.final_norm {
-                hidden = norm.forward(&hidden);
-            }
+        if end_layer == self.layers.len()
+            && let Some(norm) = &self.final_norm
+        {
+            hidden = norm.forward(&hidden);
         }
 
         Ok(CpuCrossDecoderOutput {
@@ -532,7 +536,7 @@ mod seq2seq_decoder_tests {
     use super::*;
     use crate::activations::Activation;
     use crate::cache::CpuBeamKVCache;
-    use crate::encoder_decoder::traits::CpuCrossDecoder; 
+    use crate::encoder_decoder::traits::CpuCrossDecoder;
     use crate::models::base::ModelLoadConfig;
     use crate::traits::{
         AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
@@ -646,7 +650,6 @@ mod seq2seq_decoder_tests {
             }
         }
     }
-
 
     fn create_model_weights(
         weights_map: HashMap<String, Vec<f32>>,
@@ -822,7 +825,7 @@ mod seq2seq_decoder_tests {
             position_encoding: PositionEncodingType::Learned { offset: 0 },
             normalize_embeddings: true,
             final_layer_norm: true,
-            pre_norm: false, 
+            pre_norm: false,
         };
 
         let decoder = Seq2SeqCPUDecoder::new(
@@ -845,8 +848,8 @@ mod seq2seq_decoder_tests {
         let output = decoder.forward(
             &dec_ids,
             &enc_hidden,
-            None, 
-            None, 
+            None,
+            None,
             Some(&mut cache),
             Some(&cross_cache),
             0,

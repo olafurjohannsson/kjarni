@@ -60,10 +60,10 @@ pub struct T5Config {
 
 impl T5Config {
     pub fn is_gated(&self) -> bool {
-        match self.feed_forward_proj.as_deref() {
-            Some("gated-gelu") | Some("gated-silu") => true,
-            _ => false,
-        }
+        matches!(
+            self.feed_forward_proj.as_deref(),
+            Some("gated-gelu") | Some("gated-silu")
+        )
     }
     pub fn activation(&self) -> Activation {
         match self.feed_forward_proj.as_deref() {
@@ -77,7 +77,7 @@ impl ModelConfig for T5Config {
     fn model_type(&self) -> &str {
         &self.model_type
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -96,16 +96,16 @@ fn as_any(&self) -> &dyn std::any::Any {
             num_kv_heads: self.num_heads,
             head_dim: self.d_kv,
             vocab_size: self.vocab_size,
-            max_seq_len: 2048, 
+            max_seq_len: 2048,
             norm_eps: self.layer_norm_epsilon,
             activation,
             rope_theta: None,
             rope_scaling: None,
-            scale_embeddings: false, 
+            scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: true,             
-            transpose_ffn_weights: false, 
+            is_prenorm: true,
+            transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: true,
@@ -291,8 +291,15 @@ mod tests {
             ffn.gate_weight.is_some(),
             "Flan-T5 should have a gate weight"
         );
-        assert!(ffn.up_weight.contains("encoder.block.{}.layer.1.DenseReluDense.wi_1.weight"));
-        assert!(ffn.gate_weight.unwrap().contains("encoder.block.{}.layer.1.DenseReluDense.wi_0.weight"));
+        assert!(
+            ffn.up_weight
+                .contains("encoder.block.{}.layer.1.DenseReluDense.wi_1.weight")
+        );
+        assert!(
+            ffn.gate_weight
+                .unwrap()
+                .contains("encoder.block.{}.layer.1.DenseReluDense.wi_0.weight")
+        );
     }
 
     #[test]

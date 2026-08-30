@@ -7,12 +7,12 @@ use ndarray::{Array1, Array2};
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
+use crate::WgpuContext;
 use crate::activations::Activation;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
 use crate::traits::FeedForwardLayout;
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -140,12 +140,6 @@ impl GpuFeedForwardStd {
             Activation::Tanh => (),
             Activation::Relu => (),
             Activation::SilU => (),
-            _ => {
-                return Err(anyhow!(
-                    "gpu feedforward only supports gelu, gelu_new, relu, silu, tanh. got {:?}",
-                    activation
-                ));
-            }
         }
 
         let (fc1_pipeline, fc1_layout) = compile_fc1_pipeline(context, activation);
@@ -265,7 +259,7 @@ impl GpuFeedForwardStd {
                 ],
             });
 
-        let workgroups = (rows * intermediate_size + 511) / 512;
+        let workgroups = (rows * intermediate_size).div_ceil(512);
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("fc1 pass"),
@@ -335,7 +329,7 @@ impl GpuFeedForwardStd {
                 ],
             });
 
-        let workgroups = (rows * hidden_size + 511) / 512;
+        let workgroups = (rows * hidden_size).div_ceil(512);
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("fc2 pass"),
@@ -361,7 +355,6 @@ fn compile_fc1_pipeline(
         Activation::Relu => 2.0,
         Activation::SilU => 3.0,
         Activation::Tanh => 4.0,
-        _ => 0.0,
     };
     let constants = [("0", act_function)];
 

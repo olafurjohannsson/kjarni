@@ -6,6 +6,10 @@ use crate::cpu::kernels::{
     q_common::{BlockQ4_K, BlockQ8_K, QK_K},
 };
 
+#[allow(
+    dead_code,
+    reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+)]
 #[inline(always)]
 unsafe fn hsum_i32_8(a: __m256i) -> i32 {
     unsafe {
@@ -19,6 +23,10 @@ unsafe fn hsum_i32_8(a: __m256i) -> i32 {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+)]
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn vec_dot_q4k_q8k_avx2(
     n: usize,
@@ -90,14 +98,12 @@ pub unsafe fn vec_dot_q4k_q8k_avx2(
 #[cfg(all(test, any(target_arch = "x86", target_arch = "x86_64")))]
 mod q4k_q8k_test {
     use super::*;
-    use rand::{Rng, SeedableRng, rngs::StdRng};
-    use half::f16;
     use crate::cpu::kernels::dequantize::dequantize_q4_k_block;
+    use half::f16;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     fn dequantize_q8k_to_f32(block: &BlockQ8_K) -> Vec<f32> {
-        block.qs.iter()
-            .map(|&q| q as f32 * block.d)
-            .collect()
+        block.qs.iter().map(|&q| q as f32 * block.d).collect()
     }
 
     fn ground_truth_dot_product(w_blocks: &[BlockQ4_K], q_blocks: &[BlockQ8_K]) -> f32 {
@@ -106,17 +112,17 @@ mod q4k_q8k_test {
 
         for (w, q) in w_blocks.iter().zip(q_blocks.iter()) {
             dequantize_q4_k_block(w, &mut w_f32);
-        
+
             let q_f32 = dequantize_q8k_to_f32(q);
-            
-            total += w_f32.iter()
+
+            total += w_f32
+                .iter()
                 .zip(q_f32.iter())
                 .map(|(a, b)| a * b)
                 .sum::<f32>();
         }
         total
     }
-
 
     fn get_rng() -> StdRng {
         StdRng::seed_from_u64(42)
@@ -139,9 +145,9 @@ mod q4k_q8k_test {
         let mut qs = [0i8; 256];
         let mut bsums = [0i16; 16];
         rng.fill(&mut qs);
-        
+
         for i in 0..16 {
-            let sum: i32 = qs[i*16..(i+1)*16].iter().map(|&x| x as i32).sum();
+            let sum: i32 = qs[i * 16..(i + 1) * 16].iter().map(|&x| x as i32).sum();
             bsums[i] = sum as i16;
         }
 
@@ -159,7 +165,7 @@ mod q4k_q8k_test {
             return;
         }
         let mut rng = get_rng();
-        let n = QK_K * 4; 
+        let n = QK_K * 4;
 
         let w_blocks: Vec<BlockQ4_K> = (0..4).map(|_| random_q4k_block(&mut rng)).collect();
         let q_blocks: Vec<BlockQ8_K> = (0..4).map(|_| random_q8k_block(&mut rng)).collect();
@@ -171,8 +177,12 @@ mod q4k_q8k_test {
         let diff = (expected - actual).abs();
         let rel_err = diff / expected.abs().max(1.0);
 
-        assert!(rel_err < 5e-4, 
-            "AVX2 mismatch! Expected: {}, Actual: {}, RelErr: {}", 
-            expected, actual, rel_err);
+        assert!(
+            rel_err < 5e-4,
+            "AVX2 mismatch! Expected: {}, Actual: {}, RelErr: {}",
+            expected,
+            actual,
+            rel_err
+        );
     }
 }

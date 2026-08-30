@@ -1,6 +1,6 @@
 //! SwiGLU Feed-Forward Network.
 
-use crate::activations::{apply_activation_2d, Activation};
+use crate::activations::{Activation, apply_activation_2d};
 use crate::linear_layer::LinearLayer;
 use anyhow::Result;
 use ndarray::{Array2, Array3};

@@ -34,6 +34,10 @@ impl ValidationResult {
         }
     }
 
+    #[expect(
+        dead_code,
+        reason = "not referenced yet; kept until the path that needs it lands"
+    )]
     fn invalid() -> Self {
         Self {
             is_valid: false,
@@ -228,7 +232,10 @@ mod tests {
         if let Some(model_type) = ModelType::from_cli_name("gpt2") {
             let result = validate_for_chat(model_type).expect("Should be valid");
             assert!(result.is_valid);
-            assert!(!result.warnings.is_empty(), "Should have warning for base model");
+            assert!(
+                !result.warnings.is_empty(),
+                "Should have warning for base model"
+            );
         }
     }
 }

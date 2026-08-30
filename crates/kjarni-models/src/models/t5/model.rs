@@ -59,7 +59,7 @@ impl EncoderDecoderModelFactory for T5Model {
     type Config = T5Config;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        let config: T5Config = serde_json::from_str(&weights.config_json())?;
+        let config: T5Config = serde_json::from_str(weights.config_json())?;
         Ok(Arc::new(config))
     }
 
@@ -194,8 +194,8 @@ impl T5Model {
 
     fn apply_translation_params(&self, config: &mut GenerationConfig, params: &TranslationParams) {
         config.max_length = params.max_length;
-        config.min_length = 0; 
-        config.no_repeat_ngram_size = 0; 
+        config.min_length = 0;
+        config.no_repeat_ngram_size = 0;
         config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
             num_beams: params.num_beams,
             length_penalty: 1.0,
@@ -432,7 +432,7 @@ impl GpuEncoderDecoderOps for T5Model {
         let (encoder_cmd, _pool) = frame.resources();
 
         let mut expanded_shape = encoder_hidden_states.shape().to_vec();
-        if expanded_shape.get(0) != Some(&1) {
+        if expanded_shape.first() != Some(&1) {
             return Err(anyhow!(
                 "Cannot broadcast encoder states with batch size != 1"
             ));
@@ -491,23 +491,23 @@ impl EncoderDecoderLanguageModel for T5Model {
 
     fn get_default_generation_config(&self) -> GenerationConfig {
         // Try to load from task specific params
-        if let Some(params) = &self.config.task_specific_params {
-            if let Some(summary) = &params.summarization {
-                return GenerationConfig {
-                    max_length: summary.max_length,
-                    min_length: summary.min_length,
-                    no_repeat_ngram_size: summary.no_repeat_ngram_size,
-                    repetition_penalty: 1.0,
-                    max_new_tokens: None,
-                    add_bos_token: false,
-                    strategy: DecodingStrategy::BeamSearch(BeamSearchParams {
-                        num_beams: summary.num_beams,
-                        length_penalty: summary.length_penalty,
-                        early_stopping: summary.early_stopping,
-                    }),
-                    speculation: None,
-                };
-            }
+        if let Some(params) = &self.config.task_specific_params
+            && let Some(summary) = &params.summarization
+        {
+            return GenerationConfig {
+                max_length: summary.max_length,
+                min_length: summary.min_length,
+                no_repeat_ngram_size: summary.no_repeat_ngram_size,
+                repetition_penalty: 1.0,
+                max_new_tokens: None,
+                add_bos_token: false,
+                strategy: DecodingStrategy::BeamSearch(BeamSearchParams {
+                    num_beams: summary.num_beams,
+                    length_penalty: summary.length_penalty,
+                    early_stopping: summary.early_stopping,
+                }),
+                speculation: None,
+            };
         }
 
         // T5 Safe Defaults

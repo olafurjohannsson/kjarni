@@ -1,9 +1,9 @@
 //! Bidirectional self-attention for encoder models
 
 use super::ops::AttentionOps;
+use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::WgpuContext;
 use std::sync::Arc;
 
 /// Bidirectional self-attention for encoder models

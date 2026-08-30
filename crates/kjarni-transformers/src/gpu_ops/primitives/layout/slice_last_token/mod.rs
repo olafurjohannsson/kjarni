@@ -159,7 +159,7 @@ impl GpuLastTokenSlice {
         // Workgroup: 256 threads per group (common size)
         let workgroup_size = 256;
         let total_elements = (batch_size * vocab_size) as u32;
-        let num_workgroups = (total_elements + workgroup_size - 1) / workgroup_size;
+        let num_workgroups = total_elements.div_ceil(workgroup_size);
 
         compute_pass.dispatch_workgroups(num_workgroups, 1, 1);
     }

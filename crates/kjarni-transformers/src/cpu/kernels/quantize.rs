@@ -67,7 +67,7 @@ pub fn quantize_row_q8_k(data: &[f32]) -> Vec<BlockQ8_K> {
     let mut out = Vec::with_capacity(num_blocks);
 
     // Process each 256-element block
-    for chunk in data.chunks_exact(QK_K) {
+    for chunk in data.as_chunks::<QK_K>().0 {
         let mut block = BlockQ8_K {
             d: 0.0,
             qs: [0; 256],

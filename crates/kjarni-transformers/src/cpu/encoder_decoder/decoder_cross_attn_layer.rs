@@ -1,5 +1,5 @@
-use crate::cpu::normalization::Normalization;
 use crate::cpu::encoder_decoder::DecoderCrossAttention;
+use crate::cpu::normalization::Normalization;
 use crate::encoder_decoder::DecoderSelfAttention;
 pub use crate::feedforward::FeedForward;
 use anyhow::Result;
@@ -229,9 +229,9 @@ mod cross_decoder_layer_tests {
     use super::*;
     use crate::{
         activations::Activation,
+        cpu::normalization::{LayerNorm, Normalization},
         feedforward::{FeedForward, LegacyFeedForward, StdFeedForward},
         linear_layer::LinearLayer,
-        cpu::normalization::{LayerNorm, Normalization},
     };
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};

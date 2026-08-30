@@ -125,7 +125,7 @@ impl Bm25Index {
         for (term, count) in term_counts {
             self.inverted_index
                 .entry(term.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((doc_id, count));
 
             *self.doc_frequencies.entry(term).or_insert(0) += 1;

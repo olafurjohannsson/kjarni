@@ -2,9 +2,7 @@
 
 use super::*;
 
-
 // Unit Tests
-
 
 #[test]
 fn test_rerank_overrides_default() {
@@ -56,7 +54,7 @@ fn test_rerank_result_display_truncation() {
 fn test_validation_unknown_model() {
     let result = is_reranking_model("nonexistent-model-xyz");
     assert!(result.is_err());
-    
+
     if let Err(RerankerError::UnknownModel(name)) = result {
         assert_eq!(name, "nonexistent-model-xyz");
     } else {
@@ -84,11 +82,11 @@ fn test_find_preset() {
     let preset = presets::find_preset("RERANKER_MINILM_V1");
     assert!(preset.is_some());
     assert_eq!(preset.unwrap().name, "RERANKER_MINILM_V1");
-    
+
     // Case insensitive
     let preset_lower = presets::find_preset("reranker_minilm_v1");
     assert!(preset_lower.is_some());
-    
+
     // Not found
     let not_found = presets::find_preset("nonexistent");
     assert!(not_found.is_none());
@@ -98,7 +96,7 @@ fn test_find_preset() {
 fn test_reranker_tier_resolve() {
     let fast = RerankerTier::Fast.resolve();
     assert_eq!(fast.name, "RERANKER_MINILM_V1");
-    
+
     let balanced = RerankerTier::Balanced.resolve();
     assert_eq!(balanced.name, "RERANKER_MSMARCO_V1");
 }
@@ -108,7 +106,6 @@ fn test_reranker_tier_default() {
     let default = RerankerTier::default();
     assert_eq!(default, RerankerTier::Balanced);
 }
-
 
 mod integration {
     use super::*;
@@ -155,12 +152,8 @@ mod integration {
         }
 
         // ML-related docs should rank higher than unrelated ones
-        let ml_indices: Vec<usize> = results
-            .iter()
-            .take(2)
-            .map(|r| r.index)
-            .collect();
-        
+        let ml_indices: Vec<usize> = results.iter().take(2).map(|r| r.index).collect();
+
         // Indices 0 and 2 are ML-related
         assert!(ml_indices.contains(&0) || ml_indices.contains(&2));
     }
@@ -267,7 +260,7 @@ mod integration {
     #[tokio::test]
     async fn test_convenience_rerank() {
         let documents = vec!["relevant doc", "irrelevant doc"];
-        
+
         let results = rerank("minilm-l6-v2-cross-encoder", "test query", &documents)
             .await
             .expect("Failed to rerank");
@@ -277,13 +270,9 @@ mod integration {
 
     #[tokio::test]
     async fn test_convenience_score() {
-        let score_result = score(
-            "minilm-l6-v2-cross-encoder",
-            "query",
-            "document",
-        )
-        .await
-        .expect("Failed to score");
+        let score_result = score("minilm-l6-v2-cross-encoder", "query", "document")
+            .await
+            .expect("Failed to score");
 
         assert!(score_result.is_finite());
     }

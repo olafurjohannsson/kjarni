@@ -3,13 +3,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use ndarray::{Array2, Array3, s};
 
+use crate::models::bart::config::BartConfig;
 use kjarni_transformers::activations::softmax_4d_inplace;
 use kjarni_transformers::feedforward::FeedForward;
 use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::models::registry::model_cache_dir;
 use kjarni_transformers::utils::linear_algebra::{apply_attention_mask, matmul_4d};
 use kjarni_transformers::weights::ModelWeights;
-use kjarni_transformers::models::registry::model_cache_dir;
-use crate::models::bart::config::BartConfig;
 
 const DISTILBART_PATH: &str = "olafuraron_distilbart-cnn-12-6";
 

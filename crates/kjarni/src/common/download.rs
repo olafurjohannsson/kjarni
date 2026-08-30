@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use kjarni_transformers::models::{download_model_files, registry::WeightsFormat, ModelType};
+use kjarni_transformers::models::{ModelType, download_model_files, registry::WeightsFormat};
 
 use super::{DownloadPolicy, KjarniError, KjarniResult};
 
@@ -63,9 +63,9 @@ pub async fn ensure_model_downloaded(
 
     match determine_download_action(is_downloaded, policy) {
         DownloadAction::Ready => Ok(model_dir),
-        DownloadAction::Error => {
-            Err(KjarniError::ModelNotDownloaded(model_type.cli_name().to_string()))
-        }
+        DownloadAction::Error => Err(KjarniError::ModelNotDownloaded(
+            model_type.cli_name().to_string(),
+        )),
         DownloadAction::Download => {
             if !quiet {
                 eprintln!("Downloading model '{}'...", model_type.cli_name());
@@ -105,7 +105,10 @@ mod tests {
     #[test]
     fn test_default_cache_dir_has_parent() {
         let dir = default_cache_dir();
-        assert!(dir.parent().is_some(), "Cache dir should have a parent directory");
+        assert!(
+            dir.parent().is_some(),
+            "Cache dir should have a parent directory"
+        );
     }
 
     #[test]
@@ -308,21 +311,24 @@ mod tests {
     fn test_different_models_different_dirs() {
         let temp = TempDir::new().unwrap();
         let cache_dir = resolve_cache_dir(Some(temp.path()));
-        
+
         let model1 = ModelType::from_cli_name("minilm-l6-v2").unwrap();
         let model2 = ModelType::from_cli_name("distilbert-sentiment").unwrap();
-        
+
         let dir1 = model1.cache_dir(&cache_dir);
         let dir2 = model2.cache_dir(&cache_dir);
-        
-        assert_ne!(dir1, dir2, "Different models should have different directories");
+
+        assert_ne!(
+            dir1, dir2,
+            "Different models should have different directories"
+        );
     }
 
     #[test]
     fn test_is_downloaded_false_in_empty_dir() {
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
-        
+
         // In an empty temp directory, model should not be downloaded
         assert!(!model_type.is_downloaded(temp.path()));
     }
@@ -330,16 +336,13 @@ mod tests {
     async fn test_ensure_model_not_downloaded_never_policy() {
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
-    
-        let result = ensure_model_downloaded(
-            model_type,
-            Some(temp.path()),
-            DownloadPolicy::Never,
-            true,
-        ).await;
-        
+
+        let result =
+            ensure_model_downloaded(model_type, Some(temp.path()), DownloadPolicy::Never, true)
+                .await;
+
         assert!(result.is_err());
-        
+
         let err = result.unwrap_err();
         match err {
             KjarniError::ModelNotDownloaded(name) => {
@@ -353,26 +356,22 @@ mod tests {
     async fn test_ensure_model_returns_correct_path() {
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
-        
+
         let expected_dir = model_type.cache_dir(temp.path());
         std::fs::create_dir_all(&expected_dir).unwrap();
-        
+
         std::fs::write(expected_dir.join("config.json"), "{}").unwrap();
         std::fs::write(expected_dir.join("model.safetensors"), "").unwrap();
         std::fs::write(expected_dir.join("tokenizer.json"), "{}").unwrap();
-        
-        let result = ensure_model_downloaded(
-            model_type,
-            Some(temp.path()),
-            DownloadPolicy::Never,
-            true,
-        ).await;
+
+        let result =
+            ensure_model_downloaded(model_type, Some(temp.path()), DownloadPolicy::Never, true)
+                .await;
         match result {
             Ok(path) => {
                 assert!(path.starts_with(temp.path()));
             }
-            Err(KjarniError::ModelNotDownloaded(_)) => {
-            }
+            Err(KjarniError::ModelNotDownloaded(_)) => {}
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }
@@ -381,14 +380,11 @@ mod tests {
     async fn test_ensure_model_with_custom_cache_dir() {
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("distilbert-sentiment").unwrap();
-        
-        let result = ensure_model_downloaded(
-            model_type,
-            Some(temp.path()),
-            DownloadPolicy::Never,
-            true,
-        ).await;
-        
+
+        let result =
+            ensure_model_downloaded(model_type, Some(temp.path()), DownloadPolicy::Never, true)
+                .await;
+
         assert!(result.is_err());
     }
     #[test]
@@ -422,7 +418,7 @@ mod tests {
     #[test]
     fn test_if_missing_is_default_behavior() {
         assert_eq!(DownloadPolicy::default(), DownloadPolicy::IfMissing);
-        
+
         assert_eq!(
             determine_download_action(false, DownloadPolicy::default()),
             DownloadAction::Download
@@ -437,7 +433,7 @@ mod tests {
     fn test_never_policy_for_offline_use() {
         let action_present = determine_download_action(true, DownloadPolicy::Never);
         let action_missing = determine_download_action(false, DownloadPolicy::Never);
-        
+
         assert!(action_present == DownloadAction::Ready);
         assert!(action_missing == DownloadAction::Error);
     }

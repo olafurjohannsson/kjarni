@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::io::{self, Read};
 use std::path::Path;
 
 use kjarni::ModelType;
 
 /// Resolve input from: direct text, file path, or stdin
-/// 
+///
 /// Rules:
 /// - If input is None, read from stdin
 /// - If input looks like a file path and exists, read the file
@@ -27,11 +27,13 @@ pub fn resolve_input(input: Option<&str>) -> Result<String> {
             let stdin = io::stdin();
             let mut buffer = String::new();
             stdin.lock().read_to_string(&mut buffer)?;
-            
+
             if buffer.is_empty() {
-                return Err(anyhow!("No input provided. Pass text as argument, a file path, or pipe via stdin."));
+                return Err(anyhow!(
+                    "No input provided. Pass text as argument, a file path, or pipe via stdin."
+                ));
             }
-            
+
             Ok(buffer)
         }
     }
@@ -56,9 +58,12 @@ pub fn resolve_model(name: &str, arch_hint: Option<&str>) -> anyhow::Result<Mode
 /// Create a helpful error message with "did you mean?" suggestions
 pub fn model_not_found_error(name: &str, arch_hint: Option<&str>) -> String {
     let mut msg = format!("Unknown model: '{}'.", name);
-    
+
     if let Some(arch) = arch_hint {
-        msg.push_str(&format!(" Run 'kjarni model list --arch {}' to see available models.", arch));
+        msg.push_str(&format!(
+            " Run 'kjarni model list --arch {}' to see available models.",
+            arch
+        ));
     } else {
         msg.push_str(" Run 'kjarni model list' to see available models.");
     }

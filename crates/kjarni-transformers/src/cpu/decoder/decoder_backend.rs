@@ -3,10 +3,10 @@
 use crate::cache::Cache;
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::{debug, trace};
-use ndarray::{s, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, s};
 use std::time::Instant;
 
 /// CPU-based backend for autoregressive decoder generation.
@@ -31,11 +31,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
     }
 
     /// Updates the decode token tensor with a newly sampled token ID.
-    fn update_decode_token(
-        &self,
-        tensor: &mut Self::DecodeToken,
-        new_token_id: u32,
-    ) -> Result<()> {
+    fn update_decode_token(&self, tensor: &mut Self::DecodeToken, new_token_id: u32) -> Result<()> {
         tensor[[0, 0]] = new_token_id;
         Ok(())
     }
@@ -169,17 +165,15 @@ impl CpuDecoderBackend {
 
         let hidden_states = ops.embed(tokens, 0)?;
         let mask_full = Array2::ones((1, prompt_len));
-        ops.decoder().forward(&hidden_states, &mask_full, 0, Some(cache))?;
+        ops.decoder()
+            .forward(&hidden_states, &mask_full, 0, Some(cache))?;
         let last_token = tokens[[0, prompt_len - 1]];
         let last_token_array = Array2::from_elem((1, 1), last_token);
         let hidden_states = ops.embed(&last_token_array, prompt_len - 1)?;
         let mask_step = ops.get_attention_mask(1, prompt_len)?;
-        let decoder_output = ops.decoder().forward(
-            &hidden_states,
-            &mask_step,
-            prompt_len, 
-            Some(cache),
-        )?;
+        let decoder_output =
+            ops.decoder()
+                .forward(&hidden_states, &mask_step, prompt_len, Some(cache))?;
         let logits_3d = ops.project_to_logits(&decoder_output)?;
         Ok(logits_3d.slice(s![0, 0, ..]).to_owned())
     }
@@ -213,7 +207,7 @@ mod tests {
     #[test]
     fn test_backend_is_stateless() {
         // Backend should be Clone and Default since it's stateless
-        let backend1 = CpuDecoderBackend::default();
+        let backend1 = CpuDecoderBackend;
         let backend2 = backend1.clone();
 
         // Both should work independently

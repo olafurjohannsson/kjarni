@@ -88,7 +88,9 @@ pub async fn run_speculative_generation_loop(
         draft_backend.prefill(draft.as_ref(), &tokens_array, draft_cache.as_mut()),
     );
 
-    let mut target_logits = target_result?;
+    // The prefill result is awaited for its error; the target logits themselves are
+    // recomputed per verification round below.
+    target_result?;
     let mut draft_logits = draft_result?;
 
     stats.end_prefill();
@@ -100,11 +102,11 @@ pub async fn run_speculative_generation_loop(
         }
 
         // Check cancellation
-        if let Some(ref c) = cancellation {
-            if c.is_cancelled() {
-                log::debug!("Cancelled during prompt emission");
-                return Ok(());
-            }
+        if let Some(ref c) = cancellation
+            && c.is_cancelled()
+        {
+            log::debug!("Cancelled during prompt emission");
+            return Ok(());
         }
 
         let text = tokenizer
@@ -129,11 +131,11 @@ pub async fn run_speculative_generation_loop(
 
     'outer: while all_tokens.len() < max_len && all_tokens.len() < context_limit {
         // Check cancellation
-        if let Some(ref c) = cancellation {
-            if c.is_cancelled() {
-                log::debug!("Cancelled in speculation loop");
-                break;
-            }
+        if let Some(ref c) = cancellation
+            && c.is_cancelled()
+        {
+            log::debug!("Cancelled in speculation loop");
+            break;
         }
 
         let mut draft_tokens: Vec<u32> = Vec::with_capacity(num_speculative);
@@ -142,6 +144,10 @@ pub async fn run_speculative_generation_loop(
         let mut current_logits = draft_logits.clone();
         let mut seq_len = all_tokens.len() + 1;
 
+        #[allow(
+            clippy::explicit_counter_loop,
+            reason = "seq_len is also advanced inside the body, so it is not a plain loop counter"
+        )]
         for _ in 0..num_speculative {
             let probs = softmax(&current_logits);
             let token = sample_token(current_logits, &crate::common::DecodingStrategy::Greedy)?;
@@ -182,7 +188,7 @@ pub async fn run_speculative_generation_loop(
             target_cache.as_mut(),
         )?;
 
-        let (accepted_tokens, final_logits) = if probabilistic {
+        let (accepted_tokens, _final_logits) = if probabilistic {
             accept_probabilistic(&draft_tokens, &draft_probs, &verify_logits)
         } else {
             accept_greedy(&draft_tokens, &verify_logits)
@@ -224,7 +230,6 @@ pub async fn run_speculative_generation_loop(
         }
 
         target_cache.set_seq_length(all_tokens.len());
-        target_logits = final_logits;
 
         draft_cache.clear();
         let resync_array = Array2::from_shape_vec((1, all_tokens.len()), all_tokens.clone())?;
@@ -236,7 +241,6 @@ pub async fn run_speculative_generation_loop(
     stats.print_summary();
     Ok(())
 }
-
 
 fn verify_batch(
     model: &dyn DecoderLanguageModel,
@@ -261,7 +265,6 @@ fn verify_batch(
     let vocab_size = model.vocab_size();
     Ok(logits_3d.into_shape_with_order((num_tokens, vocab_size))?)
 }
-
 
 /// Greedy acceptance: accept while target argmax matches draft.
 fn accept_greedy(draft_tokens: &[u32], verify_logits: &Array2<f32>) -> (Vec<u32>, Array1<f32>) {
@@ -370,7 +373,6 @@ fn sample_from_distribution(probs: &Array1<f32>) -> u32 {
 
     (probs.len() - 1) as u32
 }
-
 
 #[cfg(test)]
 mod tests {

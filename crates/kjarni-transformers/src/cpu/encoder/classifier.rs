@@ -1,13 +1,13 @@
 //! Concrete classification heads for encoder models.
 
 #[cfg(not(target_arch = "wasm32"))]
+use crate::gpu::{GpuFrameContext, GpuTensor};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::add::GpuAdd;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::{linear::GpuLinearLayer, tanh::GpuTanh};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::gpu::{GpuFrameContext, GpuTensor};
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
 use crate::weights::ModelWeights;
@@ -75,23 +75,23 @@ impl CpuSequenceClassificationHead {
         labels: Option<Vec<String>>,
     ) -> Result<Self> {
         // Validate dimensions
-        if let Some(ref p) = pooler {
-            if p.out_features() != classifier.in_features() {
-                return Err(anyhow!(
-                    "Pooler output ({}) != Classifier input ({})",
-                    p.out_features(),
-                    classifier.in_features()
-                ));
-            }
+        if let Some(ref p) = pooler
+            && p.out_features() != classifier.in_features()
+        {
+            return Err(anyhow!(
+                "Pooler output ({}) != Classifier input ({})",
+                p.out_features(),
+                classifier.in_features()
+            ));
         }
-        if let Some(ref pc) = pre_classifier {
-            if pc.out_features() != classifier.in_features() {
-                return Err(anyhow!(
-                    "Pre-classifier output ({}) != Classifier input ({})",
-                    pc.out_features(),
-                    classifier.in_features()
-                ));
-            }
+        if let Some(ref pc) = pre_classifier
+            && pc.out_features() != classifier.in_features()
+        {
+            return Err(anyhow!(
+                "Pre-classifier output ({}) != Classifier input ({})",
+                pc.out_features(),
+                classifier.in_features()
+            ));
         }
 
         Ok(Self {
@@ -225,14 +225,12 @@ impl CpuSequenceClassificationHead {
             PoolingStrategy::LastToken => {
                 if let Some(mask) = attention_mask {
                     last_token_pool(encoder_hidden_states, mask)?
+                } else if seq_len == 1 {
+                    encoder_hidden_states.slice(s![.., 0, ..]).to_owned()
                 } else {
-                    if seq_len == 1 {
-                        encoder_hidden_states.slice(s![.., 0, ..]).to_owned()
-                    } else {
-                        return Err(anyhow!(
-                            "LastToken pooling requires an attention mask for seq_len > 1"
-                        ));
-                    }
+                    return Err(anyhow!(
+                        "LastToken pooling requires an attention mask for seq_len > 1"
+                    ));
                 }
             }
             _ => {
@@ -242,7 +240,6 @@ impl CpuSequenceClassificationHead {
                 ));
             }
         };
-
 
         let features = if let Some(ref pooler) = self.pooler {
             let mut pooled = pooler.matmul(&sequence_embedding.view());
@@ -595,7 +592,6 @@ mod classification_head_tests {
         Ok(())
     }
 
-
     // BERT logic: CLS Pooling (Index 0) -> Pooler (Dense+Tanh) -> Classifier
     #[test]
     fn test_bert_head_golden() -> Result<()> {
@@ -664,7 +660,6 @@ mod classification_head_tests {
         assert!(max_diff < 1e-5);
         Ok(())
     }
-
 
     #[test]
     fn test_distilbert_head_golden() -> Result<()> {
@@ -738,7 +733,6 @@ mod classification_head_tests {
         Ok(())
     }
 
-
     #[test]
     fn test_simple_head_golden() -> Result<()> {
         let mut w = HashMap::new();
@@ -787,7 +781,6 @@ mod classification_head_tests {
         assert!(max_diff < 1e-5);
         Ok(())
     }
-
 
     #[test]
     fn test_gelu_head_golden() -> Result<()> {

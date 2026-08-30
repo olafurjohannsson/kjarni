@@ -54,8 +54,8 @@ pub fn get_summarization_models() -> Vec<&'static str> {
 /// Get recommended models for summarization.
 pub fn recommended_summarization_models() -> Vec<&'static str> {
     vec![
-        "distilbart-cnn",  // Fast
-        "bart-large-cnn",  // Quality
-        "flan-t5-base",    // Flexible
+        "distilbart-cnn", // Fast
+        "bart-large-cnn", // Quality
+        "flan-t5-base",   // Flexible
     ]
 }

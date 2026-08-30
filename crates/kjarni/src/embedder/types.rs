@@ -50,8 +50,6 @@ pub enum EmbedderError {
 /// Result type for embedder operations.
 pub type EmbedderResult<T> = Result<T, EmbedderError>;
 
-
-
 /// Overrides for embedding behavior.
 #[derive(Debug, Clone, Default)]
 pub struct EmbeddingOverrides {

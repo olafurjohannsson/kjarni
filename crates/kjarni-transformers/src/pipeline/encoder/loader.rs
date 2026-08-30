@@ -1,10 +1,12 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::sync::Arc;
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
 
 use tokenizers::Tokenizer;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::get_default_cache_dir;
 use crate::{
     Device, ModelType, WgpuContext,
     cpu::encoder::{
@@ -18,7 +20,6 @@ use crate::{
     weights::ModelWeights,
 };
 use anyhow::{Result, anyhow};
-use crate::models::get_default_cache_dir;
 
 /// Factory trait for encoder-based models.
 pub trait EncoderModelFactory: Sized {
@@ -62,7 +63,6 @@ pub struct EncoderLoader;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::{download_model_files, registry::WeightsFormat};
 
-
 /// The sequence length a sentence-transformers model was actually tuned for.
 ///
 /// Three different numbers claim to be this model's context, and they disagree.
@@ -78,6 +78,7 @@ use crate::models::{download_model_files, registry::WeightsFormat};
 ///
 /// Returns `None` when the model ships no such file, which is the case for
 /// anything that is not a sentence-transformers export.
+#[allow(dead_code, reason = "reachable only on some targets")]
 fn sentence_transformers_max_seq_len(model_path: &std::path::Path) -> Option<usize> {
     #[derive(serde::Deserialize)]
     struct SentenceBertConfig {
@@ -234,7 +235,7 @@ impl EncoderLoader {
             &weights,
             &meta,
             &layout,
-            load_config.clone(),
+            load_config,
             context.as_ref(),
             device,
         )?;
@@ -294,14 +295,8 @@ impl EncoderLoader {
         }));
 
         // WASM is always CPU, no GPU context
-        let (cpu_encoder, gpu_encoder) = M::build_backends(
-            &weights,
-            &meta,
-            &layout,
-            load_config.clone(),
-            None,
-            Device::Cpu,
-        )?;
+        let (cpu_encoder, gpu_encoder) =
+            M::build_backends(&weights, &meta, &layout, load_config, None, Device::Cpu)?;
 
         let cpu_head = M::build_head(&weights, &load_config)?;
 

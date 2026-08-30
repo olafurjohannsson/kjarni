@@ -265,7 +265,7 @@ async fn main() -> Result<()> {
                 top_k,
                 &mode,
                 &model,
-                rerank_model.as_ref().map(|s| s.as_str()),
+                rerank_model.as_deref(),
                 &format,
                 gpu,
                 quiet,

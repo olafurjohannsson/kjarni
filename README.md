@@ -93,11 +93,21 @@ tar -xzf kjarni-x86_64-linux.tar.gz -C kjarni/
 g++ -std=c++23 main.cpp -Ikjarni -Lkjarni -lkjarni_ffi -o app
 ```
 
-**Browser (WebAssembly)** — download `kjarni-wasm.tar.gz` from [releases](https://github.com/olafurjohannsson/kjarni/releases), or build it yourself:
+**Browser (WebAssembly)** — [npmjs.com/package/kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)
 
 ```bash
-cd crates/kjarni-wasm && wasm-pack build --target web --release
+npm i kjarni-wasm
 ```
+
+Or without a bundler, straight from a CDN:
+
+```html
+<script type="module">
+  import { Kjarni } from "https://cdn.jsdelivr.net/npm/kjarni-wasm/dist/index.js";
+</script>
+```
+
+The package runs inference in a Web Worker, so loading a model or generating a reply never freezes the page. The raw wasm-bindgen bundle is also in `kjarni-wasm.tar.gz` on [releases](https://github.com/olafurjohannsson/kjarni/releases) if you would rather drive it yourself.
 
 Models for the browser are packed as `.kjq`, a single file holding config, tokenizer and int8 weights. See [the format guide](crates/kjarni-wasm/scripts/README.md) for how to make your own.
 
@@ -153,12 +163,10 @@ println!("{} ({:.1}%)", result.label, result.score * 100.0);
 **Browser**
 
 ```js
-import init, { WasmModel } from "./pkg/kjarni_wasm.js";
+import { Kjarni } from "kjarni-wasm";
 
-await init();
-const bytes = new Uint8Array(await (await fetch("model.kjq")).arrayBuffer());
-const model = WasmModel.from_quantized(bytes);
-const vectors = model.encode(["doctor", "physician"], true);
+const kjarni = await Kjarni.load({ encoder: "/models/minilm-l6-v2-q8.kjq" });
+console.log(await kjarni.similarity("doctor", "physician"));   // 0.8598
 ```
 
 **CLI**

@@ -12,7 +12,7 @@
 //!
 //! These tests need `minilm-l6-v2` in the cache and skip without it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use kjarni_models::SentenceEncoder;
 use kjarni_transformers::models::base::ModelLoadConfig;
@@ -24,10 +24,7 @@ fn model_dir() -> Option<PathBuf> {
     dir.join("model.safetensors").exists().then_some(dir)
 }
 
-fn try_at_length(
-    dir: &PathBuf,
-    max_seq_len: Option<usize>,
-) -> anyhow::Result<SentenceEncoder> {
+fn try_at_length(dir: &Path, max_seq_len: Option<usize>) -> anyhow::Result<SentenceEncoder> {
     let config = ModelLoadConfig {
         max_sequence_length: max_seq_len,
         ..Default::default()
@@ -35,7 +32,7 @@ fn try_at_length(
     SentenceEncoder::from_pretrained(dir, Device::Cpu, None, Some(config), None)
 }
 
-fn at_length(dir: &PathBuf, max_seq_len: Option<usize>) -> SentenceEncoder {
+fn at_length(dir: &Path, max_seq_len: Option<usize>) -> SentenceEncoder {
     try_at_length(dir, max_seq_len).expect("load encoder")
 }
 

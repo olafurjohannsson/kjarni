@@ -1,4 +1,3 @@
-
 use ndarray::{Array2, Array3};
 
 #[test]
@@ -344,11 +343,11 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
     });
 
     let linear = LinearLayer::from(weights_cpu.clone());
-    
+
     // Ensure GPU weights are F32
     let gpu_weights = GpuTensor::from_ndarray(&ctx, &weights_cpu).unwrap();
     assert_eq!(gpu_weights.dtype(), DType::F32, "GPU weights should be F32");
-    
+
     let gpu_kernel = crate::gpu_ops::primitives::linear::GpuLinearLayer::new(&ctx);
 
     let head = LoadedLMHead {
@@ -363,7 +362,7 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
 
     // Create input - use smaller values to reduce accumulation error
     let hidden_cpu = Array3::<f32>::from_shape_fn((1, 4, hidden_size), |(_, _, k)| {
-        (k as f32) * 0.01  // Smaller values
+        (k as f32) * 0.01 // Smaller values
     });
     let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden_cpu).unwrap();
     assert_eq!(hidden_gpu.dtype(), DType::F32, "Input should be F32");
@@ -380,14 +379,24 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
     ctx.queue.submit(Some(encoder.finish()));
     let logits_gpu = logits_gpu_tensor.to_ndarray_3d::<f32>().await.unwrap();
 
-    println!("CPU logits first 5: {:?}", &logits_cpu.as_slice().unwrap()[..5]);
-    println!("GPU logits first 5: {:?}", &logits_gpu.as_slice().unwrap()[..5]);
-    println!("CPU shape: {:?}, GPU shape: {:?}", logits_cpu.shape(), logits_gpu.shape());
+    println!(
+        "CPU logits first 5: {:?}",
+        &logits_cpu.as_slice().unwrap()[..5]
+    );
+    println!(
+        "GPU logits first 5: {:?}",
+        &logits_gpu.as_slice().unwrap()[..5]
+    );
+    println!(
+        "CPU shape: {:?}, GPU shape: {:?}",
+        logits_cpu.shape(),
+        logits_gpu.shape()
+    );
 
     let mut max_diff = 0.0f32;
     let mut max_diff_idx = (0, 0, 0);
     let mut max_diff_values = (0.0f32, 0.0f32);
-    
+
     for ((idx, &cpu_val), &gpu_val) in logits_cpu.indexed_iter().zip(logits_gpu.iter()) {
         let diff = (cpu_val - gpu_val).abs();
         if diff > max_diff {
@@ -405,6 +414,9 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
     assert!(
         max_diff < 1e-3,
         "CPU/GPU parity failed: max diff = {} at {:?} (CPU: {}, GPU: {})",
-        max_diff, max_diff_idx, max_diff_values.0, max_diff_values.1
+        max_diff,
+        max_diff_idx,
+        max_diff_values.0,
+        max_diff_values.1
     );
 }

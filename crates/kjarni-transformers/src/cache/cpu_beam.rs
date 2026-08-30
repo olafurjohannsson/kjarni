@@ -137,7 +137,7 @@ impl CpuBeamKVCache {
         new_v: &Array3<f32>,
         new_tokens_len: usize,
     ) -> anyhow::Result<()> {
-        self.update(layer_idx, new_k, new_v);
+        self.update(layer_idx, new_k, new_v)?;
         self.increment_len(new_tokens_len);
         Ok(())
     }

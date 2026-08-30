@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use std::sync::Mutex;
 
-
 /// Conditionally profile a compute pass.
 ///
 /// In release builds without `profiling` feature, this compiles to
@@ -145,7 +144,7 @@ impl GpuProfiler {
         let data = slice.get_mapped_range();
         let timestamps: &[u64] = bytemuck::cast_slice(&data);
 
-        let period = context.queue.get_timestamp_period(); 
+        let period = context.queue.get_timestamp_period();
 
         log::info!("\n=== GPU KERNEL PROFILER ===");
         let mut total = 0.0;

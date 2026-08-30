@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### A panic in the engine no longer kills the host process
+
+The workspace release profile set `panic = "abort"`. Cargo has no per-package panic
+strategy, so that applied to `kjarni-ffi` as well — the cdylib that NuGet, the Go
+module and the C header all load *into someone else's process*. Any panic reachable
+through any of the 80 `extern "C"` entry points terminated that process: a .NET
+service, a Go binary, a Qt application. No error code, no message, nothing the caller
+could have handled. `kjarni-ffi/src` had 38 `unwrap`/`expect`/`panic!` sites of its
+own, and everything the engine can panic on sits behind them.
+
+`panic = "abort"` is gone from the profile, and the 66 fallible entry points now run
+their bodies inside a `catch_unwind` barrier (`kjarni-ffi/src/panic.rs`). A panic
+becomes the new `KJARNI_ERROR_CODE_PANIC` (11) with the entry point's name and the
+panic message on `kjarni_last_error_message()`, which is what every other failure in
+the C ABI already looks like. The remaining 14 entry points return compile-time
+constants and are left unguarded, which the module documents; guarding
+`kjarni_last_error_message` in particular would be circular.
+
+This is a backstop, not a licence to panic — a panic reaching it is still a bug. It
+only decides whether the caller gets to hear about it.
+
+Building `kjarni-ffi` under `panic = "abort"` is now a compile error rather than a
+silently defeated barrier, since `catch_unwind` cannot intercept an abort. That check
+is what would have caught the original setting.
+
+`KJARNI_ERROR_CODE_PANIC = 11` is additive — no existing code is renumbered — and is
+mirrored in the C header, the C# `KjarniErrorCode`, Go's `ErrPanic`, and Python's
+`PANIC`. The cost of the profile change is a larger binary and landing pads the
+optimiser must keep.
+
+### An error message with an interior nul is no longer discarded
+
+`set_last_error` built its `CString` with `CString::new(msg).ok()`, which yields
+`None` on an interior nul and cleared the stored message rather than replacing it, so
+`kjarni_last_error_message()` returned NULL for an error that had just been reported.
+It now truncates at the first nul and keeps the leading, most specific part. For an ordinary error that lost a diagnostic; for a caught panic it
+would have lost the only evidence the panic happened.
+
 ## 0.1.4
 
 ### Encoders now truncate where sentence-transformers does
@@ -52,6 +92,40 @@ total: without that the parallel scan could return a different permutation of
 equally-scoring documents between runs.
 
 WASM keeps the serial path, since rayon there needs a threaded build.
+
+### A TypeScript package for the browser, published to npm
+
+`npm i kjarni-wasm` gets embeddings, classification, reranking and chat running
+in a Web Worker, so loading a model or generating a reply never freezes the page.
+Every method returns a promise, and chat is an async iterator.
+
+```ts
+const kjarni = await Kjarni.load({ encoder: "/models/minilm-l6-v2-q8.kjq" });
+for await (const piece of kjarni.chat("Explain RAG")) out.textContent += piece;
+```
+
+The raw wasm-bindgen bundle is still in `kjarni-wasm.tar.gz` for anyone who
+would rather drive it directly.
+
+### Browser generation actually streams
+
+`WasmChat` ran the whole decode loop to completion and only then drained the
+channel the engine had been streaming into, so callers could show nothing until
+the reply was finished. Polling the loop together with its own drain fixes that
+on wasm's single thread, and the channel goes back to being a small buffer that
+applies real back-pressure rather than one sized to hold an entire response.
+
+`generate_stream` exposes it to JavaScript.
+
+### The WASM bundle is now tested in a browser
+
+Everything testing `kjarni-wasm` ran the Rust natively, which covers the engine
+and misses the artifact entirely: a broken import, a bundle compiled from stale
+sources, a binding that only fails through wasm-bindgen's glue. A new CI job
+loads the built bundle in Chromium and checks it encodes text correctly.
+
+This was not hypothetical. The live demo served a bundle containing neither
+classification nor chat for days while every test stayed green.
 
 ### C++ is built and tested in CI
 

@@ -1,10 +1,9 @@
 use crate::WgpuContext;
 use wgpu::util::DeviceExt;
-use wgpu::{include_wgsl, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline, include_wgsl};
 
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -55,7 +54,10 @@ impl GpuApplyMask {
         let key_stride = scores_shape[3] as u32; // Physical width of scores
 
         // Sanity check
-        assert_eq!(key_stride, mask_shape[1] as u32, "Mask and Score physical widths must match");
+        assert_eq!(
+            key_stride, mask_shape[1] as u32,
+            "Mask and Score physical widths must match"
+        );
 
         // let logical_key_len = position_offset + query_len;
         // self-attention = position_offset + query_len
@@ -123,13 +125,13 @@ fn run_internal_apply_mask(
     //     label: Some("Apply Mask Pass"),
     //     timestamp_writes: None,
     // });
-    let label = format!("ApplyMask");
+    let label = "ApplyMask".to_string();
     context.profiler.profile(encoder, &label, |compute_pass| {
         compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroup_x = (uniforms.query_len + 15) / 16;
-        let workgroup_y = (uniforms.key_stride + 15) / 16;
+        let workgroup_x = uniforms.query_len.div_ceil(16);
+        let workgroup_y = uniforms.key_stride.div_ceil(16);
         let workgroup_z = uniforms.batch_size * uniforms.num_heads;
         compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z)
     });

@@ -1,10 +1,9 @@
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Top-level Kjarni configuration.
-/// 
+///
 /// Loaded from kjarni.toml, provides defaults for all operations.
 /// CLI flags always override these settings.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -109,14 +108,30 @@ impl Default for DefaultModels {
     }
 }
 
-fn default_chat_model() -> String { "llama3.2-1b-instruct".into() }
-fn default_generate_model() -> String { "llama3.2-1b-instruct".into() }
-fn default_embed_model() -> String { "minilm-l6-v2".into() }
-fn default_classify_model() -> String { "distilbert-sentiment".into() }
-fn default_rerank_model() -> String { "minilm-reranker".into() }
-fn default_summarize_model() -> String { "distilbart-cnn".into() }
-fn default_translate_model() -> String { "flan-t5-base".into() }
-fn default_transcribe_model() -> String { "whisper-tiny".into() }
+fn default_chat_model() -> String {
+    "llama3.2-1b-instruct".into()
+}
+fn default_generate_model() -> String {
+    "llama3.2-1b-instruct".into()
+}
+fn default_embed_model() -> String {
+    "minilm-l6-v2".into()
+}
+fn default_classify_model() -> String {
+    "distilbert-sentiment".into()
+}
+fn default_rerank_model() -> String {
+    "minilm-reranker".into()
+}
+fn default_summarize_model() -> String {
+    "distilbart-cnn".into()
+}
+fn default_translate_model() -> String {
+    "flan-t5-base".into()
+}
+fn default_transcribe_model() -> String {
+    "whisper-tiny".into()
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GenerationParams {
@@ -147,9 +162,15 @@ impl Default for GenerationParams {
     }
 }
 
-fn default_temperature() -> f32 { 0.7 }
-fn default_max_tokens() -> usize { 512 }
-fn default_repetition_penalty() -> f32 { 1.1 }
+fn default_temperature() -> f32 {
+    0.7
+}
+fn default_max_tokens() -> usize {
+    512
+}
+fn default_repetition_penalty() -> f32 {
+    1.1
+}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ChatTaskConfig {
@@ -181,10 +202,10 @@ impl Default for GenerateTaskConfig {
     fn default() -> Self {
         Self {
             generation: GenerationParams {
-                temperature: 0.5, 
+                temperature: 0.5,
                 max_tokens: 256,
                 ..Default::default()
-            }
+            },
         }
     }
 }
@@ -218,16 +239,24 @@ impl Default for Seq2SeqParams {
     }
 }
 
-fn default_seq2seq_max_length() -> usize { 200 }
-fn default_num_beams() -> usize { 4 }
-fn default_length_penalty() -> f32 { 2.0 }
-fn default_true() -> bool { true }
+fn default_seq2seq_max_length() -> usize {
+    200
+}
+fn default_num_beams() -> usize {
+    4
+}
+fn default_length_penalty() -> f32 {
+    2.0
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SummarizeTaskConfig {
     #[serde(flatten)]
     pub seq2seq: Seq2SeqParams,
-    
+
     #[serde(default = "default_summarize_min")]
     pub min_length: usize,
 }
@@ -246,17 +275,19 @@ impl Default for SummarizeTaskConfig {
     }
 }
 
-fn default_summarize_min() -> usize { 50 }
+fn default_summarize_min() -> usize {
+    50
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TranslateTaskConfig {
     #[serde(flatten)]
     pub seq2seq: Seq2SeqParams,
-    
+
     /// Default source language
     #[serde(default)]
     pub src: Option<String>,
-    
+
     /// Default target language
     #[serde(default)]
     pub dst: Option<String>,
@@ -303,9 +334,15 @@ impl Default for ClassifyTaskConfig {
     }
 }
 
-fn default_classify_top_k() -> usize { 5 }
-fn default_max_length() -> usize { 512 }
-fn default_batch_size() -> usize { 8 }
+fn default_classify_top_k() -> usize {
+    5
+}
+fn default_max_length() -> usize {
+    512
+}
+fn default_batch_size() -> usize {
+    8
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EmbedTaskConfig {
@@ -324,7 +361,9 @@ impl Default for EmbedTaskConfig {
     }
 }
 
-fn default_pooling() -> String { "mean".into() }
+fn default_pooling() -> String {
+    "mean".into()
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RerankTaskConfig {
@@ -343,7 +382,9 @@ impl Default for RerankTaskConfig {
     }
 }
 
-fn default_rerank_top_k() -> usize { 10 }
+fn default_rerank_top_k() -> usize {
+    10
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IndexTaskConfig {
@@ -365,9 +406,15 @@ impl Default for IndexTaskConfig {
     }
 }
 
-fn default_chunk_size() -> usize { 512 }
-fn default_chunk_overlap() -> usize { 50 }
-fn default_max_docs() -> usize { 10000 }
+fn default_chunk_size() -> usize {
+    512
+}
+fn default_chunk_overlap() -> usize {
+    50
+}
+fn default_max_docs() -> usize {
+    10000
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SearchTaskConfig {
@@ -389,25 +436,22 @@ impl Default for SearchTaskConfig {
     }
 }
 
-fn default_search_top_k() -> usize { 10 }
-fn default_search_mode() -> String { "semantic".into() }
-fn default_hybrid_alpha() -> f32 { 0.5 }
+fn default_search_top_k() -> usize {
+    10
+}
+fn default_search_mode() -> String {
+    "semantic".into()
+}
+fn default_hybrid_alpha() -> f32 {
+    0.5
+}
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TranscribeTaskConfig {
     #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]
     pub timestamps: bool,
-}
-
-impl Default for TranscribeTaskConfig {
-    fn default() -> Self {
-        Self {
-            language: None,  // Auto-detect
-            timestamps: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -424,19 +468,19 @@ pub struct ModelOverride {
 
     #[serde(default)]
     pub quantize_embeddings: Option<String>,
-    
+
     /// Generation overrides (for decoder models)
     #[serde(default)]
     pub generation: Option<GenerationParams>,
-    
+
     /// Encoding overrides (for encoder models)
     #[serde(default)]
     pub encoding: Option<EmbedTaskConfig>,
-    
+
     /// Summarize overrides (for seq2seq models)
     #[serde(default)]
     pub summarize: Option<Seq2SeqParams>,
-    
+
     /// Translate overrides (for seq2seq models)
     #[serde(default)]
     pub translate: Option<Seq2SeqParams>,
@@ -477,11 +521,11 @@ impl Default for LoadTaskConfig {
     }
 }
 
-fn default_dtype() -> String { "f32".into() }
-
+fn default_dtype() -> String {
+    "f32".into()
+}
 
 // Cache Configuration
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CacheConfig {
@@ -494,15 +538,13 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            dir: None,  // Use system default
+            dir: None, // Use system default
             auto_download: true,
         }
     }
 }
 
-
 // Hardware Configuration
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HardwareConfig {
@@ -518,11 +560,11 @@ impl Default for HardwareConfig {
     }
 }
 
-fn default_device() -> String { "auto".into() }
-
+fn default_device() -> String {
+    "auto".into()
+}
 
 // Output Configuration
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OutputConfig {
@@ -544,4 +586,6 @@ impl Default for OutputConfig {
     }
 }
 
-fn default_format() -> String { "text".into() }
+fn default_format() -> String {
+    "text".into()
+}

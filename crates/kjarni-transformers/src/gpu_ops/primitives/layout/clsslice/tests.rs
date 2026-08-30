@@ -1,16 +1,16 @@
 #[cfg(test)]
 mod tests {
-    
+
+    use crate::WgpuContext;
     use crate::gpu::DType;
     use crate::gpu_ops::primitives::layout::clsslice::GpuClsSlice;
     use crate::{gpu::GpuTensor, gpu_ops::primitives::layout::clsslice::ClsSliceUniforms};
-    use crate::WgpuContext;
     use anyhow::Result;
     use ndarray::{Array2, Array3};
     use std::sync::Arc;
 
     async fn get_test_context() -> Arc<WgpuContext> {
-       WgpuContext::new().await.unwrap()
+        WgpuContext::new().await.unwrap()
     }
 
     #[tokio::test]
@@ -18,7 +18,7 @@ mod tests {
     async fn test_cls_slice_new() {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
-        
+
         // Should create without error
         let _ = kernel;
     }
@@ -131,11 +131,7 @@ mod tests {
 
         // [32, 16, 64] -> [32, 64]
         let src_data = Array3::from_shape_fn((32, 16, 64), |(b, s, h)| {
-            if s == 0 {
-                (b * 1000 + h) as f32
-            } else {
-                0.0
-            }
+            if s == 0 { (b * 1000 + h) as f32 } else { 0.0 }
         });
 
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
@@ -264,11 +260,7 @@ mod tests {
 
         // Minimal hidden: [2, 4, 1] -> [2, 1]
         let src_data = Array3::from_shape_fn((2, 4, 1), |(b, s, _)| {
-            if s == 0 {
-                (b + 1) as f32 * 100.0
-            } else {
-                -1.0
-            }
+            if s == 0 { (b + 1) as f32 * 100.0 } else { -1.0 }
         });
 
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
@@ -314,13 +306,13 @@ mod tests {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
 
-        let src_data = Array3::from_shape_fn((1, 4, 8), |(_, s, h)| {
-            if s == 0 {
-                -(h as f32) - 1.0
-            } else {
-                1000.0
-            }
-        });
+        let src_data =
+            Array3::from_shape_fn(
+                (1, 4, 8),
+                |(_, s, h)| {
+                    if s == 0 { -(h as f32) - 1.0 } else { 1000.0 }
+                },
+            );
 
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![1, 8], DType::F32, "")?;
@@ -338,11 +330,10 @@ mod tests {
         Ok(())
     }
 
-  
     fn cpu_cls_slice(src: &Array3<f32>) -> Array2<f32> {
         let batch_size = src.shape()[0];
         let hidden_size = src.shape()[2];
-        
+
         let mut result = Array2::<f32>::zeros((batch_size, hidden_size));
         for b in 0..batch_size {
             for h in 0..hidden_size {
@@ -391,15 +382,15 @@ mod tests {
         let kernel = GpuClsSlice::new(&context);
 
         // Run multiple times with different shapes
-        let configs = vec![
-            (1, 4, 8),
-            (2, 16, 32),
-            (4, 8, 64),
-        ];
+        let configs = vec![(1, 4, 8), (2, 16, 32), (4, 8, 64)];
 
         for (batch, seq, hidden) in configs {
             let src_data = Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
-                if s == 0 { (b * hidden + h) as f32 } else { -1.0 }
+                if s == 0 {
+                    (b * hidden + h) as f32
+                } else {
+                    -1.0
+                }
             });
 
             let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;

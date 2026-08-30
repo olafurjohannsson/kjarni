@@ -2,15 +2,13 @@
 mod sentence_encoder_loading_tests {
     use crate::SentenceEncoder;
 
-    
     use anyhow::Result;
     use kjarni_transformers::models::ModelType;
     use kjarni_transformers::traits::Device;
     use kjarni_transformers::{LanguageModel, WgpuContext};
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
-    
-    
+
     use tempfile::TempDir;
 
     fn create_dummy_bert_files() -> Result<TempDir> {
@@ -18,19 +16,19 @@ mod sentence_encoder_loading_tests {
         let path = dir.path();
         let mut tensors = HashMap::new();
         let shape_emb = vec![10, 4];
-        let data_emb = vec![0.0f32; 40];
+        let data_emb = [0.0f32; 40];
         let bytes_emb: Vec<u8> = data_emb.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         let data_pos = vec![0.0f32; 512 * 4];
         let bytes_pos: Vec<u8> = data_pos.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         let shape_layer = vec![4, 4];
-        let data_layer = vec![0.0f32; 16];
+        let data_layer = [0.0f32; 16];
         let bytes_layer: Vec<u8> = data_layer.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         // Biases (4 floats)
         let shape_bias = vec![4];
-        let data_bias = vec![0.0f32; 4];
+        let data_bias = [0.0f32; 4];
         let bytes_bias: Vec<u8> = data_bias.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         tensors.insert(
@@ -43,7 +41,7 @@ mod sentence_encoder_loading_tests {
             TensorView::new(Dtype::F32, vec![512, 4], &bytes_pos)?,
         );
 
-        let token_type_bytes = &bytes_layer[0..32]; 
+        let token_type_bytes = &bytes_layer[0..32];
         tensors.insert(
             "embeddings.token_type_embeddings.weight".to_string(),
             TensorView::new(Dtype::F32, vec![2, 4], token_type_bytes)?,

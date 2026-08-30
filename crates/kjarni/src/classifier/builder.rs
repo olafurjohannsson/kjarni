@@ -3,16 +3,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::tensor::DType;
-use kjarni_transformers::{WgpuContext};
 
 use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder};
 
 use super::model::Classifier;
 use super::presets::ClassifierPreset;
-use super::types::{
-    ClassificationMode, ClassificationOverrides, ClassifierResult, LabelConfig,
-};
+use super::types::{ClassificationMode, ClassificationOverrides, ClassifierResult, LabelConfig};
 
 /// Builder for configuring and constructing a Classifier.
 ///

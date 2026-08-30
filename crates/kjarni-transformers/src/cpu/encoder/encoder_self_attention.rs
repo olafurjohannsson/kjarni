@@ -110,7 +110,7 @@ impl EncoderSelfAttention {
 
         // Add position bias if provided
         if let Some(bias) = position_bias {
-            scores = scores + bias;
+            scores += bias;
         }
 
         // Apply padding mask
@@ -231,7 +231,7 @@ impl EncoderSelfAttention {
             (q_heads, k_heads_t, v_heads)
         };
 
-        // Compute attention scores: Q @ K^T 
+        // Compute attention scores: Q @ K^T
         matmul_4d_into(
             &q_heads.view(),
             &k_heads_t.view(),
@@ -273,7 +273,7 @@ impl EncoderSelfAttention {
             ..seq_len
         ]));
 
-        // Compute context: Scores @ V 
+        // Compute context: Scores @ V
         matmul_4d_into(
             &buffers
                 .attn_scores
@@ -325,7 +325,7 @@ impl EncoderSelfAttention {
     }
 }
 
-/// Batched matmul 
+/// Batched matmul
 #[inline]
 pub fn matmul_4d_into(
     a: &ArrayView4<f32>,

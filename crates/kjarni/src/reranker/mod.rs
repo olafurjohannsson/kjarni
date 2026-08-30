@@ -44,7 +44,11 @@ pub use types::{RerankOverrides, RerankResult, RerankerError, RerankerResult};
 ///     println!("Doc {}: {:.4}", idx, score);
 /// }
 /// ```
-pub async fn rerank(model: &str, query: &str, documents: &[&str]) -> RerankerResult<Vec<RerankResult>> {
+pub async fn rerank(
+    model: &str,
+    query: &str,
+    documents: &[&str],
+) -> RerankerResult<Vec<RerankResult>> {
     let reranker = Reranker::new(model).await?;
     reranker.rerank(query, documents).await
 }

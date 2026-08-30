@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use crate::WgpuContext;
+use crate::gpu::cache::GpuKVCache;
 use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
-use crate::gpu::cache::GpuKVCache;
-use crate::WgpuContext;
 
 pub struct GpuPreNormDecoderLayer {
     pub self_attn: GpuAttention,
@@ -246,13 +246,8 @@ impl GpuPreNormDecoderLayer {
 
         let ffn_out = pool.get(ln2_out.shape().to_vec());
 
-        self.feedforward.encode(
-            encoder,
-            &self.ff_weights,
-            &ln2_out,
-            &ffn_out,
-            pool,
-        );
+        self.feedforward
+            .encode(encoder, &self.ff_weights, &ln2_out, &ffn_out, pool);
 
         let final_output = pool.get(residual_2.shape().to_vec());
         self.add

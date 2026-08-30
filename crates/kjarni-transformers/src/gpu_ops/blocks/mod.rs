@@ -3,17 +3,12 @@ pub mod cache;
 pub mod encoder;
 pub mod ffn;
 pub mod ffn_swiglu;
-pub mod rope;
 pub mod layers;
+pub mod rope;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 
-
-
-pub use ffn::{
-    GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd,
-};
+pub use ffn::{GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd};
 pub use ffn_swiglu::{GpuSwiGLUFFN, GpuSwiGLUFFNWeights};
-
 
 pub enum GpuFeedForwardWeights {
     Standard(GpuFeedForwardWeightsStd),

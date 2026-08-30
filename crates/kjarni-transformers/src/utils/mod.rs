@@ -1,9 +1,9 @@
 //! Utility modules
 
+pub mod alloc_stats;
 pub mod levenshtein;
 pub mod linear_algebra;
 pub mod masks;
-pub mod alloc_stats;
 pub mod tensor_ops;
 pub use levenshtein::{distance, find_similar, find_within_distance, similarity};
 pub use masks::*;
@@ -13,7 +13,6 @@ mod tests;
 
 #[cfg(target_os = "linux")]
 fn set_thread_affinity(num_cores: usize) {
-
     unsafe {
         let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
         for i in 0..num_cores {
@@ -36,7 +35,7 @@ pub fn configure_threading() {
     let (num_threads, is_hybrid) = if is_intel_hybrid() {
         (get_p_core_count().unwrap_or(physical_cores / 2), true)
     } else if physical_cores < logical_cores {
-        (physical_cores, false) 
+        (physical_cores, false)
     } else {
         (logical_cores, false)
     };
@@ -59,6 +58,7 @@ pub fn configure_threading() {
     log::info!("Threading: {} threads, hybrid={}", num_threads, is_hybrid);
 }
 
+#[allow(dead_code, reason = "reachable only on some targets")]
 fn is_intel_hybrid() -> bool {
     // Check for Intel 12th gen+ hybrid architecture
     #[cfg(target_os = "linux")]
@@ -88,6 +88,7 @@ fn is_intel_hybrid() -> bool {
     false
 }
 
+#[allow(dead_code, reason = "reachable only on some targets")]
 fn get_p_core_count() -> Option<usize> {
     #[cfg(target_os = "linux")]
     {

@@ -2,8 +2,7 @@
 mod tests {
     use std::path::Path;
 
-    
-    use crate::weights::{gguf_loader::GgufLoader, ModelWeights, WeightLoader};
+    use crate::weights::{ModelWeights, WeightLoader, gguf_loader::GgufLoader};
 
     const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B";
     const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf";
@@ -123,7 +122,8 @@ mod tests {
 
         let gguf_weights = ModelWeights::new(Path::new(GGUF_PATH)).unwrap();
 
-        let _raw = gguf_weights.loader()
+        let _raw = gguf_weights
+            .loader()
             .get_raw("model.layers.0.self_attn.q_proj.weight")
             .unwrap();
 
@@ -260,8 +260,14 @@ mod tests {
         let st_weights = ModelWeights::new(Path::new(SAFETENSORS_PATH)).unwrap();
         let gguf_weights = ModelWeights::new(Path::new(GGUF_PATH)).unwrap();
 
-        let st_emb = st_weights.loader().get_raw("model.embed_tokens.weight").unwrap();
-        let gguf_emb = gguf_weights.loader().get_raw("model.embed_tokens.weight").unwrap();
+        let st_emb = st_weights
+            .loader()
+            .get_raw("model.embed_tokens.weight")
+            .unwrap();
+        let gguf_emb = gguf_weights
+            .loader()
+            .get_raw("model.embed_tokens.weight")
+            .unwrap();
 
         assert_eq!(
             st_emb.shape, gguf_emb.shape,
@@ -291,7 +297,6 @@ mod tests {
         ];
 
         for name in tensors_to_check {
-            
             let st_tensor = st_weights.loader().get_raw(name).unwrap();
             let gguf_tensor = gguf_weights.loader().get_raw(name).unwrap();
 
@@ -422,7 +427,11 @@ mod tests {
             let tensor = loader
                 .get_raw(hf_name)
                 .unwrap_or_else(|e| panic!("failed to load '{}': {}", hf_name, e));
-            assert!(!tensor.shape.is_empty(), "tensor {} should have shape", hf_name);
+            assert!(
+                !tensor.shape.is_empty(),
+                "tensor {} should have shape",
+                hf_name
+            );
         }
     }
 

@@ -80,9 +80,6 @@ impl fmt::Display for EncodingConfig {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,3 +1,5 @@
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -7,23 +9,22 @@ use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
-use crate::models::llama::{cpu_decoder::LlamaCpuDecoder};
+use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+use crate::models::qwen::config::QwenConfig;
 #[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
-use crate::models::qwen::config::QwenConfig;
 
 use kjarni_transformers::{
-    ChatTemplate,
-    WgpuContext,
+    ChatTemplate, WgpuContext,
     cache::{Cache, CpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
+    loaders::LoadedRoPE,
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
-    loaders::LoadedRoPE,
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
@@ -40,9 +41,15 @@ impl DecoderModelFactory for QwenModel {
     type Config = QwenConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        QwenConfig::from_loader(&*weights.loader(), Some(&weights.config_json()))
+        QwenConfig::from_loader(weights.loader(), Some(weights.config_json()))
     }
 
+    // On wasm there is no GPU backend, so `context` goes unread and the
+    // locals are never reassigned. The signature is shared with native.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(unused_variables, unused_mut, unused_assignments)
+    )]
     fn build_backends(
         weights: &ModelWeights,
         meta: &ModelMetadata,
@@ -194,9 +201,9 @@ impl LanguageModel for QwenModel {
                 )?))
             }
             #[cfg(target_arch = "wasm32")]
-            kjarni_transformers::prelude::Device::Wgpu => Err(anyhow!(
-                "GPU cache is not available in WebAssembly"
-            )),
+            kjarni_transformers::prelude::Device::Wgpu => {
+                Err(anyhow!("GPU cache is not available in WebAssembly"))
+            }
         }
     }
 
@@ -286,9 +293,9 @@ impl DecoderLanguageModel for QwenModel {
             max_new_tokens: Some(512),
             max_length: self.config.max_position_embeddings,
             min_length: 0,
-            repetition_penalty: 1.1, 
+            repetition_penalty: 1.1,
             no_repeat_ngram_size: 0,
-            add_bos_token: false, 
+            add_bos_token: false,
             strategy: DecodingStrategy::Sample(SamplingParams {
                 temperature: 0.7,
                 top_k: Some(40),

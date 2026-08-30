@@ -1,7 +1,9 @@
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
-use crate::{cpu::normalization::Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
+use crate::{
+    cpu::encoder::encoder_self_attention::EncoderSelfAttention, cpu::normalization::Normalization,
+};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3, s};
 use rayon::iter::{
@@ -178,7 +180,6 @@ impl EncoderLayer {
         Ok(())
     }
 
- 
     /// Forward pass
     pub fn forward(
         &self,
@@ -226,7 +227,7 @@ impl EncoderLayer {
         add_inplace(&mut hidden, &attn_out.view());
         let ffn_input = self.self_attn_layer_norm.forward(&hidden);
         let ffn_residual = &ffn_input;
-        let ffn_out = self.feedforward.forward(&ffn_residual)?;
+        let ffn_out = self.feedforward.forward(ffn_residual)?;
         let hidden = self.ffn_layer_norm.forward(&(ffn_residual + &ffn_out));
         Ok(hidden)
     }
@@ -235,10 +236,10 @@ impl EncoderLayer {
 #[cfg(test)]
 mod encoder_layer_tests {
     use super::*;
+    use crate::cpu::normalization::LayerNorm;
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer;
-    use crate::cpu::normalization::LayerNorm;
-    
+
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};
     fn create_deterministic_layer(
@@ -301,9 +302,7 @@ mod encoder_layer_tests {
             1e-5,
         ));
 
-        let layer = EncoderLayer::new(self_attn, ln1, feedforward, ln2);
-
-        layer
+        EncoderLayer::new(self_attn, ln1, feedforward, ln2)
     }
     #[test]
     fn test_noalloc_attention_only() -> Result<()> {

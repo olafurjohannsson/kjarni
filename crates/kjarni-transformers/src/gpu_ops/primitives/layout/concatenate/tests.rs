@@ -23,7 +23,7 @@ async fn test_gpu_concatenate_parity() -> Result<()> {
     let b_shape = (1, 12, 1, 64);
     let concat_axis = 2; // Sequence dimension
     let a_cpu = Array4::from_shape_fn(a_shape, |(i, j, k, l)| (i + j + k + l) as f32);
-    let b_cpu = Array4::from_shape_fn(b_shape, |(i, j, k, l)| (i + j + k + l) as f32 * -1.0);
+    let b_cpu = Array4::from_shape_fn(b_shape, |(i, j, k, l)| -((i + j + k + l) as f32));
     let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
     let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
     let expected_cpu = ndarray::concatenate(Axis(concat_axis), &[a_cpu.view(), b_cpu.view()])?;

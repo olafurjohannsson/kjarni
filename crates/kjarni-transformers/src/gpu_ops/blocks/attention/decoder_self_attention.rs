@@ -1,10 +1,10 @@
 //! Causal self-attention for decoder models
 
 use super::ops::AttentionOps;
-use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
+use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::WgpuContext;
+use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::Result;
 use std::sync::Arc;
@@ -111,8 +111,8 @@ impl GpuDecoderSelfAttention {
             &full_k,
             &full_v,
             Some(attention_mask),
-            true,       // is_causal = true for decoder
-            cache_len,  // position_offset for causal mask
+            true,      // is_causal = true for decoder
+            cache_len, // position_offset for causal mask
             pool,
         );
 
@@ -160,8 +160,10 @@ impl GpuDecoderSelfAttention {
         let full_v = pool.get(vec![b, h, full_len, d]);
 
         // Concatenate along sequence dimension (axis 2)
-        self.concatenate.encode(encoder, &[&valid_cache_k, k_new], &full_k, 2);
-        self.concatenate.encode(encoder, &[&valid_cache_v, v_new], &full_v, 2);
+        self.concatenate
+            .encode(encoder, &[&valid_cache_k, k_new], &full_k, 2);
+        self.concatenate
+            .encode(encoder, &[&valid_cache_v, v_new], &full_v, 2);
 
         Ok((full_k, full_v))
     }

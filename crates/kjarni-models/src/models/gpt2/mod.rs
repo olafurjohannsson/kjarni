@@ -9,13 +9,12 @@
 mod config;
 mod model;
 // No GPU backend on wasm.
+mod cpu_decoder;
 #[cfg(not(target_arch = "wasm32"))]
 mod gpu_decoder;
-mod cpu_decoder;
 
 #[cfg(test)]
 mod tests;
 
-
-pub use model::Gpt2Model;
 pub use config::Gpt2Config;
+pub use model::Gpt2Model;

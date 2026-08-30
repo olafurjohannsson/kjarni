@@ -1,11 +1,10 @@
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 use super::*;
+use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use crate::utils::masks::{apply_causal_mask, apply_padding_mask};
 use crate::utils::masks::{create_full_attention_mask, create_padding_mask_from_tokens};
-use crate::WgpuContext;
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
 use ndarray::{Array, Array2, Array4};
@@ -267,7 +266,10 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
         }
     }
 
-    assert_eq!(&result_gpu.into_raw_vec(), &expected_cpu.into_raw_vec());
+    assert_eq!(
+        &result_gpu.into_raw_vec_and_offset().0,
+        &expected_cpu.into_raw_vec_and_offset().0
+    );
     println!("✓ GPU causal masking with offset test passed.");
     Ok(())
 }

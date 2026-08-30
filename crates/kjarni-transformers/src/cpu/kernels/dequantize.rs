@@ -1,16 +1,16 @@
 use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 
-
 /// Dequantize a Q4_K block to 256 f32 values.
 pub fn dequantize_q4_k_block(b: &BlockQ4_K, out: &mut [f32]) {
     let d = b.d.to_f32();
     let dmin = b.dmin.to_f32();
 
-    let mut is = 0;      // Sub-block index (0..7)
-    let mut q_idx = 0;   // Index into qs array
+    let mut is = 0; // Sub-block index (0..7)
+    let mut q_idx = 0; // Index into qs array
 
     // Process 4 pairs of sub-blocks (each pair processes 64 values)
-    for j in 0..4 {  // QK_K / 64 = 256 / 64 = 4
+    for j in 0..4 {
+        // QK_K / 64 = 256 / 64 = 4
         // Get scales and mins for two consecutive sub-blocks
         let (sc1, m1) = get_scale_min_k4(is, &b.scales);
         let (sc2, m2) = get_scale_min_k4(is + 1, &b.scales);
@@ -35,9 +35,7 @@ pub fn dequantize_q4_k_block(b: &BlockQ4_K, out: &mut [f32]) {
     }
 }
 
-
 // Q8_0 Dequantization
-
 
 /// Dequantize a Q8_0 block to 32 f32 values.
 pub fn dequantize_q8_0_block(block: &BlockQ8_0, output: &mut [f32]) {
@@ -46,7 +44,6 @@ pub fn dequantize_q8_0_block(block: &BlockQ8_0, output: &mut [f32]) {
         output[i] = (q as f32) * scale;
     }
 }
-
 
 // Q6_K Dequantization
 
@@ -91,7 +88,7 @@ pub fn dequantize_q6_k_block(b: &BlockQ6_K, out: &mut [f32]) {
 
             // 3. Upper 4 bits from ql[j], Upper 2 bits from qh[j] (bits 4-5)
             // Scale: sc[is + 4]
-            let q2 = ((ql[j] >> 4) as i8) | (((qh_val & 0x30) << 0) as i8);
+            let q2 = ((ql[j] >> 4) as i8) | ((qh_val & 0x30) as i8);
             let val2 = (q2.wrapping_sub(32)) as f32;
             out_ptr[j + 64] = d * val2 * sc[is + 4] as f32;
 
@@ -137,9 +134,7 @@ pub fn get_scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
     }
 }
 
-
 // Unit Tests
-
 
 #[cfg(test)]
 mod tests {
@@ -149,9 +144,18 @@ mod tests {
     fn test_get_scale_min_k4_low_indices() {
         // Test sub-blocks 0-3 use simple 6-bit extraction
         let scales: [u8; 12] = [
-            0b00_111111, 0b00_101010, 0b00_010101, 0b00_000000, // scales 0-3 (lower 6 bits)
-            0b00_110011, 0b00_001100, 0b00_110000, 0b00_001111, // mins 0-3 (lower 6 bits)
-            0, 0, 0, 0, // unused for j < 4
+            0b00_111111,
+            0b00_101010,
+            0b00_010101,
+            0b00_000000, // scales 0-3 (lower 6 bits)
+            0b00_110011,
+            0b00_001100,
+            0b00_110000,
+            0b00_001111, // mins 0-3 (lower 6 bits)
+            0,
+            0,
+            0,
+            0, // unused for j < 4
         ];
 
         let (sc0, m0) = get_scale_min_k4(0, &scales);
@@ -167,9 +171,18 @@ mod tests {
     fn test_get_scale_min_k4_high_indices() {
         // Test sub-blocks 4-7 reconstruct from packed bits
         let scales: [u8; 12] = [
-            0b11_000000, 0b10_000000, 0b01_000000, 0b00_000000, // high bits in bits 6-7
-            0b11_000000, 0b10_000000, 0b01_000000, 0b00_000000, // high bits in bits 6-7
-            0b0101_0011, 0b0110_0100, 0b0111_0101, 0b1000_0110, // bytes 8-11
+            0b11_000000,
+            0b10_000000,
+            0b01_000000,
+            0b00_000000, // high bits in bits 6-7
+            0b11_000000,
+            0b10_000000,
+            0b01_000000,
+            0b00_000000, // high bits in bits 6-7
+            0b0101_0011,
+            0b0110_0100,
+            0b0111_0101,
+            0b1000_0110, // bytes 8-11
         ];
 
         // j=4: sc = (scales[8] & 0xF) | ((scales[0] >> 6) << 4)
@@ -196,6 +209,9 @@ mod tests {
 
         // With scale=63, d=1.0, q=8: value = 1.0 * 63 * 8 = 504
         assert!(out[0] > 0.0, "First value should be positive");
-        assert!(out.iter().all(|&v| v.is_finite()), "All values should be finite");
+        assert!(
+            out.iter().all(|&v| v.is_finite()),
+            "All values should be finite"
+        );
     }
 }

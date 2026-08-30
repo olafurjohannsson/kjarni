@@ -106,8 +106,8 @@ impl GpuReshape {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroups_x = (s as u32 + 15) / 16;
-        let workgroups_y = (h as u32 + 15) / 16;
+        let workgroups_x = (s as u32).div_ceil(16);
+        let workgroups_y = (h as u32).div_ceil(16);
         let workgroups_z = b as u32;
         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
     }
@@ -169,7 +169,6 @@ fn compile_reshape_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGrou
     });
     (pipeline, bind_group_layout)
 }
-
 
 #[cfg(test)]
 mod tests;

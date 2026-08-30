@@ -1,9 +1,6 @@
 use anyhow::Result;
 
-use kjarni_transformers::{
-    models::ModelType,
-    traits::Device,
-};
+use kjarni_transformers::{models::ModelType, traits::Device};
 
 #[cfg(test)]
 mod cross_encoder_tests {

@@ -140,7 +140,7 @@ impl GpuLookup2 {
             |pass: &mut wgpu::ComputePass<'_>| {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                let workgroups = (uniforms.output_size + 255) / 256;
+                let workgroups = uniforms.output_size.div_ceil(256);
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
         );

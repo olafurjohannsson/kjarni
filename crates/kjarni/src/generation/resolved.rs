@@ -26,6 +26,10 @@ impl ResolvedGenerationConfig {
     }
 
     /// Get a reference to the inner config.
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "inherent accessor on the public API; renaming it would be a breaking change"
+    )]
     pub fn as_ref(&self) -> &GenerationConfig {
         &self.inner
     }

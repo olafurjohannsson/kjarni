@@ -7,86 +7,87 @@ use std::arch::wasm32::*;
 #[cfg(target_arch = "wasm32")]
 #[target_feature(enable = "simd128")]
 pub unsafe fn wasm_dot_product(a: &[f32], b: &[f32]) -> f32 {
-    let n = a.len();
-    debug_assert_eq!(n, b.len());
+    // SAFETY: the caller guarantees the slices are valid and
+    // correctly aligned; this body only reads through them.
+    unsafe {
+        let n = a.len();
+        debug_assert_eq!(n, b.len());
 
-    let a_ptr = a.as_ptr();
-    let b_ptr = b.as_ptr();
+        let a_ptr = a.as_ptr();
+        let b_ptr = b.as_ptr();
 
-    let mut sum0 = f32x4_splat(0.0);
-    let mut sum1 = f32x4_splat(0.0);
-    let mut sum2 = f32x4_splat(0.0);
-    let mut sum3 = f32x4_splat(0.0);
+        let mut sum0 = f32x4_splat(0.0);
+        let mut sum1 = f32x4_splat(0.0);
+        let mut sum2 = f32x4_splat(0.0);
+        let mut sum3 = f32x4_splat(0.0);
 
-    let mut i = 0;
+        let mut i = 0;
 
-    // Main loop: 16 elements per iteration
-    while i + 16 <= n {
-        let a0 = v128_load(a_ptr.add(i) as *const v128);
-        let a1 = v128_load(a_ptr.add(i + 4) as *const v128);
-        let a2 = v128_load(a_ptr.add(i + 8) as *const v128);
-        let a3 = v128_load(a_ptr.add(i + 12) as *const v128);
+        // Main loop: 16 elements per iteration
+        while i + 16 <= n {
+            let a0 = v128_load(a_ptr.add(i) as *const v128);
+            let a1 = v128_load(a_ptr.add(i + 4) as *const v128);
+            let a2 = v128_load(a_ptr.add(i + 8) as *const v128);
+            let a3 = v128_load(a_ptr.add(i + 12) as *const v128);
 
-        let b0 = v128_load(b_ptr.add(i) as *const v128);
-        let b1 = v128_load(b_ptr.add(i + 4) as *const v128);
-        let b2 = v128_load(b_ptr.add(i + 8) as *const v128);
-        let b3 = v128_load(b_ptr.add(i + 12) as *const v128);
+            let b0 = v128_load(b_ptr.add(i) as *const v128);
+            let b1 = v128_load(b_ptr.add(i + 4) as *const v128);
+            let b2 = v128_load(b_ptr.add(i + 8) as *const v128);
+            let b3 = v128_load(b_ptr.add(i + 12) as *const v128);
 
-        sum0 = f32x4_add(sum0, f32x4_mul(a0, b0));
-        sum1 = f32x4_add(sum1, f32x4_mul(a1, b1));
-        sum2 = f32x4_add(sum2, f32x4_mul(a2, b2));
-        sum3 = f32x4_add(sum3, f32x4_mul(a3, b3));
+            sum0 = f32x4_add(sum0, f32x4_mul(a0, b0));
+            sum1 = f32x4_add(sum1, f32x4_mul(a1, b1));
+            sum2 = f32x4_add(sum2, f32x4_mul(a2, b2));
+            sum3 = f32x4_add(sum3, f32x4_mul(a3, b3));
 
-        i += 16;
+            i += 16;
+        }
+
+        // Handle 4-element chunks
+        while i + 4 <= n {
+            let a0 = v128_load(a_ptr.add(i) as *const v128);
+            let b0 = v128_load(b_ptr.add(i) as *const v128);
+            sum0 = f32x4_add(sum0, f32x4_mul(a0, b0));
+            i += 4;
+        }
+
+        // Combine accumulators
+        sum0 = f32x4_add(f32x4_add(sum0, sum1), f32x4_add(sum2, sum3));
+
+        // Horizontal sum
+        let mut result = f32x4_extract_lane::<0>(sum0)
+            + f32x4_extract_lane::<1>(sum0)
+            + f32x4_extract_lane::<2>(sum0)
+            + f32x4_extract_lane::<3>(sum0);
+
+        // Scalar remainder
+        while i < n {
+            result += *a_ptr.add(i) * *b_ptr.add(i);
+            i += 1;
+        }
+
+        result
     }
-
-    // Handle 4-element chunks
-    while i + 4 <= n {
-        let a0 = v128_load(a_ptr.add(i) as *const v128);
-        let b0 = v128_load(b_ptr.add(i) as *const v128);
-        sum0 = f32x4_add(sum0, f32x4_mul(a0, b0));
-        i += 4;
-    }
-
-    // Combine accumulators
-    sum0 = f32x4_add(f32x4_add(sum0, sum1), f32x4_add(sum2, sum3));
-
-    // Horizontal sum
-    let mut result = f32x4_extract_lane::<0>(sum0)
-        + f32x4_extract_lane::<1>(sum0)
-        + f32x4_extract_lane::<2>(sum0)
-        + f32x4_extract_lane::<3>(sum0);
-
-    // Scalar remainder
-    while i < n {
-        result += *a_ptr.add(i) * *b_ptr.add(i);
-        i += 1;
-    }
-
-    result
 }
 
 /// Computes C = A @ B^T using WASM SIMD128.
 /// A is [m, k], B is [n, k] (row-major, transposed), C is [m, n].
 #[cfg(target_arch = "wasm32")]
 #[target_feature(enable = "simd128")]
-pub unsafe fn wasm_matmul_2d(
-    out: &mut [f32],
-    a: &[f32],
-    b: &[f32],
-    m: usize,
-    n: usize,
-    k: usize,
-) {
-    debug_assert_eq!(a.len(), m * k);
-    debug_assert_eq!(b.len(), n * k);
-    debug_assert_eq!(out.len(), m * n);
+pub unsafe fn wasm_matmul_2d(out: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
+    // SAFETY: the caller guarantees the slices are valid and
+    // correctly aligned; this body only reads through them.
+    unsafe {
+        debug_assert_eq!(a.len(), m * k);
+        debug_assert_eq!(b.len(), n * k);
+        debug_assert_eq!(out.len(), m * n);
 
-    for row in 0..m {
-        let a_row = &a[row * k..(row + 1) * k];
-        for col in 0..n {
-            let b_row = &b[col * k..(col + 1) * k];
-            out[row * n + col] = wasm_dot_product(a_row, b_row);
+        for row in 0..m {
+            let a_row = &a[row * k..(row + 1) * k];
+            for col in 0..n {
+                let b_row = &b[col * k..(col + 1) * k];
+                out[row * n + col] = wasm_dot_product(a_row, b_row);
+            }
         }
     }
 }
@@ -96,6 +97,7 @@ pub unsafe fn wasm_matmul_2d(
 /// Transposes B internally then delegates to wasm_matmul_2d.
 #[cfg(target_arch = "wasm32")]
 #[target_feature(enable = "simd128")]
+#[allow(dead_code, reason = "reachable only on some targets")]
 pub unsafe fn wasm_matmul_2d_nn(
     out: &mut [f32],
     a: &[f32],
@@ -115,5 +117,9 @@ pub unsafe fn wasm_matmul_2d_nn(
         }
     }
 
-    wasm_matmul_2d(out, a, &b_t, m, n, k);
+    // SAFETY: the caller guarantees the slices are valid and correctly sized;
+    // b_t is built here and is correct by construction.
+    unsafe {
+        wasm_matmul_2d(out, a, &b_t, m, n, k);
+    }
 }

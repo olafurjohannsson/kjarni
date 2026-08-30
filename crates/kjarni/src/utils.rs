@@ -85,13 +85,25 @@ mod tests {
         let matrix = similarity_matrix(&embeddings);
 
         // Check symmetry
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "indexed numeric loop; the index addresses more than the iterated slice"
+        )]
         for i in 0..3 {
+            #[allow(
+                clippy::needless_range_loop,
+                reason = "indexed numeric loop; the index addresses more than the iterated slice"
+            )]
             for j in 0..3 {
                 assert!((matrix[i][j] - matrix[j][i]).abs() < 1e-6);
             }
         }
 
         // Check diagonal is 1.0
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "indexed numeric loop; the index addresses more than the iterated slice"
+        )]
         for i in 0..3 {
             assert!((matrix[i][i] - 1.0).abs() < 1e-6);
         }

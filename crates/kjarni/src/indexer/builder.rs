@@ -1,4 +1,3 @@
-
 use crate::Indexer;
 use crate::indexer::IndexerResult;
 use kjarni_rag::{Progress, ProgressCallback};

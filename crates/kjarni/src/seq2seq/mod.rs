@@ -1,7 +1,5 @@
 //! Generic encoder-decoder (seq2seq) text generation.
 
-
-
 mod builder;
 mod model;
 mod resolution;
@@ -57,7 +55,6 @@ pub fn is_seq2seq_model(model: &str) -> Seq2SeqResult<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod send_sync_tests {
     use super::*;
@@ -82,7 +79,6 @@ mod send_sync_tests {
         assert_sync::<Seq2SeqError>();
     };
 }
-
 
 #[cfg(test)]
 mod tests;

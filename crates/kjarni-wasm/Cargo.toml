@@ -65,21 +65,10 @@ pkg-config = "0.3"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = "0.7.0"
 
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-strip = true
-
-[profile.bench]
-inherits = "release"
-
-[profile.dev-opt]
-inherits = "dev"
-opt-level = 2
-
 [package.metadata.wasm-pack.profile.release]
 # Size matters here: the engine is a far larger codebase than the hand-rolled stack
 # it replaced, and this bundle is downloaded by every visitor.
 wasm-opt = ["-Os", "--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[lints]
+workspace = true

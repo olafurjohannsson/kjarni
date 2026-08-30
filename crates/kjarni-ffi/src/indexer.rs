@@ -10,7 +10,6 @@ use kjarni::indexer::{IndexInfo, IndexStats, Indexer, IndexerError};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
-
 #[repr(C)]
 pub struct KjarniIndexStats {
     /// Number of document chunks indexed (after splitting)
@@ -81,15 +80,22 @@ impl KjarniIndexInfo {
 }
 
 /// Free memory allocated for index info strings
+///
+/// # Safety
+///
+/// - `info` must be a value returned by `kjarni_index_info`, passed here exactly once. Its
+///   buffers are invalid to read afterwards.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) { unsafe {
-    if !info.path.is_null() {
-        let _ = CString::from_raw(info.path);
-    }
-    if !info.embedding_model.is_null() {
-        let _ = CString::from_raw(info.embedding_model);
-    }
-}}
+pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
+    crate::panic::guard("kjarni_index_info_free", (), || unsafe {
+        if !info.path.is_null() {
+            let _ = CString::from_raw(info.path);
+        }
+        if !info.embedding_model.is_null() {
+            let _ = CString::from_raw(info.embedding_model);
+        }
+    })
+}
 
 /// Configuration for creating an Indexer
 #[repr(C)]
@@ -147,109 +153,128 @@ pub struct KjarniIndexer {
 }
 
 /// Create a new Indexer
+///
+/// # Safety
+///
+/// - `out` must be null, or a live handle returned by `kjarni_indexer_new` that has not been
+///   freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_new(
     config: *const KjarniIndexerConfig,
     out: *mut *mut KjarniIndexer,
-) -> KjarniErrorCode { unsafe {
-    if out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
-
-    let default_config = kjarni_indexer_config_default();
-    let config = if config.is_null() {
-        &default_config
-    } else {
-        &*config
-    };
-
-    let result = get_runtime().block_on(async {
-        // Get model name
-        let model_name = if !config.model_name.is_null() {
-            match CStr::from_ptr(config.model_name).to_str() {
-                Ok(s) => s,
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        } else {
-            "minilm-l6-v2"
-        };
-
-        let mut builder = Indexer::builder(model_name);
-
-        // Device
-        match config.device {
-            KjarniDevice::Gpu => builder = builder.gpu(),
-            KjarniDevice::Cpu => builder = builder.cpu(),
-        }
-
-        // Cache dir
-        if !config.cache_dir.is_null() {
-            match CStr::from_ptr(config.cache_dir).to_str() {
-                Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
-
-        // Chunking
-        builder = builder.chunk_size(config.chunk_size);
-        builder = builder.chunk_overlap(config.chunk_overlap);
-        builder = builder.batch_size(config.batch_size);
-
-        // Extensions
-        if !config.extensions.is_null() {
-            match CStr::from_ptr(config.extensions).to_str() {
-                Ok(s) => {
-                    let exts: Vec<&str> = s.split(',').map(|e| e.trim()).collect();
-                    builder = builder.extensions(&exts);
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_indexer_new",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if out.is_null() {
+                    return KjarniErrorCode::NullPointer;
                 }
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-            }
-        }
 
-        // Exclude patterns
-        if !config.exclude_patterns.is_null() {
-            match CStr::from_ptr(config.exclude_patterns).to_str() {
-                Ok(s) => {
-                    for pattern in s.split(',').map(|p| p.trim()) {
-                        builder = builder.exclude(pattern);
+                let default_config = kjarni_indexer_config_default();
+                let config = if config.is_null() {
+                    &default_config
+                } else {
+                    &*config
+                };
+
+                let result = get_runtime().block_on(async {
+                    // Get model name
+                    let model_name = if !config.model_name.is_null() {
+                        match CStr::from_ptr(config.model_name).to_str() {
+                            Ok(s) => s,
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    } else {
+                        "minilm-l6-v2"
+                    };
+
+                    let mut builder = Indexer::builder(model_name);
+
+                    // Device
+                    match config.device {
+                        KjarniDevice::Gpu => builder = builder.gpu(),
+                        KjarniDevice::Cpu => builder = builder.cpu(),
                     }
+
+                    // Cache dir
+                    if !config.cache_dir.is_null() {
+                        match CStr::from_ptr(config.cache_dir).to_str() {
+                            Ok(s) => builder = builder.cache_dir(s),
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Chunking
+                    builder = builder.chunk_size(config.chunk_size);
+                    builder = builder.chunk_overlap(config.chunk_overlap);
+                    builder = builder.batch_size(config.batch_size);
+
+                    // Extensions
+                    if !config.extensions.is_null() {
+                        match CStr::from_ptr(config.extensions).to_str() {
+                            Ok(s) => {
+                                let exts: Vec<&str> = s.split(',').map(|e| e.trim()).collect();
+                                builder = builder.extensions(&exts);
+                            }
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Exclude patterns
+                    if !config.exclude_patterns.is_null() {
+                        match CStr::from_ptr(config.exclude_patterns).to_str() {
+                            Ok(s) => {
+                                for pattern in s.split(',').map(|p| p.trim()) {
+                                    builder = builder.exclude(pattern);
+                                }
+                            }
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    }
+
+                    // Flags
+                    builder = builder.recursive(config.recursive != 0);
+                    builder = builder.include_hidden(config.include_hidden != 0);
+                    if config.max_file_size > 0 {
+                        builder = builder.max_file_size(config.max_file_size);
+                    }
+                    builder = builder.quiet(config.quiet != 0);
+
+                    builder.build().await.map_err(|e| {
+                        set_last_error(e.to_string());
+                        KjarniErrorCode::LoadFailed
+                    })
+                });
+
+                match result {
+                    Ok(indexer) => {
+                        let handle = Box::new(KjarniIndexer { inner: indexer });
+                        *out = Box::into_raw(handle);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => e,
                 }
-                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
-        }
-
-        // Flags
-        builder = builder.recursive(config.recursive != 0);
-        builder = builder.include_hidden(config.include_hidden != 0);
-        if config.max_file_size > 0 {
-            builder = builder.max_file_size(config.max_file_size);
-        }
-        builder = builder.quiet(config.quiet != 0);
-
-        builder.build().await.map_err(|e| {
-            set_last_error(e.to_string());
-            KjarniErrorCode::LoadFailed
-        })
-    });
-
-    match result {
-        Ok(indexer) => {
-            let handle = Box::new(KjarniIndexer { inner: indexer });
-            *out = Box::into_raw(handle);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => e,
-    }
-}}
+        },
+    )
+}
 
 /// Free an Indexer handle
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a handle returned by `kjarni_indexer_new` that has not already
+///   been passed to this function. It is invalid to use afterwards.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) { unsafe {
-    if !indexer.is_null() {
-        let _ = Box::from_raw(indexer);
-    }
-}}
-
+pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
+    crate::panic::guard("kjarni_indexer_free", (), || unsafe {
+        if !indexer.is_null() {
+            let _ = Box::from_raw(indexer);
+        }
+    })
+}
 
 /// Convert Rust ProgressStage to FFI KjarniProgressStage
 fn convert_stage(stage: ProgressStage) -> KjarniProgressStage {
@@ -281,23 +306,35 @@ fn indexer_error_to_code(e: &IndexerError) -> KjarniErrorCode {
 unsafe fn parse_inputs<'a>(
     inputs: *const *const c_char,
     num_inputs: usize,
-) -> Result<Vec<&'a str>, KjarniErrorCode> { unsafe {
-    let mut input_vec = Vec::with_capacity(num_inputs);
-    for i in 0..num_inputs {
-        let input_ptr = *inputs.add(i);
-        if input_ptr.is_null() {
-            return Err(KjarniErrorCode::NullPointer);
+) -> Result<Vec<&'a str>, KjarniErrorCode> {
+    unsafe {
+        let mut input_vec = Vec::with_capacity(num_inputs);
+        for i in 0..num_inputs {
+            let input_ptr = *inputs.add(i);
+            if input_ptr.is_null() {
+                return Err(KjarniErrorCode::NullPointer);
+            }
+            match CStr::from_ptr(input_ptr).to_str() {
+                Ok(s) => input_vec.push(s),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+            }
         }
-        match CStr::from_ptr(input_ptr).to_str() {
-            Ok(s) => input_vec.push(s),
-            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-        }
+        Ok(input_vec)
     }
-    Ok(input_vec)
-}}
-
+}
 
 /// Create a new index from files/directories
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
+/// - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+/// - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+///   nul-terminated C string that stays valid for the call.
+/// - `out` must be a valid, writable pointer to a `KjarniIndexStats`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create(
     indexer: *mut KjarniIndexer,
@@ -306,44 +343,68 @@ pub unsafe extern "C" fn kjarni_indexer_create(
     num_inputs: usize,
     force: i32,
     out: *mut KjarniIndexStats,
-) -> KjarniErrorCode { unsafe {
-    // Validate pointers
-    if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_indexer_create",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                // Validate pointers
+                if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let indexer_ref = &(*indexer).inner;
+                let indexer_ref = &(*indexer).inner;
 
-    // Parse index path
-    let index_path = match CStr::from_ptr(index_path).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                // Parse index path
+                let index_path = match CStr::from_ptr(index_path).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    // Parse input paths
-    let input_vec = match parse_inputs(inputs, num_inputs) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let result = get_runtime().block_on(async {
-        indexer_ref
-            .create_with_options(index_path, &input_vec, force != 0)
-            .await
-    });
+                // Parse input paths
+                let input_vec = match parse_inputs(inputs, num_inputs) {
+                    Ok(v) => v,
+                    Err(e) => return e,
+                };
+                let result = get_runtime().block_on(async {
+                    indexer_ref
+                        .create_with_options(index_path, &input_vec, force != 0)
+                        .await
+                });
 
-    match result {
-        Ok(stats) => {
-            *out = stats.into();
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            indexer_error_to_code(&e)
-        }
-    }
-}}
+                match result {
+                    Ok(stats) => {
+                        *out = stats.into();
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        indexer_error_to_code(&e)
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Create a new index with progress callback and cancellation support.
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
+/// - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+/// - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+///   nul-terminated C string that stays valid for the call.
+/// - `user_data` must be a valid, writable pointer to a `c_void`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
+/// - `cancel_token` must be null, or a live handle returned by `kjarni_cancel_token_new` that
+///   has not been freed.
+/// - `out` must be a valid, writable pointer to a `KjarniIndexStats`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     indexer: *mut KjarniIndexer,
@@ -355,85 +416,103 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
     out: *mut KjarniIndexStats,
-) -> KjarniErrorCode { unsafe {
-    // Validate required pointers
-    if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_indexer_create_with_callback",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                // Validate required pointers
+                if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let indexer_ref = &(*indexer).inner;
+                let indexer_ref = &(*indexer).inner;
 
-    // Parse index path
-    let index_path = match CStr::from_ptr(index_path).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
-
-    // Parse input paths
-    let input_vec = match parse_inputs(inputs, num_inputs) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-
-    // Create progress callback closure
-    let on_progress =
-        move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
-            if let Some(callback) = progress_callback {
-                let ffi_stage = convert_stage(stage);
-
-                let msg_cstring = msg.and_then(|s| CString::new(s).ok());
-                let msg_ptr = msg_cstring
-                    .as_ref()
-                    .map(|c| c.as_ptr())
-                    .unwrap_or(ptr::null());
-
-                let progress = KjarniProgress {
-                    stage: ffi_stage,
-                    current,
-                    total,
-                    message: msg_ptr,
+                // Parse index path
+                let index_path = match CStr::from_ptr(index_path).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
                 };
 
-                callback(progress, user_data);
+                // Parse input paths
+                let input_vec = match parse_inputs(inputs, num_inputs) {
+                    Ok(v) => v,
+                    Err(e) => return e,
+                };
+
+                // Create progress callback closure
+                let on_progress =
+                    move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+                        if let Some(callback) = progress_callback {
+                            let ffi_stage = convert_stage(stage);
+
+                            let msg_cstring = msg.and_then(|s| CString::new(s).ok());
+                            let msg_ptr = msg_cstring
+                                .as_ref()
+                                .map(|c| c.as_ptr())
+                                .unwrap_or(ptr::null());
+
+                            let progress = KjarniProgress {
+                                stage: ffi_stage,
+                                current,
+                                total,
+                                message: msg_ptr,
+                            };
+
+                            callback(progress, user_data);
+                        }
+                    };
+
+                // Create cancellation check closure
+                let is_cancelled_fn = move || -> bool {
+                    if cancel_token.is_null() {
+                        false
+                    } else {
+                        is_cancelled(cancel_token)
+                    }
+                };
+
+                // Call the Rust API with callbacks
+                let result = get_runtime().block_on(async {
+                    indexer_ref
+                        .create_with_callback(
+                            index_path,
+                            &input_vec,
+                            force != 0,
+                            Some(on_progress),
+                            Some(is_cancelled_fn),
+                        )
+                        .await
+                });
+
+                match result {
+                    Ok(stats) => {
+                        *out = stats.into();
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        indexer_error_to_code(&e)
+                    }
+                }
             }
-        };
+        },
+    )
+}
 
-    // Create cancellation check closure
-    let is_cancelled_fn = move || -> bool {
-        if cancel_token.is_null() {
-            false
-        } else {
-            is_cancelled(cancel_token)
-        }
-    };
-
-    // Call the Rust API with callbacks
-    let result = get_runtime().block_on(async {
-        indexer_ref
-            .create_with_callback(
-                index_path,
-                &input_vec,
-                force != 0,
-                Some(on_progress),
-                Some(is_cancelled_fn),
-            )
-            .await
-    });
-
-    match result {
-        Ok(stats) => {
-            *out = stats.into();
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            indexer_error_to_code(&e)
-        }
-    }
-}}
-
-
-/// Add documents to an existing index 
+/// Add documents to an existing index
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
+/// - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+/// - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+///   nul-terminated C string that stays valid for the call.
+/// - `documents_added` must be a valid, writable pointer to a `usize`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add(
     indexer: *mut KjarniIndexer,
@@ -441,47 +520,76 @@ pub unsafe extern "C" fn kjarni_indexer_add(
     inputs: *const *const c_char,
     num_inputs: usize,
     documents_added: *mut usize,
-) -> KjarniErrorCode { unsafe {
-    // Validate pointers
-    if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_indexer_add",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                // Validate pointers
+                if indexer.is_null()
+                    || index_path.is_null()
+                    || inputs.is_null()
+                    || documents_added.is_null()
+                {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    // Handle empty input
-    if num_inputs == 0 {
-        *documents_added = 0;
-        return KjarniErrorCode::Ok;
-    }
+                // Handle empty input
+                if num_inputs == 0 {
+                    *documents_added = 0;
+                    return KjarniErrorCode::Ok;
+                }
 
-    let indexer_ref = &(*indexer).inner;
+                let indexer_ref = &(*indexer).inner;
 
-    // Parse index path
-    let index_path = match CStr::from_ptr(index_path).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                // Parse index path
+                let index_path = match CStr::from_ptr(index_path).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    // Parse input paths
-    let input_vec = match parse_inputs(inputs, num_inputs) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let result = get_runtime().block_on(async { indexer_ref.add(index_path, &input_vec).await });
+                // Parse input paths
+                let input_vec = match parse_inputs(inputs, num_inputs) {
+                    Ok(v) => v,
+                    Err(e) => return e,
+                };
+                let result =
+                    get_runtime().block_on(async { indexer_ref.add(index_path, &input_vec).await });
 
-    match result {
-        Ok(count) => {
-            *documents_added = count;
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *documents_added = 0;
-            indexer_error_to_code(&e)
-        }
-    }
-}}
+                match result {
+                    Ok(count) => {
+                        *documents_added = count;
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *documents_added = 0;
+                        indexer_error_to_code(&e)
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Add documents to an existing index with progress callback and cancellation support.
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
+/// - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+/// - `inputs` must point to `the accompanying count` readable pointers, each null or a valid
+///   nul-terminated C string that stays valid for the call.
+/// - `user_data` must be a valid, writable pointer to a `c_void`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
+/// - `cancel_token` must be null, or a live handle returned by `kjarni_cancel_token_new` that
+///   has not been freed.
+/// - `documents_added` must be a valid, writable pointer to a `usize`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     indexer: *mut KjarniIndexer,
@@ -492,184 +600,248 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
     documents_added: *mut usize,
-) -> KjarniErrorCode { unsafe {
-    // Validate required pointers
-    if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_indexer_add_with_callback",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                // Validate required pointers
+                if indexer.is_null()
+                    || index_path.is_null()
+                    || inputs.is_null()
+                    || documents_added.is_null()
+                {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    // Handle empty input
-    if num_inputs == 0 {
-        *documents_added = 0;
-        return KjarniErrorCode::Ok;
-    }
+                // Handle empty input
+                if num_inputs == 0 {
+                    *documents_added = 0;
+                    return KjarniErrorCode::Ok;
+                }
 
-    let indexer_ref = &(*indexer).inner;
+                let indexer_ref = &(*indexer).inner;
 
-    // Parse index path
-    let index_path = match CStr::from_ptr(index_path).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
-
-    // Parse input paths
-    let input_vec = match parse_inputs(inputs, num_inputs) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-
-    // Create progress callback closure
-    let on_progress =
-        move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
-            if let Some(callback) = progress_callback {
-                let ffi_stage = convert_stage(stage);
-
-                let msg_cstring = msg.and_then(|s| CString::new(s).ok());
-                let msg_ptr = msg_cstring
-                    .as_ref()
-                    .map(|c| c.as_ptr())
-                    .unwrap_or(ptr::null());
-
-                let progress = KjarniProgress {
-                    stage: ffi_stage,
-                    current,
-                    total,
-                    message: msg_ptr,
+                // Parse index path
+                let index_path = match CStr::from_ptr(index_path).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
                 };
 
-                callback(progress, user_data);
+                // Parse input paths
+                let input_vec = match parse_inputs(inputs, num_inputs) {
+                    Ok(v) => v,
+                    Err(e) => return e,
+                };
+
+                // Create progress callback closure
+                let on_progress =
+                    move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+                        if let Some(callback) = progress_callback {
+                            let ffi_stage = convert_stage(stage);
+
+                            let msg_cstring = msg.and_then(|s| CString::new(s).ok());
+                            let msg_ptr = msg_cstring
+                                .as_ref()
+                                .map(|c| c.as_ptr())
+                                .unwrap_or(ptr::null());
+
+                            let progress = KjarniProgress {
+                                stage: ffi_stage,
+                                current,
+                                total,
+                                message: msg_ptr,
+                            };
+
+                            callback(progress, user_data);
+                        }
+                    };
+
+                // Create cancellation check closure
+                let is_cancelled_fn = move || -> bool {
+                    if cancel_token.is_null() {
+                        false
+                    } else {
+                        is_cancelled(cancel_token)
+                    }
+                };
+
+                // Call the Rust API with callbacks
+                let result = get_runtime().block_on(async {
+                    indexer_ref
+                        .add_with_callback(
+                            index_path,
+                            &input_vec,
+                            Some(on_progress),
+                            Some(is_cancelled_fn),
+                        )
+                        .await
+                });
+
+                match result {
+                    Ok(count) => {
+                        *documents_added = count;
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        *documents_added = 0;
+                        indexer_error_to_code(&e)
+                    }
+                }
             }
-        };
-
-    // Create cancellation check closure
-    let is_cancelled_fn = move || -> bool {
-        if cancel_token.is_null() {
-            false
-        } else {
-            is_cancelled(cancel_token)
-        }
-    };
-
-    // Call the Rust API with callbacks
-    let result = get_runtime().block_on(async {
-        indexer_ref
-            .add_with_callback(
-                index_path,
-                &input_vec,
-                Some(on_progress),
-                Some(is_cancelled_fn),
-            )
-            .await
-    });
-
-    match result {
-        Ok(count) => {
-            *documents_added = count;
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *documents_added = 0;
-            indexer_error_to_code(&e)
-        }
-    }
-}}
-
+        },
+    )
+}
 
 /// Get information about an existing index
+///
+/// # Safety
+///
+/// - `index_path` must be null, or a valid pointer to a nul-terminated C string.
+/// - `out` must be a valid, writable pointer to a `KjarniIndexInfo`. On `KJARNI_OK` it
+///   receives a value the caller owns and must release with the matching `*_free`; on
+///   failure it is either cleared or left unmodified, and must not be read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info(
     index_path: *const c_char,
     out: *mut KjarniIndexInfo,
-) -> KjarniErrorCode { unsafe {
-    if index_path.is_null() || out.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_index_info",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if index_path.is_null() || out.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let index_path = match CStr::from_ptr(index_path).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let index_path = match CStr::from_ptr(index_path).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    match Indexer::info(index_path) {
-        Ok(info) => {
-            *out = KjarniIndexInfo::from_info(info);
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            KjarniErrorCode::ModelNotFound
-        }
-    }
-}}
+                match Indexer::info(index_path) {
+                    Ok(info) => {
+                        *out = KjarniIndexInfo::from_info(info);
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        KjarniErrorCode::ModelNotFound
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Delete an index.
+///
+/// # Safety
+///
+/// - `index_path` must be null, or a valid pointer to a nul-terminated C string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode { unsafe {
-    if index_path.is_null() {
-        return KjarniErrorCode::NullPointer;
-    }
+pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_index_delete",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if index_path.is_null() {
+                    return KjarniErrorCode::NullPointer;
+                }
 
-    let index_path = match CStr::from_ptr(index_path).to_str() {
-        Ok(s) => s,
-        Err(_) => return KjarniErrorCode::InvalidUtf8,
-    };
+                let index_path = match CStr::from_ptr(index_path).to_str() {
+                    Ok(s) => s,
+                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                };
 
-    match Indexer::delete(index_path) {
-        Ok(()) => KjarniErrorCode::Ok,
-        Err(e) => {
-            set_last_error(e.to_string());
-            KjarniErrorCode::InferenceFailed
-        }
-    }
-}}
-
+                match Indexer::delete(index_path) {
+                    Ok(()) => KjarniErrorCode::Ok,
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        KjarniErrorCode::InferenceFailed
+                    }
+                }
+            }
+        },
+    )
+}
 
 /// Get the embedding model name used by the indexer.
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
+/// - `buf` must be null, or point to at least `buf_len` writable bytes. When it is null the
+///   required size is returned and nothing is written.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_model_name(
     indexer: *const KjarniIndexer,
     buf: *mut c_char,
     buf_len: usize,
 ) -> usize {
-    if indexer.is_null() {
-        return 0;
-    }
+    crate::panic::guard("kjarni_indexer_model_name", 0, || -> usize {
+        if indexer.is_null() {
+            return 0;
+        }
 
-    let name: &str = unsafe { (*indexer).inner.model_name() };
-    let name_bytes = name.as_bytes();
-    let required = name_bytes.len() + 1; // +1 for null terminator
+        let name: &str = unsafe { (*indexer).inner.model_name() };
+        let name_bytes = name.as_bytes();
+        let required = name_bytes.len() + 1; // +1 for null terminator
 
-    // If no buffer provided, just return required size
-    if buf.is_null() || buf_len == 0 {
-        return required;
-    }
+        // If no buffer provided, just return required size
+        if buf.is_null() || buf_len == 0 {
+            return required;
+        }
 
-    // Copy as much as fits
-    let copy_len = name_bytes.len().min(buf_len.saturating_sub(1));
-    unsafe {
-        std::ptr::copy_nonoverlapping(name_bytes.as_ptr(), buf as *mut u8, copy_len);
+        // Copy as much as fits
+        let copy_len = name_bytes.len().min(buf_len.saturating_sub(1));
+        unsafe {
+            std::ptr::copy_nonoverlapping(name_bytes.as_ptr(), buf as *mut u8, copy_len);
 
-        // Null terminate
-        *buf.add(copy_len) = 0;
-    }
-    required
+            // Null terminate
+            *buf.add(copy_len) = 0;
+        }
+        required
+    })
 }
 
 /// Get the embedding dimension used by the indexer.
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize { unsafe {
-    if indexer.is_null() {
-        return 0;
-    }
-    (*indexer).inner.dimension()
-}}
+pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize {
+    crate::panic::guard("kjarni_indexer_dimension", 0, || -> usize {
+        unsafe {
+            if indexer.is_null() {
+                return 0;
+            }
+            (*indexer).inner.dimension()
+        }
+    })
+}
 
 /// Get the chunk size configured for the indexer.
+///
+/// # Safety
+///
+/// - `indexer` must be null, or a live handle returned by `kjarni_indexer_new` that has not
+///   been freed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize { unsafe {
-    if indexer.is_null() {
-        return 0;
-    }
-    (*indexer).inner.chunk_size()
-}}
+pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize {
+    crate::panic::guard("kjarni_indexer_chunk_size", 0, || -> usize {
+        unsafe {
+            if indexer.is_null() {
+                return 0;
+            }
+            (*indexer).inner.chunk_size()
+        }
+    })
+}

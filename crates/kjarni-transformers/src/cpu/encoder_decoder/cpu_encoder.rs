@@ -8,7 +8,7 @@ use std::{any::Any, sync::Arc};
 pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderConfig};
 use crate::{
     Embeddings, Normalization, WgpuContext,
-    cpu::encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
+    cpu::encoder::{encoder_layer::EncoderLayer, prelude::*},
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::Seq2SeqFactory,
     traits::{

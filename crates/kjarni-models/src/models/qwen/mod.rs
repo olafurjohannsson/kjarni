@@ -5,10 +5,8 @@
 //!
 //! The actual text generation is handled by the generic `Generator` struct.
 
-
-
 pub mod config;
 pub mod model;
 
-pub use model::QwenModel;
 pub use config::QwenConfig;
+pub use model::QwenModel;

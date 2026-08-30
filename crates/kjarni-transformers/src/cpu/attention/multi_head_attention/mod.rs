@@ -1,7 +1,7 @@
 //! Multi-head attention implementation with KV caching support.
 
 use anyhow::Result;
-use ndarray::{s, Array1, Array2, Array3, Array4, Axis};
+use ndarray::{Array1, Array2, Array3, Array4, Axis, s};
 
 use crate::activations::softmax_4d_inplace;
 use crate::rope::RoPE;
@@ -59,13 +59,13 @@ impl MultiHeadAttention {
     }
 
     pub fn project_kv(&self, key_value_source: &Array3<f32>) -> (Array3<f32>, Array3<f32>) {
-        let new_k = if self.k_bias.len() > 0 {
+        let new_k = if !self.k_bias.is_empty() {
             matmul_3d_2d(key_value_source, &self.k_weight) + &self.k_bias
         } else {
             matmul_3d_2d(key_value_source, &self.k_weight)
         };
 
-        let new_v = if self.v_bias.len() > 0 {
+        let new_v = if !self.v_bias.is_empty() {
             matmul_3d_2d(key_value_source, &self.v_weight) + &self.v_bias
         } else {
             matmul_3d_2d(key_value_source, &self.v_weight)
@@ -210,18 +210,18 @@ impl MultiHeadAttention {
         let kv_source = key_value.unwrap_or(query);
 
         let mut q_proj = matmul_3d_2d(query, &self.q_weight);
-        if self.q_bias.len() > 0 {
-            q_proj = q_proj + &self.q_bias
+        if !self.q_bias.is_empty() {
+            q_proj += &self.q_bias
         }
 
         let mut new_k = matmul_3d_2d(kv_source, &self.k_weight);
-        if self.k_bias.len() > 0 {
-            new_k = new_k + &self.k_bias
+        if !self.k_bias.is_empty() {
+            new_k += &self.k_bias
         }
 
         let mut new_v = matmul_3d_2d(kv_source, &self.v_weight);
-        if self.v_bias.len() > 0 {
-            new_v = new_v + &self.v_bias;
+        if !self.v_bias.is_empty() {
+            new_v += &self.v_bias;
         }
 
         let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[1]);
@@ -274,7 +274,7 @@ impl MultiHeadAttention {
             cache_len,
         )?;
 
-        let output = if self.output_bias.len() > 0 {
+        let output = if !self.output_bias.is_empty() {
             matmul_3d_2d(&context_reshaped, &self.output_weight) + &self.output_bias
         } else {
             matmul_3d_2d(&context_reshaped, &self.output_weight)

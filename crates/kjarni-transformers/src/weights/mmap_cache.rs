@@ -18,11 +18,17 @@ pub fn get_or_create_mmap(path: &Path) -> Result<Arc<Mmap>> {
         .with_context(|| format!("failed to canonicalize path: {:?}", path))?;
 
     if let Some(mmap) = guard.get(&canonical) {
-        log::debug!("mmap cache hit for {:?}", canonical.file_name().unwrap_or_default());
+        log::debug!(
+            "mmap cache hit for {:?}",
+            canonical.file_name().unwrap_or_default()
+        );
         return Ok(Arc::clone(mmap));
     }
 
-    log::debug!("mmap cache miss, creating new mapping for {:?}", canonical.file_name().unwrap_or_default());
+    log::debug!(
+        "mmap cache miss, creating new mapping for {:?}",
+        canonical.file_name().unwrap_or_default()
+    );
 
     let file = std::fs::File::open(&canonical)
         .with_context(|| format!("failed to open file for mmap: {:?}", canonical))?;

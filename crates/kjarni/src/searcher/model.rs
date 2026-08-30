@@ -1,4 +1,3 @@
-
 use crate::reranker::Reranker;
 use crate::searcher::{SearchOptions, SearcherError, SearcherResult};
 use crate::{embedder::Embedder, searcher::SearcherBuilder};
@@ -80,10 +79,10 @@ impl Searcher {
         query: &str,
         top_k: usize,
     ) -> SearcherResult<Vec<SearchResult>> {
-        let reader = IndexReader::open(index_path).map_err(|e| SearcherError::SearchFailed(e))?;
+        let reader = IndexReader::open(index_path).map_err(SearcherError::SearchFailed)?;
 
         let results = reader.search_keywords(query, top_k);
-        Ok(results.into_iter().map(Into::into).collect())
+        Ok(results.into_iter().collect())
     }
 
     /// Search with default options
@@ -99,7 +98,7 @@ impl Searcher {
         query: &str,
         options: &SearchOptions,
     ) -> SearcherResult<Vec<SearchResult>> {
-        let reader = IndexReader::open(index_path).map_err(|e| SearcherError::SearchFailed(e))?;
+        let reader = IndexReader::open(index_path).map_err(SearcherError::SearchFailed)?;
 
         // Validate dimension
         if reader.dimension() != self.embedder.dimension() {
@@ -134,7 +133,7 @@ impl Searcher {
                     .embedder
                     .embed(query)
                     .await
-                    .map_err(|e| SearcherError::EmbedderError(e))?;
+                    .map_err(SearcherError::EmbedderError)?;
 
                 if let Some(ref filter) = options.filter {
                     reader.search_semantic_filtered(&query_embedding, fetch_k, filter)
@@ -147,7 +146,7 @@ impl Searcher {
                     .embedder
                     .embed(query)
                     .await
-                    .map_err(|e| SearcherError::EmbedderError(e))?;
+                    .map_err(SearcherError::EmbedderError)?;
 
                 if let Some(ref filter) = options.filter {
                     reader.search_hybrid_filtered(query, &query_embedding, fetch_k, filter)
@@ -158,23 +157,21 @@ impl Searcher {
         };
 
         // Rerank if enabled
-        if use_reranker {
-            if let Some(ref reranker) = self.reranker {
-                let texts: Vec<&str> = results.iter().map(|r| r.text.as_str()).collect();
-                let reranked = reranker
-                    .rerank(query, &texts)
-                    .await
-                    .map_err(|e| SearcherError::RerankerError(e))?;
+        if use_reranker && let Some(ref reranker) = self.reranker {
+            let texts: Vec<&str> = results.iter().map(|r| r.text.as_str()).collect();
+            let reranked = reranker
+                .rerank(query, &texts)
+                .await
+                .map_err(SearcherError::RerankerError)?;
 
-                // Reconstruct with new scores
-                let mut new_results = Vec::with_capacity(reranked.len().min(top_k));
-                for rr in reranked.into_iter().take(top_k) {
-                    let mut result = results[rr.index].clone();
-                    result.score = rr.score;
-                    new_results.push(result);
-                }
-                results = new_results;
+            // Reconstruct with new scores
+            let mut new_results = Vec::with_capacity(reranked.len().min(top_k));
+            for rr in reranked.into_iter().take(top_k) {
+                let mut result = results[rr.index].clone();
+                result.score = rr.score;
+                new_results.push(result);
             }
+            results = new_results;
         }
 
         // Apply threshold
@@ -185,7 +182,7 @@ impl Searcher {
         // Truncate to top_k
         results.truncate(top_k);
 
-        Ok(results.into_iter().map(Into::into).collect())
+        Ok(results.into_iter().collect())
     }
 
     // Accessors

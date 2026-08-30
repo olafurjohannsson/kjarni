@@ -3,11 +3,14 @@ use kjarni_transformers::models::base::RopeScalingConfig;
 use kjarni_transformers::traits::NormalizationStrategy;
 use kjarni_transformers::{
     activations::Activation,
-    traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata},
+    traits::{
+        AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
+        ModelLayout, ModelMetadata,
+    },
     weights::WeightLoader,
 };
-use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use std::sync::Arc;
 
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
@@ -32,7 +35,8 @@ where
         }
 
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            let first = seq.next_element::<u32>()?
+            let first = seq
+                .next_element::<u32>()?
                 .ok_or_else(|| de::Error::custom("empty token_id array"))?;
             while seq.next_element::<u32>()?.is_some() {}
             Ok(first)
@@ -78,7 +82,6 @@ where
 
     deserializer.deserialize_any(TokenIdsVisitor)
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -236,7 +239,7 @@ impl ModelConfig for LlamaConfig {
     fn model_type(&self) -> &str {
         "llama"
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -266,11 +269,11 @@ fn as_any(&self) -> &dyn std::any::Any {
             rope_theta: Some(self.rope_theta),
             rope_scaling: self.rope_scaling.clone(),
 
-            scale_embeddings: false, 
+            scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0, // Llama has no position offset
             is_prenorm: true,        // Llama uses Pre-Normalization
-            transpose_ffn_weights: false, 
+            transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
@@ -314,7 +317,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             } else {
                 "lm_head.weight"
             }
-                .to_string(),
+            .to_string(),
             encoder: None,
             decoder: Some(DecoderLayout {
                 position_embedding: None, // Llama uses RoPE

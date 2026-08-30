@@ -77,7 +77,7 @@ pub fn matmul_vec_q4_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
         let mut temp_w = [0.0f32; QK_K];
 
         // Process each block: dequantize fully, then compute dot product
-        for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
+        for (block_idx, a_chunk) in a.as_chunks::<QK_K>().0.iter().enumerate() {
             let b = &row_blocks[block_idx];
             dequantize_q4_k_block(b, &mut temp_w);
 
@@ -104,7 +104,7 @@ pub fn matmul_vec_q6_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
         let mut temp_w = [0.0f32; QK_K];
 
         // Process each block: dequantize fully, then compute dot product
-        for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
+        for (block_idx, a_chunk) in a.as_chunks::<QK_K>().0.iter().enumerate() {
             let b = &row_blocks[block_idx];
             dequantize_q6_k_block(b, &mut temp_w);
 
@@ -118,6 +118,10 @@ pub fn matmul_vec_q6_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "SIMD kernel for the Q4_K path, which linear_algebra.rs still leaves unimplemented!()"
+)]
 /// Computes dot product of Q4_K weights and Q8_K quantized input.
 pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[BlockQ8_K]) -> f32 {
     let num_blocks = n / QK_K;
@@ -239,17 +243,16 @@ pub fn vec_dot_q6k_q8k_scalar(n: usize, w_blocks: &[BlockQ6_K], q_blocks: &[Bloc
     sumf
 }
 
-
 #[cfg(test)]
 mod matmul_scalar_tests {
     use super::*;
-    use rand::{Rng, SeedableRng, rngs::StdRng};
-    use half::f16;
-    use crate::cpu::kernels::quantize::quantize_row_q8_k;
     use crate::cpu::kernels::dequantize::dequantize_q8_0_block;
+    use crate::cpu::kernels::quantize::quantize_row_q8_k;
+    use half::f16;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
-    const TEST_K: usize = 256; 
-    const TEST_ROWS: usize = 4; 
+    const TEST_K: usize = 256;
+    const TEST_ROWS: usize = 4;
 
     fn get_rng() -> StdRng {
         StdRng::seed_from_u64(42)
@@ -260,64 +263,74 @@ mod matmul_scalar_tests {
     }
 
     fn f32_to_bf16_vec(data: &[f32]) -> Vec<u16> {
-        data.iter().map(|&x| {
-            let bits = x.to_bits();
-            (bits >> 16) as u16
-        }).collect()
+        data.iter()
+            .map(|&x| {
+                let bits = x.to_bits();
+                (bits >> 16) as u16
+            })
+            .collect()
     }
     fn random_q8_0_blocks(rng: &mut StdRng, count: usize) -> Vec<BlockQ8_0> {
-        (0..count).map(|_| {
-            let mut qs = [0i8; 32];
-            for x in &mut qs { *x = rng.gen_range(-127..=127); }
-            BlockQ8_0 {
-                d: f16::from_f32(rng.gen_range(0.1..2.0)),
-                qs
-            }
-        }).collect()
+        (0..count)
+            .map(|_| {
+                let mut qs = [0i8; 32];
+                for x in &mut qs {
+                    *x = rng.gen_range(-127..=127);
+                }
+                BlockQ8_0 {
+                    d: f16::from_f32(rng.gen_range(0.1..2.0)),
+                    qs,
+                }
+            })
+            .collect()
     }
 
     fn random_q4k_blocks(rng: &mut StdRng, count: usize) -> Vec<BlockQ4_K> {
-        (0..count).map(|_| {
-            let mut scales = [0u8; 12];
-            let mut qs = [0u8; QK_K / 2];
-            rng.fill(&mut scales);
-            rng.fill(&mut qs);
-            
-            BlockQ4_K {
-                d: f16::from_f32(rng.gen_range(0.1..1.0)),
-                dmin: f16::from_f32(rng.gen_range(0.0..0.1)),
-                scales,
-                qs,
-            }
-        }).collect()
+        (0..count)
+            .map(|_| {
+                let mut scales = [0u8; 12];
+                let mut qs = [0u8; QK_K / 2];
+                rng.fill(&mut scales);
+                rng.fill(&mut qs);
+
+                BlockQ4_K {
+                    d: f16::from_f32(rng.gen_range(0.1..1.0)),
+                    dmin: f16::from_f32(rng.gen_range(0.0..0.1)),
+                    scales,
+                    qs,
+                }
+            })
+            .collect()
     }
 
     fn random_q6k_blocks(rng: &mut StdRng, count: usize) -> Vec<BlockQ6_K> {
-        (0..count).map(|_| {
-            let mut ql = [0u8; 128];
-            let mut qh = [0u8; 64];
-            let mut scales = [0i8; 16];
-            rng.fill(&mut ql);
-            rng.fill(&mut qh);
-            rng.fill(&mut scales);
+        (0..count)
+            .map(|_| {
+                let mut ql = [0u8; 128];
+                let mut qh = [0u8; 64];
+                let mut scales = [0i8; 16];
+                rng.fill(&mut ql);
+                rng.fill(&mut qh);
+                rng.fill(&mut scales);
 
-            BlockQ6_K {
-                ql,
-                qh,
-                scales,
-                d: f16::from_f32(rng.gen_range(0.1..1.0)),
-            }
-        }).collect()
+                BlockQ6_K {
+                    ql,
+                    qh,
+                    scales,
+                    d: f16::from_f32(rng.gen_range(0.1..1.0)),
+                }
+            })
+            .collect()
     }
 
     #[test]
     fn test_parity_f32_vs_bf16() {
         let mut rng = get_rng();
         let k = TEST_K * 2;
-        
+
         let input = random_f32_vec(&mut rng, k);
         let weights_f32 = random_f32_vec(&mut rng, k * TEST_ROWS);
-        
+
         let mut out_f32 = vec![0.0; TEST_ROWS];
         let mut out_bf16 = vec![0.0; TEST_ROWS];
 
@@ -328,21 +341,27 @@ mod matmul_scalar_tests {
 
         for i in 0..TEST_ROWS {
             let rel_diff = (out_f32[i] - out_bf16[i]).abs() / (out_f32[i].abs() + 1e-6);
-            assert!(rel_diff < 0.02, "Row {}: F32 {} vs BF16 {}", i, out_f32[i], out_bf16[i]);
+            assert!(
+                rel_diff < 0.02,
+                "Row {}: F32 {} vs BF16 {}",
+                i,
+                out_f32[i],
+                out_bf16[i]
+            );
         }
     }
 
     #[test]
     fn test_parity_f32_vs_q8_0() {
         let mut rng = get_rng();
-        let k = TEST_K; 
-        
+        let k = TEST_K;
+
         let input = random_f32_vec(&mut rng, k);
 
         let blocks_q8 = random_q8_0_blocks(&mut rng, TEST_ROWS * (k / 32));
         let mut weights_f32_ref = vec![0.0f32; TEST_ROWS * k];
         for (i, block) in blocks_q8.iter().enumerate() {
-            dequantize_q8_0_block(block, &mut weights_f32_ref[i*32..(i+1)*32]);
+            dequantize_q8_0_block(block, &mut weights_f32_ref[i * 32..(i + 1) * 32]);
         }
 
         let mut out_f32 = vec![0.0; TEST_ROWS];
@@ -357,38 +376,51 @@ mod matmul_scalar_tests {
             let diff = (out_f32[i] - out_q8[i]).abs();
             let magnitude = out_f32[i].abs().max(1.0);
             let rel_diff = diff / magnitude;
-            
-            assert!(rel_diff < 1e-5, 
-                "Row {}: F32 {} vs Q8_0 {} (Diff: {}, Rel: {})", 
-                i, out_f32[i], out_q8[i], diff, rel_diff);
+
+            assert!(
+                rel_diff < 1e-5,
+                "Row {}: F32 {} vs Q8_0 {} (Diff: {}, Rel: {})",
+                i,
+                out_f32[i],
+                out_q8[i],
+                diff,
+                rel_diff
+            );
         }
     }
 
     #[test]
     fn test_consistency_q4k_float_vs_int() {
         let mut rng = get_rng();
-        let k = TEST_K; 
-        
+        let k = TEST_K;
+
         let input = random_f32_vec(&mut rng, k);
         let weight_blocks = random_q4k_blocks(&mut rng, 1);
         let mut out_float = [0.0f32; 1];
         matmul_vec_q4_k_scalar(&mut out_float, &input, &weight_blocks, k);
         let input_q8k = quantize_row_q8_k(&input);
-        
+
         let val_int = vec_dot_q4k_q8k_scalar(k, &weight_blocks, &input_q8k);
 
         let diff = (out_float[0] - val_int).abs();
         let magnitude = out_float[0].abs().max(1.0);
         let rel_err = diff / magnitude;
-        
-        assert!(rel_err < 0.02, "Q4K Float {} vs Int {} (Diff: {}, Rel: {})", out_float[0], val_int, diff, rel_err);
+
+        assert!(
+            rel_err < 0.02,
+            "Q4K Float {} vs Int {} (Diff: {}, Rel: {})",
+            out_float[0],
+            val_int,
+            diff,
+            rel_err
+        );
     }
 
     #[test]
     fn test_consistency_q6k_float_vs_int() {
         let mut rng = get_rng();
-        let k = TEST_K; 
-        
+        let k = TEST_K;
+
         let input = random_f32_vec(&mut rng, k);
         let weight_blocks = random_q6k_blocks(&mut rng, 1);
         let mut out_float = [0.0f32; 1];
@@ -399,22 +431,32 @@ mod matmul_scalar_tests {
         let diff = (out_float[0] - val_int).abs();
         let magnitude = out_float[0].abs().max(1.0);
         let rel_err = diff / magnitude;
-        
-        assert!(rel_err < 0.02, "Q6K Float {} vs Int {} (Diff: {}, Rel: {})", out_float[0], val_int, diff, rel_err);
+
+        assert!(
+            rel_err < 0.02,
+            "Q6K Float {} vs Int {} (Diff: {}, Rel: {})",
+            out_float[0],
+            val_int,
+            diff,
+            rel_err
+        );
     }
 
     #[test]
     fn test_q8_0_empty_or_zero() {
         let k = 32;
         let a = vec![1.0; k];
-        let mut b = BlockQ8_0 { d: f16::from_f32(1.0), qs: [0; 32] };
+        let mut b = BlockQ8_0 {
+            d: f16::from_f32(1.0),
+            qs: [0; 32],
+        };
         let mut out = [0.0];
         matmul_vec_q8_0_scalar(&mut out, &a, &[b], k);
         assert_eq!(out[0], 0.0);
         b.qs.fill(1);
         matmul_vec_q8_0_scalar(&mut out, &a, &[b], k);
         assert_eq!(out[0], 32.0);
-    
+
         b.d = f16::from_f32(0.5);
         matmul_vec_q8_0_scalar(&mut out, &a, &[b], k);
         assert_eq!(out[0], 16.0);
@@ -423,15 +465,11 @@ mod matmul_scalar_tests {
     #[test]
     fn test_bf16_decoding_logic() {
         let a = vec![1.0, 2.0, 1.0];
-        let b_rows = vec![
-            0x3F80, 
-            0x3F00, 
-            0xC000, 
-        ];
-        
+        let b_rows = vec![0x3F80, 0x3F00, 0xC000];
+
         let mut out = [0.0];
         matmul_vec_bf16_scalar(&mut out, &a, &b_rows, 3);
-        
+
         assert_eq!(out[0], 0.0);
     }
 }

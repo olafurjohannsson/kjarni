@@ -1,14 +1,12 @@
-use crate::gpu_ops::blocks::attention::{GpuAttentionWeights, GpuCrossAttention, GpuDecoderSelfAttention};
-use crate::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardWeights,
-};
-use crate::gpu::normalization::{
-    GpuNormalization, GpuNormalizationWeights, 
-};
-use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
-use crate::traits::ModelMetadata;
 use crate::WgpuContext;
+use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu_ops::blocks::attention::{
+    GpuAttentionWeights, GpuCrossAttention, GpuDecoderSelfAttention,
+};
+use crate::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::traits::ModelMetadata;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -62,7 +60,7 @@ impl GpuCrossDecoderLayer {
             add: GpuAdd::new(context),
         })
     }
-   
+
     pub fn precompute_cross_kv(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -102,7 +100,11 @@ impl GpuCrossDecoderLayer {
         )?;
 
         let after_add1 = pool.get(residual.shape().to_vec());
-        self.add.encode(encoder, &[residual, &self_attn_out.hidden_states], &after_add1);
+        self.add.encode(
+            encoder,
+            &[residual, &self_attn_out.hidden_states],
+            &after_add1,
+        );
 
         let after_norm1 = pool.get(after_add1.shape().to_vec());
         self.self_attn_norm.encode(
@@ -123,7 +125,8 @@ impl GpuCrossDecoderLayer {
         );
 
         let after_add2 = pool.get(residual.shape().to_vec());
-        self.add.encode(encoder, &[residual, &cross_attn_out], &after_add2);
+        self.add
+            .encode(encoder, &[residual, &cross_attn_out], &after_add2);
 
         let after_norm2 = pool.get(after_add2.shape().to_vec());
         self.cross_attn_norm.encode(
@@ -136,28 +139,18 @@ impl GpuCrossDecoderLayer {
         let residual = &after_norm2;
 
         let ffn_out = pool.get(residual.shape().to_vec());
-        self.feedforward.encode(
-            encoder,
-            &self.ff_weights,
-            residual,
-            &ffn_out,
-            pool,
-        );
+        self.feedforward
+            .encode(encoder, &self.ff_weights, residual, &ffn_out, pool);
 
         let after_add3 = pool.get(residual.shape().to_vec());
         self.add.encode(encoder, &[residual, &ffn_out], &after_add3);
 
         let final_output = pool.get(after_add3.shape().to_vec());
-        self.ffn_norm.encode(
-            encoder,
-            &self.ffn_norm_weights,
-            &after_add3,
-            &final_output,
-        );
+        self.ffn_norm
+            .encode(encoder, &self.ffn_norm_weights, &after_add3, &final_output);
 
         Ok((final_output, self_attn_out.new_k, self_attn_out.new_v))
     }
-
 }
 
 #[cfg(test)]

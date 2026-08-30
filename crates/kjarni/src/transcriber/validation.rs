@@ -31,10 +31,7 @@ pub fn validate_audio_path(path: &Path) -> TranscriberResult<()> {
 }
 
 /// Sanity-check transcription configuration values.
-pub fn validate_config(
-    language: Option<&str>,
-    max_tokens: usize,
-) -> TranscriberResult<()> {
+pub fn validate_config(language: Option<&str>, max_tokens: usize) -> TranscriberResult<()> {
     if let Some(lang) = language {
         if lang.is_empty() {
             return Err(TranscriberError::InvalidConfig(
@@ -42,9 +39,10 @@ pub fn validate_config(
             ));
         }
         if lang.len() > 10 {
-            return Err(TranscriberError::InvalidConfig(
-                format!("Language code too long: '{}'", lang),
-            ));
+            return Err(TranscriberError::InvalidConfig(format!(
+                "Language code too long: '{}'",
+                lang
+            )));
         }
     }
 
@@ -55,9 +53,10 @@ pub fn validate_config(
     }
 
     if max_tokens > 4096 {
-        return Err(TranscriberError::InvalidConfig(
-            format!("max_tokens_per_chunk too large: {} (max 4096)", max_tokens),
-        ));
+        return Err(TranscriberError::InvalidConfig(format!(
+            "max_tokens_per_chunk too large: {} (max 4096)",
+            max_tokens
+        )));
     }
 
     Ok(())
@@ -66,7 +65,6 @@ pub fn validate_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_validate_missing_path() {

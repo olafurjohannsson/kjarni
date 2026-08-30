@@ -1,18 +1,15 @@
-
 use std::path::Path;
 use std::sync::Arc;
 
 use futures::Stream;
 
-use kjarni_transformers::{Device, ModelType};
-use kjarni_transformers::audio::{
-    compute_mel_spectrogram, load_audio, AudioLoaderConfig,
-};
 use kjarni_models::models::whisper::WhisperModel;
 use kjarni_models::models::whisper::{
-    WhisperChunkResult, WhisperTask, WhisperTranscriberConfig,
-    WHISPER_CHUNK_LENGTH_SECS, WHISPER_SAMPLE_RATE,
+    WHISPER_CHUNK_LENGTH_SECS, WHISPER_SAMPLE_RATE, WhisperChunkResult, WhisperTask,
+    WhisperTranscriberConfig,
 };
+use kjarni_transformers::audio::{AudioLoaderConfig, compute_mel_spectrogram, load_audio};
+use kjarni_transformers::{Device, ModelType};
 
 use super::builder::TranscriberBuilder;
 use super::types::*;
@@ -61,7 +58,6 @@ impl Transcriber {
         }
     }
 
-
     /// Human-readable model name.
     pub fn model_name(&self) -> &str {
         self.model_type.cli_name()
@@ -80,7 +76,12 @@ impl Transcriber {
         let path = path.as_ref();
         validation::validate_audio_path(path)?;
 
-        self.report_progress(TranscriptionStage::LoadingAudio, 0, 0, Some(&path.display().to_string()));
+        self.report_progress(
+            TranscriptionStage::LoadingAudio,
+            0,
+            0,
+            Some(&path.display().to_string()),
+        );
 
         let audio = load_audio(path, &self.audio_loader_config())
             .map_err(TranscriberError::AudioLoadFailed)?;
@@ -182,8 +183,9 @@ impl Transcriber {
     pub async fn stream_file(
         &self,
         path: impl AsRef<Path>,
-    ) -> TranscriberResult<std::pin::Pin<Box<dyn Stream<Item = TranscriberResult<TranscribedToken>> + Send>>>
-    {
+    ) -> TranscriberResult<
+        std::pin::Pin<Box<dyn Stream<Item = TranscriberResult<TranscribedToken>> + Send>>,
+    > {
         let path = path.as_ref();
         validation::validate_audio_path(path)?;
 
@@ -198,8 +200,9 @@ impl Transcriber {
         &self,
         samples: Vec<f32>,
         sample_rate: u32,
-    ) -> TranscriberResult<std::pin::Pin<Box<dyn Stream<Item = TranscriberResult<TranscribedToken>> + Send>>>
-    {
+    ) -> TranscriberResult<
+        std::pin::Pin<Box<dyn Stream<Item = TranscriberResult<TranscribedToken>> + Send>>,
+    > {
         let model = self.model.clone();
         let config = self.build_config();
         let mel_config = model.expected_mel_config();
@@ -333,7 +336,6 @@ impl Transcriber {
         }
     }
 }
-
 
 /// Resample audio via linear interpolation.
 fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {

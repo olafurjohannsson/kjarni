@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use ndarray::{Array, Array1, Array2, Array3, Array4};
-use ndarray_rand::{rand_distr::Uniform, RandomExt};
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
+use crate::WgpuContext;
 use crate::activations::Activation;
 use crate::attention::MultiHeadAttention;
 use crate::cpu::normalization::{Normalization, RMSNorm};
@@ -12,22 +13,20 @@ use crate::feedforward::{FeedForward, SwiGluFeedForward};
 use crate::gpu::normalization::{
     GpuNormalization, GpuNormalizationWeights, GpuRMSNorm, GpuRMSNormWeights,
 };
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE as CpuRoPE;
 use crate::traits::{
     AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
     ModelLayout, ModelMetadata,
 };
-use crate::WgpuContext;
 
-#[path = "../../../tests/common.rs"]
-mod common;
+use crate::tests::common;
 
 use common::{assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context};
 

@@ -111,8 +111,8 @@ impl GpuUpdateCache {
             |pass: &mut wgpu::ComputePass<'_>| {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                let workgroups_x = (d as u32 + 15) / 16;
-                let workgroups_y = (s_new as u32 + 15) / 16;
+                let workgroups_x = (d as u32).div_ceil(16);
+                let workgroups_y = (s_new as u32).div_ceil(16);
                 let workgroups_z = (b * h) as u32;
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
             }

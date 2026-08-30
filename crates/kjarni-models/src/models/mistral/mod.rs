@@ -1,13 +1,10 @@
 //! Mistral
 
-
 pub mod config;
 pub mod model;
 
-pub use model::MistralModel;
 pub use config::MistralConfig;
-
-
+pub use model::MistralModel;
 
 #[cfg(test)]
 mod tests;

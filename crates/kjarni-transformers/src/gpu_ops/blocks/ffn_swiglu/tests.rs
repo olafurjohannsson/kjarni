@@ -1,16 +1,13 @@
 use super::*;
+use crate::WgpuContext;
 use crate::activations::Activation;
 use crate::feedforward::SwiGluFeedForward as CpuSwiGLUFFN;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tests::common::assert_tensors_are_close_2d as assert_tensors_are_close;
-use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::Array;
-use ndarray_rand::{rand_distr::Uniform, RandomExt};
-
-#[path = "../../../tests/common.rs"]
-mod common;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 #[ignore = "GPU required"]
 #[tokio::test]

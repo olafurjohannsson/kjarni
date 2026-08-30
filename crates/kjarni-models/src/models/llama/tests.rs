@@ -4,9 +4,9 @@ use anyhow::Result;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::LanguageModel;
+use kjarni_transformers::models::registry::model_cache_dir;
 use kjarni_transformers::prelude::*;
 use std::sync::Arc;
-use kjarni_transformers::models::registry::model_cache_dir;
 
 const LLAMA_32_1B: &str = "meta-llama_Llama-3.2-1B";
 const LLAMA_32_8B: &str = "meta-llama_Llama-3.2-8B-Instruct";
@@ -15,33 +15,19 @@ const LLAMA_32_8B: &str = "meta-llama_Llama-3.2-8B-Instruct";
 async fn load_llama_for_test() -> Result<LlamaModel> {
     let p = model_cache_dir(LLAMA_32_1B);
     let path = p.as_path();
-    LlamaModel::from_pretrained(
-        path,
-        Device::Cpu,
-        None,
-        None,
-        None,
-    )
+    LlamaModel::from_pretrained(path, Device::Cpu, None, None, None)
 }
 
 async fn load_llama_8b_for_test() -> Result<LlamaModel> {
     let p = model_cache_dir(LLAMA_32_8B);
     let path = p.as_path();
-    LlamaModel::from_pretrained(
-        path,
-        Device::Cpu,
-        None,
-        None,
-        None,
-    )
+    LlamaModel::from_pretrained(path, Device::Cpu, None, None, None)
 }
 
 #[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama3_8b_architectural_properties() -> Result<()> {
-    if std::path::Path::new("meta-llama_Llama-3.2-8B-Instruct").exists()
-        == false
-    {
+    if !std::path::Path::new("meta-llama_Llama-3.2-8B-Instruct").exists() {
         log::warn!("Skipping Llama-3.2-8B test since model files not found in cache.");
         return Ok(());
     }
@@ -81,7 +67,7 @@ async fn test_llama3_8b_architectural_properties() -> Result<()> {
 
     // Check token IDs match config.json
     assert_eq!(model.bos_token_id(), Some(128000));
-    assert_eq!(model.eos_token_id(), Some(128009)); 
+    assert_eq!(model.eos_token_id(), Some(128009));
 
     Ok(())
 }
@@ -220,20 +206,14 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     let config = GenerationConfig {
         max_new_tokens: Some(6),
         strategy: DecodingStrategy::Greedy,
-        repetition_penalty: 1.0, 
-        add_bos_token: true,     
+        repetition_penalty: 1.0,
+        add_bos_token: true,
         ..Default::default()
     };
     let p = model_cache_dir(LLAMA_32_1B);
     let path = p.as_path();
     {
-        let llama_model = LlamaModel::from_pretrained(
-            path,
-            Device::Cpu,
-            None,
-            None,
-            None,
-        )?;
+        let llama_model = LlamaModel::from_pretrained(path, Device::Cpu, None, None, None)?;
         let _pp = model_cache_dir(LLAMA_32_1B);
         let path22 = p.as_path();
         let llama_gpu = LlamaModel::from_pretrained(

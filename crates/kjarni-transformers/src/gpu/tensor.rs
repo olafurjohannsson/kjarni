@@ -86,10 +86,10 @@ impl GpuTensor {
                 }
             }
 
-            if let Some(target) = target_dt {
-                if target != raw.dtype {
-                    return Ok(None);
-                }
+            if let Some(target) = target_dt
+                && target != raw.dtype
+            {
+                return Ok(None);
             }
 
             let tensor = GpuTensor::from_raw(ctx, &raw, label)?;
@@ -124,7 +124,7 @@ impl GpuTensor {
     /// Creates a tensor from f32 data.
     pub fn create(
         ctx: &Arc<WgpuContext>,
-        data: &Vec<f32>,
+        data: &[f32],
         shape: Vec<usize>,
         label: &str,
     ) -> Result<GpuTensor> {
@@ -327,7 +327,7 @@ impl GpuTensor {
             new_num_elements,
             "cannot view tensor of shape {:?} as {:?}; element count mismatch",
             self.shape(),
-            &shape
+            shape
         );
 
         Self::new_view(

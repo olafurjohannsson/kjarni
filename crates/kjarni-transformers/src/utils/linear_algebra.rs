@@ -5,7 +5,6 @@ use ndarray::{Array2, Array3, Array4, ArrayView2, ArrayView4, Axis, Zip};
 use rayon::prelude::*;
 const MASK_VALUE: f32 = -1e9;
 
-
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
@@ -176,8 +175,6 @@ unsafe fn compute_chunk_fallback(
     }
 }
 
-
-
 pub fn matmul_dequant_q4_k(_a: &ArrayView2<f32>, _b_weights: &Array3<u8>) -> Array2<f32> {
     unimplemented!("Q4_K matmul not implemented yet");
 }
@@ -213,7 +210,7 @@ pub fn matmul_2d_mixed_bf16_new(
 
         if total_work >= min_parallel_work && n >= num_threads {
             // Parallel path
-            let chunk_size = (n + num_threads - 1) / num_threads;
+            let chunk_size = n.div_ceil(num_threads);
             output_slice
                 .par_chunks_mut(chunk_size)
                 .enumerate()
@@ -259,7 +256,8 @@ pub fn matmul_2d_mixed_bf16_new(
                 compute_chunk_fallback(output_slice, a_ptr, b_curr, k);
             }
         }
-    } else { // batch > 1
+    } else {
+        // batch > 1
         let c_addr = c_ptr_head as usize;
         (0..m).into_par_iter().for_each(|i| unsafe {
             let a_ptr = a_addr as *const f32;
@@ -315,7 +313,7 @@ pub fn matmul_2d_mixed_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<u16>) ->
         let min_parallel_work = num_threads * min_work_per_thread;
 
         if total_work >= min_parallel_work && n >= num_threads {
-            let chunk_size = (n + num_threads - 1) / num_threads;
+            let chunk_size = n.div_ceil(num_threads);
             output_slice
                 .par_chunks_mut(chunk_size)
                 .enumerate()
@@ -362,7 +360,7 @@ pub fn matmul_2d_mixed_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<u16>) ->
             }
         }
     } else {
-        // batch 
+        // batch
         let c_addr = c_ptr_head as usize;
         (0..m).into_par_iter().for_each(|i| unsafe {
             let a_ptr = a_addr as *const f32;
@@ -418,7 +416,7 @@ pub fn matmul_2d_f32_notranspose(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32
         let min_parallel_work = num_threads * min_work_per_thread;
 
         if total_work >= min_parallel_work && n >= num_threads {
-            let chunk_size = (n + num_threads - 1) / num_threads;
+            let chunk_size = n.div_ceil(num_threads);
             output_slice
                 .par_chunks_mut(chunk_size)
                 .enumerate()
@@ -631,7 +629,6 @@ unsafe fn compute_chunk_fallback_f32(
     }
 }
 
-
 #[inline]
 pub fn matmul_2d(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim();
@@ -708,22 +705,22 @@ pub fn matmul_3d_2d_transposed(a: &Array3<f32>, b_transposed: &Array2<f32>) -> A
 pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     let (batch, heads, seq1, dim) = a.dim();
     let seq2 = b.shape()[3];
-    
+
     let mut output = Array4::<f32>::zeros((batch, heads, seq1, seq2));
 
     Zip::from(output.outer_iter_mut())
         .and(a.outer_iter())
         .and(b.outer_iter())
         .par_for_each(|mut out_b, a_b, b_b| {
-            
             Zip::from(out_b.outer_iter_mut())
                 .and(a_b.outer_iter())
                 .and(b_b.outer_iter())
                 .for_each(|mut out_h, a_h, b_h| {
-                    
                     let a_s = a_h.as_standard_layout();
                     let b_s = b_h.as_standard_layout();
-                    let o_s = out_h.as_slice_mut().expect("Output buffer must be contiguous");
+                    let o_s = out_h
+                        .as_slice_mut()
+                        .expect("Output buffer must be contiguous");
 
                     faer::linalg::matmul::matmul(
                         faer::mat::from_row_major_slice_mut(o_s, seq1, seq2),
@@ -735,21 +732,20 @@ pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
                     );
                 });
         });
-        
+
     output
 }
 
-
 #[inline]
-pub fn matmul_4d_noalloc(
-    a: &Array4<f32>,
-    b: &Array4<f32>,
-    out: &mut Array4<f32>,
-) {
+pub fn matmul_4d_noalloc(a: &Array4<f32>, b: &Array4<f32>, out: &mut Array4<f32>) {
     let (batch, heads, seq1, dim) = a.dim();
     let seq2 = b.shape()[3];
 
-    debug_assert_eq!(out.dim(), (batch, heads, seq1, seq2), "Output shape mismatch");
+    debug_assert_eq!(
+        out.dim(),
+        (batch, heads, seq1, seq2),
+        "Output shape mismatch"
+    );
 
     Zip::from(out.outer_iter_mut())
         .and(a.outer_iter())
@@ -761,7 +757,9 @@ pub fn matmul_4d_noalloc(
                 .for_each(|mut out_h, a_h, b_h| {
                     let a_s = a_h.as_standard_layout();
                     let b_s = b_h.as_standard_layout();
-                    let o_s = out_h.as_slice_mut().expect("Output buffer must be contiguous");
+                    let o_s = out_h
+                        .as_slice_mut()
+                        .expect("Output buffer must be contiguous");
 
                     faer::linalg::matmul::matmul(
                         faer::mat::from_row_major_slice_mut(o_s, seq1, seq2),
@@ -774,7 +772,6 @@ pub fn matmul_4d_noalloc(
                 });
         });
 }
-
 
 pub fn matmul_4d_decode_gqa(
     q: &Array4<f32>,
@@ -801,6 +798,7 @@ pub fn matmul_4d_decode_gqa(
                     let q_ptr = q_h.as_ptr();
                     let out_s = out_h.as_slice_mut().unwrap();
 
+                    #[allow(clippy::needless_range_loop, reason = "indexed numeric loop; the index addresses more than the iterated slice")]
                     for t in 0..cache_len {
                         let mut sum = 0.0;
                         for d in 0..dim {
@@ -840,6 +838,7 @@ pub fn matmul_4d_context_gqa(
                     let s_ptr = s_h.as_ptr();
                     let out_s = out_h.as_slice_mut().unwrap();
 
+                    #[allow(clippy::needless_range_loop, reason = "indexed numeric loop; the index addresses more than the iterated slice")]
                     for d in 0..dim {
                         let mut sum = 0.0;
                         for t in 0..cache_len {
@@ -941,7 +940,6 @@ pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Arra
     scores
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -954,7 +952,11 @@ mod tests {
             assert!(
                 diff <= tol,
                 "{}: mismatch at {}: {} vs {} (diff: {})",
-                msg, i, x, y, diff
+                msg,
+                i,
+                x,
+                y,
+                diff
             );
         }
     }
@@ -1171,7 +1173,8 @@ mod tests {
     #[test]
     fn test_matmul_2d_mixed_bf16_simple() {
         let a = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        let b_f32 = Array2::from_shape_vec((2, 4), vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
+        let b_f32 =
+            Array2::from_shape_vec((2, 4), vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
         let b_u16: Array2<u16> = b_f32.mapv(|x| half::bf16::from_f32(x).to_bits());
 
         let result = matmul_2d_mixed_bf16(&a.view(), &b_u16.view());
@@ -1220,7 +1223,8 @@ mod tests {
     #[test]
     fn test_matmul_2d_mixed_bf16_new_simple() {
         let a = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        let b_f32 = Array2::from_shape_vec((2, 4), vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
+        let b_f32 =
+            Array2::from_shape_vec((2, 4), vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
         let b_bf16: Array2<half::bf16> = b_f32.mapv(half::bf16::from_f32);
 
         let result = matmul_2d_mixed_bf16_new(&a.view(), &b_bf16.view());
@@ -1611,10 +1615,8 @@ mod tests {
     #[test]
     fn test_apply_attention_mask_per_batch() {
         let scores = Array4::from_shape_fn((2, 1, 2, 4), |_| 1.0f32);
-        let mask = Array2::from_shape_vec((2, 4), vec![
-            1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 0.0, 0.0,
-        ]).unwrap();
+        let mask =
+            Array2::from_shape_vec((2, 4), vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0]).unwrap();
 
         let result = apply_attention_mask(scores, &mask);
 

@@ -1,9 +1,11 @@
 use super::*;
 use crate::Embeddings;
+use crate::WgpuContext;
 use crate::gpu::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu::{GpuFrameContext, GpuTensor};
-use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
-use crate::WgpuContext;
+use crate::traits::{
+    AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout,
+};
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 

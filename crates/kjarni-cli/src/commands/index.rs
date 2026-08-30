@@ -3,9 +3,9 @@ use anyhow::{Result, anyhow};
 use kjarni::Chunk;
 use std::collections::HashMap;
 use std::path::Path;
-use tokio::sync::mpsc;
-use tokio::sync::Semaphore;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::sync::mpsc;
 
 use kjarni::embedder::Embedder;
 use kjarni::{DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, SplitterConfig};
@@ -208,23 +208,32 @@ async fn process_inputs(
     };
     let loader = Arc::new(DocumentLoader::new(loader_config));
 
-    let (tx, mut rx) = mpsc::channel::<Vec<Chunk>>(64); 
-    let concurrency_limit = 16; 
+    let (tx, mut rx) = mpsc::channel::<Vec<Chunk>>(64);
+    let concurrency_limit = 16;
     let semaphore = Arc::new(Semaphore::new(concurrency_limit));
 
     // Producer Task
     let inputs_owned = inputs.to_vec();
     let loader_ref = loader.clone();
-    
+
     tokio::spawn(async move {
         for input in inputs_owned {
             let path = Path::new(&input);
-            if !path.exists() { continue; }
+            if !path.exists() {
+                continue;
+            }
 
-            for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-                if !entry.file_type().is_file() { continue; }
-                
-                if !loader_ref.is_supported_extension(entry.path()) { continue; }
+            for entry in walkdir::WalkDir::new(path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+
+                if !loader_ref.is_supported_extension(entry.path()) {
+                    continue;
+                }
 
                 let permit = match semaphore.clone().acquire_owned().await {
                     Ok(p) => p,
@@ -236,16 +245,15 @@ async fn process_inputs(
                 let file_path = entry.path().to_owned();
 
                 tokio::spawn(async move {
-                    let _p = permit; 
-                    
-                    let result = tokio::task::spawn_blocking(move || {
-                        loader.load_file(&file_path)
-                    }).await;
+                    let _p = permit;
 
-                    if let Ok(Ok(chunks)) = result {
-                        if !chunks.is_empty() {
-                            let _ = tx.send(chunks).await;
-                        }
+                    let result =
+                        tokio::task::spawn_blocking(move || loader.load_file(&file_path)).await;
+
+                    if let Ok(Ok(chunks)) = result
+                        && !chunks.is_empty()
+                    {
+                        let _ = tx.send(chunks).await;
                     }
                 });
             }
@@ -263,12 +271,8 @@ async fn process_inputs(
             batch_metadata.push(chunk.metadata.to_hashmap());
 
             if batch_texts.len() >= ENCODE_BATCH_SIZE {
-                total_indexed += flush_batch(
-                    writer,
-                    embedder,
-                    &mut batch_texts,
-                    &mut batch_metadata,
-                ).await?;
+                total_indexed +=
+                    flush_batch(writer, embedder, &mut batch_texts, &mut batch_metadata).await?;
 
                 if !quiet {
                     eprint!("\r  Indexed {} documents", total_indexed);
@@ -278,12 +282,8 @@ async fn process_inputs(
     }
 
     if !batch_texts.is_empty() {
-        total_indexed += flush_batch(
-            writer,
-            embedder,
-            &mut batch_texts,
-            &mut batch_metadata,
-        ).await?;
+        total_indexed +=
+            flush_batch(writer, embedder, &mut batch_texts, &mut batch_metadata).await?;
     }
 
     if !quiet && total_indexed > 0 {
@@ -358,12 +358,12 @@ fn format_index_info(index_path: &str, reader: &IndexReader) -> Result<String> {
 
         for entry in entries {
             let meta_path = entry.path().join("segment.json");
-            if let Ok(content) = std::fs::read_to_string(&meta_path) {
-                if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
-                    let doc_count = meta["doc_count"].as_u64().unwrap_or(0);
-                    let name = entry.file_name();
-                    output.push_str(&format!("  {:?}: {} docs\n", name, doc_count));
-                }
+            if let Ok(content) = std::fs::read_to_string(&meta_path)
+                && let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content)
+            {
+                let doc_count = meta["doc_count"].as_u64().unwrap_or(0);
+                let name = entry.file_name();
+                output.push_str(&format!("  {:?}: {} docs\n", name, doc_count));
             }
         }
     }
@@ -373,9 +373,8 @@ fn format_index_info(index_path: &str, reader: &IndexReader) -> Result<String> {
 }
 
 async fn load_embedder(model: &str, gpu: bool, quiet: bool) -> Result<Embedder> {
-    let mut builder = Embedder::builder(model)
-        .quiet(quiet);
-    
+    let mut builder = Embedder::builder(model).quiet(quiet);
+
     if gpu {
         builder = builder.gpu();
     } else {
@@ -387,7 +386,10 @@ async fn load_embedder(model: &str, gpu: bool, quiet: bool) -> Result<Embedder> 
 
 fn calculate_index_size(path: &str) -> Result<u64> {
     let mut total = 0u64;
-    for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if entry.file_type().is_file() {
             total += entry.metadata().map(|m| m.len()).unwrap_or(0);
         }
@@ -408,7 +410,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    let s = s.replace('\n', " ").replace('\t', " ");
+    let s = s.replace(['\n', '\t'], " ");
     if s.len() <= max_len {
         s
     } else {
@@ -541,7 +543,7 @@ mod tests {
     fn test_truncate_realistic_document() {
         let doc = "This is a document with multiple paragraphs.\n\nIt has some content that spans several lines.\n\nAnd more content here.";
         let result = truncate(doc, 60);
-        
+
         assert_eq!(result.len(), 60);
         assert!(result.ends_with("..."));
         assert!(!result.contains('\n'));
@@ -550,16 +552,16 @@ mod tests {
     #[test]
     fn test_format_size_realistic_file_sizes() {
         // Common file sizes
-        assert_eq!(format_size(4_096), "4.10 KB");        // 4KB block
-        assert_eq!(format_size(65_536), "65.54 KB");      // 64KB
-        assert_eq!(format_size(1_048_576), "1.05 MB");    // 1 MiB
+        assert_eq!(format_size(4_096), "4.10 KB"); // 4KB block
+        assert_eq!(format_size(65_536), "65.54 KB"); // 64KB
+        assert_eq!(format_size(1_048_576), "1.05 MB"); // 1 MiB
         assert_eq!(format_size(104_857_600), "104.86 MB"); // 100 MiB
         assert_eq!(format_size(1_073_741_824), "1.07 GB"); // 1 GiB
     }
     #[test]
     fn test_encode_batch_size_is_reasonable() {
-        assert!(ENCODE_BATCH_SIZE > 0);
-        assert!(ENCODE_BATCH_SIZE <= 128);
+        const { assert!(ENCODE_BATCH_SIZE > 0) };
+        const { assert!(ENCODE_BATCH_SIZE <= 128) };
         assert_eq!(ENCODE_BATCH_SIZE, 32);
     }
 }

@@ -16,11 +16,15 @@ pub enum TranslatorError {
     IncompatibleModel { model: String, reason: String },
 
     /// Unknown or unsupported language.
-    #[error("Unknown language: '{0}'. Use language codes (en, de, fr) or names (English, German, French).")]
+    #[error(
+        "Unknown language: '{0}'. Use language codes (en, de, fr) or names (English, German, French)."
+    )]
     UnknownLanguage(String),
 
     /// Missing required language specification.
-    #[error("Missing language: specify both source and target languages, or set defaults via builder.")]
+    #[error(
+        "Missing language: specify both source and target languages, or set defaults via builder."
+    )]
     MissingLanguage,
 
     /// Translation failed.

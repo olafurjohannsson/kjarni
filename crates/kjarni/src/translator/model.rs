@@ -49,7 +49,10 @@ impl Translator {
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| TranslatorError::UnknownModel(builder.model.clone()))?;
 
-        debug!("Resolved translator model '{}' -> {:?}", builder.model, model_type);
+        debug!(
+            "Resolved translator model '{}' -> {:?}",
+            builder.model, model_type
+        );
 
         validate_for_translation(model_type)?;
 
@@ -326,7 +329,6 @@ impl Translator {
         &self.generator
     }
 }
-
 
 impl std::fmt::Debug for Translator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

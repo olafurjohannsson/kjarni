@@ -1,6 +1,6 @@
 //! Translation command using encoder-decoder models
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::{StreamExt, pin_mut};
 use std::io::{self, Write};
 

@@ -4,32 +4,38 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 #[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
+#[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::models::base::ModelInput;
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::cpu::encoder::traits::GpuEncoderOps;
+#[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::encoder::GpuTransformerEncoder;
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::pipeline::EncoderLoader;
 use kjarni_transformers::{
     WgpuContext,
     cpu::encoder::{
-        CpuTransformerEncoder, 
+        CpuTransformerEncoder,
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
-        traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},
+        traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder},
     },
     models::base::ModelLoadConfig,
     models::{LanguageModel, ModelType},
-    pipeline::{EncoderLoader, EncoderModelFactory, EncoderPipeline},
+    pipeline::{EncoderModelFactory, EncoderPipeline},
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
 
 use crate::BertConfig;
 use crate::models::sequence_classifier::configs::MiniLMCrossEncoderConfig;
-
-
 
 /// Cross-encoder for semantic similarity and reranking.
 pub struct CrossEncoder {
@@ -38,8 +44,6 @@ pub struct CrossEncoder {
     config: Arc<dyn ModelConfig + Send + Sync>,
     model_type: Option<ModelType>,
 }
-
-
 
 impl EncoderModelFactory for CrossEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
@@ -57,6 +61,12 @@ impl EncoderModelFactory for CrossEncoder {
         }
     }
 
+    // On wasm there is no GPU backend, so `context` goes unread and the
+    // locals are never reassigned. The signature is shared with native.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(unused_variables, unused_mut, unused_assignments)
+    )]
     fn build_backends(
         weights: &ModelWeights,
         meta: &ModelMetadata,
@@ -94,9 +104,6 @@ impl EncoderModelFactory for CrossEncoder {
             Device::Wgpu => {
                 return Err(anyhow!("GPU inference is not available in WebAssembly"));
             }
-            _ => {
-                panic!("No CPU or GPU encoder on CrossEncoder, will not work!");
-            }
         }
 
         Ok((cpu, gpu))
@@ -132,8 +139,6 @@ impl EncoderModelFactory for CrossEncoder {
     }
 }
 
-
-
 impl CrossEncoder {
     /// Run the encoder on the GPU, or `None` when there is no GPU backend.
     ///
@@ -162,6 +167,10 @@ impl CrossEncoder {
         let attention_mask_gpu = GpuTensor::from_ndarray(&context, attention_mask)?;
         let token_types_gpu = GpuTensor::from_ndarray(&context, token_type_ids)?;
 
+        #[allow(
+            deprecated,
+            reason = "internal caller of an API deprecated without a named replacement"
+        )]
         let gpu_output = ops.encoder().forward(
             encoder_cmd,
             pool_ref,

@@ -1,10 +1,10 @@
 //! A GPU-accelerated Embedding block
 
 use crate::WgpuContext;
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::lookup2::GpuLookup2;
 use crate::gpu_ops::primitives::scale::GpuScale;
-use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
 use anyhow::Result;
@@ -73,7 +73,7 @@ impl GpuEmbeddingWeights {
             token_type_embeddings,
         })
     }
-    
+
     pub fn with_shared_words(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
