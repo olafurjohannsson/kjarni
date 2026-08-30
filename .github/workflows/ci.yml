@@ -315,7 +315,8 @@ jobs:
           mkdir -p dist
           cp target/x86_64-unknown-linux-gnu/release/kjarni dist/
           cp target/x86_64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -352,7 +353,8 @@ jobs:
           mkdir -p dist
           cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
           cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -384,7 +386,8 @@ jobs:
           mkdir -p dist
           cp target/aarch64-apple-darwin/release/kjarni dist/
           cp target/aarch64-apple-darwin/release/libkjarni_ffi.dylib dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -417,7 +420,8 @@ jobs:
           mkdir -p dist
           cp target/x86_64-pc-windows-msvc/release/kjarni.exe dist/
           cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -506,6 +510,49 @@ jobs:
             artifacts/kjarni-aarch64-macos.tar.gz
             artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz
+
+  # ─── Publish to npm ─────────────────────────────────────────────
+  #
+  # Needs an NPM_TOKEN secret: an npm automation token with publish rights on
+  # `kjarni-wasm`. Create it at npmjs.com under Access Tokens, then add it in
+  # Settings > Secrets and variables > Actions. Without it this job fails at the
+  # publish step rather than silently skipping.
+  publish-npm:
+    name: Publish to npm
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # The published package is the TypeScript wrapper plus the wasm-pack output
+      # it wraps, so both have to be present before packing.
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kjarni-wasm
+          path: crates/kjarni-wasm/pkg/
+
+      - name: Build the TypeScript wrapper
+        working-directory: crates/kjarni-wasm/ts
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      # npm versions are immutable like NuGet's, so the version has to come from
+      # the tag rather than whatever is committed in package.json.
+      - name: Publish
+        working-directory: crates/kjarni-wasm/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+          npm publish --access public
 
   # ─── Publish to NuGet ───────────────────────────────────────────
   # This lives here, not in a release-triggered workflow, because GitHub does
