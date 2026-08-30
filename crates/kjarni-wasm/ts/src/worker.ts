@@ -88,12 +88,13 @@ function handle(req: Request): unknown {
 
     case "chat": {
       if (!chat) throw new Error("no chat model loaded; call load({ chat }) first");
-      // The binding generates to completion rather than yielding tokens, so the
-      // whole reply arrives at once. Emitting it as a single token keeps the
-      // streaming API honest: callers written against `for await` keep working
-      // unchanged if a token callback is exposed later.
-      const text = chat.generate(req.prompt, req.maxNewTokens, req.temperature);
-      post({ id: req.id, kind: "token", text });
+      // Genuinely incremental: the callback fires between decoding steps, and
+      // each postMessage reaches the page while the model is still generating.
+      // This is the reason the whole wrapper is worth having, since the same
+      // call on the main thread would freeze the tab until the reply finished.
+      chat.generate_stream(req.prompt, req.maxNewTokens, req.temperature, (piece: string) => {
+        post({ id: req.id, kind: "token", text: piece });
+      });
       return null;
     }
 

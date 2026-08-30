@@ -96,10 +96,11 @@ for await (const piece of kjarni.chat("Explain RAG in one sentence.")) {
 }
 ```
 
-`temperature: 0` selects greedy decoding, which is deterministic. Note that the
-underlying binding currently generates to completion before returning, so the reply
-arrives as one piece. The `for await` shape is the API either way, and it will
-stream incrementally without a change on your side once token callbacks land.
+Tokens arrive as they are decoded, not in one lump at the end. The worker is what
+makes that useful: generation occupies its thread completely, so the same call on
+the main thread would freeze the tab until the reply finished.
+
+`temperature: 0` selects greedy decoding, which is deterministic.
 
 ## Cleaning up
 

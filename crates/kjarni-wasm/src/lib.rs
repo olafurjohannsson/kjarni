@@ -695,6 +695,37 @@ impl WasmChat {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    /// Generate a completion, invoking `on_token` with each piece as it arrives.
+    ///
+    /// The callback runs on whichever thread called this, synchronously between
+    /// decoding steps. On the main thread that still blocks the page, so this is
+    /// meant to be driven from a Web Worker; the `kjarni-wasm` npm wrapper does
+    /// exactly that and turns it into an async iterator.
+    ///
+    /// Returning `false` from the callback does not stop generation yet; the
+    /// value is ignored.
+    ///
+    /// Browser-only: `js_sys::Function` has no native equivalent. The streaming
+    /// itself is in `generate_stream_core`, which builds and is tested natively.
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen]
+    pub fn generate_stream(
+        &self,
+        prompt: &str,
+        max_new_tokens: usize,
+        temperature: f32,
+        on_token: &js_sys::Function,
+    ) -> Result<String, JsValue> {
+        let this = JsValue::NULL;
+        self.generate_stream_core(prompt, max_new_tokens, temperature, |piece| {
+            // A throwing callback must not abort generation midway and leave the
+            // model in a half-stepped state, so the error is dropped here and the
+            // completed text is still returned.
+            let _ = on_token.call1(&this, &JsValue::from_str(piece));
+        })
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// The model's context window, in tokens.
     #[wasm_bindgen]
     pub fn context_size(&self) -> usize {
@@ -767,6 +798,30 @@ impl WasmChat {
         max_new_tokens: usize,
         temperature: f32,
     ) -> anyhow::Result<String> {
+        self.generate_stream_core(prompt, max_new_tokens, temperature, |_| {})
+    }
+
+    /// Generates, calling `on_token` with each piece as it is produced.
+    ///
+    /// The engine has always streamed: `run_generation_loop` sends every token
+    /// into a channel the moment it is decoded. The earlier version of this
+    /// method threw that away, blocking on the whole loop and only then draining
+    /// the channel, which is why it needed one large enough to hold the entire
+    /// response.
+    ///
+    /// Joining the loop with its own drain fixes that on a single thread. There
+    /// is no second thread to spare in wasm, but there does not need to be: the
+    /// loop awaits on `send`, and at that point `block_on` polls the drain, which
+    /// hands the token out before the loop resumes. Tokens surface as they are
+    /// decoded, and the channel goes back to being a small buffer that applies
+    /// real back-pressure.
+    pub fn generate_stream_core(
+        &self,
+        prompt: &str,
+        max_new_tokens: usize,
+        temperature: f32,
+        mut on_token: impl FnMut(&str),
+    ) -> anyhow::Result<String> {
         use kjarni_transformers::common::{
             DecodingStrategy, GenerationConfig, SamplingParams, TokenType,
         };
@@ -788,28 +843,34 @@ impl WasmChat {
         };
 
         let tokens = self.generator.encode(prompt, &config)?;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
 
-        // Sized to hold the whole response: nothing drains this channel while the
-        // loop runs, so a smaller one would deadlock rather than back-pressure.
-        let (tx, mut rx) = tokio::sync::mpsc::channel(max_new_tokens + tokens.len() + 16);
-
-        futures::executor::block_on(run_generation_loop(
+        let generate = run_generation_loop(
             self.generator.model.clone(),
             self.generator.backend(),
             tokens,
             config,
             tx,
             None,
-        ))?;
+        );
 
-        let mut out = String::new();
-        while let Ok(item) = rx.try_recv() {
-            let token = item?;
-            if token.token_type == TokenType::Generated {
-                out.push_str(&token.text);
+        let drain = async {
+            let mut out = String::new();
+            // Ends when the loop returns and drops its sender.
+            while let Some(item) = rx.recv().await {
+                let token = item?;
+                if token.token_type == TokenType::Generated {
+                    on_token(&token.text);
+                    out.push_str(&token.text);
+                }
             }
-        }
-        Ok(out)
+            Ok::<String, anyhow::Error>(out)
+        };
+
+        let (generated, drained) =
+            futures::executor::block_on(futures::future::join(generate, drain));
+        generated?;
+        drained
     }
 }
 

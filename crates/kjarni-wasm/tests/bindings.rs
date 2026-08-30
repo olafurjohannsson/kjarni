@@ -396,3 +396,58 @@ fn chat_rejects_an_encoder_model() {
     let Some(bytes) = model_bytes(EMBED_KJQ) else { return };
     assert!(kjarni_wasm::WasmChat::load_core(&bytes, None).is_err());
 }
+
+/// Generation must hand tokens out as they are decoded, not in one lump.
+///
+/// It used to do the latter: `generate_core` blocked on the whole loop and only
+/// then drained the channel, so a caller could not show anything until the reply
+/// was finished. The engine had been streaming into that channel the entire time.
+///
+/// Counting callbacks is what pins the fix. Asserting only on the returned text
+/// would pass just as happily against the batched version.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "decoder generation is orders of magnitude slower unoptimised; run with --release"
+)]
+fn chat_streams_tokens_as_they_are_generated() {
+    let Some(chat) = chat() else {
+        eprintln!("skipping: {CHAT_KJQ} not present");
+        return;
+    };
+
+    let mut pieces: Vec<String> = Vec::new();
+    let text = chat
+        .generate_stream_core("Count: one, two,", 12, 0.0, |piece| {
+            pieces.push(piece.to_string())
+        })
+        .expect("generation succeeds");
+
+    assert!(
+        pieces.len() > 1,
+        "expected several streamed pieces, got {}: {pieces:?}",
+        pieces.len()
+    );
+    assert_eq!(
+        pieces.concat(),
+        text,
+        "the streamed pieces must reconstruct exactly what was returned"
+    );
+}
+
+/// Streaming and non-streaming must produce identical text.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "decoder generation is orders of magnitude slower unoptimised; run with --release"
+)]
+fn streaming_and_batched_generation_agree() {
+    let Some(chat) = chat() else { return };
+
+    let batched = chat.generate_core("The capital of Iceland is", 12, 0.0).unwrap();
+    let streamed = chat
+        .generate_stream_core("The capital of Iceland is", 12, 0.0, |_| {})
+        .unwrap();
+
+    assert_eq!(batched, streamed, "greedy decoding must not vary by call path");
+}
