@@ -124,11 +124,22 @@ async function fetchModel(url, statusId, label) {
 
 let wasm = null, model = null, reranker = null, classifier = null, chat = null, modelBytes = null;
 
+// Models are hosted on Hugging Face, one repository per model, because they are
+// far too large for the git repository: qwen05b alone is 478MB, well past
+// GitHub's 100MB per-file limit. The repository name and the file name match,
+// which is what lets one function cover all of them.
+//
+// Serving them from Hugging Face also gets CORS right for free: `resolve/main`
+// echoes the requesting origin and its CDN returns `*`, so a fetch from any
+// site works without proxying.
+const modelUrl = (name) =>
+  `https://huggingface.co/olafuraron/${name}/resolve/main/${name}.kjq`;
+
 const MODELS = {
-  embed:    "../../../../web.kjarni.ai/src/static/models/all-MiniLM-L6-v2-q8.kjq",
-  rerank:   "../../../../web.kjarni.ai/src/static/models/ms-marco-MiniLM-L-6-v2-q8.kjq",
-  classify: "../../../../web.kjarni.ai/src/static/models/distilbert-sentiment-q8.kjq",
-  chat:     "../../../../web.kjarni.ai/src/static/models/qwen05b-q8.kjq",
+  embed:    modelUrl("all-MiniLM-L6-v2-q8"),
+  rerank:   modelUrl("ms-marco-MiniLM-L-6-v2-q8"),
+  classify: modelUrl("distilbert-sentiment-q8"),
+  chat:     modelUrl("qwen05b-q8"),
 };
 
 // ── 1. Load the encoder ─────────────────────────────────────────
