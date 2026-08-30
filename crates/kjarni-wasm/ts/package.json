@@ -1,0 +1,46 @@
+{
+  "name": "kjarni-wasm",
+  "version": "0.1.4",
+  "description": "Local AI inference in the browser: embeddings, classification, reranking, semantic search and chat, running in a Web Worker.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "pkg"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "prebuild": "rm -rf pkg && cp -r ../pkg pkg && rm -f pkg/.gitignore",
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/olafurjohannsson/kjarni.git",
+    "directory": "crates/kjarni-wasm"
+  },
+  "homepage": "https://kjarni.ai",
+  "keywords": [
+    "ai",
+    "embeddings",
+    "webassembly",
+    "wasm",
+    "local",
+    "offline",
+    "bert",
+    "rag",
+    "semantic-search",
+    "web-worker"
+  ]
+}

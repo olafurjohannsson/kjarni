@@ -2,6 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
+// Only the wasm32 arms use the macro, so importing it unconditionally reads as an
+// unused import on native and gets pruned, which breaks the WebAssembly build.
+#[cfg(target_arch = "wasm32")]
+use anyhow::anyhow;
 use async_trait::async_trait;
 use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};

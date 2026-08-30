@@ -658,8 +658,13 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
-          test -f pkg/kjarni_wasm_bg.wasm || {
-            echo "::error::the wasm bundle is missing from the package"; exit 1; }
+          # Two ways this has already gone wrong: `files` pointing outside the
+          # package root (npm drops it silently), and wasm-pack's own .gitignore
+          # containing `*` (npm honours it when there is no .npmignore). Both
+          # produce a green publish of a package that cannot work, so check the
+          # tarball rather than the working directory.
+          npm pack --dry-run 2>&1 | grep -q 'pkg/kjarni_wasm_bg.wasm' || {
+            echo "::error::the wasm bundle is not in the npm tarball"; exit 1; }
 
       # npm versions are immutable like NuGet's, so the version has to come from
       # the tag rather than whatever is committed in package.json.
