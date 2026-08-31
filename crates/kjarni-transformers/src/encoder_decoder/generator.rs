@@ -145,7 +145,7 @@ impl EncoderDecoderGenerator {
         input_text: &str,
         config: Option<&GenerationConfig>,
     ) -> Result<String> {
-        let t_start = std::time::Instant::now();
+        let t_start = crate::utils::time::Instant::now();
         let generation_config = config
             .cloned()
             .unwrap_or_else(|| self.model.get_generation_config_for_input(input_text));
@@ -206,7 +206,7 @@ impl EncoderDecoderGenerator {
                 &owned_config,
             );
 
-            let t_start = std::time::Instant::now();
+            let t_start = crate::utils::time::Instant::now();
             let mut token_count = 0;
 
             pin_mut!(stream);

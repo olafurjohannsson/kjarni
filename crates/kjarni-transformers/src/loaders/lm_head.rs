@@ -1,8 +1,8 @@
 //! Unified LM head supporting both CPU and GPU execution.
 
+use crate::utils::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, s};

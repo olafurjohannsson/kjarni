@@ -1,7 +1,7 @@
 //! GPU timeout
 
+use crate::utils::time::{Duration, Instant};
 use anyhow::Result;
-use std::time::{Duration, Instant};
 use wgpu::Device;
 
 /// Default timeout for GPU operations (30 seconds).

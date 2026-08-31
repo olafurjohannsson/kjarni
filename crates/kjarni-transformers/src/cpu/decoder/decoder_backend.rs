@@ -3,11 +3,11 @@
 use crate::cache::Cache;
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
+use crate::utils::time::Instant;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::{debug, trace};
 use ndarray::{Array1, Array2, Array3, s};
-use std::time::Instant;
 
 /// CPU-based backend for autoregressive decoder generation.
 #[derive(Clone, Default)]

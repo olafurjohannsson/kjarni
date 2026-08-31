@@ -50,6 +50,8 @@ windows = { version = "0.58", features = ["Win32_Graphics_Dxgi"] }
 sysinfo = "0.32"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# std::time::Instant panics on this target; see utils::time.
+web-time = "1.1"
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
