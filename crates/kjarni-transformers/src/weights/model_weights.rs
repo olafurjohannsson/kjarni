@@ -94,6 +94,29 @@ impl ModelWeights {
         })
     }
 
+    /// Creates `ModelWeights` from an unpacked `.kjq` container.
+    ///
+    /// A `KJQ1` file arrives as f32 safetensors and takes the ordinary path. A
+    /// `KJQ8` file keeps its `BlockQ8_0` tensors, which is the whole point of
+    /// that encoding: expanding a 494M parameter decoder to f32 needs 1.98GB,
+    /// and wasm32 caps a single allocation at 2GB.
+    pub fn from_kjq(unpacked: &crate::weights::kjq::KjqUnpacked) -> Result<Self> {
+        use crate::weights::kjq::KjqEncoding;
+
+        let loader: Box<dyn WeightLoader + Send + Sync> = match unpacked.encoding {
+            KjqEncoding::Kjq1 => Box::new(SafeTensorsLoader::from_bytes(&unpacked.safetensors)?),
+            KjqEncoding::Kjq8 => Box::new(crate::weights::kjq_loader::KjqLoader::new(unpacked)?),
+        };
+
+        Ok(Self {
+            inner: Arc::new(ModelWeightsInner {
+                loader,
+                config_json: unpacked.config_json.clone(),
+                is_gguf: false,
+            }),
+        })
+    }
+
     /// Creates ModelWeights from a specific file.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path) -> Result<Self> {

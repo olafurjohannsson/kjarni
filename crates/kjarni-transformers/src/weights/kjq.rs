@@ -25,15 +25,49 @@
 
 use anyhow::{Result, anyhow};
 
+/// How a `.kjq` file stored its tensors.
+///
+/// Two encodings share the container, told apart by the magic bytes. `KJQ1` keeps
+/// one scale per tensor and is dequantised here, which suits small encoders where
+/// f32 matmul is faster and the memory never mattered. `KJQ8` keeps
+/// GGUF-compatible `BlockQ8_0` and is handed through untouched, because
+/// materialising a 0.5B decoder as f32 needs 1.98GB and wasm32 caps a single
+/// allocation at 2GB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KjqEncoding {
+    /// Per-tensor int8, dequantised to f32 on read.
+    Kjq1,
+    /// Block-quantised, kept quantised in memory.
+    Kjq8,
+}
+
 /// A `.kjq` file unpacked into the pieces the loaders expect.
 #[derive(Debug)]
 pub struct KjqUnpacked {
-    /// Tensors re-encoded as safetensors bytes.
+    /// Which encoding the file used.
+    pub encoding: KjqEncoding,
+    /// Tensors re-encoded as safetensors bytes. Empty for `Kjq8`.
     pub safetensors: Vec<u8>,
+    /// Block-quantised tensors, populated only for `Kjq8`.
+    ///
+    /// safetensors has no dtype that can describe `BlockQ8_0`, so these travel
+    /// beside it rather than inside it: the name, the logical `[out, in]` shape,
+    /// and the block bytes exactly as they were written.
+    pub blocks: Vec<KjqBlockTensor>,
     /// The model's `config.json`.
     pub config_json: String,
     /// The model's `tokenizer.json`.
     pub tokenizer_json: String,
+}
+
+/// One block-quantised tensor from a `KJQ8` file.
+#[derive(Debug)]
+pub struct KjqBlockTensor {
+    pub name: String,
+    /// The logical shape, `[out_features, in_features]`, not the block count.
+    pub shape: [usize; 2],
+    /// `BlockQ8_0` bytes: an f16 scale then 32 int8 values, repeated.
+    pub bytes: Vec<u8>,
 }
 
 fn read_u32(data: &[u8], cursor: &mut usize) -> Result<u32> {
@@ -74,12 +108,16 @@ pub fn unpack(data: &[u8]) -> Result<KjqUnpacked> {
 
     let mut cursor = 0usize;
 
-    if data.len() < 4 || &data[0..4] != b"KJQ1" {
-        return Err(anyhow!(
-            "not a .kjq file: expected magic \"KJQ1\", found {:?}",
-            &data[..data.len().min(4)]
-        ));
-    }
+    let encoding = match data.get(0..4) {
+        Some(b"KJQ1") => KjqEncoding::Kjq1,
+        Some(b"KJQ8") => KjqEncoding::Kjq8,
+        _ => {
+            return Err(anyhow!(
+                "not a .kjq file: expected magic \"KJQ1\" or \"KJQ8\", found {:?}",
+                &data[..data.len().min(4)]
+            ));
+        }
+    };
     cursor += 4;
 
     let config_json = read_str(data, &mut cursor, "config")?;
@@ -91,6 +129,7 @@ pub fn unpack(data: &[u8]) -> Result<KjqUnpacked> {
     // views can borrow from one allocation rather than one per tensor.
     let mut meta: Vec<(String, Vec<usize>, usize, usize)> = Vec::with_capacity(num_tensors);
     let mut bytes: Vec<u8> = Vec::new();
+    let mut blocks: Vec<KjqBlockTensor> = Vec::new();
 
     for i in 0..num_tensors {
         let name = read_str(data, &mut cursor, &format!("tensor {i} name"))?;
@@ -115,6 +154,35 @@ pub fn unpack(data: &[u8]) -> Result<KjqUnpacked> {
         cursor += 1;
 
         let start = bytes.len();
+
+        if quantized && encoding == KjqEncoding::Kjq8 {
+            // BlockQ8_0: one f16 scale plus 32 int8 values per block, copied out
+            // verbatim. Dequantising here would defeat the entire point of the
+            // encoding, so the bytes travel to the loader as they are.
+            let cols = *shape.last().unwrap_or(&0);
+            if cols == 0 || cols % 32 != 0 {
+                return Err(anyhow!(
+                    "tensor '{name}' is marked block-quantised but its last dimension \
+                     ({cols}) is not a multiple of 32"
+                ));
+            }
+            let block_count = numel / 32;
+            let len = block_count * 34;
+            if cursor + len > data.len() {
+                return Err(anyhow!(
+                    "truncated .kjq: tensor '{name}' needs {len} bytes of blocks, {} remain",
+                    data.len() - cursor
+                ));
+            }
+            blocks.push(KjqBlockTensor {
+                name,
+                shape: [shape[0], cols],
+                bytes: data[cursor..cursor + len].to_vec(),
+            });
+            cursor += len;
+            let _ = start;
+            continue;
+        }
 
         if quantized {
             if cursor + 4 > data.len() {
@@ -168,6 +236,8 @@ pub fn unpack(data: &[u8]) -> Result<KjqUnpacked> {
         .map_err(|e| anyhow!("failed to encode tensors as safetensors: {e}"))?;
 
     Ok(KjqUnpacked {
+        encoding,
+        blocks,
         safetensors,
         config_json,
         tokenizer_json,

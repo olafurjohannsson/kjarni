@@ -180,6 +180,42 @@ impl DecoderLoader {
         ))
     }
 
+    /// Load a decoder straight from an unpacked `.kjq` container.
+    ///
+    /// `load_from_bytes` takes f32 safetensors, which for a `KJQ8` file would
+    /// mean expanding the weights it was written to keep compressed. This keeps
+    /// `BlockQ8_0` tensors quantised all the way into `LinearData::Q8_0`, which
+    /// is what lets a 494M parameter decoder fit under wasm32's 2GB cap on a
+    /// single allocation.
+    ///
+    /// A `KJQ1` container still works and still dequantises, so the same call
+    /// handles both encodings.
+    pub fn load_from_kjq<M: DecoderModelFactory>(
+        unpacked: &crate::weights::kjq::KjqUnpacked,
+        load_config: Option<ModelLoadConfig>,
+        model_type: Option<ModelType>,
+    ) -> Result<M> {
+        use crate::weights::kjq::KjqEncoding;
+
+        let weights = ModelWeights::from_kjq(unpacked)?;
+        let mut load_config: ModelLoadConfig = load_config.unwrap_or_default();
+
+        // The container decides the dtype: a KJQ8 file exists precisely so its
+        // weights are not expanded, and honouring a caller's F32 request here
+        // would defeat that silently.
+        if unpacked.encoding == KjqEncoding::Kjq8 {
+            load_config.target_dtype = Some(crate::tensor::DType::Q8_0);
+        }
+
+        Self::build_from_parts::<M>(
+            weights,
+            &unpacked.config_json,
+            unpacked.tokenizer_json.as_bytes(),
+            load_config,
+            model_type,
+        )
+    }
+
     /// Load a decoder from raw safetensors plus its config and tokenizer.
     ///
     /// The browser counterpart to `load_from_pretrained`: there is no filesystem to
@@ -194,6 +230,24 @@ impl DecoderLoader {
     ) -> Result<M> {
         let weights = ModelWeights::from_safetensors_bytes(safetensors_data, config_json)?;
         let load_config: ModelLoadConfig = load_config.unwrap_or_default();
+        Self::build_from_parts::<M>(
+            weights,
+            config_json,
+            tokenizer_json,
+            load_config,
+            model_type,
+        )
+    }
+
+    /// The half of `load_from_bytes` that does not care where the bytes came from.
+    fn build_from_parts<M: DecoderModelFactory>(
+        weights: ModelWeights,
+        config_json: &str,
+        tokenizer_json: &[u8],
+        load_config: ModelLoadConfig,
+        model_type: Option<ModelType>,
+    ) -> Result<M> {
+        let _ = config_json;
 
         let config = M::load_config(&weights)?;
         let meta = config.metadata();
