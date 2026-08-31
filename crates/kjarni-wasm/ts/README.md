@@ -1,7 +1,7 @@
 # kjarni-wasm
 
-Local AI inference in the browser. Embeddings, classification, reranking and chat,
-running in a Web Worker so the page never freezes.
+Local AI inference in the browser. Embeddings, classification, reranking, semantic
+search and chat, running in a Web Worker so the page never freezes.
 
 ```bash
 npm i kjarni-wasm
@@ -20,7 +20,9 @@ Or without a bundler, straight from a CDN:
 ```ts
 import { Kjarni } from "kjarni-wasm";
 
-const kjarni = await Kjarni.load({ encoder: "/models/minilm-l6-v2-q8.kjq" });
+const kjarni = await Kjarni.load({
+  encoder: "https://huggingface.co/olafuraron/all-MiniLM-L6-v2-q8/resolve/main/all-MiniLM-L6-v2-q8.kjq",
+});
 
 const [doctor, physician] = await kjarni.encode(["doctor", "physician"]);
 console.log(Kjarni.cosine(doctor, physician));   // 0.8598
@@ -28,6 +30,8 @@ console.log(Kjarni.cosine(doctor, physician));   // 0.8598
 // or in one call
 console.log(await kjarni.similarity("doctor", "physician"));
 ```
+
+That URL is a real, public 23 MB file. It downloads once, the browser caches it, and nothing else leaves the machine. See [Models](#models) for the rest, and serve them from your own origin in production rather than hotlinking.
 
 Every method returns a promise and the work happens on a worker thread. A model
 loads or a reply generates while the page keeps painting.
@@ -48,9 +52,9 @@ Models are `.kjq` files: config, tokenizer and int8 weights in one download.
 
 ```ts
 const kjarni = await Kjarni.load({
-  encoder:    "/models/minilm-l6-v2-q8.kjq",
-  classifier: "/models/distilbert-sentiment-q8.kjq",
-  reranker:   "/models/ms-marco-MiniLM-L-6-v2-q8.kjq",
+  encoder:    model("all-MiniLM-L6-v2-q8"),
+  classifier: model("distilbert-sentiment-q8"),
+  reranker:   model("ms-marco-MiniLM-L-6-v2-q8"),
   onProgress: (capability, loaded, total) => {
     console.log(`${capability}: ${Math.round((loaded / total) * 100)}%`);
   },
@@ -85,22 +89,32 @@ for (const { index, score } of ranked) console.log(score, documents[index]);
 
 ## Chat
 
+A 0.5B language model runs in the tab, and tokens arrive as they are decoded.
+
 ```ts
 const kjarni = await Kjarni.load({
-  chat: "/models/qwen05b-q8.kjq",
+  chat: model("qwen05b-q8"),
   chatModelId: "qwen2.5-0.5b-instruct",
 });
 
-for await (const piece of kjarni.chat("Explain RAG in one sentence.")) {
-  output.textContent += piece;
-}
+let out = "";
+for await (const piece of kjarni.chat("Explain RAG in one sentence.")) out += piece;
 ```
 
-Tokens arrive as they are decoded, not in one lump at the end. The worker is what
-makes that useful: generation occupies its thread completely, so the same call on
-the main thread would freeze the tab until the reply finished.
+This works because the weights stay block-quantised in memory. wasm32 caps a
+single allocation at `isize::MAX`, which is 2 GB, and Qwen2.5 0.5B expanded to f32
+needs 1.98 GB, so a loader that dequantises up front traps on load. The `.kjq`
+container carries block-quantised weights the engine reads in place, which is
+500 MB rather than 1.98 GB, and decodes faster than f32 rather than slower.
 
-`temperature: 0` selects greedy decoding, which is deterministic.
+Expect a few tokens per second on a laptop CPU. Run it in a Web Worker: generation
+occupies the thread until it returns, so on the main thread the tab stops painting
+for the whole reply.
+
+`chat()` completes a prompt; it does not keep turns. Multi-turn conversation, where
+the model's own chat template is applied and earlier turns are remembered, exists
+on `WasmChat` (`send_stream`, `clear_history`) and is not yet surfaced through this
+wrapper.
 
 ## Cleaning up
 
@@ -115,6 +129,45 @@ reference leaks the weights. `close()` frees the models and stops the worker.
 
 A browser with WebAssembly and module workers: Chrome and Edge 80+, Firefox 114+,
 Safari 15+. No WebGPU required, inference runs on the CPU.
+
+## Models
+
+`.kjq` is a single file holding config, tokenizer and int8 weights. These are
+public and hosted on Hugging Face, one repository per model, with the repository
+and file names matching:
+
+```ts
+const model = (name: string) =>
+  `https://huggingface.co/olafuraron/${name}/resolve/main/${name}.kjq`;
+```
+
+| Pass as | Name | Size | What it does |
+| ------- | ---- | ---- | ------------ |
+| `encoder` | `all-MiniLM-L6-v2-q8` | 23 MB | embeddings, similarity, search |
+| `reranker` | `ms-marco-MiniLM-L-6-v2-q8` | 23 MB | cross-encoder reranking |
+| `classifier` | `distilbert-sentiment-q8` | 68 MB | positive / negative sentiment |
+| `chat` | `qwen05b-q8` | 508 MB | a local language model, block-quantised so it fits |
+
+Hugging Face serves these with permissive CORS, so a browser can fetch them from
+any origin. For production, copy what you need and serve it from your own origin:
+you control caching, and your page does not depend on someone else's uptime.
+
+Load only what you use, and wire `onProgress` to something visible: these are real
+downloads, and a silent minute reads as a broken page.
+
+## The same engine elsewhere
+
+Kjarni is one Rust engine behind several packages. The browser is one target; if
+you need the server half of the same product:
+
+- **[Live demo](https://kjarni.ai/demo/)**: this package, running in a page
+- **[Kjarni](https://www.nuget.org/packages/Kjarni)** and
+  **[Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI)**
+  on NuGet for C#, including `IEmbeddingGenerator` and `IChatClient`
+- **[Go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)**,
+  **[C++](https://github.com/olafurjohannsson/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
+  and a CLI that reads stdin and writes JSON
+- **[Source and issues](https://github.com/olafurjohannsson/kjarni)**
 
 ## Making your own `.kjq`
 

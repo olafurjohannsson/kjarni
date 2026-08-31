@@ -198,6 +198,24 @@ GPU inference uses WebGPU: Vulkan on Linux, DX12 or Vulkan on Windows, Metal on 
 - **Metadata** is available through `GetService(typeof(EmbeddingGeneratorMetadata))` and `GetService(typeof(ChatClientMetadata))`, reporting provider name `kjarni` and the model id.
 - **Unwrapping.** `GetService(typeof(Embedder))` and `GetService(typeof(Chat))` return the underlying Kjarni objects when you need the native API directly.
 
+## The same engine elsewhere
+
+Kjarni is one Rust engine behind several packages. If you are building the browser
+half of the same product, or want to try it before installing anything:
+
+- **[Live demo](https://kjarni.ai/demo/)**: embeddings, reranking and search running
+  in your own browser tab, nothing installed
+- **[kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)** on npm: the same
+  engine compiled to WebAssembly, running in a Web Worker
+- **[Go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)**,
+  **[C++](https://github.com/olafurjohannsson/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
+  and a CLI that reads stdin and writes JSON
+- **[Source and issues](https://github.com/olafurjohannsson/kjarni)**
+
+- **[Kjarni](https://www.nuget.org/packages/Kjarni)**: the underlying package, with
+  indexing, search and the direct API this one wraps
+- **[kjarni.ai](https://kjarni.ai)**: guides and quickstarts
+
 ## License
 
 MIT.

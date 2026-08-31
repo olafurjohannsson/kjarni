@@ -225,10 +225,22 @@ Hugging Face repositories, such as any `meta-llama/*` model.
 
 The native library links only against glibc, so it runs on anything from a modern distribution back to CentOS 7.
 
-## Links
+## The same engine elsewhere
 
-- [Source and issues](https://github.com/olafurjohannsson/kjarni)
-- [Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI): Microsoft.Extensions.AI provider
-- [kjarni.ai](https://kjarni.ai)
+Kjarni is one Rust engine behind several packages. If you are building the browser
+half of the same product, or want to try it before installing anything:
+
+- **[Live demo](https://kjarni.ai/demo/)**: embeddings, reranking and search running
+  in your own browser tab, nothing installed
+- **[kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)** on npm: the same
+  engine compiled to WebAssembly, running in a Web Worker
+- **[Go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)**,
+  **[C++](https://github.com/olafurjohannsson/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
+  and a CLI that reads stdin and writes JSON
+- **[Source and issues](https://github.com/olafurjohannsson/kjarni)**
+
+- **[Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI)**:
+  the Microsoft.Extensions.AI provider
+- **[kjarni.ai](https://kjarni.ai)**: guides and quickstarts
 
 MIT licensed.
