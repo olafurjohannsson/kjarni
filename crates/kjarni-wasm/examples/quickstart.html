@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Kjarni quickstart</title>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; margin: 40px auto; max-width: 640px; }
+  pre { background: #f6f8fa; padding: 14px; border-radius: 8px; white-space: pre-wrap; }
+</style>
+
+<h1>Kjarni in a browser</h1>
+<p>An embedding model runs on this page. Nothing is sent anywhere.</p>
+<pre id="out">starting…</pre>
+
+<script type="module">
+  // The engine, compiled to WebAssembly. Nothing to install: this is the npm
+  // package served straight from a CDN.
+  import init, { WasmModel } from "https://cdn.jsdelivr.net/npm/kjarni-wasm@0.1.4/pkg/kjarni_wasm.js";
+
+  const out = document.getElementById("out");
+  const log = (line) => { out.textContent += line + "\n"; };
+
+  out.textContent = "";
+  await init();
+
+  // 23 MB, cached by the browser after the first visit. Serve it from your own
+  // origin in production rather than hotlinking someone else's.
+  const URL = "https://huggingface.co/olafuraron/all-MiniLM-L6-v2-q8/resolve/main/all-MiniLM-L6-v2-q8.kjq";
+  log("downloading the model (23 MB)…");
+  const bytes = new Uint8Array(await (await fetch(URL)).arrayBuffer());
+
+  const model = WasmModel.from_quantized(bytes);
+  log("loaded\n");
+
+  const texts = [
+    "How do I get my money back?",
+    "What is your refund policy?",
+    "The weather in Reykjavik is unpredictable.",
+  ];
+
+  // One flat Float32Array of every vector, normalised, so a dot product is the
+  // cosine similarity.
+  const flat = model.encode(texts, true);
+  const dim = flat.length / texts.length;
+  const vec = (i) => flat.subarray(i * dim, (i + 1) * dim);
+  const cosine = (a, b) => a.reduce((sum, x, i) => sum + x * b[i], 0);
+
+  log(`${dim} dimensions per sentence\n`);
+  log(`related:   ${cosine(vec(0), vec(1)).toFixed(4)}   "${texts[1]}"`);
+  log(`unrelated: ${cosine(vec(0), vec(2)).toFixed(4)}   "${texts[2]}"`);
+</script>
