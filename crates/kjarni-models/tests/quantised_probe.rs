@@ -148,7 +148,7 @@ fn kjq_container_reads_both_encodings() {
         eprintln!("  skipping KJQ1: {} not present", v1.display());
     }
 
-    if let Ok(bytes) = std::fs::read(v8) {
+    if let Ok(bytes) = std::fs::read(&v8) {
         let u = kjq::unpack(&bytes).expect("KJQ8 must unpack");
         assert_eq!(u.encoding, KjqEncoding::Kjq8);
         assert!(!u.config_json.is_empty() && !u.tokenizer_json.is_empty());
