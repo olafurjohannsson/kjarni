@@ -63,8 +63,13 @@ impl ComputeStrategy {
         // already agreed: the allocation counts are identical, the code is the
         // same, and the remaining spread is measurement noise, which reaches 12%
         // on the largest batches on this machine.
-        let _ = (DECODE_THRESHOLD, NOALLOC_WINS_TOKENS);
-        let use_scratch_buffers = true;
+        static AUTO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let auto = *AUTO.get_or_init(|| std::env::var("KJARNI_SCRATCH").as_deref() == Ok("auto"));
+        let use_scratch_buffers = if auto {
+            tokens <= DECODE_THRESHOLD || tokens >= NOALLOC_WINS_TOKENS
+        } else {
+            true
+        };
 
         Self {
             use_fused_qkv,

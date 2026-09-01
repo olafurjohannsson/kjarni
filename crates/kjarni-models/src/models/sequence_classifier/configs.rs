@@ -83,7 +83,18 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             decoder_layers: None,
             rope_theta: None,
             rope_scaling: None,
-            intermediate_size: 0,
+            // Read from config.json rather than left at zero. A zero here sized
+            // the encoder's ffn_intermediate buffer to nothing, and the feed
+            // forward then sliced past the end of it: a debug assertion catches
+            // the mismatch, a release build panics inside ndarray. It only fired
+            // when the buffered path was taken, which the token thresholds made
+            // rare, so it survived. Falls back to the usual 4x hidden when a
+            // config omits it.
+            intermediate_size: if self.intermediate_size > 0 {
+                self.intermediate_size
+            } else {
+                self.hidden_size * 4
+            },
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
@@ -223,7 +234,18 @@ impl ModelConfig for RobertaConfig {
             rope_theta: None,
             rope_scaling: None,
             decoder_layers: None,
-            intermediate_size: 0,
+            // Read from config.json rather than left at zero. A zero here sized
+            // the encoder's ffn_intermediate buffer to nothing, and the feed
+            // forward then sliced past the end of it: a debug assertion catches
+            // the mismatch, a release build panics inside ndarray. It only fired
+            // when the buffered path was taken, which the token thresholds made
+            // rare, so it survived. Falls back to the usual 4x hidden when a
+            // config omits it.
+            intermediate_size: if self.intermediate_size > 0 {
+                self.intermediate_size
+            } else {
+                self.hidden_size * 4
+            },
             scale_embeddings: false,
             normalize_embedding: false,
             is_prenorm: false,

@@ -98,25 +98,6 @@ pub trait EncoderLanguageModel: LanguageModel {
             let hidden: Array3<f32> = ops.embed_tokens(input_ids, None, 0)?;
             let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
 
-            let _hidden_states = if !compute_strategy.use_scratch_buffers {
-                encoder
-                    .forward(&normalized_hidden, &attention_mask_f32)?
-                    .last_hidden_state
-            } else {
-                let mut buffers = encoder.create_buffers(batch_size, seq_len);
-                #[cfg(debug_assertions)]
-                {
-                    let buf_desc: String = buffers.memory_breakdown();
-                    println!(
-                        "Encoder buffers allocated for batch_size={}, seq_len={}: {}",
-                        batch_size, seq_len, buf_desc
-                    );
-                }
-                encoder
-                    .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
-                    .last_hidden_state
-            };
-
             if !compute_strategy.use_scratch_buffers {
                 encoder
                     .forward(&normalized_hidden, &attention_mask_f32)?
