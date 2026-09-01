@@ -1,5 +1,31 @@
 # Kjarni from C++
 
+## Quickstart
+
+Four commands, no build system and no package manager. Linux x86_64 shown; the
+[releases page](https://github.com/olafurjohannsson/kjarni/releases/latest) has
+macOS and Windows builds.
+
+```bash
+mkdir kjarni-quickstart && cd kjarni-quickstart
+curl -sL https://github.com/olafurjohannsson/kjarni/releases/latest/download/kjarni-x86_64-linux.tar.gz | tar xz
+curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-ffi/examples/cpp/hello.cpp
+g++ -std=c++23 hello.cpp -I. -L. -lkjarni_ffi -Wl,-rpath,'$ORIGIN' -o hello && ./hello
+```
+
+```
+related:   0.5510
+unrelated: -0.0630
+```
+
+The tarball holds the shared library, both headers and the CLI, all at the top
+level. The model downloads on first run and is cached under `~/.cache/kjarni`.
+
+On macOS the library is `libkjarni_ffi.dylib` and the rpath flag becomes
+`-Wl,-rpath,@loader_path`. Needs a compiler with C++23 `<print>`: GCC 14+ or
+Clang 17+.
+
+
 Two headers, one shared library, and the model runs inside your process. Useful
 where a network call is not an option: desktop software shipped to customers,
 industrial and medical systems, field tools that work without connectivity.
