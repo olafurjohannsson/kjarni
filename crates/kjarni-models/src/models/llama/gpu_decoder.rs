@@ -147,25 +147,43 @@ impl LlamaGpuDecoder {
             "o",
         )?;
 
-        // Dummy biases for Llama (logic preserved)
-        let q_bias = GpuTensor::zeros(&context, vec![meta.hidden_size], DType::F32, "q_b")?;
+        // Llama has no attention bias; Qwen2 does, and shares this decoder. Reading
+        // the layout rather than assuming keeps both correct: a model that declares
+        // a bias gets the real tensor, one that does not gets zeros.
+        //
+        // Substituting zeros for a bias the model actually has does not fail loudly.
+        // It shifts every Q, K and V projection in every layer, and the model goes on
+        // producing fluent-looking tokens that are wrong.
         let head_dim = meta.hidden_size / meta.num_attention_heads;
-        let k_bias = GpuTensor::zeros(
-            &context,
-            vec![meta.num_kv_heads * head_dim],
-            DType::F32,
-            "k_b",
-        )?;
+        let kv_dim = meta.num_kv_heads * head_dim;
+
+        let bias = |declared: &Option<String>, len: usize, label: &str| -> Result<GpuTensor> {
+            match declared {
+                Some(pattern) => GpuTensor::from_model_weights(
+                    &context,
+                    weights,
+                    &name(pattern),
+                    Some(DType::F32),
+                    label,
+                ),
+                None => GpuTensor::zeros(&context, vec![len], DType::F32, label),
+            }
+        };
+
+        let q_bias = bias(&self_attn_layout.q_bias, meta.hidden_size, "q_b")?;
+        let k_bias = bias(&self_attn_layout.k_bias, kv_dim, "k_b")?;
+        let v_bias = bias(&self_attn_layout.v_bias, kv_dim, "v_b")?;
+        let o_bias = bias(&self_attn_layout.o_bias, meta.hidden_size, "o_b")?;
 
         let self_attn_weights = GpuAttentionWeights::new(
             q_t,
-            Some(q_bias.clone()),
-            k_t,
-            Some(k_bias.clone()),
-            v_t,
-            Some(k_bias),
-            o_t,
             Some(q_bias),
+            k_t,
+            Some(k_bias),
+            v_t,
+            Some(v_bias),
+            o_t,
+            Some(o_bias),
         )?;
 
         let self_attn_norm_w = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
