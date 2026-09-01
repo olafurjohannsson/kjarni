@@ -50,7 +50,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         num_beams: usize,
     ) -> Result<Self::Tensor> {
         log::info!("[GpuBackend] Encoding {} tokens...", tokens.len());
-        let t_start = std::time::Instant::now();
+        let t_start = crate::utils::time::Instant::now();
 
         let seq2seq_ops = model
             .encoder_decoder_gpu_ops()
@@ -117,7 +117,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         encoder_state: &Self::Tensor,
         cache: &mut dyn Cache,
     ) -> Result<Array3<f32>> {
-        let t_start = std::time::Instant::now();
+        let t_start = crate::utils::time::Instant::now();
 
         let ops = model
             .encoder_decoder_gpu_ops()

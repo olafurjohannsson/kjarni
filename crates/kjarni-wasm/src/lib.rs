@@ -15,11 +15,13 @@ use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Response, Window, WorkerGlobalScope};
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // The shared engine. Everything below that used to run on this crate's own copy of
 // the encoder stack is being moved onto these.
 use kjarni_models::{CrossEncoder, SentenceEncoder, SequenceClassifier};
+use kjarni_transformers::Conversation;
 use kjarni_transformers::decoder::generator::DecoderGenerator;
 use kjarni_transformers::decoder::traits::DecoderLanguageModel;
 use kjarni_transformers::pipeline::EncoderLoader;
@@ -668,6 +670,9 @@ impl WasmClassifier {
 #[wasm_bindgen]
 pub struct WasmChat {
     generator: DecoderGenerator,
+    /// Turns so far. `RefCell` because wasm_bindgen hands JS `&self`, and wasm is
+    /// single-threaded, so there is no contention to guard against.
+    conversation: RefCell<Conversation>,
 }
 
 #[wasm_bindgen]
@@ -725,6 +730,43 @@ impl WasmChat {
         .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    /// Sends a message in an ongoing conversation, streaming the reply.
+    ///
+    /// Unlike `generate_stream`, which completes raw text, this keeps the turns so
+    /// far and formats them with the model's own chat template, so an instruct
+    /// model answers instead of continuing the sentence. The reply is appended to
+    /// the history, so the next call sees it.
+    ///
+    /// Browser-only: `js_sys::Function` has no native equivalent. The work is in
+    /// `send_stream_core`, which builds and is tested natively.
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen]
+    pub fn send_stream(
+        &self,
+        message: &str,
+        max_new_tokens: usize,
+        temperature: f32,
+        on_token: &js_sys::Function,
+    ) -> Result<String, JsValue> {
+        let this = JsValue::NULL;
+        self.send_stream_core(message, max_new_tokens, temperature, |piece| {
+            let _ = on_token.call1(&this, &JsValue::from_str(piece));
+        })
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Drops the conversation, keeping the system prompt.
+    #[wasm_bindgen]
+    pub fn clear_history(&self) {
+        self.conversation.borrow_mut().clear(true);
+    }
+
+    /// Number of messages held, system prompt included.
+    #[wasm_bindgen]
+    pub fn history_len(&self) -> usize {
+        self.conversation.borrow().len()
+    }
+
     /// The model's context window, in tokens.
     #[wasm_bindgen]
     pub fn context_size(&self) -> usize {
@@ -753,33 +795,15 @@ impl WasmChat {
             .unwrap_or_default();
 
         let model: std::sync::Arc<dyn DecoderLanguageModel + Send + Sync> = match arch.as_str() {
-            "qwen2" => std::sync::Arc::new(DecoderLoader::load_from_bytes::<
+            "qwen2" => std::sync::Arc::new(DecoderLoader::load_from_kjq::<
                 kjarni_models::models::qwen::QwenModel,
-            >(
-                &unpacked.safetensors,
-                &unpacked.config_json,
-                unpacked.tokenizer_json.as_bytes(),
-                None,
-                model_type,
-            )?),
-            "llama" => std::sync::Arc::new(DecoderLoader::load_from_bytes::<
+            >(&unpacked, None, model_type)?),
+            "llama" => std::sync::Arc::new(DecoderLoader::load_from_kjq::<
                 kjarni_models::models::llama::LlamaModel,
-            >(
-                &unpacked.safetensors,
-                &unpacked.config_json,
-                unpacked.tokenizer_json.as_bytes(),
-                None,
-                model_type,
-            )?),
-            "mistral" => std::sync::Arc::new(DecoderLoader::load_from_bytes::<
+            >(&unpacked, None, model_type)?),
+            "mistral" => std::sync::Arc::new(DecoderLoader::load_from_kjq::<
                 kjarni_models::models::mistral::MistralModel,
-            >(
-                &unpacked.safetensors,
-                &unpacked.config_json,
-                unpacked.tokenizer_json.as_bytes(),
-                None,
-                model_type,
-            )?),
+            >(&unpacked, None, model_type)?),
             other => {
                 return Err(anyhow::anyhow!(
                     "unsupported architecture '{other}' for browser chat. \
@@ -789,8 +813,71 @@ impl WasmChat {
         };
 
         let generator = DecoderGenerator::new(model)?;
+
+        // Seed with the template's own system prompt, so a conversation starts the
+        // way the model was trained to see one.
+        let conversation = match generator
+            .model
+            .chat_template()
+            .and_then(|t| t.default_system_prompt())
+        {
+            Some(system) => Conversation::with_system(system),
+            None => Conversation::new(),
+        };
+
         klog!("WasmChat::load: {:.1}ms", now_ms() - t0);
-        Ok(WasmChat { generator })
+        Ok(WasmChat {
+            generator,
+            conversation: RefCell::new(conversation),
+        })
+    }
+
+    /// Sends a message in the ongoing conversation, in plain Rust so it can be
+    /// tested on the host.
+    pub fn send_stream_core(
+        &self,
+        message: &str,
+        max_new_tokens: usize,
+        temperature: f32,
+        mut on_token: impl FnMut(&str),
+    ) -> anyhow::Result<String> {
+        let (prompt, stops) = {
+            let mut conv = self.conversation.borrow_mut();
+            conv.push_user(message);
+            match self.generator.model.chat_template() {
+                Some(t) => (t.apply(&conv), t.stop_sequences()),
+                None => (message.to_string(), Vec::new()),
+            }
+        };
+
+        // A stop sequence can arrive split across tokens ("<|im", "_end|>"), so the
+        // search runs over the accumulated text rather than each piece, and nothing
+        // past it reaches the caller.
+        let mut full = String::new();
+        let mut cut: Option<usize> = None;
+        let text = self.generate_stream_core(&prompt, max_new_tokens, temperature, |piece| {
+            if cut.is_some() {
+                return;
+            }
+            let start = full.len();
+            full.push_str(piece);
+            match stops.iter().filter_map(|s| full.find(s.as_str())).min() {
+                Some(at) => {
+                    cut = Some(at);
+                    if at > start {
+                        on_token(&full[start..at]);
+                    }
+                }
+                None => on_token(piece),
+            }
+        })?;
+
+        let reply = match cut {
+            Some(at) => full[..at].trim().to_string(),
+            None => text.trim().to_string(),
+        };
+        self.conversation.borrow_mut().push_assistant(&reply);
+        Ok(reply)
     }
 
     /// Generate a completion, in plain Rust so it can be tested on the host.

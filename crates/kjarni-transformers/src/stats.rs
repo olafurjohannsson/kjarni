@@ -1,8 +1,8 @@
 //! Generation statistics
 
+use crate::utils::time::{Duration, Instant};
 use log::info;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 static STATS_ENABLED: AtomicBool = AtomicBool::new(false);
 

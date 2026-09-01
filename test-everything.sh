@@ -88,22 +88,94 @@ stage_wasm_check() { cargo check -p kjarni-wasm --target wasm32-unknown-unknown 
 stage_fixtures() {
     mkdir -p "$KJQ_DIR"
     local cache="${HOME}/.cache/kjarni"
-    local pairs=(
-        "sentence-transformers_all-MiniLM-L6-v2:all-MiniLM-L6-v2-q8.kjq"
-        "cross-encoder_ms-marco-MiniLM-L-6-v2:ms-marco-MiniLM-L-6-v2-q8.kjq"
-        "distilbert_distilbert-base-uncased-finetuned-sst-2-english:distilbert-sentiment-q8.kjq"
-        "Qwen_Qwen2.5-0.5B-Instruct:qwen05b-q8.kjq"
+    # source : output : format. Both encodings are built, because the container
+    # has to keep reading KJQ1 (the encoders, which are published that way) while
+    # KJQ8 is what the browser needs for a decoder: block-quantised weights that
+    # are never expanded to f32. Qwen is built only as KJQ8, which is what is
+    # published and the only encoding that fits a browser.
+    local triples=(
+        "sentence-transformers_all-MiniLM-L6-v2:all-MiniLM-L6-v2-q8.kjq:kjq1"
+        "cross-encoder_ms-marco-MiniLM-L-6-v2:ms-marco-MiniLM-L-6-v2-q8.kjq:kjq1"
+        "distilbert_distilbert-base-uncased-finetuned-sst-2-english:distilbert-sentiment-q8.kjq:kjq1"
+        "sentence-transformers_all-MiniLM-L6-v2:all-MiniLM-L6-v2-kjq8.kjq:kjq8"
+        "Qwen_Qwen2.5-0.5B-Instruct:qwen05b-kjq8.kjq:kjq8"
     )
     ensure_venv || return 1
     local py="$VENV/bin/python"
 
-    for pair in "${pairs[@]}"; do
-        local src="${pair%%:*}" out="${pair##*:}"
-        [ -f "$KJQ_DIR/$out" ] && { dim "  have $out"; continue; }
+    for triple in "${triples[@]}"; do
+        local src out fmt magic
+        IFS=: read -r src out fmt <<<"$triple"
+        [ "$fmt" = "kjq8" ] && magic=KJQ8 || magic=KJQ1
+
+        # Existence is not enough. An interrupted run leaves a partial file that
+        # looks present forever after, and the failure surfaces much later as
+        # "truncated .kjq: expected a u32 at offset ...". Parse the container.
+        #
+        # The magic is checked against the one this fixture is supposed to carry,
+        # so a KJQ1 file sitting where a KJQ8 one belongs is rebuilt rather than
+        # silently used.
+        if [ -f "$KJQ_DIR/$out" ]; then
+            if "$py" - "$KJQ_DIR/$out" "$magic" <<'CHECK'
+# Walk the whole container. A header-only check passes on a file truncated
+# mid-tensor, which is exactly the shape an interrupted quantize run leaves.
+import struct, sys
+
+path, want = sys.argv[1], sys.argv[2].encode()
+BLOCK, BYTES_PER_BLOCK = 32, 34   # f16 scale + 32 int8, per BlockQ8_0
+
+def u32(f):
+    b = f.read(4)
+    if len(b) != 4:
+        raise EOFError
+    return struct.unpack("<I", b)[0]
+
+def skip(f, n):
+    if len(f.read(n)) != n:
+        raise EOFError
+
+try:
+    with open(path, "rb") as f:
+        magic = f.read(4)
+        if magic != want:
+            sys.exit(1)
+        skip(f, u32(f))                       # config json
+        skip(f, u32(f))                       # tokenizer json
+        for _ in range(u32(f)):               # num_tensors
+            skip(f, u32(f))                   # name
+            dims = [u32(f) for _ in range(u32(f))]
+            numel = 1
+            for d in dims:
+                numel *= d
+            quantized = f.read(1)
+            if len(quantized) != 1:
+                raise EOFError
+            if not quantized[0]:
+                skip(f, numel * 4)            # f32 data
+            elif magic == b"KJQ8":
+                # Blocks carry their own f16 scale, so there is no tensor scale.
+                skip(f, dims[0] * (dims[1] // BLOCK) * BYTES_PER_BLOCK)
+            else:
+                skip(f, 4)                    # scale f32
+                skip(f, numel)                # int8 data
+except (EOFError, struct.error, IndexError):
+    sys.exit(1)
+CHECK
+            then
+                dim "  have $out"; continue
+            fi
+            echo "  rebuilding $out (wrong encoding, truncated or malformed)"
+            rm -f "$KJQ_DIR/$out"
+        fi
+
         [ -d "$cache/$src" ] || { echo "  skip $out (weights not cached: $src)"; continue; }
-        echo "  building $out"
+        echo "  building $out ($fmt)"
+        # Write to a temp name and rename, so an interrupted run cannot leave a
+        # partial file that the check above then has to catch.
         "$py" crates/kjarni-wasm/scripts/quantize_model.py \
-            --model-dir "$cache/$src" --output "$KJQ_DIR/$out" >/dev/null || return 1
+            --model-dir "$cache/$src" --format "$fmt" \
+            --output "$KJQ_DIR/$out.partial" >/dev/null || return 1
+        mv "$KJQ_DIR/$out.partial" "$KJQ_DIR/$out"
     done
 }
 

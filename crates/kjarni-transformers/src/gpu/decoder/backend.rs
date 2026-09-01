@@ -206,7 +206,7 @@ impl GpuDecoderBackend {
             let _ = tx.send(result);
         });
 
-        let start = std::time::Instant::now();
+        let start = crate::utils::time::Instant::now();
         let map_result;
 
         loop {

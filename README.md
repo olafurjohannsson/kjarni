@@ -165,7 +165,8 @@ println!("{} ({:.1}%)", result.label, result.score * 100.0);
 ```js
 import { Kjarni } from "kjarni-wasm";
 
-const kjarni = await Kjarni.load({ encoder: "/models/minilm-l6-v2-q8.kjq" });
+const url = "https://huggingface.co/olafuraron/all-MiniLM-L6-v2-q8/resolve/main/all-MiniLM-L6-v2-q8.kjq";
+const kjarni = await Kjarni.load({ encoder: url });
 console.log(await kjarni.similarity("doctor", "physician"));   // 0.8598
 ```
 

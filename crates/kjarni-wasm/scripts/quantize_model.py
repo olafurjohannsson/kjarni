@@ -97,7 +97,51 @@ def _read_bfloat16(safetensors_path, name):
     return widened.reshape(meta["shape"]).astype(np.float32)
 
 
-def quantize_model(model_dir: Path, output_path: Path):
+Q8_0_BLOCK_SIZE = 32
+
+
+def quantize_block_q8_0(matrix: np.ndarray) -> bytes:
+    """Encode a 2D f32 matrix as GGUF-compatible BlockQ8_0.
+
+    One scale per 32 values along each row, rather than one scale for the whole
+    tensor. That is finer-grained, so it reconstructs more accurately, and it is
+    the layout `matmul_2d_cpu_q8_0` already reads on both native and wasm.
+
+    Layout per block, matching `#[repr(C)] BlockQ8_0`:
+        d:  f16 little-endian   the scale
+        qs: [i8; 32]            the quantised values
+
+    The arithmetic mirrors `quantize_matrix_q8_0` in the engine exactly: scale is
+    max_abs / 127, values are round-half-away-from-zero then clamped. A block of
+    all zeros keeps scale 0, which dequantises back to zeros.
+    """
+    rows, cols = matrix.shape
+    if cols % Q8_0_BLOCK_SIZE != 0:
+        raise ValueError(
+            f"columns ({cols}) must be a multiple of {Q8_0_BLOCK_SIZE} for q8_0"
+        )
+
+    blocks = matrix.reshape(rows * (cols // Q8_0_BLOCK_SIZE), Q8_0_BLOCK_SIZE)
+    max_abs = np.abs(blocks).max(axis=1)
+
+    # A zero block keeps scale 0; dividing by it would produce nan.
+    scales = np.where(max_abs > 0, max_abs / 127.0, 0.0).astype(np.float32)
+    inv = np.where(scales > 0, 1.0 / np.where(scales > 0, scales, 1.0), 0.0)
+
+    # numpy rounds halves to even; the engine rounds halves away from zero.
+    scaled = blocks * inv[:, None]
+    qs = np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)
+    qs = np.clip(qs, -128, 127).astype(np.int8)
+
+    out = bytearray()
+    d = scales.astype(np.float16)
+    for i in range(blocks.shape[0]):
+        out += d[i].tobytes()
+        out += qs[i].tobytes()
+    return bytes(out)
+
+
+def quantize_model(model_dir: Path, output_path: Path, fmt: str = "kjq1"):
     """Read safetensors + config.json, write quantized .kjq file."""
     
     safetensors_path = model_dir / "model.safetensors"
@@ -179,9 +223,19 @@ def quantize_model(model_dir: Path, output_path: Path):
     num_kept = 0
     
     # Write output
+    #
+    # Two encodings share the .kjq container, told apart by the magic bytes:
+    #
+    #   KJQ1  one f32 scale per tensor. The loader dequantises to f32 on read,
+    #         which is the right choice for small encoders where f32 matmul is
+    #         faster and the memory never mattered.
+    #   KJQ8  GGUF-compatible BlockQ8_0, one f16 scale per 32 values. The loader
+    #         keeps these quantised, so a model needs roughly a quarter of the
+    #         memory. That is the difference between a 0.5B decoder running in a
+    #         browser and trapping on wasm32's 2GB allocation cap.
+    magic = b"KJQ8" if fmt == "kjq8" else b"KJQ1"
     with open(output_path, "wb") as f:
-        # Magic
-        f.write(b"KJQ1")
+        f.write(magic)
         
         # Config
         f.write(struct.pack("<I", len(config_bytes)))
@@ -207,7 +261,27 @@ def quantize_model(model_dir: Path, output_path: Path):
             for dim in tensor.shape:
                 f.write(struct.pack("<I", dim))
             
-            if should_quantize(name):
+            # Block quantisation needs a 2D matrix whose rows divide evenly into
+            # blocks. Anything else (biases, layer norms, odd shapes) stays f32,
+            # which is what the engine expects for those anyway.
+            blockable = (
+                fmt == "kjq8"
+                and tensor.ndim == 2
+                and tensor.shape[1] % Q8_0_BLOCK_SIZE == 0
+            )
+
+            if fmt == "kjq8" and should_quantize(name) and blockable:
+                f.write(struct.pack("B", 1))  # quantized = true
+                data = quantize_block_q8_0(tensor)
+                f.write(data)
+
+                quantized_size += len(data)
+                num_quantized += 1
+
+                blocks = tensor.shape[0] * (tensor.shape[1] // Q8_0_BLOCK_SIZE)
+                print(f"  Q8_0 {name:59s} shape={str(tensor.shape):20s} "
+                      f"{blocks} blocks")
+            elif fmt != "kjq8" and should_quantize(name):
                 # Quantized path
                 f.write(struct.pack("B", 1))  # quantized = true
                 q_data, scale = quantize_tensor(tensor)
@@ -307,6 +381,9 @@ if __name__ == "__main__":
                         help="Directory containing model.safetensors and config.json")
     parser.add_argument("--output", type=str, default=None,
                         help="Output .kjq file path (default: model_q8.kjq in model dir)")
+    parser.add_argument("--format", choices=["kjq1", "kjq8"], default="kjq1",
+                        help="kjq1 keeps one scale per tensor and dequantises on load; "
+                             "kjq8 writes BlockQ8_0 and stays quantised in memory")
     parser.add_argument("--verify", action="store_true",
                         help="Verify quantization accuracy after saving")
     
@@ -314,7 +391,7 @@ if __name__ == "__main__":
     model_dir = Path(args.model_dir)
     output_path = Path(args.output) if args.output else model_dir / "model_q8.kjq"
     
-    quantize_model(model_dir, output_path)
+    quantize_model(model_dir, output_path, args.format)
     
     if args.verify:
         verify_quantized(model_dir, output_path)
