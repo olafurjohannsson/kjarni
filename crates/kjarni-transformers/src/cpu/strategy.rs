@@ -40,11 +40,29 @@ impl ComputeStrategy {
         };
 
         // NO-ALLOC DECISION
-        // Anything between a single token and NOALLOC_WINS_TOKENS used to fall
-        // through to the allocating path: a 64-document batch of short texts is
-        // 896 tokens and allocated 47,413 times per call. Reusing the scratch
-        // buffers everywhere cuts that to 21,059 with no measured change in time,
-        // so this is about steady-state memory rather than speed.
+        // The old rule reused the scratch buffers at a single token and above
+        // NOALLOC_WINS_TOKENS, and took the allocating path in between, which is
+        // where most requests land. The buffered path also builds its buffers per
+        // call, so the in-between case was worth measuring rather than assuming.
+        //
+        // MiniLM, mean of five runs, repeated. The rightmost column is how many
+        // allocations each rule made, which is what proves the two took different
+        // paths at all:
+        //
+        //     docs x tok    total    always   old rule   allocations
+        //        1 x  18       18     12 ms      24 ms   475 / 1190
+        //        4 x  18       72     25         57      1745 / 3685
+        //       16 x  18      288     41         85      8519 / 13649
+        //        1 x 216      216     70         93      3471 / 4187
+        //        4 x 216      864    156        233      15434 / 15669
+        //       64 x  18     1152    159        159      28779 / 28778
+        //       16 x 216     3456    575        550      56455 / 56454
+        //
+        // Below the old threshold, reusing the buffers is 1.3x to 2.2x faster, for
+        // paragraphs as well as single sentences. At and above it both rules
+        // already agreed: the allocation counts are identical, the code is the
+        // same, and the remaining spread is measurement noise, which reaches 12%
+        // on the largest batches on this machine.
         let _ = (DECODE_THRESHOLD, NOALLOC_WINS_TOKENS);
         let use_scratch_buffers = true;
 

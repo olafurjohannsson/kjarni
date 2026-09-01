@@ -897,6 +897,49 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
     output
 }
 
+/// C[..m, ..n] = A[m, k] @ W[n, k]^T + bias, writing into a caller-owned buffer.
+///
+/// faer has no bias argument and needs exact dimensions, so the output is viewed
+/// as its first `m * n` elements. Nothing here allocates: every matrix is a
+/// borrowed view over memory the caller already owns.
+pub fn matmul_2d_f32_faer_noalloc(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    use rayon::prelude::*;
+
+    let (m, k) = a.dim();
+    let (n, _) = b_weights.dim();
+
+    let a_slice = a.to_slice().expect("input must be contiguous");
+    let w_slice = b_weights.to_slice().expect("weights must be contiguous");
+    let out_slice = &mut output.as_slice_mut().expect("output must be contiguous")[..m * n];
+
+    {
+        let a_f = faer::mat::from_row_major_slice(a_slice, m, k);
+        let b_f = faer::mat::from_row_major_slice(w_slice, n, k);
+        let c_f = faer::mat::from_row_major_slice_mut(out_slice, m, n);
+        faer::linalg::matmul::matmul(
+            c_f,
+            a_f,
+            b_f.transpose(),
+            None,
+            1.0f32,
+            faer::Parallelism::Rayon(0),
+        );
+    }
+
+    if let Some(b) = bias {
+        out_slice.par_chunks_mut(n).for_each(|row| {
+            for (v, &bv) in row.iter_mut().zip(b.iter()) {
+                *v += bv;
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod matmul_tests {
     use super::*;
@@ -1619,48 +1662,5 @@ mod matmul_tests {
         println!("\n=== No-Alloc Matches Allocating (Batched) ===");
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "No-alloc should match allocating exactly");
-    }
-}
-
-/// C[..m, ..n] = A[m, k] @ W[n, k]^T + bias, writing into a caller-owned buffer.
-///
-/// faer has no bias argument and needs exact dimensions, so the output is viewed
-/// as its first `m * n` elements. Nothing here allocates: every matrix is a
-/// borrowed view over memory the caller already owns.
-pub fn matmul_2d_f32_faer_noalloc(
-    a: &ArrayView2<f32>,
-    b_weights: &ArrayView2<f32>,
-    bias: Option<&[f32]>,
-    output: &mut Array2<f32>,
-) {
-    use rayon::prelude::*;
-
-    let (m, k) = a.dim();
-    let (n, _) = b_weights.dim();
-
-    let a_slice = a.to_slice().expect("input must be contiguous");
-    let w_slice = b_weights.to_slice().expect("weights must be contiguous");
-    let out_slice = &mut output.as_slice_mut().expect("output must be contiguous")[..m * n];
-
-    {
-        let a_f = faer::mat::from_row_major_slice(a_slice, m, k);
-        let b_f = faer::mat::from_row_major_slice(w_slice, n, k);
-        let c_f = faer::mat::from_row_major_slice_mut(out_slice, m, n);
-        faer::linalg::matmul::matmul(
-            c_f,
-            a_f,
-            b_f.transpose(),
-            None,
-            1.0f32,
-            faer::Parallelism::Rayon(0),
-        );
-    }
-
-    if let Some(b) = bias {
-        out_slice.par_chunks_mut(n).for_each(|row| {
-            for (v, &bv) in row.iter_mut().zip(b.iter()) {
-                *v += bv;
-            }
-        });
     }
 }
