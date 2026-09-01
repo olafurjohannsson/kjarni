@@ -15,6 +15,59 @@ Or without a bundler, straight from a CDN:
 </script>
 ```
 
+## Copy this and it runs
+
+One file, nothing installed. Save it as `quickstart.html`, serve the directory,
+open it: a real model downloads and ranks three sentences by meaning.
+
+```bash
+curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-wasm/examples/quickstart.html
+python3 -m http.server 8000
+# then open http://localhost:8000/quickstart.html
+```
+
+A server is needed because ES modules do not load over `file://`. Any static
+server will do.
+
+```html
+<pre id="out">starting…</pre>
+<script type="module">
+  import init, { WasmModel } from "https://cdn.jsdelivr.net/npm/kjarni-wasm@0.1.4/pkg/kjarni_wasm.js";
+  await init();
+
+  const url = "https://huggingface.co/olafuraron/all-MiniLM-L6-v2-q8/resolve/main/all-MiniLM-L6-v2-q8.kjq";
+  const model = WasmModel.from_quantized(new Uint8Array(await (await fetch(url)).arrayBuffer()));
+
+  const texts = [
+    "How do I get my money back?",
+    "What is your refund policy?",
+    "The weather in Reykjavik is unpredictable.",
+  ];
+
+  // Normalised, so a dot product is the cosine similarity.
+  const flat = model.encode(texts, true);
+  const dim = flat.length / texts.length;
+  const vec = (i) => flat.subarray(i * dim, (i + 1) * dim);
+  const cosine = (a, b) => a.reduce((sum, x, i) => sum + x * b[i], 0);
+
+  out.textContent = `related:   ${cosine(vec(0), vec(1)).toFixed(4)}\n`
+                  + `unrelated: ${cosine(vec(0), vec(2)).toFixed(4)}`;
+</script>
+```
+
+```
+related:   0.5268
+unrelated: -0.0470
+```
+
+This imports the wasm module directly rather than the `Kjarni` wrapper, so it runs
+on the main thread with no Worker: fine for a page that encodes a few sentences,
+not for chat. Use `Kjarni` for anything larger, and see the Chat section.
+
+Scores differ slightly from the native library (0.5510 / -0.0630) because the
+browser model is int8-quantised. The ranking is the same, which is what a search
+uses.
+
 ## Quick tour
 
 ```ts

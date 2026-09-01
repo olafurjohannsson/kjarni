@@ -86,12 +86,25 @@ pip install --pre kjarni
 cargo add kjarni@0.0.1-alpha.1
 ```
 
-**C++** — download the archive for your platform from [releases](https://github.com/olafurjohannsson/kjarni/releases). It contains the shared library, `kjarni.h` (the C ABI) and `kjarni.hpp` (a header-only C++23 wrapper with RAII handles and `std::expected` errors).
+**C++** — no package manager. Four commands from nothing to output:
 
 ```bash
-tar -xzf kjarni-x86_64-linux.tar.gz -C kjarni/
-g++ -std=c++23 main.cpp -Ikjarni -Lkjarni -lkjarni_ffi -o app
+mkdir kjarni-quickstart && cd kjarni-quickstart
+curl -sL https://github.com/olafurjohannsson/kjarni/releases/latest/download/kjarni-x86_64-linux.tar.gz | tar xz
+curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-ffi/examples/cpp/hello.cpp
+g++ -std=c++23 hello.cpp -I. -L. -lkjarni_ffi -Wl,-rpath,'$ORIGIN' -o hello && ./hello
 ```
+
+```
+related:   0.5510
+unrelated: -0.0630
+```
+
+The archive holds the shared library, `kjarni.h` (the C ABI) and `kjarni.hpp` (a
+header-only C++23 wrapper with RAII handles and `std::expected` errors). macOS and
+Windows builds are on the same [releases](https://github.com/olafurjohannsson/kjarni/releases)
+page; see [the C++ guide](crates/kjarni-ffi/examples/cpp/README.md) for those and for
+classification, reranking and chat.
 
 **Browser (WebAssembly)** — [npmjs.com/package/kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)
 
@@ -106,6 +119,19 @@ Or without a bundler, straight from a CDN:
   import { Kjarni } from "https://cdn.jsdelivr.net/npm/kjarni-wasm/dist/index.js";
 </script>
 ```
+
+Nothing installed at all: one file that downloads a model and ranks sentences by
+meaning in your browser.
+
+```bash
+curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-wasm/examples/quickstart.html
+python3 -m http.server 8000    # then open http://localhost:8000/quickstart.html
+```
+
+It imports the wasm module straight from a CDN and runs on the page, no Worker and
+no build step. See [the browser examples](crates/kjarni-wasm/examples) for search,
+classification and chat, and [the package guide](crates/kjarni-wasm/ts/README.md)
+for the `Kjarni` wrapper that moves inference off the main thread.
 
 The package runs inference in a Web Worker, so loading a model or generating a reply never freezes the page. The raw wasm-bindgen bundle is also in `kjarni-wasm.tar.gz` on [releases](https://github.com/olafurjohannsson/kjarni/releases) if you would rather drive it yourself.
 
