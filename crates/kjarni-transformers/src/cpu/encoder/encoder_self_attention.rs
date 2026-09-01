@@ -173,112 +173,126 @@ impl EncoderSelfAttention {
         let k_slice = buffers.k.slice(s![..tokens, ..]);
         let v_slice = buffers.v.slice(s![..tokens, ..]);
 
-        //  Reshape to heads
-        let (q_heads, k_heads_t, v_heads) = if let Some(r) = rope {
-            // RoPe need 3D intermediate for RoPE application
-            let mut q_3d = q_slice
+        //  Reshape to heads, into buffers that persist across layers.
+        //
+        // This used to build three arrays per layer with
+        // `permuted_axes(..).as_standard_layout().to_owned()`. On MiniLM at batch
+        // 64 that is 1.4MB each, so a six-layer forward pass allocated and dropped
+        // about 25MB against a 30MB L3 and evicted the weights every layer. The
+        // transposes themselves were only part of the cost: the FFN's GEMMs, which
+        // touch none of this, were running at half speed because their weights had
+        // been pushed out of cache.
+        if let Some(r) = rope {
+            let q_3d = q_slice
                 .to_owned()
                 .into_shape_with_order((batch, seq_len, hidden_dim))?;
-            let mut k_3d = k_slice
+            let k_3d = k_slice
                 .to_owned()
                 .into_shape_with_order((batch, seq_len, hidden_dim))?;
-
             let (q_rot, k_rot) = r.apply_3d(&q_3d, &k_3d, self.num_heads, self.num_heads, 0)?;
-            q_3d = q_rot;
-            k_3d = k_rot;
 
-            let q_heads = q_3d
-                .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
+            let q_4d =
+                q_rot.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?;
+            let k_4d =
+                k_rot.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?;
 
-            let k_heads_t = k_3d
-                .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-                .permuted_axes([0, 2, 3, 1])
-                .as_standard_layout()
-                .to_owned();
-
-            let v_3d = v_slice
-                .to_owned()
-                .into_shape_with_order((batch, seq_len, hidden_dim))?;
-            let v_heads = v_3d
-                .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
-
-            (q_heads, k_heads_t, v_heads)
+            buffers
+                .q_heads
+                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
+                .assign(&q_4d.view().permuted_axes([0, 2, 1, 3]));
+            buffers
+                .k_heads_t
+                .slice_mut(s![..batch, .., ..self.head_dim, ..seq_len])
+                .assign(&k_4d.view().permuted_axes([0, 2, 3, 1]));
         } else {
             let q_4d = q_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            let q_heads = q_4d
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
-
             let k_4d = k_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            let k_heads_t = k_4d
-                .permuted_axes([0, 2, 3, 1])
-                .as_standard_layout()
-                .to_owned();
 
+            buffers
+                .q_heads
+                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
+                .assign(&q_4d.view().permuted_axes([0, 2, 1, 3]));
+            buffers
+                .k_heads_t
+                .slice_mut(s![..batch, .., ..self.head_dim, ..seq_len])
+                .assign(&k_4d.view().permuted_axes([0, 2, 3, 1]));
+        }
+
+        // V is untouched by RoPE, so it is the same either way.
+        {
             let v_4d = v_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            let v_heads = v_4d
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
-
-            (q_heads, k_heads_t, v_heads)
-        };
+            buffers
+                .v_heads
+                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
+                .assign(&v_4d.view().permuted_axes([0, 2, 1, 3]));
+        }
 
         // Compute attention scores: Q @ K^T
         matmul_4d_into(
-            &q_heads.view(),
-            &k_heads_t.view(),
+            &buffers
+                .q_heads
+                .slice(s![..batch, .., ..seq_len, ..self.head_dim]),
+            &buffers
+                .k_heads_t
+                .slice(s![..batch, .., ..self.head_dim, ..seq_len]),
             &mut buffers
                 .attn_scores
                 .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
         );
 
-        // Scale in-place
-        if self.scale_qk {
-            buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
-                .mapv_inplace(|x| x * self.scale_factor);
+        // Scale, mask and softmax in one pass.
+        //
+        // These were three separate walks of the score tensor plus a fourth for
+        // the softmax, each serial, and the mask indexed `scores[[b, h, q, k]]`
+        // one element at a time: 4D stride arithmetic and a bounds check per
+        // element. Fused, a row is read once while it is still in L1, and batch
+        // items run in parallel.
+        if position_bias.is_some() {
+            // Position bias is a T5-style path, left on the original code.
+            if self.scale_qk {
+                buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
+                    .mapv_inplace(|x| x * self.scale_factor);
+            }
+            if let Some(bias) = position_bias {
+                let bias_slice = bias.slice(s![.., .., ..seq_len, ..seq_len]);
+                buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
+                    .zip_mut_with(&bias_slice, |s, &b| *s += b);
+            }
+            Self::apply_padding_mask_inplace(
+                &mut buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
+                attention_mask,
+            );
+            crate::activations::softmax_4d_view_inplace(&mut buffers.attn_scores.slice_mut(s![
+                ..batch,
+                ..,
+                ..seq_len,
+                ..seq_len
+            ]));
+        } else {
+            let scale = self.scale_qk.then_some(self.scale_factor);
+            fused_scale_mask_softmax(
+                &mut buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
+                attention_mask,
+                scale,
+            );
         }
-
-        //Add position bias if provided
-        if let Some(bias) = position_bias {
-            let bias_slice = bias.slice(s![.., .., ..seq_len, ..seq_len]);
-            buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
-                .zip_mut_with(&bias_slice, |s, &b| *s += b);
-        }
-
-        // Apply padding mask in-place
-        Self::apply_padding_mask_inplace(
-            &mut buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
-            attention_mask,
-        );
-
-        // Softmax in-place
-        crate::activations::softmax_4d_view_inplace(&mut buffers.attn_scores.slice_mut(s![
-            ..batch,
-            ..,
-            ..seq_len,
-            ..seq_len
-        ]));
 
         // Compute context: Scores @ V
         matmul_4d_into(
             &buffers
                 .attn_scores
                 .slice(s![..batch, .., ..seq_len, ..seq_len]),
-            &v_heads.view(),
+            &buffers
+                .v_heads
+                .slice(s![..batch, .., ..seq_len, ..self.head_dim]),
             &mut buffers
                 .attn_context
                 .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
@@ -323,6 +337,65 @@ impl EncoderSelfAttention {
             }
         }
     }
+}
+
+/// Scale, apply the padding mask, and softmax, in a single pass per row.
+///
+/// Rows are independent, so this is parallel over batch items and identical in
+/// result to doing the three separately. A fully masked row yields zeros rather
+/// than the NaN the separate path produced; such rows belong to padding
+/// positions and are discarded by pooling either way.
+fn fused_scale_mask_softmax(
+    scores: &mut ndarray::ArrayViewMut4<f32>,
+    mask: &Array2<f32>,
+    scale: Option<f32>,
+) {
+    use rayon::prelude::*;
+
+    scores
+        .outer_iter_mut()
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(b, mut heads)| {
+            heads.outer_iter_mut().for_each(|mut queries| {
+                queries.outer_iter_mut().for_each(|mut row| {
+                    let mut max = f32::NEG_INFINITY;
+                    for (k, v) in row.iter_mut().enumerate() {
+                        let x = match scale {
+                            Some(s) => *v * s,
+                            None => *v,
+                        };
+                        let x = if mask[[b, k]] == 0.0 {
+                            f32::NEG_INFINITY
+                        } else {
+                            x
+                        };
+                        *v = x;
+                        if x > max {
+                            max = x;
+                        }
+                    }
+
+                    if !max.is_finite() {
+                        row.fill(0.0);
+                        return;
+                    }
+
+                    let mut sum = 0.0f32;
+                    for v in row.iter_mut() {
+                        let e = (*v - max).exp();
+                        *v = e;
+                        sum += e;
+                    }
+                    if sum > 0.0 {
+                        let inv = 1.0 / sum;
+                        for v in row.iter_mut() {
+                            *v *= inv;
+                        }
+                    }
+                });
+            });
+        });
 }
 
 /// Batched matmul

@@ -27,6 +27,16 @@ pub struct EncoderBuffers {
     /// Scratch buffer for merged heads [max_tokens, hidden]
     pub merge_scratch: Array2<f32>,
 
+    /// Head-major Q, K^T and V [batch, heads, seq, head_dim].
+    ///
+    /// The attention used to build these with `permuted_axes(..).to_owned()` on
+    /// every layer: three transposing copies of the whole activation, allocated
+    /// and dropped six times a forward pass. Holding them here makes the permute
+    /// a write into memory that is already warm.
+    pub q_heads: Array4<f32>,
+    pub k_heads_t: Array4<f32>,
+    pub v_heads: Array4<f32>,
+
     max_batch: usize,
     max_seq: usize,
     hidden: usize,
@@ -70,6 +80,9 @@ impl EncoderBuffers {
             ffn_output: Array2::zeros((max_tokens, hidden)),
             norm_scratch: Array2::zeros((max_tokens, hidden)),
             merge_scratch: Array2::zeros((max_tokens, hidden)),
+            q_heads: Array4::zeros((max_batch, num_heads, max_seq, head_dim)),
+            k_heads_t: Array4::zeros((max_batch, num_heads, head_dim, max_seq)),
+            v_heads: Array4::zeros((max_batch, num_heads, max_seq, head_dim)),
 
             // Config
             max_batch,

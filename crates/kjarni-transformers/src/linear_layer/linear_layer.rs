@@ -82,7 +82,11 @@ impl LinearData {
 impl LinearLayer {
     /// Threshold for switching from vec kernel to batched 4x3 kernel.
     /// Based on benchmarks: vec kernel wins for m < ~1000, batched wins for m >= ~1000.
+    #[allow(dead_code, reason = "kept while the new dispatch is being measured")]
     const BATCH_KERNEL_THRESHOLD: usize = 1000;
+
+    /// Above this many rows faer beats both hand-written kernels.
+    const FAER_THRESHOLD: usize = 256;
 
     /// Creates a new zero-initialized `LinearLayer` with the specified dimensions and dtype.
     pub fn new(out_features: usize, in_features: usize, dtype: DType) -> Self {
@@ -166,12 +170,16 @@ impl LinearLayer {
                     let (m, _) = input.dim();
                     let bias = self.bias.as_ref().map(|b| b.as_slice().unwrap());
 
-                    if m < Self::BATCH_KERNEL_THRESHOLD {
-                        // Vec kernel: better for decode and small batches
+                    // Measured on MiniLM and Qwen 0.5B shapes across m from 1 to
+                    // 2048: the blocked kernel wins at a single row, the vector
+                    // kernel from there to a few hundred, and faer above that by
+                    // 1.3x to 1.6x. One threshold could not express that.
+                    if m == 1 {
+                        ops::matmul::matmul_2d_f32_batched_noalloc(input, &w.view(), bias, output);
+                    } else if m < Self::FAER_THRESHOLD {
                         ops::matmul::matmul_2d_f32_noalloc(input, &w.view(), bias, output);
                     } else {
-                        // 4x3 block kernel: better for large batches
-                        ops::matmul::matmul_2d_f32_batched_noalloc(input, &w.view(), bias, output);
+                        ops::matmul::matmul_2d_f32_faer_noalloc(input, &w.view(), bias, output);
                     }
                 }
                 F32MatmulStrategy::Faer | F32MatmulStrategy::FaerOutIn => {
