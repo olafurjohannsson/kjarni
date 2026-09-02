@@ -34,6 +34,9 @@ impl T5RelativePositionBias {
                     prefix
                 ))
             })
+            // MPNet keeps one table for the whole encoder rather than one per
+            // block, and hangs it directly off the encoder prefix.
+            .or_else(|_| weights.get_array2(&format!("{}.relative_attention_bias.weight", prefix)))
             .map_err(|_| {
                 anyhow!(
                     "Could not find T5 relative attention bias weights for prefix: {}",
