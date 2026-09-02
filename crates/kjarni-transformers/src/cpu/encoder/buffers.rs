@@ -283,7 +283,14 @@ impl EncoderBuffers {
         let attn_scores = self.max_batch * self.num_heads * self.max_seq * self.max_seq * 4;
         let attn_context = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4;
 
-        qkv + outputs + ffn + qkv_scratch + attn_scores + attn_context + norm
+        // q_heads, k_heads_t and v_heads are the same size as one another, and
+        // merge_scratch matches the 2D buffers. Both were missing here, so the
+        // figure this returns was well under the real allocation and the
+        // breakdown printed in debug builds under-reported with it.
+        let head_bufs = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4 * 3;
+        let merge = max_tokens * self.hidden * 4;
+
+        qkv + outputs + ffn + qkv_scratch + attn_scores + attn_context + norm + head_bufs + merge
     }
 
     /// Returns memory usage breakdown as a formatted string.
@@ -303,9 +310,13 @@ impl EncoderBuffers {
         let ffn_out = max_tokens * self.hidden * 4;
         let norm = max_tokens * self.hidden * 4;
 
+        let head_bufs = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4 * 3;
+        let merge = max_tokens * self.hidden * 4;
+
         format!(
             "Q/K/V: {:.2} MB, QKV scratch: {:.2} MB, Attn scores: {:.2} MB, \
-             Attn context: {:.2} MB, Attn output: {:.2} MB, FFN inter: {:.2} MB, FFN out: {:.2} MB, Norm: {:.2} MB",
+             Attn context: {:.2} MB, Attn output: {:.2} MB, FFN inter: {:.2} MB, FFN out: {:.2} MB, \
+             Norm: {:.2} MB, Head-major Q/K/V: {:.2} MB, Merge scratch: {:.2} MB",
             qkv as f64 / 1024.0 / 1024.0,
             qkv_scratch as f64 / 1024.0 / 1024.0,
             attn_scores as f64 / 1024.0 / 1024.0,
@@ -314,6 +325,8 @@ impl EncoderBuffers {
             ffn_inter as f64 / 1024.0 / 1024.0,
             ffn_out as f64 / 1024.0 / 1024.0,
             norm as f64 / 1024.0 / 1024.0,
+            head_bufs as f64 / 1024.0 / 1024.0,
+            merge as f64 / 1024.0 / 1024.0,
         )
     }
 }
@@ -388,7 +401,12 @@ mod tests {
         let norm = max_tokens * 768 * 4; // norm_scratch - THIS WAS MISSING
         let attn_scores = 12 * 128 * 128 * 4;
         let attn_context = 12 * 128 * 64 * 4;
-        let expected = qkv + outputs + ffn + norm + attn_scores + attn_context;
+        // Head-major Q, K^T and V, plus the merged-heads scratch. Both were
+        // allocated but absent from the total, and this test reproduced the same
+        // omission so it passed regardless.
+        let head_bufs = 12 * 128 * 64 * 4 * 3;
+        let merge = max_tokens * 768 * 4;
+        let expected = qkv + outputs + ffn + norm + attn_scores + attn_context + head_bufs + merge;
 
         assert_eq!(buffers.memory_usage(), expected);
 

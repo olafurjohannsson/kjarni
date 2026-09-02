@@ -1,9 +1,10 @@
 //! SwiGLU Feed-Forward Network.
 
-use crate::activations::{Activation, apply_activation_2d};
+use crate::activations::{Activation, apply_activation_2d, apply_activation_2d_mut};
+use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::linear_layer::LinearLayer;
 use anyhow::Result;
-use ndarray::{Array2, Array3};
+use ndarray::{Array2, Array3, ArrayView2, s};
 
 /// SwiGLU Feed-Forward Network.
 pub struct SwiGluFeedForward {
@@ -64,6 +65,38 @@ impl SwiGluFeedForward {
         gate_out.zip_mut_with(&up_out, |g, &u| *g *= u);
 
         Ok(self.down.matmul(&gate_out.view()))
+    }
+
+    /// Writes into caller-owned buffers instead of allocating.
+    ///
+    /// Without this, `FeedForward::forward_noalloc` fell through to a panic for
+    /// SwiGLU. That was unreachable while a token-count threshold sent most
+    /// requests down the allocating path; once every encode takes the buffered
+    /// path it means any SwiGLU encoder, Nomic among them, panics on its first
+    /// layer.
+    ///
+    /// The gate result lands in `ffn_intermediate`, which is sized for the
+    /// intermediate dimension, and the up projection needs a second buffer of the
+    /// same width, so that one is still allocated here. Removing it needs another
+    /// scratch buffer on `EncoderBuffers`.
+    pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
+        let tokens = hidden.shape()[0];
+        let intermediate = self.gate.out_features();
+
+        let up_out = self.up.matmul(hidden);
+        self.gate
+            .matmul_noalloc(hidden, &mut buffers.ffn_intermediate);
+
+        {
+            let mut gate_slice = buffers
+                .ffn_intermediate
+                .slice_mut(s![..tokens, ..intermediate]);
+            apply_activation_2d_mut(&mut gate_slice, self.activation);
+            gate_slice.zip_mut_with(&up_out.slice(s![..tokens, ..intermediate]), |g, &u| *g *= u);
+        }
+
+        let gated = buffers.ffn_intermediate.slice(s![..tokens, ..intermediate]);
+        self.down.matmul_noalloc(&gated, &mut buffers.ffn_output);
     }
 
     /// Returns (hidden_size, intermediate_size).

@@ -40,6 +40,7 @@ impl FeedForward {
         match self {
             FeedForward::StandardNew(ffn) => ffn.forward_noalloc(hidden, buffers),
             FeedForward::Standard(ffn) => ffn.forward_noalloc(hidden, buffers),
+            FeedForward::SwiGLU(ffn) => ffn.forward_noalloc(hidden, buffers),
             _ => panic!("No-alloc forward not implemented for this FeedForward type"),
         }
     }
