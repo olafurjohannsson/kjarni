@@ -67,7 +67,7 @@ async fn parity_for(model: &str) {
     let got = encoder.encode(short).await.expect("encode");
     let (worst, cos) = compare(&got, &floats(&expected["short"]));
     eprintln!("  {model} encode()      cosine {cos:.6}, worst {worst:.3e}");
-    assert!(worst < 1e-4, "encode() differs from torch by {worst:.3e}");
+    let short_worst = worst;
 
     // A batch long enough to take the buffered path.
     let docs: Vec<String> = reference["docs"]
@@ -94,8 +94,8 @@ async fn parity_for(model: &str) {
         got.len()
     );
     assert!(
-        worst_all < 1e-4,
-        "encode_batch differs from torch by {worst_all:.3e}"
+        short_worst < 1e-4 && worst_all < 1e-4,
+        "differs from torch: encode {short_worst:.3e}, encode_batch {worst_all:.3e}"
     );
 }
 
@@ -109,4 +109,18 @@ async fn minilm_matches_torch() {
 #[ignore = "needs roberta-base and the torch reference in bench/"]
 async fn roberta_matches_torch() {
     parity_for("SamLowe_roberta-base-go_emotions").await;
+}
+
+/// mpnet and distilbert both crashed from C# with "end <= axis_len" before their
+/// configs stopped inheriting `intermediate_size` = 0 from the trait default.
+#[tokio::test]
+#[ignore = "needs mpnet-base-v2 and the torch reference"]
+async fn mpnet_matches_torch() {
+    parity_for("sentence-transformers_all-mpnet-base-v2").await;
+}
+
+#[tokio::test]
+#[ignore = "needs distilbert and the torch reference"]
+async fn distilbert_matches_torch() {
+    parity_for("distilbert_distilbert-base-uncased-finetuned-sst-2-english").await;
 }

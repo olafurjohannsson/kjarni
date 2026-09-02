@@ -19,7 +19,14 @@ DOCS = [
 SHORT = "The capital of Iceland is Reykjavik, which sits on the south west coast."
 
 out = {"short": SHORT, "docs": DOCS, "models": {}}
-for name in ["sentence-transformers_all-MiniLM-L6-v2", "SamLowe_roberta-base-go_emotions"]:
+for name in [
+    "sentence-transformers_all-MiniLM-L6-v2",
+    "SamLowe_roberta-base-go_emotions",
+    # Both of these crashed from C# with "end <= axis_len": their configs
+    # inherited intermediate_size = 0 from the trait default.
+    "sentence-transformers_all-mpnet-base-v2",
+    "distilbert_distilbert-base-uncased-finetuned-sst-2-english",
+]:
     path = f"{cache}/{name}"
     if not os.path.exists(f"{path}/model.safetensors"):
         print(f"  skipping {name}: not cached")

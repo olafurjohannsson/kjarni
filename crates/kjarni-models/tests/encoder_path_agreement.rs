@@ -112,3 +112,9 @@ async fn minilm_paths_agree() {
 async fn roberta_paths_agree() {
     paths_agree("SamLowe_roberta-base-go_emotions", 768).await;
 }
+
+#[tokio::test]
+#[ignore = "needs mpnet-base-v2 in the local model cache"]
+async fn mpnet_paths_agree() {
+    paths_agree("sentence-transformers_all-mpnet-base-v2", 768).await;
+}
