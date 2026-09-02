@@ -11,8 +11,8 @@ use crate::cpu::encoder::traits::CpuEncoderOutput;
 use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
-use crate::cpu::encoder_decoder::relative_position_bias::T5RelativePositionBias;
 use crate::cpu::normalization::RMSNorm;
+use crate::cpu::relative_position_bias::T5RelativePositionBias;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
 use crate::rope::RoPE;

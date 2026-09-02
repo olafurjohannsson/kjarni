@@ -124,3 +124,12 @@ async fn mpnet_matches_torch() {
 async fn distilbert_matches_torch() {
     parity_for("distilbert_distilbert-base-uncased-finetuned-sst-2-english").await;
 }
+
+/// bge-m3: xlm-roberta, 1024 wide, 24 layers, an 8192 token window. The only
+/// long-context encoder covered here, and the only one whose position embeddings
+/// are offset by the padding index.
+#[tokio::test]
+#[ignore = "needs bge-m3 in the local model cache and the torch reference"]
+async fn bge_m3_matches_torch() {
+    parity_for("BAAI_bge-m3").await;
+}

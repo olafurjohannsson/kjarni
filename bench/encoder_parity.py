@@ -26,6 +26,9 @@ for name in [
     # inherited intermediate_size = 0 from the trait default.
     "sentence-transformers_all-mpnet-base-v2",
     "distilbert_distilbert-base-uncased-finetuned-sst-2-english",
+    # xlm-roberta architecture with an 8192 token window: the only long-context
+    # encoder here, and the only one whose position embeddings are offset.
+    "BAAI_bge-m3",
 ]:
     path = f"{cache}/{name}"
     if not os.path.exists(f"{path}/model.safetensors"):
