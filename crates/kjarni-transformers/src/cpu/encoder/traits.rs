@@ -640,8 +640,16 @@ mod tests_trait {
         }
     }
     impl CpuEncoder for MockCpuEncoder {
-        fn create_buffers(&self, _max_batch: usize, _max_seq: usize) -> EncoderBuffers {
-            unimplemented!()
+        // Real buffers rather than unimplemented!(): every encode now takes the
+        // buffered path, so this is on the tested route.
+        fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+            EncoderBuffers::new_auto(
+                max_batch,
+                max_seq,
+                self.hidden_size,
+                8,
+                self.hidden_size * 4,
+            )
         }
         fn forward_layers(
             &self,

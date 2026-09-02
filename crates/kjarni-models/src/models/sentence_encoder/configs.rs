@@ -393,6 +393,15 @@ impl ModelConfig for MpnetConfig {
     fn model_type(&self) -> &str {
         "mpnet"
     }
+    /// The trait default is 0, which sizes the encoder's ffn_intermediate buffer
+    /// to nothing and makes the feed forward slice past the end of it.
+    fn intermediate_size(&self) -> usize {
+        if self.intermediate_size > 0 {
+            self.intermediate_size
+        } else {
+            self.hidden_size * 4
+        }
+    }
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -598,6 +607,15 @@ impl DistilBertConfig {
 impl ModelConfig for DistilBertConfig {
     fn model_type(&self) -> &str {
         "distilbert"
+    }
+    /// DistilBERT calls them `dim` and `hidden_dim`, so the inherited default of
+    /// 0 applied here too.
+    fn intermediate_size(&self) -> usize {
+        if self.hidden_dim > 0 {
+            self.hidden_dim
+        } else {
+            self.dim * 4
+        }
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
