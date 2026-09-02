@@ -86,6 +86,13 @@ impl LinearLayer {
     const BATCH_KERNEL_THRESHOLD: usize = 1000;
 
     /// Above this many rows faer beats both hand-written kernels.
+    ///
+    /// Thresholds of 16, 32 and 256, with and without a column-parallel blocked
+    /// kernel, were measured over the five encoders, both entry points, batches
+    /// of 1 to 64 and two document lengths, taking the minimum of repeated
+    /// interleaved runs. All four configurations landed within 2.4% of each
+    /// other overall and within 3% per model, which is inside the run to run
+    /// noise on this machine, so the value is not worth tuning further.
     const FAER_THRESHOLD: usize = 256;
 
     /// Creates a new zero-initialized `LinearLayer` with the specified dimensions and dtype.

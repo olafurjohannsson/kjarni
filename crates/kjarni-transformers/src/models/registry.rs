@@ -386,9 +386,12 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Embedding,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/BAAI/bge-m3/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/BAAI/bge-m3/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/BAAI/bge-m3/resolve/main/config.json",
+                    // BAAI publish bge-m3 only as pytorch_model.bin, so the
+                    // safetensors URL on their repo 404s. This mirror carries the
+                    // converted weights and the same tokenizer and config.
+                    weights_url: "https://huggingface.co/olafuraron/bge-m3-safetensors/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/olafuraron/bge-m3-safetensors/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/olafuraron/bge-m3-safetensors/resolve/main/config.json",
                     gguf_url: None,
                 },
                 description: "Massive multilingual embedding model. State of the art for diverse languages.",

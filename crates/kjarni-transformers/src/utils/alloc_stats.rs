@@ -6,11 +6,20 @@ pub struct TracingAllocator;
 static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static PEAK_BYTES: AtomicUsize = AtomicUsize::new(0);
 
+/// How many times the allocator has been called.
+///
+/// Bytes and peak answer "how much memory"; this answers "how often did we go to
+/// the allocator", which is the number that matters when chasing per-call
+/// overhead. A forward pass that allocates nine times per layer pays nine
+/// synchronisation points and nine chances to miss cache, regardless of size.
+static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 unsafe impl GlobalAlloc for TracingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         unsafe {
             let ret = System.alloc(layout);
             if !ret.is_null() {
+                ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
                 let prev = ALLOCATED_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
                 let current = prev + layout.size();
 
@@ -54,4 +63,17 @@ pub fn get_current_ram_usage_mb() -> f64 {
 
 pub fn get_peak_ram_usage_mb() -> f64 {
     PEAK_BYTES.load(Ordering::Relaxed) as f64 / 1_048_576.0
+}
+
+/// Total allocator calls since the process started, or since the last reset.
+pub fn alloc_count() -> usize {
+    ALLOC_COUNT.load(Ordering::Relaxed)
+}
+
+/// Zeroes the allocation counter so a region can be measured on its own.
+///
+/// The counter is global and counts every thread, which is what you want for a
+/// rayon-parallel forward pass: work handed to another thread still allocates.
+pub fn reset_alloc_count() {
+    ALLOC_COUNT.store(0, Ordering::Relaxed);
 }

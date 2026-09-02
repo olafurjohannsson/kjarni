@@ -10,7 +10,6 @@ use std::sync::Arc;
 use crate::WgpuContext;
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
-use crate::cpu::strategy::ComputeStrategy;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::LanguageModel;
@@ -88,21 +87,13 @@ pub trait EncoderLanguageModel: LanguageModel {
     ) -> Result<(Array3<f32>, Array2<f32>)> {
         let attention_mask_f32 = attention_mask.mapv(|x| x as f32);
         let (batch_size, seq_len) = input_ids.dim();
-        let tokens = batch_size * seq_len;
-        let hidden = self.hidden_size();
-        let compute_strategy = ComputeStrategy::select(tokens, hidden);
-
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
             let encoder: &dyn CpuEncoder = ops.encoder();
 
             let hidden: Array3<f32> = ops.embed_tokens(input_ids, None, 0)?;
             let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
 
-            if !compute_strategy.use_scratch_buffers {
-                encoder
-                    .forward(&normalized_hidden, &attention_mask_f32)?
-                    .last_hidden_state
-            } else {
+            {
                 let mut buffers = encoder.create_buffers(batch_size, seq_len);
                 #[cfg(debug_assertions)]
                 {
@@ -166,10 +157,6 @@ pub trait EncoderLanguageModel: LanguageModel {
     ) -> Result<(Array3<f32>, Array2<f32>)> {
         let attention_mask_f32 = attention_mask.mapv(|x| x as f32);
         let (batch_size, seq_len) = input_ids.dim();
-        let tokens = batch_size * seq_len;
-        let hidden = self.hidden_size();
-        let compute_strategy = ComputeStrategy::select(tokens, hidden);
-
         let ops = self
             .encoder_cpu_ops()
             .ok_or_else(|| anyhow!("No available CPU encoder implementation for this model."))?;
@@ -178,11 +165,7 @@ pub trait EncoderLanguageModel: LanguageModel {
         let hidden: Array3<f32> = ops.embed_tokens(input_ids, None, 0)?;
         let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
 
-        let hidden_states = if compute_strategy.use_scratch_buffers == false {
-            encoder
-                .forward(&normalized_hidden, &attention_mask_f32)?
-                .last_hidden_state
-        } else {
+        let hidden_states = {
             let mut buffers = encoder.create_buffers(batch_size, seq_len);
             encoder
                 .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
