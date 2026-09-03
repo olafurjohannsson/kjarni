@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>kjarni-wasm benchmark</title>
+<!--
+  Times encodes in a real browser, which is the only place the wasm kernels
+  actually run. Reports the minimum of many iterations after warmups, matching
+  crates/kjarni-models/tests/encoder_benchmark.rs: the mean was measured to
+  swing 10% at the median on native and there is no reason to expect better here.
+-->
+<script type="module">
+  import init, { WasmModel } from "/pkg/kjarni_wasm.js";
+
+  const WARMUP = 3;
+  const RUNS = 9;
+
+  const sentence = "Document number 0 sentence 0 covers refunds, delivery windows and account settings in some detail. ";
+  const doc = (n) => sentence.repeat(n);
+
+  window.__bench = async (modelFile) => {
+    await init();
+    const res = await fetch(`/models/${modelFile}`);
+    if (!res.ok) throw new Error(`model fetch failed: HTTP ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    const t0 = performance.now();
+    const model = WasmModel.from_quantized(bytes);
+    const loadMs = performance.now() - t0;
+
+    const rows = [];
+    const shapes = [
+      { label: "encode 1 doc, 1 sent", docs: 1, sents: 1 },
+      { label: "encode 1 doc, 12 sent", docs: 1, sents: 12 },
+      { label: "encode 1 doc, 48 sent", docs: 1, sents: 48 },
+      { label: "batch 4, 1 sent", docs: 4, sents: 1 },
+      { label: "batch 16, 1 sent", docs: 16, sents: 1 },
+      { label: "batch 16, 12 sent", docs: 16, sents: 12 },
+    ];
+
+    for (const s of shapes) {
+      const texts = Array.from({ length: s.docs }, () => doc(s.sents));
+      for (let i = 0; i < WARMUP; i++) model.encode(texts, true);
+      let best = Infinity;
+      for (let i = 0; i < RUNS; i++) {
+        const t = performance.now();
+        model.encode(texts, true);
+        best = Math.min(best, performance.now() - t);
+      }
+      rows.push({ label: s.label, ms: best });
+    }
+
+    // Fingerprint: the same encode under two builds must agree, which is the
+    // only correctness gate available for a kernel that only exists in wasm.
+    const fp = Array.from(model.encode(["doctor", "physician"], true).slice(0, 8));
+
+    model.free();
+    return { loadMs, rows, fp };
+  };
+</script>

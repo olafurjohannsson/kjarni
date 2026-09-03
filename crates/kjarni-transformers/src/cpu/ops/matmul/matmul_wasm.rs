@@ -158,7 +158,11 @@ pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array
         let a_row = &a_s.as_slice().unwrap()[row * k..(row + 1) * k];
         let out_row = &mut c.as_slice_mut().unwrap()[row * n..(row + 1) * n];
 
-        kernels::scalar::matmul_vec_q8_0_scalar(out_row, a_row, b_weights, k);
+        // SIMD128 rather than the scalar fallback: this is the kernel the
+        // browser chat runs for every token of every quantised model.
+        unsafe {
+            kernels::wasm32::wasm_matmul_vec_q8_0(out_row, a_row.as_ptr(), b_weights, k);
+        }
     }
 
     c

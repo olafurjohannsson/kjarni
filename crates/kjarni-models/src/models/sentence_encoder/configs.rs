@@ -427,7 +427,17 @@ impl ModelConfig for MpnetConfig {
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position_embeddings,
             norm_eps: self.layer_norm_eps,
-            activation: Activation::GeluNew,
+            // mpnet's config.json says "gelu", the exact erf form, and this
+            // hardcoded the tanh approximation while parsing `hidden_act` into a
+            // field it then ignored. The two differ by about 3e-4 at their worst,
+            // which is what put mpnet at 4.7e-4 against torch while every other
+            // encoder sat at 1e-7.
+            activation: match self.hidden_act.as_str() {
+                "gelu" => Activation::Gelu,
+                "gelu_new" => Activation::GeluNew,
+                "relu" => Activation::Relu,
+                _ => Activation::Gelu,
+            },
             rope_theta: None,
             decoder_layers: None,
             rope_scaling: None,
