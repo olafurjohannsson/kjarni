@@ -32,30 +32,37 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
 
         let mut n = k;
 
+        // Three weight vectors stay live and the four input rows stream through
+        // one at a time. Holding all four inputs as well, which is how this was
+        // written, needs 12 accumulators plus 4 plus 1: seventeen values for
+        // sixteen registers, and the disassembly showed one accumulator spilled
+        // to the stack and reloaded on every iteration. This ordering is exactly
+        // 12 + 3 + 1. Consecutive FMAs also write different accumulators, so
+        // nothing waits on the four-cycle latency of the one before it.
         while n >= 8 {
-            let a0 = _mm256_loadu_ps(a0_ptr);
-            let a1 = _mm256_loadu_ps(a1_ptr);
-            let a2 = _mm256_loadu_ps(a2_ptr);
-            let a3 = _mm256_loadu_ps(a3_ptr);
-
-            let _w0 = _mm256_loadu_ps(b0_ptr);
             let w0 = _mm256_loadu_ps(b0_ptr);
-            c00 = _mm256_fmadd_ps(a0, w0, c00);
-            c10 = _mm256_fmadd_ps(a1, w0, c10);
-            c20 = _mm256_fmadd_ps(a2, w0, c20);
-            c30 = _mm256_fmadd_ps(a3, w0, c30);
-
             let w1 = _mm256_loadu_ps(b1_ptr);
-            c01 = _mm256_fmadd_ps(a0, w1, c01);
-            c11 = _mm256_fmadd_ps(a1, w1, c11);
-            c21 = _mm256_fmadd_ps(a2, w1, c21);
-            c31 = _mm256_fmadd_ps(a3, w1, c31);
-
             let w2 = _mm256_loadu_ps(b2_ptr);
-            c02 = _mm256_fmadd_ps(a0, w2, c02);
-            c12 = _mm256_fmadd_ps(a1, w2, c12);
-            c22 = _mm256_fmadd_ps(a2, w2, c22);
-            c32 = _mm256_fmadd_ps(a3, w2, c32);
+
+            let av = _mm256_loadu_ps(a0_ptr);
+            c00 = _mm256_fmadd_ps(av, w0, c00);
+            c01 = _mm256_fmadd_ps(av, w1, c01);
+            c02 = _mm256_fmadd_ps(av, w2, c02);
+
+            let av = _mm256_loadu_ps(a1_ptr);
+            c10 = _mm256_fmadd_ps(av, w0, c10);
+            c11 = _mm256_fmadd_ps(av, w1, c11);
+            c12 = _mm256_fmadd_ps(av, w2, c12);
+
+            let av = _mm256_loadu_ps(a2_ptr);
+            c20 = _mm256_fmadd_ps(av, w0, c20);
+            c21 = _mm256_fmadd_ps(av, w1, c21);
+            c22 = _mm256_fmadd_ps(av, w2, c22);
+
+            let av = _mm256_loadu_ps(a3_ptr);
+            c30 = _mm256_fmadd_ps(av, w0, c30);
+            c31 = _mm256_fmadd_ps(av, w1, c31);
+            c32 = _mm256_fmadd_ps(av, w2, c32);
 
             // Advance
             a0_ptr = a0_ptr.add(8);

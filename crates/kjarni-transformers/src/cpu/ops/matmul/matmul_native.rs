@@ -940,6 +940,197 @@ pub fn matmul_2d_f32_faer_noalloc(
     }
 }
 
+/// Vector-kernel matmul parallelised over output columns instead of rows.
+///
+/// The row-parallel path gives every task a whole row of A and streams the entire
+/// weight matrix past it, so at m rows the weights are pulled through cache m
+/// times, and when m is below the thread count most threads get nothing. A
+/// MiniLM encode of 18 tokens runs about 70 MFLOP per layer in a millisecond,
+/// which is 2.9 GFLOP/s per thread against a per-core peak near 160, and
+/// profiling puts 15% of that encode in crossbeam and rayon bookkeeping.
+///
+/// Splitting by column instead gives each thread its own band of weights, read
+/// once and reused across every row, and all threads get equal work regardless
+/// of m. Bands are multiples of the 16 floats in a cache line so that two
+/// threads never share a line of the output.
+///
+/// Falls back to the row-parallel path where the AVX2 kernel is unavailable.
+pub fn matmul_2d_f32_noalloc_par_n(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    return matmul_2d_f32_noalloc(a, b_weights, bias, output);
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if !(is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")) {
+            return matmul_2d_f32_noalloc(a, b_weights, bias, output);
+        }
+
+        let (m, k) = a.dim();
+        let (n, k2) = b_weights.dim();
+        debug_assert_eq!(k, k2);
+        debug_assert_eq!(output.dim(), (m, n));
+
+        let a_s = a.as_standard_layout();
+        let b_s = b_weights.as_standard_layout();
+        let a_slice = a_s.as_slice().expect("input must be contiguous");
+        let b_slice = b_s.as_slice().expect("weights must be contiguous");
+
+        struct OutPtr(*mut f32);
+        // SAFETY: each task writes only its own band of columns, and the bands are
+        // disjoint, so no two threads touch the same element.
+        unsafe impl Send for OutPtr {}
+        unsafe impl Sync for OutPtr {}
+        let out = OutPtr(output.as_mut_ptr());
+
+        const LINE: usize = 16;
+        let threads = rayon::current_num_threads();
+        let band = n.div_ceil(threads).div_ceil(LINE).max(1) * LINE;
+
+        (0..n.div_ceil(band)).into_par_iter().for_each(|bi| {
+            let out = &out;
+            let j0 = bi * band;
+            let j_end = (j0 + band).min(n);
+            let width = j_end - j0;
+
+            unsafe {
+                let b_band = b_slice.as_ptr().add(j0 * k);
+                for t in 0..m {
+                    let dst = std::slice::from_raw_parts_mut(out.0.add(t * n + j0), width);
+                    kernels::x86::f32::matmul_vec_f32(dst, a_slice.as_ptr().add(t * k), b_band, k);
+                    if let Some(bs) = bias {
+                        for (i, v) in dst.iter_mut().enumerate() {
+                            *v += bs[j0 + i];
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Column-parallel matmul using the 4x3 register tile.
+///
+/// Same band structure as [`matmul_2d_f32_noalloc_par_n`], but each band is
+/// worked in 4 row by 3 column tiles instead of one output at a time. The tile
+/// does 12 FMAs per 7 loads where the vector kernel does one per two, and since
+/// the inner loop was restructured to hold three weight vectors and stream the
+/// input rows it fits the sixteen AVX2 registers exactly, with no stack traffic.
+///
+/// Rows past a multiple of four, and columns past a multiple of three inside a
+/// band, fall back to the vector kernel.
+pub fn matmul_2d_f32_tile43_par_n(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    return matmul_2d_f32_noalloc(a, b_weights, bias, output);
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if !(is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")) {
+            return matmul_2d_f32_noalloc(a, b_weights, bias, output);
+        }
+
+        let (m, k) = a.dim();
+        let (n, k2) = b_weights.dim();
+        debug_assert_eq!(k, k2);
+        debug_assert_eq!(output.dim(), (m, n));
+
+        let a_s = a.as_standard_layout();
+        let b_s = b_weights.as_standard_layout();
+        let a_slice = a_s.as_slice().expect("input must be contiguous");
+        let b_slice = b_s.as_slice().expect("weights must be contiguous");
+
+        struct OutPtr(*mut f32);
+        // SAFETY: each task writes only its own band of columns, and the bands
+        // are disjoint, so no two threads touch the same element.
+        unsafe impl Send for OutPtr {}
+        unsafe impl Sync for OutPtr {}
+        let out = OutPtr(output.as_mut_ptr());
+
+        const LINE: usize = 16;
+        let threads = rayon::current_num_threads();
+        let band = n.div_ceil(threads).div_ceil(LINE).max(1) * LINE;
+
+        (0..n.div_ceil(band)).into_par_iter().for_each(|bi| {
+            let out = &out;
+            let j0 = bi * band;
+            let j_end = (j0 + band).min(n);
+            let bias_ptr = bias.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
+
+            unsafe {
+                let base = out.0;
+                let mut t = 0;
+
+                while t + 4 <= m {
+                    let in_ptr = a_slice.as_ptr().add(t * k);
+                    let mut j = j0;
+
+                    while j + 3 <= j_end {
+                        kernels::x86::f32::matmul_block_4x3_f32(
+                            base.add(t * n + j),
+                            n,
+                            in_ptr,
+                            b_slice.as_ptr().add(j * k),
+                            k,
+                            if bias_ptr.is_null() {
+                                std::ptr::null()
+                            } else {
+                                bias_ptr.add(j)
+                            },
+                        );
+                        j += 3;
+                    }
+
+                    if j < j_end {
+                        for row in 0..4 {
+                            let dst = std::slice::from_raw_parts_mut(
+                                base.add((t + row) * n + j),
+                                j_end - j,
+                            );
+                            kernels::x86::f32::matmul_vec_f32(
+                                dst,
+                                in_ptr.add(row * k),
+                                b_slice.as_ptr().add(j * k),
+                                k,
+                            );
+                            if !bias_ptr.is_null() {
+                                for (i, v) in dst.iter_mut().enumerate() {
+                                    *v += *bias_ptr.add(j + i);
+                                }
+                            }
+                        }
+                    }
+                    t += 4;
+                }
+
+                while t < m {
+                    let dst = std::slice::from_raw_parts_mut(base.add(t * n + j0), j_end - j0);
+                    kernels::x86::f32::matmul_vec_f32(
+                        dst,
+                        a_slice.as_ptr().add(t * k),
+                        b_slice.as_ptr().add(j0 * k),
+                        k,
+                    );
+                    if !bias_ptr.is_null() {
+                        for (i, v) in dst.iter_mut().enumerate() {
+                            *v += *bias_ptr.add(j0 + i);
+                        }
+                    }
+                    t += 1;
+                }
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod matmul_tests {
     use super::*;
@@ -1662,5 +1853,47 @@ mod matmul_tests {
         println!("\n=== No-Alloc Matches Allocating (Batched) ===");
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-6, "No-alloc should match allocating exactly");
+    }
+}
+
+#[cfg(test)]
+mod par_n_tests {
+    use super::*;
+    use ndarray::Array2;
+
+    /// Column-parallel must agree with the row-parallel path at every shape,
+    /// including n that is not a multiple of the cache-line band.
+    #[test]
+    fn agrees_with_row_parallel() {
+        for (m, k, n) in [
+            (2, 384, 1152),
+            (5, 384, 384),
+            (14, 384, 1536),
+            (20, 768, 3072),
+            (31, 1024, 4096),
+            (64, 384, 384),
+            (7, 33, 11),
+            (3, 17, 5),
+        ] {
+            let a = Array2::from_shape_fn((m, k), |(i, j)| {
+                ((i * 31 + j * 17) % 97) as f32 / 97.0 - 0.5
+            });
+            let w =
+                Array2::from_shape_fn((n, k), |(i, j)| ((i * 13 + j * 7) % 89) as f32 / 89.0 - 0.5);
+            let bias: Vec<f32> = (0..n).map(|i| (i % 11) as f32 / 11.0).collect();
+
+            for b in [None, Some(bias.as_slice())] {
+                let mut want = Array2::zeros((m, n));
+                let mut got = Array2::zeros((m, n));
+                matmul_2d_f32_noalloc(&a.view(), &w.view(), b, &mut want);
+                matmul_2d_f32_noalloc_par_n(&a.view(), &w.view(), b, &mut got);
+                let d = want
+                    .iter()
+                    .zip(got.iter())
+                    .map(|(x, y)| (x - y).abs())
+                    .fold(0.0f32, f32::max);
+                assert!(d < 1e-5, "m={m} k={k} n={n} bias={} diff {d}", b.is_some());
+            }
+        }
     }
 }

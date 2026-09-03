@@ -4,7 +4,7 @@ use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
 use crate::utils::linear_algebra::matmul_4d;
 use anyhow::Result;
-use ndarray::{Array2, Array3, ArrayView4, Zip, s};
+use ndarray::{Array2, Array3, ArrayView4, Axis, Zip, s};
 
 pub struct EncoderSelfAttention {
     pub qkv_proj: QKVProjection,
@@ -232,6 +232,7 @@ impl EncoderSelfAttention {
         // keeps the materialised form. Everything else tiles by query block and
         // never builds the tensor at all.
         if position_bias.is_some() || seq_len < TILE_MIN_SEQ {
+            buffers.ensure_scores(batch, seq_len);
             matmul_4d_into(
                 &buffers
                     .q_heads
@@ -440,7 +441,9 @@ fn tiled_attention(
     scale: Option<f32>,
     context: &mut ndarray::ArrayViewMut4<f32>,
 ) {
-    let (_, _, seq_q, head_dim) = q_heads.dim();
+    use ndarray::parallel::prelude::*;
+
+    let (_, _, _seq_q, head_dim) = q_heads.dim();
     let seq_k = k_heads_t.dim().3;
 
     Zip::from(context.outer_iter_mut())
@@ -461,97 +464,118 @@ fn tiled_attention(
                     let kt_sl = kt_s.as_slice().expect("k^T block contiguous");
                     let v_sl = v_s.as_slice().expect("v block contiguous");
 
-                    let rows_max = QUERY_BLOCK.min(seq_q);
-                    let mut tile = vec![0.0f32; rows_max * seq_k];
-                    let mut out_block = vec![0.0f32; rows_max * head_dim];
+                    // Query blocks run in parallel too, not just batch items
+                    // and heads. Parallelising over `batch * heads` alone gives
+                    // twelve tasks for a single document on a twelve head model,
+                    // so half of a 24 thread machine idled through attention no
+                    // matter how long the sequence was. That showed up as a
+                    // consistent loss on one document of about 220 tokens across
+                    // four of the five encoders.
+                    //
+                    // The K^T and V copies above stay hoisted per head, shared by
+                    // reference across the blocks, and the scratch tiles are
+                    // allocated once per worker rather than once per block.
+                    let scratch = || {
+                        (
+                            vec![0.0f32; QUERY_BLOCK * seq_k],
+                            vec![0.0f32; QUERY_BLOCK * head_dim],
+                        )
+                    };
+                    let work = |(tile, out_block): &mut (Vec<f32>, Vec<f32>),
+                                (block_idx, mut dst): (usize, ndarray::ArrayViewMut2<f32>)| {
+                                let q0 = block_idx * QUERY_BLOCK;
+                                let rows = dst.len_of(Axis(0));
 
-                    let mut q0 = 0;
-                    while q0 < seq_q {
-                        let rows = QUERY_BLOCK.min(seq_q - q0);
+                                faer::linalg::matmul::matmul(
+                                    faer::mat::from_row_major_slice_mut(
+                                        &mut tile[..rows * seq_k],
+                                        rows,
+                                        seq_k,
+                                    ),
+                                    faer::mat::from_row_major_slice(
+                                        &q_sl[q0 * head_dim..(q0 + rows) * head_dim],
+                                        rows,
+                                        head_dim,
+                                    ),
+                                    faer::mat::from_row_major_slice(kt_sl, head_dim, seq_k),
+                                    None,
+                                    1.0,
+                                    faer::Parallelism::None,
+                                );
 
-                        faer::linalg::matmul::matmul(
-                            faer::mat::from_row_major_slice_mut(
-                                &mut tile[..rows * seq_k],
-                                rows,
-                                seq_k,
-                            ),
-                            faer::mat::from_row_major_slice(
-                                &q_sl[q0 * head_dim..(q0 + rows) * head_dim],
-                                rows,
-                                head_dim,
-                            ),
-                            faer::mat::from_row_major_slice(kt_sl, head_dim, seq_k),
-                            None,
-                            1.0,
-                            faer::Parallelism::None,
-                        );
+                                for r in 0..rows {
+                                    let row = &mut tile[r * seq_k..(r + 1) * seq_k];
+                                    let mut max = f32::NEG_INFINITY;
+                                    for (k, v) in row.iter_mut().enumerate() {
+                                        let x = match scale {
+                                            Some(s) => *v * s,
+                                            None => *v,
+                                        };
+                                        let x = if mask_b[k] == 0.0 {
+                                            f32::NEG_INFINITY
+                                        } else {
+                                            x
+                                        };
+                                        *v = x;
+                                        if x > max {
+                                            max = x;
+                                        }
+                                    }
 
-                        for r in 0..rows {
-                            let row = &mut tile[r * seq_k..(r + 1) * seq_k];
-                            let mut max = f32::NEG_INFINITY;
-                            for (k, v) in row.iter_mut().enumerate() {
-                                let x = match scale {
-                                    Some(s) => *v * s,
-                                    None => *v,
-                                };
-                                let x = if mask_b[k] == 0.0 {
-                                    f32::NEG_INFINITY
+                                    if !max.is_finite() {
+                                        row.fill(0.0);
+                                        continue;
+                                    }
+
+                                    let mut sum = 0.0f32;
+                                    for v in row.iter_mut() {
+                                        let e = (*v - max).exp();
+                                        *v = e;
+                                        sum += e;
+                                    }
+                                    if sum > 0.0 {
+                                        let inv = 1.0 / sum;
+                                        for v in row.iter_mut() {
+                                            *v *= inv;
+                                        }
+                                    }
+                                }
+
+                                faer::linalg::matmul::matmul(
+                                    faer::mat::from_row_major_slice_mut(
+                                        &mut out_block[..rows * head_dim],
+                                        rows,
+                                        head_dim,
+                                    ),
+                                    faer::mat::from_row_major_slice(
+                                        &tile[..rows * seq_k],
+                                        rows,
+                                        seq_k,
+                                    ),
+                                    faer::mat::from_row_major_slice(v_sl, seq_k, head_dim),
+                                    None,
+                                    1.0,
+                                    faer::Parallelism::None,
+                                );
+
+                                if let Some(d) = dst.as_slice_mut() {
+                                    d.copy_from_slice(&out_block[..rows * head_dim]);
                                 } else {
-                                    x
-                                };
-                                *v = x;
-                                if x > max {
-                                    max = x;
+                                    dst.assign(
+                                        &ndarray::ArrayView2::from_shape(
+                                            (rows, head_dim),
+                                            &out_block[..rows * head_dim],
+                                        )
+                                        .expect("shape"),
+                                    );
                                 }
-                            }
+                    };
 
-                            if !max.is_finite() {
-                                row.fill(0.0);
-                                continue;
-                            }
-
-                            let mut sum = 0.0f32;
-                            for v in row.iter_mut() {
-                                let e = (*v - max).exp();
-                                *v = e;
-                                sum += e;
-                            }
-                            if sum > 0.0 {
-                                let inv = 1.0 / sum;
-                                for v in row.iter_mut() {
-                                    *v *= inv;
-                                }
-                            }
-                        }
-
-                        faer::linalg::matmul::matmul(
-                            faer::mat::from_row_major_slice_mut(
-                                &mut out_block[..rows * head_dim],
-                                rows,
-                                head_dim,
-                            ),
-                            faer::mat::from_row_major_slice(&tile[..rows * seq_k], rows, seq_k),
-                            faer::mat::from_row_major_slice(v_sl, seq_k, head_dim),
-                            None,
-                            1.0,
-                            faer::Parallelism::None,
-                        );
-
-                        let mut dst = ctx_h.slice_mut(s![q0..q0 + rows, ..]);
-                        if let Some(d) = dst.as_slice_mut() {
-                            d.copy_from_slice(&out_block[..rows * head_dim]);
-                        } else {
-                            dst.assign(
-                                &ndarray::ArrayView2::from_shape(
-                                    (rows, head_dim),
-                                    &out_block[..rows * head_dim],
-                                )
-                                .expect("shape"),
-                            );
-                        }
-
-                        q0 += rows;
-                    }
+                    ctx_h
+                        .axis_chunks_iter_mut(Axis(0), QUERY_BLOCK)
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each_init(scratch, work);
                 });
         });
 }

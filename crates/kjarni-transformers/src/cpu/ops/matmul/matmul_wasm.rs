@@ -223,3 +223,24 @@ pub fn matmul_2d_cpu_q6_k(a: &ArrayView2<f32>, b_weights: &[BlockQ6_K]) -> Array
 pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     matmul_2d_cpu_q6_k(input, weights)
 }
+
+/// wasm has no AVX2 kernel, so there is no column-parallel variant; the
+/// row-parallel path is the only implementation.
+pub fn matmul_2d_f32_noalloc_par_n(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    matmul_2d_f32_noalloc(a, b_weights, bias, output)
+}
+
+/// wasm has no AVX2 tile kernel; the vector path is the only implementation.
+pub fn matmul_2d_f32_tile43_par_n(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    matmul_2d_f32_noalloc(a, b_weights, bias, output)
+}

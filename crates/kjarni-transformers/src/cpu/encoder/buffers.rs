@@ -70,8 +70,15 @@ impl EncoderBuffers {
                 None
             },
 
-            // Attention intermediates
-            attn_scores: Array4::zeros((max_batch, num_heads, max_seq, max_seq)),
+            // Attention intermediates.
+            //
+            // The score tensor is left empty and grown on demand. Only the
+            // materialised attention path reads it, which is the T5 relative
+            // position bias case and sequences short enough that tiling is not
+            // worth it; the tiled path never touches a single element. It is
+            // O(batch * heads * seq^2), so at batch 64 and 218 tokens it is
+            // 145MB, and `create_buffers` runs on every encode call.
+            attn_scores: Array4::zeros((0, num_heads, 0, 0)),
             attn_context: Array4::zeros((max_batch, num_heads, max_seq, head_dim)),
 
             // Layer outputs
@@ -279,8 +286,9 @@ impl EncoderBuffers {
             0
         };
 
-        // 4D buffers
-        let attn_scores = self.max_batch * self.num_heads * self.max_seq * self.max_seq * 4;
+        // 4D buffers. The score tensor is grown on demand, so report what is
+        // actually held rather than what the maximum shape would need.
+        let attn_scores = self.attn_scores.len() * 4;
         let attn_context = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4;
 
         // q_heads, k_heads_t and v_heads are the same size as one another, and
@@ -291,6 +299,20 @@ impl EncoderBuffers {
         let merge = max_tokens * self.hidden * 4;
 
         qkv + outputs + ffn + qkv_scratch + attn_scores + attn_context + norm + head_bufs + merge
+    }
+
+    /// Grows the score tensor to hold `[batch, heads, seq, seq]`, if it does not
+    /// already. Only the materialised attention path calls this; the tiled path
+    /// works out of small per block tiles and never needs the tensor at all.
+    ///
+    /// Never shrinks, so a run of decreasing sequence lengths reallocates once
+    /// rather than on every call.
+    pub fn ensure_scores(&mut self, batch: usize, seq: usize) {
+        let (b, _, q, k) = self.attn_scores.dim();
+        if b < batch || q < seq || k < seq {
+            let n = seq.max(q).max(k);
+            self.attn_scores = Array4::zeros((batch.max(b), self.num_heads, n, n));
+        }
     }
 
     /// Returns memory usage breakdown as a formatted string.
@@ -358,7 +380,22 @@ mod tests {
         assert_eq!(buffers.k.dim(), (32 * 128, 768));
         assert_eq!(buffers.v.dim(), (32 * 128, 768));
         assert!(buffers.qkv_scratch.is_none());
-        assert_eq!(buffers.attn_scores.dim(), (32, 12, 128, 128));
+        // Grown on demand by the materialised attention path, empty until then.
+        assert_eq!(buffers.attn_scores.dim(), (0, 12, 0, 0));
+        {
+            let mut b = EncoderBuffers::new(32, 128, 768, 12, 3072, false);
+            b.ensure_scores(4, 64);
+            assert_eq!(b.attn_scores.dim(), (4, 12, 64, 64));
+            let before = b.attn_scores.as_ptr();
+            b.ensure_scores(2, 32);
+            assert_eq!(
+                b.attn_scores.as_ptr(),
+                before,
+                "a smaller request must not reallocate"
+            );
+            b.ensure_scores(8, 64);
+            assert_eq!(b.attn_scores.dim(), (8, 12, 64, 64));
+        }
         assert_eq!(buffers.attn_context.dim(), (32, 12, 128, 64)); // head_dim = 768/12 = 64
         assert_eq!(buffers.attn_output.dim(), (32 * 128, 768));
         assert_eq!(buffers.ffn_intermediate.dim(), (32 * 128, 3072));
@@ -399,7 +436,7 @@ mod tests {
         let outputs = max_tokens * 768 * 4 * 2; // attn_output, ffn_output
         let ffn = max_tokens * 3072 * 4;
         let norm = max_tokens * 768 * 4; // norm_scratch - THIS WAS MISSING
-        let attn_scores = 12 * 128 * 128 * 4;
+        let attn_scores = 0; // grown on demand
         let attn_context = 12 * 128 * 64 * 4;
         // Head-major Q, K^T and V, plus the merged-heads scratch. Both were
         // allocated but absent from the total, and this test reproduced the same

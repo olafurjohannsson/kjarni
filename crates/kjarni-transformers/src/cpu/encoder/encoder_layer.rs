@@ -18,12 +18,25 @@ pub struct EncoderLayer {
     pub ffn_layer_norm: Normalization,
 }
 
-/// Parallel in-place addition: a += b
+/// In-place addition: a += b, parallel only when there is enough of it.
+///
+/// This is the residual connection, so it runs twice per layer. It used to
+/// parallelise per element unconditionally, which on an 18 token MiniLM encode
+/// splits 7680 additions, about two microseconds of work, across 24 threads
+/// twelve times per forward pass. Profiling a small encode put 15% of it in
+/// crossbeam and rayon bookkeeping. `PARALLEL_THRESHOLD` is the same bound the
+/// activations already use.
 pub fn add_inplace(a: &mut Array3<f32>, b: &ArrayView3<f32>) {
     let a_slice = a.as_slice_mut().expect("A must be contiguous");
     let b_slice = b.as_slice().expect("B must be contiguous");
 
-    // Parallelize the loop using Rayon
+    if a_slice.len() < crate::activations::PARALLEL_THRESHOLD {
+        for (x, y) in a_slice.iter_mut().zip(b_slice.iter()) {
+            *x += *y;
+        }
+        return;
+    }
+
     a_slice
         .par_iter_mut()
         .zip(b_slice.par_iter())
