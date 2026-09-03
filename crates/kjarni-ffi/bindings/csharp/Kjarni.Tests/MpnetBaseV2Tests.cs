@@ -31,26 +31,29 @@ namespace Kjarni.Tests
             Assert.Equal(768, embedding.Length);
         }
 
-        // These fixtures were regenerated after MPNet gained its T5 style relative
-        // attention bias, which the encoder had been missing. The previous values
-        // recorded the output from before that fix and matched nothing: they gave
-        // dog/car as 0.546 where both this engine and torch now agree on 0.391.
+        // These are torch's values, which the engine now reproduces.
         //
-        // torch reference for "Hello world" is
-        // 0.02625, 0.01340, -0.00453, -0.02179, 0.05455.
-        // MPNet carries a residual against torch of roughly 7e-4, which is tracked
-        // by `encoder_torch_parity` on the Rust side and is not yet explained, so
-        // these assert the engine's own output rather than torch's.
+        // MPNet used to sit 4.7e-4 away from torch while every other encoder was at
+        // 1e-7. The cause was `MpnetConfig::metadata()` hardcoding the tanh
+        // approximation of GELU while its config.json asks for the exact erf form,
+        // and parsing `hidden_act` into a field it then ignored. With that fixed
+        // parity is 1.6e-7 and these fixtures are a real check against torch rather
+        // than a recording of our own output.
+        //
+        // Compared with a tolerance rather than decimal places on purpose: the
+        // first value lands 3e-7 from a 4-decimal rounding boundary, so
+        // `Assert.Equal(.., 4)` would flip on any architecture that rounds the last
+        // bit differently.
         [Fact]
         public void Encode_FirstFiveValues()
         {
             var embedding = _embedder.Encode("Hello world");
 
-            Assert.Equal( 0.026320f, embedding[0], 4);
-            Assert.Equal( 0.013616f, embedding[1], 4);
-            Assert.Equal(-0.004428f, embedding[2], 4);
-            Assert.Equal(-0.021703f, embedding[3], 4);
-            Assert.Equal( 0.054573f, embedding[4], 4);
+            Assert.Equal( 0.0262497f, embedding[0], 1e-5f);
+            Assert.Equal( 0.0133956f, embedding[1], 1e-5f);
+            Assert.Equal(-0.0045332f, embedding[2], 1e-5f);
+            Assert.Equal(-0.0217914f, embedding[3], 1e-5f);
+            Assert.Equal( 0.0545519f, embedding[4], 1e-5f);
         }
 
         [Fact]
@@ -73,19 +76,19 @@ namespace Kjarni.Tests
                 Assert.Equal(a[i], b[i]);
         }
 
-        // Regenerated with the fixtures above. torch gives 0.778325, 0.608123,
-        // 0.390584 and 0.250900 for these four pairs.
+        // torch gives 0.778325, 0.608123, 0.390584 and 0.250900 for these pairs;
+        // the engine agrees to within 1e-5.
         [Theory]
-        [InlineData("dog", "puppy", 0.778542f)]
-        [InlineData("dog", "cat", 0.608497f)]
-        [InlineData("dog", "car", 0.391313f)]
-        [InlineData("dog", "quantum physics", 0.251558f)]
+        [InlineData("dog", "puppy", 0.778325f)]
+        [InlineData("dog", "cat", 0.608123f)]
+        [InlineData("dog", "car", 0.390585f)]
+        [InlineData("dog", "quantum physics", 0.250894f)]
         public void Similarity_ExactValues(string a, string b, float expected)
         {
             var score = _embedder.Similarity(a, b);
             _output.WriteLine($"{a} / {b}: {score:F6}");
 
-            Assert.Equal(expected, score, 3);
+            Assert.Equal(expected, score, 1e-4f);
         }
 
         [Fact]
