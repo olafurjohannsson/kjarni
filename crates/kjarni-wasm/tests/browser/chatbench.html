@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>kjarni-wasm chat benchmark</title>
+<!--
+  Times and fingerprints quantised generation. The chat model is the only thing
+  that exercises the Q8_0 kernel in the browser, so this is the correctness gate
+  for it: greedy decoding must produce identical text before and after.
+-->
+<script type="module">
+  import init, { WasmChat } from "/pkg/kjarni_wasm.js";
+  window.__chat = async (modelFile, tokens) => {
+    await init();
+    const res = await fetch(`/models/${modelFile}`);
+    if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const t0 = performance.now();
+    const chat = WasmChat.load(bytes, undefined);
+    const loadMs = performance.now() - t0;
+
+    const prompt = "Explain what a vector database is in one sentence.";
+    chat.generate(prompt, 4, 0.0);              // warmup
+
+    const t1 = performance.now();
+    const text = chat.generate(prompt, tokens, 0.0);   // greedy, deterministic
+    const genMs = performance.now() - t1;
+    return { loadMs, genMs, tokens, text };
+  };
+</script>

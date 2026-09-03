@@ -63,11 +63,8 @@ async fn embedder_matches_torch() {
     let reference = reference("torch_encoder_parity.json");
     let expected = &reference["models"]["sentence-transformers_all-MiniLM-L6-v2"];
 
-    // Built from the registry rather than `Embedder::from_path`, which cannot
-    // work: `from_path` sets the model name to "custom" and `from_builder` then
-    // resolves that name without ever looking at `model_path`, so it fails with
-    // UnknownModel("custom"). Classifier and Reranker check `model_path` first
-    // and load from disk; the Embedder does not. Tracked separately.
+    // Built from the registry. `Embedder::from_path` is covered separately in
+    // `embedder_from_path`, which also checks the two agree.
     model_dir("sentence-transformers_all-MiniLM-L6-v2");
     let embedder = Embedder::new("minilm-l6-v2")
         .await

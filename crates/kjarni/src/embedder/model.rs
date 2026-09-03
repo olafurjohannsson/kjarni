@@ -48,6 +48,16 @@ impl Embedder {
 
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: EmbedderBuilder) -> EmbedderResult<Self> {
+        // A local path is loaded from disk without consulting the registry.
+        //
+        // `from_path` sets the model name to "custom", so resolving that name
+        // first, as this did, failed every time with UnknownModel("custom") and
+        // made the whole `from_path` builder unusable. Classifier and Reranker
+        // both check `model_path` before the registry; this now matches them.
+        if let Some(model_path) = builder.model_path.clone() {
+            return Self::from_local_path(model_path, builder).await;
+        }
+
         // Resolve model type
         let model_type = ModelType::resolve(&builder.model).map_err(EmbedderError::UnknownModel)?;
 
@@ -111,6 +121,108 @@ impl Embedder {
             default_overrides: builder.overrides,
             device,
         })
+    }
+
+    /// Loads an encoder from a directory on disk.
+    ///
+    /// The concrete architecture comes from `config.json` during loading, so the
+    /// `ModelType` here only has to be an encoder of the right family for
+    /// validation and for `model_type()` to report something. That mirrors what
+    /// `Classifier::load_from_path` does.
+    async fn from_local_path(
+        model_path: std::path::PathBuf,
+        builder: EmbedderBuilder,
+    ) -> EmbedderResult<Self> {
+        if !model_path.exists() {
+            return Err(EmbedderError::InvalidConfig(format!(
+                "model path not found: {}",
+                model_path.display()
+            )));
+        }
+        for required in ["config.json", "tokenizer.json"] {
+            if !model_path.join(required).exists() {
+                return Err(EmbedderError::InvalidConfig(format!(
+                    "{required} not found in {}",
+                    model_path.display()
+                )));
+            }
+        }
+
+        let model_type = Self::detect_model_type(&model_path)?;
+        validate_for_embedding(model_type)?;
+
+        let device = builder.device.to_device();
+        let context = if device == Device::Wgpu {
+            match builder.context {
+                Some(ctx) => Some(ctx),
+                None => Some(
+                    WgpuContext::new()
+                        .await
+                        .map_err(|_| EmbedderError::GpuUnavailable)?,
+                ),
+            }
+        } else {
+            None
+        };
+
+        let load_config = builder.load_config.map(|c| c.into_inner());
+        let inner = SentenceEncoder::from_pretrained(
+            &model_path,
+            device,
+            context,
+            load_config,
+            Some(model_type),
+        )
+        .map_err(|e| EmbedderError::LoadFailed {
+            model: model_path.display().to_string(),
+            source: e,
+        })?;
+
+        Ok(Self {
+            inner,
+            model_type,
+            default_overrides: builder.overrides,
+            device,
+        })
+    }
+
+    /// Reads `config.json` and picks an encoder `ModelType` of the right family.
+    fn detect_model_type(path: &std::path::Path) -> EmbedderResult<ModelType> {
+        let config_str = std::fs::read_to_string(path.join("config.json")).map_err(|e| {
+            EmbedderError::InvalidConfig(format!("failed to read config.json: {e}"))
+        })?;
+        let config: serde_json::Value = serde_json::from_str(&config_str)
+            .map_err(|e| EmbedderError::InvalidConfig(format!("invalid config.json: {e}")))?;
+
+        let declared = config
+            .get("model_type")
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                config
+                    .get("architectures")
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|v| v.as_str())
+            })
+            .ok_or_else(|| {
+                EmbedderError::InvalidConfig(
+                    "config.json has neither 'model_type' nor 'architectures'".to_string(),
+                )
+            })?
+            .to_lowercase();
+
+        if declared.contains("nomic") {
+            Ok(ModelType::NomicEmbedText)
+        } else if declared.contains("mpnet") {
+            Ok(ModelType::MpnetBaseV2)
+        } else if declared.contains("bert") || declared.contains("roberta") {
+            Ok(ModelType::MiniLML6V2)
+        } else {
+            Err(EmbedderError::IncompatibleModel {
+                model: path.display().to_string(),
+                reason: format!("unknown model type '{declared}', expected a BERT-family encoder"),
+            })
+        }
     }
 
     /// Embed a single text.
