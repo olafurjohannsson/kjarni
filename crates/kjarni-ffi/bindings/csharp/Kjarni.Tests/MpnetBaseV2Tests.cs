@@ -31,16 +31,26 @@ namespace Kjarni.Tests
             Assert.Equal(768, embedding.Length);
         }
 
+        // These fixtures were regenerated after MPNet gained its T5 style relative
+        // attention bias, which the encoder had been missing. The previous values
+        // recorded the output from before that fix and matched nothing: they gave
+        // dog/car as 0.546 where both this engine and torch now agree on 0.391.
+        //
+        // torch reference for "Hello world" is
+        // 0.02625, 0.01340, -0.00453, -0.02179, 0.05455.
+        // MPNet carries a residual against torch of roughly 7e-4, which is tracked
+        // by `encoder_torch_parity` on the Rust side and is not yet explained, so
+        // these assert the engine's own output rather than torch's.
         [Fact]
         public void Encode_FirstFiveValues()
         {
             var embedding = _embedder.Encode("Hello world");
 
-            Assert.Equal( 0.03161f, embedding[0], 4);
-            Assert.Equal( 0.06104f, embedding[1], 4);
-            Assert.Equal( 0.00548f, embedding[2], 4);
-            Assert.Equal(-0.02045f, embedding[3], 4);
-            Assert.Equal( 0.04734f, embedding[4], 4);
+            Assert.Equal( 0.026320f, embedding[0], 4);
+            Assert.Equal( 0.013616f, embedding[1], 4);
+            Assert.Equal(-0.004428f, embedding[2], 4);
+            Assert.Equal(-0.021703f, embedding[3], 4);
+            Assert.Equal( 0.054573f, embedding[4], 4);
         }
 
         [Fact]
@@ -63,11 +73,13 @@ namespace Kjarni.Tests
                 Assert.Equal(a[i], b[i]);
         }
 
+        // Regenerated with the fixtures above. torch gives 0.778325, 0.608123,
+        // 0.390584 and 0.250900 for these four pairs.
         [Theory]
-        [InlineData("dog", "puppy", 0.7183f)]
-        [InlineData("dog", "cat", 0.6397f)]
-        [InlineData("dog", "car", 0.5461f)]
-        [InlineData("dog", "quantum physics", 0.3508f)]
+        [InlineData("dog", "puppy", 0.778542f)]
+        [InlineData("dog", "cat", 0.608497f)]
+        [InlineData("dog", "car", 0.391313f)]
+        [InlineData("dog", "quantum physics", 0.251558f)]
         public void Similarity_ExactValues(string a, string b, float expected)
         {
             var score = _embedder.Similarity(a, b);

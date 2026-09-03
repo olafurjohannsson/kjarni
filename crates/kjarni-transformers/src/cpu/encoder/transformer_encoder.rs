@@ -12,6 +12,7 @@ use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
 use crate::cpu::normalization::RMSNorm;
+use crate::cpu::relative_position_bias::T5RelativePositionBias;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
 use crate::rope::RoPE;
@@ -26,6 +27,13 @@ pub struct CpuTransformerEncoder {
     layers: Vec<EncoderLayer>,
     pub metadata: ModelMetadata,
     pub rope: Option<Arc<RoPE>>,
+    /// Present only for encoders that ship a relative attention bias table.
+    ///
+    /// MPNet adds a learned, bucketed bias to the attention scores before the
+    /// softmax; without it the model still produces plausible embeddings that do
+    /// not match the reference, which is how this went unnoticed. The bucketing
+    /// is the same scheme T5 uses, so the table is shared with that loader.
+    pub position_bias: Option<Arc<T5RelativePositionBias>>,
 }
 
 impl CpuTransformerEncoder {
@@ -228,11 +236,24 @@ impl CpuTransformerEncoder {
             None
         };
 
+        // Absent for most encoders; only models that carry the table get one.
+        let position_bias = T5RelativePositionBias::new(
+            weights, "encoder", true,
+            // MPNet and T5 both use 32 buckets over a 128 token span. A model
+            // with different values would need this read from its config, which
+            // means a new ModelMetadata field and every construction site
+            // updated; no supported model needs it yet.
+            32, 128,
+        )
+        .ok()
+        .map(Arc::new);
+
         Ok(Self {
             embeddings_layer_norm,
             layers,
             metadata: meta,
             rope,
+            position_bias,
         })
     }
 }
@@ -253,11 +274,18 @@ impl CpuTransformerEncoder {
         #[cfg(debug_assertions)]
         buffers.ensure_capacity(batch, seq);
 
+        // Computed once per call and shared by every layer: MPNet keeps a single
+        // table for the whole encoder, not one per block.
+        let bias = match &self.position_bias {
+            Some(pb) => Some(pb.compute(seq, seq)?),
+            None => None,
+        };
+
         for layer in &self.layers[start_layer..end_layer] {
             layer.forward_noalloc(
                 hidden_states,
                 attention_mask,
-                None,
+                bias.as_ref(),
                 self.metadata.is_prenorm,
                 self.rope.as_deref(),
                 buffers,
@@ -359,11 +387,16 @@ impl CpuEncoder for CpuTransformerEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
+        let (_, seq_len, _) = hidden.dim();
+        let bias = match &self.position_bias {
+            Some(pb) => Some(pb.compute(seq_len, seq_len)?),
+            None => None,
+        };
         for layer in self.layers[start_layer..end_layer].iter() {
             hidden = layer.forward(
                 hidden,
                 attention_mask,
-                None,
+                bias.as_ref(),
                 is_prenorm,
                 self.rope.as_deref(),
             )?;

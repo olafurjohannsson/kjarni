@@ -83,6 +83,19 @@ pub fn matmul_2d_f32_noalloc(
     }
 }
 
+/// The faer path does not exist on wasm32: faer is a native dependency, and this
+/// target has one thread and no AVX2 for it to exploit. The dispatch in
+/// `LinearLayer::matmul_noalloc` is shared across targets, so the name has to
+/// exist here; it delegates to the vector kernel, which is what wasm runs anyway.
+pub fn matmul_2d_f32_faer_noalloc(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    matmul_2d_f32_noalloc(a, b_weights, bias, output);
+}
+
 /// No-alloc batched F32 matmul. In WASM, delegates to noalloc.
 pub fn matmul_2d_f32_batched_noalloc(
     a: &ArrayView2<f32>,
@@ -209,4 +222,25 @@ pub fn matmul_2d_cpu_q6_k(a: &ArrayView2<f32>, b_weights: &[BlockQ6_K]) -> Array
 /// Q6_K matmul variant 2, same as q6_k for WASM.
 pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     matmul_2d_cpu_q6_k(input, weights)
+}
+
+/// wasm has no AVX2 kernel, so there is no column-parallel variant; the
+/// row-parallel path is the only implementation.
+pub fn matmul_2d_f32_noalloc_par_n(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    matmul_2d_f32_noalloc(a, b_weights, bias, output)
+}
+
+/// wasm has no AVX2 tile kernel; the vector path is the only implementation.
+pub fn matmul_2d_f32_tile43_par_n(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    matmul_2d_f32_noalloc(a, b_weights, bias, output)
 }

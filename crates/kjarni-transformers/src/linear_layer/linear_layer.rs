@@ -82,7 +82,17 @@ impl LinearData {
 impl LinearLayer {
     /// Threshold for switching from vec kernel to batched 4x3 kernel.
     /// Based on benchmarks: vec kernel wins for m < ~1000, batched wins for m >= ~1000.
+    #[allow(dead_code, reason = "kept while the new dispatch is being measured")]
     const BATCH_KERNEL_THRESHOLD: usize = 1000;
+
+    /// Above this many rows faer beats the hand-written kernels.
+    ///
+    /// Re-swept after the mid band moved to column-parallel 4x3 tiles. Against
+    /// the old row-parallel vector kernel every candidate landed within 2.4% and
+    /// 256 was as good as any; with the tile kernel, 512 is better in 19 of 60
+    /// rows and worse in 2, because the tile stays ahead of faer roughly twice as
+    /// far up. 1024 is a wash, 13 better and 11 worse.
+    const FAER_THRESHOLD: usize = 512;
 
     /// Creates a new zero-initialized `LinearLayer` with the specified dimensions and dtype.
     pub fn new(out_features: usize, in_features: usize, dtype: DType) -> Self {
@@ -166,12 +176,29 @@ impl LinearLayer {
                     let (m, _) = input.dim();
                     let bias = self.bias.as_ref().map(|b| b.as_slice().unwrap());
 
-                    if m < Self::BATCH_KERNEL_THRESHOLD {
-                        // Vec kernel: better for decode and small batches
-                        ops::matmul::matmul_2d_f32_noalloc(input, &w.view(), bias, output);
-                    } else {
-                        // 4x3 block kernel: better for large batches
+                    // Measured on MiniLM and Qwen 0.5B shapes across m from 1 to
+                    // 2048: the blocked kernel wins at a single row, the vector
+                    // kernel from there to a few hundred, and faer above that by
+                    // 1.3x to 1.6x. One threshold could not express that.
+                    if m == 1 {
                         ops::matmul::matmul_2d_f32_batched_noalloc(input, &w.view(), bias, output);
+                    } else if m < Self::FAER_THRESHOLD {
+                        // Column-parallel bands worked in 4x3 register tiles.
+                        //
+                        // Splitting by column rather than by row was worth 26 of
+                        // 60 rows on its own, because at m below the thread count
+                        // row-splitting starves threads and drags the whole
+                        // weight matrix through cache once per row: a short
+                        // MiniLM document went from 5.5ms to 2.8ms.
+                        //
+                        // The 4x3 tile then replaced one output at a time, 12
+                        // FMAs per 7 loads against one per two, and took a 220
+                        // token document on bge-m3 from 560ms to 336ms and on
+                        // distilbert from 69ms to 45ms. Neither change lost a row
+                        // that was not on the faer path.
+                        ops::matmul::matmul_2d_f32_tile43_par_n(input, &w.view(), bias, output);
+                    } else {
+                        ops::matmul::matmul_2d_f32_faer_noalloc(input, &w.view(), bias, output);
                     }
                 }
                 F32MatmulStrategy::Faer | F32MatmulStrategy::FaerOutIn => {

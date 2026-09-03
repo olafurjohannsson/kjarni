@@ -4,7 +4,7 @@ pub mod decoder_cross_attn;
 pub mod decoder_cross_attn_layer;
 pub mod gpu_decoder;
 pub mod gpu_encoder;
-pub mod relative_position_bias;
+pub use crate::cpu::relative_position_bias;
 
 pub use gpu_encoder::Seq2SeqGPUEncoder;
 

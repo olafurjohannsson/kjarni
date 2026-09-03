@@ -1,0 +1,2 @@
+# The throwaway venv for the torch reference scripts.
+.venv/

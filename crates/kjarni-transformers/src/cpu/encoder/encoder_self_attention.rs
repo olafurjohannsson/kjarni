@@ -4,7 +4,7 @@ use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
 use crate::utils::linear_algebra::matmul_4d;
 use anyhow::Result;
-use ndarray::{Array2, Array3, ArrayView4, Zip, s};
+use ndarray::{Array2, Array3, ArrayView4, Axis, Zip, s};
 
 pub struct EncoderSelfAttention {
     pub qkv_proj: QKVProjection,
@@ -173,116 +173,144 @@ impl EncoderSelfAttention {
         let k_slice = buffers.k.slice(s![..tokens, ..]);
         let v_slice = buffers.v.slice(s![..tokens, ..]);
 
-        //  Reshape to heads
-        let (q_heads, k_heads_t, v_heads) = if let Some(r) = rope {
-            // RoPe need 3D intermediate for RoPE application
-            let mut q_3d = q_slice
+        //  Reshape to heads, into buffers that persist across layers.
+        //
+        // This used to build three arrays per layer with
+        // `permuted_axes(..).as_standard_layout().to_owned()`. On MiniLM at batch
+        // 64 that is 1.4MB each, so a six-layer forward pass allocated and dropped
+        // about 25MB against a 30MB L3 and evicted the weights every layer. The
+        // transposes themselves were only part of the cost: the FFN's GEMMs, which
+        // touch none of this, were running at half speed because their weights had
+        // been pushed out of cache.
+        if let Some(r) = rope {
+            let q_3d = q_slice
                 .to_owned()
                 .into_shape_with_order((batch, seq_len, hidden_dim))?;
-            let mut k_3d = k_slice
+            let k_3d = k_slice
                 .to_owned()
                 .into_shape_with_order((batch, seq_len, hidden_dim))?;
-
             let (q_rot, k_rot) = r.apply_3d(&q_3d, &k_3d, self.num_heads, self.num_heads, 0)?;
-            q_3d = q_rot;
-            k_3d = k_rot;
 
-            let q_heads = q_3d
-                .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
+            let q_4d =
+                q_rot.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?;
+            let k_4d =
+                k_rot.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?;
 
-            let k_heads_t = k_3d
-                .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-                .permuted_axes([0, 2, 3, 1])
-                .as_standard_layout()
-                .to_owned();
-
-            let v_3d = v_slice
-                .to_owned()
-                .into_shape_with_order((batch, seq_len, hidden_dim))?;
-            let v_heads = v_3d
-                .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
-
-            (q_heads, k_heads_t, v_heads)
+            buffers
+                .q_heads
+                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
+                .assign(&q_4d.view().permuted_axes([0, 2, 1, 3]));
+            buffers
+                .k_heads_t
+                .slice_mut(s![..batch, .., ..self.head_dim, ..seq_len])
+                .assign(&k_4d.view().permuted_axes([0, 2, 3, 1]));
         } else {
             let q_4d = q_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            let q_heads = q_4d
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
-
             let k_4d = k_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            let k_heads_t = k_4d
-                .permuted_axes([0, 2, 3, 1])
-                .as_standard_layout()
-                .to_owned();
 
+            buffers
+                .q_heads
+                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
+                .assign(&q_4d.view().permuted_axes([0, 2, 1, 3]));
+            buffers
+                .k_heads_t
+                .slice_mut(s![..batch, .., ..self.head_dim, ..seq_len])
+                .assign(&k_4d.view().permuted_axes([0, 2, 3, 1]));
+        }
+
+        // V is untouched by RoPE, so it is the same either way.
+        {
             let v_4d = v_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            let v_heads = v_4d
-                .permuted_axes([0, 2, 1, 3])
-                .as_standard_layout()
-                .to_owned();
-
-            (q_heads, k_heads_t, v_heads)
-        };
-
-        // Compute attention scores: Q @ K^T
-        matmul_4d_into(
-            &q_heads.view(),
-            &k_heads_t.view(),
-            &mut buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
-        );
-
-        // Scale in-place
-        if self.scale_qk {
             buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
-                .mapv_inplace(|x| x * self.scale_factor);
+                .v_heads
+                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
+                .assign(&v_4d.view().permuted_axes([0, 2, 1, 3]));
         }
 
-        //Add position bias if provided
-        if let Some(bias) = position_bias {
-            let bias_slice = bias.slice(s![.., .., ..seq_len, ..seq_len]);
-            buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
-                .zip_mut_with(&bias_slice, |s, &b| *s += b);
+        // Two paths. The T5 style relative position bias is a [1, heads, seq, seq]
+        // array added to the scores, so that case still needs the whole tensor and
+        // keeps the materialised form. Everything else tiles by query block and
+        // never builds the tensor at all.
+        if position_bias.is_some() || seq_len < TILE_MIN_SEQ {
+            buffers.ensure_scores(batch, seq_len);
+            matmul_4d_into(
+                &buffers
+                    .q_heads
+                    .slice(s![..batch, .., ..seq_len, ..self.head_dim]),
+                &buffers
+                    .k_heads_t
+                    .slice(s![..batch, .., ..self.head_dim, ..seq_len]),
+                &mut buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
+            );
+
+            if position_bias.is_some() && self.scale_qk {
+                buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
+                    .mapv_inplace(|x| x * self.scale_factor);
+            }
+            if let Some(bias) = position_bias {
+                let bias_slice = bias.slice(s![.., .., ..seq_len, ..seq_len]);
+                buffers
+                    .attn_scores
+                    .slice_mut(s![..batch, .., ..seq_len, ..seq_len])
+                    .zip_mut_with(&bias_slice, |s, &b| *s += b);
+            }
+            if position_bias.is_some() {
+                Self::apply_padding_mask_inplace(
+                    &mut buffers
+                        .attn_scores
+                        .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
+                    attention_mask,
+                );
+                crate::activations::softmax_4d_view_inplace(
+                    &mut buffers
+                        .attn_scores
+                        .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
+                );
+            } else {
+                fused_scale_mask_softmax(
+                    &mut buffers
+                        .attn_scores
+                        .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
+                    attention_mask,
+                    self.scale_qk.then_some(self.scale_factor),
+                );
+            }
+
+            matmul_4d_into(
+                &buffers
+                    .attn_scores
+                    .slice(s![..batch, .., ..seq_len, ..seq_len]),
+                &buffers
+                    .v_heads
+                    .slice(s![..batch, .., ..seq_len, ..self.head_dim]),
+                &mut buffers
+                    .attn_context
+                    .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
+            );
+        } else {
+            // Disjoint fields, so the immutable views of q, k and v coexist with
+            // the mutable view of the context.
+            let EncoderBuffers {
+                q_heads,
+                k_heads_t,
+                v_heads,
+                attn_context,
+                ..
+            } = &mut *buffers;
+
+            tiled_attention(
+                &q_heads.slice(s![..batch, .., ..seq_len, ..self.head_dim]),
+                &k_heads_t.slice(s![..batch, .., ..self.head_dim, ..seq_len]),
+                &v_heads.slice(s![..batch, .., ..seq_len, ..self.head_dim]),
+                attention_mask,
+                self.scale_qk.then_some(self.scale_factor),
+                &mut attn_context.slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
+            );
         }
-
-        // Apply padding mask in-place
-        Self::apply_padding_mask_inplace(
-            &mut buffers
-                .attn_scores
-                .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
-            attention_mask,
-        );
-
-        // Softmax in-place
-        crate::activations::softmax_4d_view_inplace(&mut buffers.attn_scores.slice_mut(s![
-            ..batch,
-            ..,
-            ..seq_len,
-            ..seq_len
-        ]));
-
-        // Compute context: Scores @ V
-        matmul_4d_into(
-            &buffers
-                .attn_scores
-                .slice(s![..batch, .., ..seq_len, ..seq_len]),
-            &v_heads.view(),
-            &mut buffers
-                .attn_context
-                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
-        );
 
         // Merge heads: [batch, heads, seq, head_dim] -> [tokens, hidden] (no-alloc)
         let context_slice = buffers
@@ -323,6 +351,233 @@ impl EncoderSelfAttention {
             }
         }
     }
+}
+
+/// Scale, mask and softmax over the whole score tensor, for sequences short
+/// enough that it stays in cache anyway.
+fn fused_scale_mask_softmax(
+    scores: &mut ndarray::ArrayViewMut4<f32>,
+    mask: &Array2<f32>,
+    scale: Option<f32>,
+) {
+    use rayon::prelude::*;
+
+    scores
+        .outer_iter_mut()
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(b, mut heads)| {
+            heads.outer_iter_mut().for_each(|mut queries| {
+                queries.outer_iter_mut().for_each(|mut row| {
+                    let mut max = f32::NEG_INFINITY;
+                    for (k, v) in row.iter_mut().enumerate() {
+                        let x = match scale {
+                            Some(s) => *v * s,
+                            None => *v,
+                        };
+                        let x = if mask[[b, k]] == 0.0 {
+                            f32::NEG_INFINITY
+                        } else {
+                            x
+                        };
+                        *v = x;
+                        if x > max {
+                            max = x;
+                        }
+                    }
+
+                    if !max.is_finite() {
+                        row.fill(0.0);
+                        return;
+                    }
+
+                    let mut sum = 0.0f32;
+                    for v in row.iter_mut() {
+                        let e = (*v - max).exp();
+                        *v = e;
+                        sum += e;
+                    }
+                    if sum > 0.0 {
+                        let inv = 1.0 / sum;
+                        for v in row.iter_mut() {
+                            *v *= inv;
+                        }
+                    }
+                });
+            });
+        });
+}
+
+/// Rows of queries handled per tile. At 64 rows a tile is `64 * seq_k * 4` bytes,
+/// which is 56KB at 220 tokens and stays in L2 while it is softmaxed and
+/// multiplied by V.
+const QUERY_BLOCK: usize = 64;
+
+/// Below this sequence length the score tensor is small enough to stay in cache,
+/// so materialising it costs nothing and tiling only adds per head setup. Every
+/// regression from tiling was at 18 token inputs, and every gain was at 220
+/// tokens and above.
+const TILE_MIN_SEQ: usize = 64;
+
+/// Attention over blocks of queries, so the score tile never reaches memory.
+///
+/// The materialised path writes a `[batch, heads, seq, seq]` score array, reads it
+/// back for the softmax and reads it a third time for the context matmul. On
+/// MiniLM at batch 64 and 220 tokens that array is 148MB per layer, which is why
+/// the softmax measured about a fifth of a batched forward pass while accounting
+/// for well under one percent of its arithmetic, and why cost grows with the
+/// square of the sequence faster than torch's.
+///
+/// Each tile here spans the whole key dimension, so a row is scaled, masked,
+/// exponentiated and normalised over exactly the same values in the same order as
+/// before. No online rescaling is needed and the results are bit identical, which
+/// `encoder_path_agreement` checks against the allocating path.
+#[allow(clippy::too_many_arguments)]
+fn tiled_attention(
+    q_heads: &ArrayView4<f32>,
+    k_heads_t: &ArrayView4<f32>,
+    v_heads: &ArrayView4<f32>,
+    mask: &Array2<f32>,
+    scale: Option<f32>,
+    context: &mut ndarray::ArrayViewMut4<f32>,
+) {
+    use ndarray::parallel::prelude::*;
+
+    let (_, _, _seq_q, head_dim) = q_heads.dim();
+    let seq_k = k_heads_t.dim().3;
+
+    Zip::from(context.outer_iter_mut())
+        .and(q_heads.outer_iter())
+        .and(k_heads_t.outer_iter())
+        .and(v_heads.outer_iter())
+        .and(mask.outer_iter())
+        .par_for_each(|mut ctx_b, q_b, kt_b, v_b, mask_b| {
+            Zip::from(ctx_b.outer_iter_mut())
+                .and(q_b.outer_iter())
+                .and(kt_b.outer_iter())
+                .and(v_b.outer_iter())
+                .par_for_each(|mut ctx_h, q_h, kt_h, v_h| {
+                    let q_s = q_h.as_standard_layout();
+                    let kt_s = kt_h.as_standard_layout();
+                    let v_s = v_h.as_standard_layout();
+                    let q_sl = q_s.as_slice().expect("q block contiguous");
+                    let kt_sl = kt_s.as_slice().expect("k^T block contiguous");
+                    let v_sl = v_s.as_slice().expect("v block contiguous");
+
+                    // Query blocks run in parallel too, not just batch items
+                    // and heads. Parallelising over `batch * heads` alone gives
+                    // twelve tasks for a single document on a twelve head model,
+                    // so half of a 24 thread machine idled through attention no
+                    // matter how long the sequence was. That showed up as a
+                    // consistent loss on one document of about 220 tokens across
+                    // four of the five encoders.
+                    //
+                    // The K^T and V copies above stay hoisted per head, shared by
+                    // reference across the blocks, and the scratch tiles are
+                    // allocated once per worker rather than once per block.
+                    let scratch = || {
+                        (
+                            vec![0.0f32; QUERY_BLOCK * seq_k],
+                            vec![0.0f32; QUERY_BLOCK * head_dim],
+                        )
+                    };
+                    let work = |(tile, out_block): &mut (Vec<f32>, Vec<f32>),
+                                (block_idx, mut dst): (usize, ndarray::ArrayViewMut2<f32>)| {
+                                let q0 = block_idx * QUERY_BLOCK;
+                                let rows = dst.len_of(Axis(0));
+
+                                faer::linalg::matmul::matmul(
+                                    faer::mat::from_row_major_slice_mut(
+                                        &mut tile[..rows * seq_k],
+                                        rows,
+                                        seq_k,
+                                    ),
+                                    faer::mat::from_row_major_slice(
+                                        &q_sl[q0 * head_dim..(q0 + rows) * head_dim],
+                                        rows,
+                                        head_dim,
+                                    ),
+                                    faer::mat::from_row_major_slice(kt_sl, head_dim, seq_k),
+                                    None,
+                                    1.0,
+                                    faer::Parallelism::None,
+                                );
+
+                                for r in 0..rows {
+                                    let row = &mut tile[r * seq_k..(r + 1) * seq_k];
+                                    let mut max = f32::NEG_INFINITY;
+                                    for (k, v) in row.iter_mut().enumerate() {
+                                        let x = match scale {
+                                            Some(s) => *v * s,
+                                            None => *v,
+                                        };
+                                        let x = if mask_b[k] == 0.0 {
+                                            f32::NEG_INFINITY
+                                        } else {
+                                            x
+                                        };
+                                        *v = x;
+                                        if x > max {
+                                            max = x;
+                                        }
+                                    }
+
+                                    if !max.is_finite() {
+                                        row.fill(0.0);
+                                        continue;
+                                    }
+
+                                    let mut sum = 0.0f32;
+                                    for v in row.iter_mut() {
+                                        let e = (*v - max).exp();
+                                        *v = e;
+                                        sum += e;
+                                    }
+                                    if sum > 0.0 {
+                                        let inv = 1.0 / sum;
+                                        for v in row.iter_mut() {
+                                            *v *= inv;
+                                        }
+                                    }
+                                }
+
+                                faer::linalg::matmul::matmul(
+                                    faer::mat::from_row_major_slice_mut(
+                                        &mut out_block[..rows * head_dim],
+                                        rows,
+                                        head_dim,
+                                    ),
+                                    faer::mat::from_row_major_slice(
+                                        &tile[..rows * seq_k],
+                                        rows,
+                                        seq_k,
+                                    ),
+                                    faer::mat::from_row_major_slice(v_sl, seq_k, head_dim),
+                                    None,
+                                    1.0,
+                                    faer::Parallelism::None,
+                                );
+
+                                if let Some(d) = dst.as_slice_mut() {
+                                    d.copy_from_slice(&out_block[..rows * head_dim]);
+                                } else {
+                                    dst.assign(
+                                        &ndarray::ArrayView2::from_shape(
+                                            (rows, head_dim),
+                                            &out_block[..rows * head_dim],
+                                        )
+                                        .expect("shape"),
+                                    );
+                                }
+                    };
+
+                    ctx_h
+                        .axis_chunks_iter_mut(Axis(0), QUERY_BLOCK)
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each_init(scratch, work);
+                });
+        });
 }
 
 /// Batched matmul

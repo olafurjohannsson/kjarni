@@ -141,6 +141,18 @@ impl BertConfig {
         self.model_type.as_deref() == Some("nomic_bert")
     }
 
+    /// RoBERTa and XLM-RoBERTa reuse the BERT layout but number positions from
+    /// `pad_token_id + 1` rather than from zero, so their tables are two rows
+    /// longer than the context they serve: bge-m3 declares 8194 positions for an
+    /// 8192 token window. Reading from row zero shifts every position embedding
+    /// and produces plausible vectors that do not match the reference.
+    fn is_roberta_family(&self) -> bool {
+        matches!(
+            self.model_type.as_deref(),
+            Some("roberta") | Some("xlm-roberta") | Some("xlm_roberta")
+        )
+    }
+
     /// Helper to resolve the context length from conflicting fields
     fn get_max_seq_len(&self) -> usize {
         self.n_positions
@@ -205,7 +217,7 @@ impl ModelConfig for BertConfig {
 
             scale_embeddings: false,
             normalize_embedding: false,
-            extra_pos_embeddings: 0,
+            extra_pos_embeddings: if self.is_roberta_family() { 2 } else { 0 },
             is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
@@ -392,6 +404,15 @@ impl MpnetConfig {
 impl ModelConfig for MpnetConfig {
     fn model_type(&self) -> &str {
         "mpnet"
+    }
+    /// The trait default is 0, which sizes the encoder's ffn_intermediate buffer
+    /// to nothing and makes the feed forward slice past the end of it.
+    fn intermediate_size(&self) -> usize {
+        if self.intermediate_size > 0 {
+            self.intermediate_size
+        } else {
+            self.hidden_size * 4
+        }
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -598,6 +619,15 @@ impl DistilBertConfig {
 impl ModelConfig for DistilBertConfig {
     fn model_type(&self) -> &str {
         "distilbert"
+    }
+    /// DistilBERT calls them `dim` and `hidden_dim`, so the inherited default of
+    /// 0 applied here too.
+    fn intermediate_size(&self) -> usize {
+        if self.hidden_dim > 0 {
+            self.hidden_dim
+        } else {
+            self.dim * 4
+        }
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
