@@ -4,6 +4,7 @@ pub mod display;
 pub mod embed;
 pub mod generate;
 pub mod index;
+pub mod inspect;
 pub mod model;
 pub mod rerank;
 pub mod search;

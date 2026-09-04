@@ -72,7 +72,7 @@ func NewIndexer(model string, opts ...Option) (*Indexer, error) {
 	config.Device = deviceCode(o.device)
 	config.ModelName = modelStr
 	config.ChunkSize = 512
-	config.ChunkOverlap = 50
+	config.ChunkOverlap = 100
 	config.BatchSize = 32
 	config.Recursive = 1
 	config.Quiet = boolToInt(o.quiet)

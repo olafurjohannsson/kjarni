@@ -211,6 +211,21 @@ impl GgufLoader {
     }
 
     /// Returns all tensor names in GGUF format.
+    /// Every metadata key/value in the file, in key order.
+    ///
+    /// GGUF carries the whole config as metadata, which is what makes it possible to
+    /// write a `Config` for a new architecture without guessing.
+    pub fn metadata(&self) -> &BTreeMap<String, Value> {
+        &self.metadata
+    }
+
+    /// dtype and shape of a tensor, without reading its data.
+    pub fn tensor_info(&self, name: &str) -> Option<(DType, Vec<usize>)> {
+        let info = self.tensor_map.get(name)?;
+        let dtype = Self::ggml_type_to_dtype(info.kind).ok()?;
+        Some((dtype, info.shape.clone()))
+    }
+
     pub fn tensor_names(&self) -> Vec<&str> {
         self.tensor_map.keys().map(|s| s.as_str()).collect()
     }
