@@ -20,6 +20,10 @@ pub struct GpuLinearLayer {
     gemv_f32: wgpu::ComputePipeline,
     gemv_bf16: wgpu::ComputePipeline,
     gemv_bf16_wide: wgpu::ComputePipeline,
+    gemv_q4k: wgpu::ComputePipeline,
+    bmm_q4k: wgpu::ComputePipeline,
+    gemv_q6k: wgpu::ComputePipeline,
+    bmm_q6k: wgpu::ComputePipeline,
     bmm_f32: wgpu::ComputePipeline,
     bmm_bf16: wgpu::ComputePipeline,
 
@@ -78,6 +82,28 @@ impl GpuLinearLayer {
                     },
                     count: None,
                 },
+                // 9: B_Q6K (Weights, packed and padded to 212 bytes per block)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 5: B_Q4K (Weights, packed)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 // 4: Output
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
@@ -122,6 +148,10 @@ impl GpuLinearLayer {
             gemv_f32: make_pipeline("gemv_f32"),
             gemv_bf16: make_pipeline("gemv_bf16"),
             gemv_bf16_wide: make_pipeline("gemv_bf16_wide"),
+            gemv_q4k: make_pipeline("gemv_q4k"),
+            bmm_q4k: make_pipeline("bmm_q4k"),
+            gemv_q6k: make_pipeline("gemv_q6k"),
+            bmm_q6k: make_pipeline("bmm_q6k"),
             bmm_f32: make_pipeline("bmm_f32"),
             bmm_bf16: make_pipeline("bmm_bf16"),
             buffer,
@@ -142,9 +172,24 @@ impl GpuLinearLayer {
         let is_bf16 = weights.dtype() == DType::BF16;
         let is_gemv = m == 1;
 
+        // Q4_K stays packed. Only the GEMV shape has a kernel for it; a batched
+        // prefill still needs the weights expanded, which is why the loader only
+        // keeps them packed when it can guarantee decode.
+        let is_q4k = weights.dtype() == DType::Q4_K;
+        let is_q6k = weights.dtype() == DType::Q6_K;
+        let use_q4k_kernel = is_gemv && is_q4k;
+        let use_q6k_kernel = is_gemv && is_q6k;
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
 
-        let pipeline = if use_wide_kernel {
+        let pipeline = if use_q4k_kernel {
+            &self.gemv_q4k
+        } else if is_q4k {
+            &self.bmm_q4k
+        } else if use_q6k_kernel {
+            &self.gemv_q6k
+        } else if is_q6k {
+            &self.bmm_q6k
+        } else if use_wide_kernel {
             &self.gemv_bf16_wide
         } else {
             match (is_gemv, is_bf16) {
@@ -165,10 +210,14 @@ impl GpuLinearLayer {
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
 
-        let (b_f32, b_bf16) = if is_bf16 {
-            (&self.buffer, weights.buffer())
+        let (b_f32, b_bf16, b_q4k, b_q6k) = if is_q4k {
+            (&self.buffer, &self.buffer, weights.buffer(), &self.buffer)
+        } else if is_q6k {
+            (&self.buffer, &self.buffer, &self.buffer, weights.buffer())
+        } else if is_bf16 {
+            (&self.buffer, weights.buffer(), &self.buffer, &self.buffer)
         } else {
-            (weights.buffer(), &self.buffer)
+            (weights.buffer(), &self.buffer, &self.buffer, &self.buffer)
         };
 
         let bind_group = self
@@ -198,6 +247,14 @@ impl GpuLinearLayer {
                         binding: 4,
                         resource: output.buffer().as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: b_q4k.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: b_q6k.as_entire_binding(),
+                    },
                 ],
             });
 
@@ -211,7 +268,16 @@ impl GpuLinearLayer {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                if use_wide_kernel {
+                if use_q4k_kernel || use_q6k_kernel {
+                    // Each workgroup produces 4 output rows.
+                    let rows = n.div_ceil(4);
+                    let max_dim = 65535;
+                    if rows > max_dim {
+                        pass.dispatch_workgroups(max_dim, rows.div_ceil(max_dim), 1);
+                    } else {
+                        pass.dispatch_workgroups(rows, 1, 1);
+                    }
+                } else if use_wide_kernel {
                     // Dispatch 2D grid if N > 65535
                     let max_dim = 65535;
                     if n > max_dim {
@@ -225,6 +291,9 @@ impl GpuLinearLayer {
                     // Standard GEMV: 1 Thread per Output Neuron
                     let groups = n.div_ceil(256);
                     pass.dispatch_workgroups(groups, 1, 1);
+                } else if is_q4k || is_q6k {
+                    // One workgroup reduces one output element.
+                    pass.dispatch_workgroups(n, m, 1);
                 } else {
                     // BMM: 2D Tiles
                     let groups_x = n.div_ceil(16);
@@ -235,3 +304,6 @@ impl GpuLinearLayer {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

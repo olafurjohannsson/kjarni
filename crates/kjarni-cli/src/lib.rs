@@ -487,12 +487,17 @@ pub enum IndexCommands {
         #[arg(long, conflicts_with = "inputs")]
         from_chunks: Option<String>,
 
-        /// Chunk size for splitting documents
-        #[arg(long, default_value_t = 1000)]
+        /// Chunk size in characters
+        ///
+        /// The default fits inside the encoder's window. minilm-l6-v2 reads 256
+        /// tokens, roughly 900 characters, so the previous default of 1000 left
+        /// about nine chunks in ten longer than the model reads, with the tail
+        /// dropped silently. The C# Indexer has always used 512; this matches it.
+        #[arg(long, default_value_t = 512)]
         chunk_size: usize,
 
-        /// Chunk overlap
-        #[arg(long, default_value_t = 200)]
+        /// Chunk overlap in characters
+        #[arg(long, default_value_t = 100)]
         chunk_overlap: usize,
 
         /// Encoder model for embeddings
@@ -514,11 +519,13 @@ pub enum IndexCommands {
         /// Input files or directories to add
         inputs: Vec<String>,
 
-        /// Chunk size for splitting documents
-        #[arg(long, default_value_t = 1000)]
+        /// Chunk size in characters
+        ///
+        /// Matches `index create`; see the note there.
+        #[arg(long, default_value_t = 512)]
         chunk_size: usize,
 
-        #[arg(long, default_value_t = 200)]
+        #[arg(long, default_value_t = 100)]
         chunk_overlap: usize,
 
         #[arg(short, long, default_value = "minilm-l6-v2")]
@@ -1191,8 +1198,8 @@ mod tests {
             } => {
                 assert_eq!(output, "output.idx");
                 assert!(inputs.is_empty());
-                assert_eq!(chunk_size, 1000);
-                assert_eq!(chunk_overlap, 200);
+                assert_eq!(chunk_size, 512);
+                assert_eq!(chunk_overlap, 100);
                 assert_eq!(model, "minilm-l6-v2");
             }
             _ => panic!("Expected Index Create command"),

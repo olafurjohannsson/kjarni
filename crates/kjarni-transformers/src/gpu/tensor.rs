@@ -78,8 +78,64 @@ impl GpuTensor {
         target_dt: Option<DType>,
         label: &str,
     ) -> Result<Self> {
+        // Q4_K is the one quantised format the GPU can read as it sits: the linear
+        // primitive and the fused SwiGLU both have kernels that unpack the 4-bit
+        // blocks in the shader. Uploading it packed is what took a 3B model from
+        // 8.6GB of VRAM to 4.1GB and its load from 24s to 8s, most of which was the
+        // dequantise.
+        //
+        // It goes through `get_typed_tensor` rather than `with_raw_tensor`, because
+        // GGUF stores the Q and K projections row-permuted for RoPE and the CPU
+        // conversion undoes that. Uploading `raw.bytes` skips the permutation and
+        // produces a model that still emits fluent text, just not the right text.
+        if weights.tensor_dtype(name).ok() == Some(DType::Q4_K)
+            && target_dt.is_none_or(|t| t == DType::Q4_K)
+        {
+            if let CpuTensor::Q4_K(matrix) = weights.get_typed_tensor(name)? {
+                let view = TensorView {
+                    name: name.to_string(),
+                    bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+                    shape: matrix.shape.to_vec(),
+                    dtype: DType::Q4_K,
+                };
+                return GpuTensor::from_raw(ctx, &view, label);
+            }
+        }
+
+        // Q6_K likewise reads packed, but its 210-byte block is not a multiple of
+        // four, so each block is padded to 212 on the way up. That costs 0.95% of the
+        // buffer and lets the shader index whole words instead of reassembling values
+        // that straddle a word boundary.
+        //
+        // Note this path is also how the embedding table arrives, and the lookup
+        // shader cannot walk quantised blocks. `GpuEmbeddingWeights::new` forces a
+        // non-quantised target for that tensor; without it, a Q6_K embedding reaches
+        // the lookup packed and panics.
+        if weights.tensor_dtype(name).ok() == Some(DType::Q6_K)
+            && target_dt.is_none_or(|t| t == DType::Q6_K)
+        {
+            if let CpuTensor::Q6_K(matrix) = weights.get_typed_tensor(name)? {
+                const SRC: usize = 210;
+                const DST: usize = 212;
+                let src = bytemuck::cast_slice::<_, u8>(matrix.blocks.as_slice());
+                let mut padded = vec![0u8; matrix.blocks.len() * DST];
+                for (i, chunk) in src.chunks_exact(SRC).enumerate() {
+                    padded[i * DST..i * DST + SRC].copy_from_slice(chunk);
+                }
+                let view = TensorView {
+                    name: name.to_string(),
+                    bytes: Cow::Owned(padded),
+                    shape: matrix.shape.to_vec(),
+                    dtype: DType::Q6_K,
+                };
+                return GpuTensor::from_raw(ctx, &view, label);
+            }
+        }
+
         let upload_attempt = weights.with_raw_tensor(name, |raw| {
             if raw.dtype.is_quantized() {
+                // Everything else quantised still has to be expanded, because nothing
+                // on the GPU can walk its blocks.
                 let target = target_dt.unwrap_or(DType::F32);
                 if !target.is_quantized() {
                     return Ok(None);
@@ -100,7 +156,21 @@ impl GpuTensor {
             return Ok(tensor);
         }
 
-        let target = target_dt.unwrap_or(DType::F32);
+        // A tensor that was quantised on disk has to be expanded here, because the
+        // GPU linear kernels read F32 and BF16 only and cannot walk Q4_K blocks.
+        // Expand it to BF16 rather than F32: the values came from 4-bit blocks, so
+        // BF16's mantissa loses nothing that matters, and F32 costs twice the VRAM.
+        // A 3B model is 12.8GB expanded to F32 and 6.4GB to BF16, and on a 12GB card
+        // the F32 copy spills to host memory, which drops decode from ~6 tok/s to 0.2.
+        let source_was_quantised = weights
+            .tensor_dtype(name)
+            .map(|dt| dt.is_quantized())
+            .unwrap_or(false);
+        let target = target_dt.unwrap_or(if source_was_quantised {
+            DType::BF16
+        } else {
+            DType::F32
+        });
 
         log::debug!(
             "converting tensor '{}' to {:?} for GPU upload",

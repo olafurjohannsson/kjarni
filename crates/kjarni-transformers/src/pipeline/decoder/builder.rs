@@ -126,8 +126,22 @@ impl<'a> DecoderPipelineBuilder<'a> {
 
         // Tied weights alias the embedding tensors, which needs the GPU-aware
         // constructor; on wasm the head is simply loaded from the weights.
+        // Tying normally aliases the embedding tensors, which costs nothing. But a
+        // quantised checkpoint dequantises its embedding table for the lookup, and
+        // aliasing that hands the LM head a vocab-sized F32 matmul: on a 3B Q4_K_M
+        // model that is 1.57GB streamed per token, measured at 77ms, 37% of CPU
+        // decode. When the tensor is still quantised on disk the head is loaded from
+        // it directly instead. That is one extra copy of the quantised table, which
+        // is small precisely because it is quantised.
         #[cfg(not(target_arch = "wasm32"))]
-        let lm_head = if tied_weights {
+        let tied_head_is_quantised = tied_weights
+            && self
+                .weights
+                .tensor_dtype(&layout.lm_head)
+                .is_ok_and(|dt| dt.is_quantized());
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let lm_head = if tied_weights && !tied_head_is_quantised {
             log::info!("Using tied weights between embeddings and LM head");
             LoadedLMHead::from_shared_weights(
                 ctx,
@@ -138,6 +152,12 @@ impl<'a> DecoderPipelineBuilder<'a> {
                 self.load_config.quantize_lm_head,
             )?
         } else {
+            if tied_head_is_quantised {
+                log::info!(
+                    "LM head shares a tensor with the embeddings but loads it quantised, \
+                     to avoid a vocab-sized F32 matmul every token"
+                );
+            }
             LoadedLMHead::new(
                 ctx,
                 self.weights,

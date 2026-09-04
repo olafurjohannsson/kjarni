@@ -6,6 +6,6 @@ description = "Examples for the Kjarni inference engine"
 publish = false
 
 [dependencies]
-kjarni = { path = "../kjarni" }
+kjarni = { workspace = true }
 anyhow = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

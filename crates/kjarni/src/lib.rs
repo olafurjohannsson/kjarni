@@ -32,6 +32,7 @@ pub use crate::translator::Translator;
 pub use kjarni_transformers::models::base::DType;
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
 pub use kjarni_transformers::traits::Device;
+pub use kjarni_transformers::WgpuContext;
 // Re-export generation
 pub use kjarni_transformers::common::{
     BeamSearchParams, DecodingStrategy, GenerationConfig, SamplingParams, StreamedToken, TokenType,

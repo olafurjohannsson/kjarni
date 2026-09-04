@@ -5,8 +5,8 @@ use futures::{StreamExt, pin_mut};
 
 use kjarni::{
     DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig,
-    ModelArchitecture, ModelType, SamplingParams, TokenType,
-    models::{Gpt2Model, LlamaModel},
+    ModelArchitecture, ModelType, SamplingParams, TokenType, WgpuContext,
+    models::{Gpt2Model, LlamaModel, QwenModel},
     registry,
 };
 use std::io::{self, Write};
@@ -35,10 +35,6 @@ pub async fn run(
     // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
 
-    if model_path.is_some() {
-        return Err(anyhow!("--model-path not yet implemented."));
-    }
-
     let model_type = ModelType::from_cli_name(model)
         .ok_or_else(|| anyhow!(model_not_found_error(model, Some("decoder"))))?;
 
@@ -66,8 +62,49 @@ pub async fn run(
         eprintln!("Loading model '{}'...", model);
     }
 
-    let loaded_model: Arc<dyn DecoderLanguageModel> = if model_type.is_llama_model() {
+    // A local path, which may be a `.gguf` file or a safetensors directory.
+    //
+    // `--model` still supplies the architecture, since a path on its own does not
+    // say which family the weights belong to. This is the only way to reach a
+    // quantised model: the registry has no GGUF entries, so `llama3.2-3b-instruct`
+    // resolves to the 6GB bf16 copy and decode streams four times the weights a
+    // Q4_K_M file would.
+    let loaded_model: Arc<dyn DecoderLanguageModel> = if let Some(path) = model_path {
+        let p = std::path::Path::new(path);
+        if !p.exists() {
+            return Err(anyhow!("--model-path not found: {path}"));
+        }
+        if !model_type.is_llama_model() {
+            return Err(anyhow!(
+                "--model-path currently supports Llama-family weights only. \
+                 Pass --model with a Llama architecture, or omit --model-path."
+            ));
+        }
+        if !quiet {
+            eprintln!("Loading weights from {path}...");
+        }
+        // `load_from_pretrained` is sync and cannot build a context itself, unlike
+        // the registry path which is async and does. Without one the GPU RoPE
+        // kernel has nothing to run on.
+        let context = if device.is_gpu() {
+            Some(WgpuContext::new().await?)
+        } else {
+            None
+        };
+        Arc::new(LlamaModel::from_pretrained(
+            p,
+            device,
+            context,
+            None,
+            Some(model_type),
+        )?)
+    } else if model_type.is_llama_model() {
         Arc::new(LlamaModel::from_registry(model_type, None, device, None, None).await?)
+    } else if model_type.is_qwen_model() {
+        // The registry has carried `is_qwen_model` all along and this dispatch
+        // never used it, so `kjarni chat` ran Qwen while `kjarni generate`
+        // rejected it as unsupported.
+        Arc::new(QwenModel::from_registry(model_type, None, device, None, None).await?)
     } else if model_type.is_gpt2_model() {
         Arc::new(Gpt2Model::from_registry(model_type, None, device, None, None).await?)
     } else {

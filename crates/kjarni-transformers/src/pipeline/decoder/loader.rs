@@ -8,6 +8,7 @@ use tokenizers::Tokenizer;
 use crate::chat::chatml::ChatMLTemplate;
 use crate::chat::llama3::Llama3ChatTemplate;
 use crate::chat::mistral::MistralChatTemplate;
+use crate::chat::phi3::Phi3ChatTemplate;
 use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::loaders::LoadedRoPE;
@@ -165,6 +166,9 @@ impl DecoderLoader {
                 ModelArchitecture::Mistral => {
                     Some(Box::new(MistralChatTemplate::new()) as Box<dyn ChatTemplate>)
                 }
+                ModelArchitecture::Phi3 => {
+                    Some(Box::new(Phi3ChatTemplate::new()) as Box<dyn ChatTemplate>)
+                }
 
                 // Fallback
                 _ => None,
@@ -295,6 +299,9 @@ impl DecoderLoader {
                 }
                 ModelArchitecture::Mistral => {
                     Some(Box::new(MistralChatTemplate::new()) as Box<dyn ChatTemplate>)
+                }
+                ModelArchitecture::Phi3 => {
+                    Some(Box::new(Phi3ChatTemplate::new()) as Box<dyn ChatTemplate>)
                 }
                 _ => None,
             }

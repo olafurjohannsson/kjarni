@@ -185,8 +185,11 @@ impl GpuAttentionWeights {
                 match b {
                     Some(tensor) => Ok(tensor),
                     None => {
+                        // A bias is always f32, whatever the weight dtype is. Sizing this
+                        // by a quantised dtype would allocate one block per 256 entries
+                        // and leave the shader reading past the end of it.
                         let out_features = w.shape()[0];
-                        GpuTensor::zeros(w.context(), vec![out_features], w.dtype(), label)
+                        GpuTensor::zeros(w.context(), vec![out_features], DType::F32, label)
                     }
                 }
             };
