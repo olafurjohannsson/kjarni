@@ -27,21 +27,36 @@ impl RoPE {
         theta: f32,
         rope_scaling: Option<&RopeScalingConfig>,
     ) -> Self {
-        let inv_freq = if let Some(scaling) = rope_scaling {
-            if scaling.rope_type == "llama3" {
-                Self::calculate_inv_freq_llama3(
-                    head_dim,
-                    theta,
-                    scaling.factor,
-                    scaling.low_freq_factor,
-                    scaling.high_freq_factor,
-                    scaling.original_max_position_embeddings,
-                )
-            } else {
-                Self::calculate_inv_freq_base(head_dim, theta)
+        let inv_freq = match rope_scaling {
+            Some(scaling) if scaling.rope_type == "llama3" => Self::calculate_inv_freq_llama3(
+                head_dim,
+                theta,
+                scaling.factor,
+                scaling.low_freq_factor,
+                scaling.high_freq_factor,
+                scaling.original_max_position_embeddings,
+            ),
+            Some(scaling) if scaling.rope_type == "longrope" => {
+                // LongRoPE divides each frequency by its own factor rather than sharing
+                // one. Which list applies depends on how far the cache reaches: the short
+                // list within the trained context, the long list beyond it. Phi-3.5 is
+                // trained to 4096 and extended to 131072.
+                let trained = scaling.original_max_position_embeddings;
+                let factors = if trained > 0 && max_seq_len > trained {
+                    scaling.long_factor.as_ref()
+                } else {
+                    scaling.short_factor.as_ref()
+                };
+                match factors {
+                    Some(f) if f.len() == head_dim / 2 => {
+                        Self::calculate_inv_freq_longrope(head_dim, theta, f)
+                    }
+                    // A list of the wrong length would silently mis-position every
+                    // token, so fall back to plain RoPE rather than guess.
+                    _ => Self::calculate_inv_freq_base(head_dim, theta),
+                }
             }
-        } else {
-            Self::calculate_inv_freq_base(head_dim, theta)
+            _ => Self::calculate_inv_freq_base(head_dim, theta),
         };
 
         let (cos_cache, sin_cache) = Self::build_cache(max_seq_len, &inv_freq);
@@ -58,6 +73,18 @@ impl RoPE {
         Array1::from_iter((0..head_dim / 2).map(|i| {
             let exponent = (2 * i) as f32 / head_dim as f32;
             1.0 / theta.powf(exponent)
+        }))
+    }
+
+    /// LongRoPE: one factor per frequency, dividing the base inverse frequency.
+    ///
+    /// `factors[i]` corresponds to dimension pair `i`, so the list is `head_dim / 2`
+    /// long. Larger factors stretch that frequency, which is what lets the model reach
+    /// past the context it was trained on.
+    fn calculate_inv_freq_longrope(head_dim: usize, theta: f32, factors: &[f32]) -> Array1<f32> {
+        Array1::from_iter((0..head_dim / 2).map(|i| {
+            let exponent = (2 * i) as f32 / head_dim as f32;
+            1.0 / (factors[i] * theta.powf(exponent))
         }))
     }
 

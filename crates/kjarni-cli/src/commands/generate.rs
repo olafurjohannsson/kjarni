@@ -5,8 +5,8 @@ use futures::{StreamExt, pin_mut};
 
 use kjarni::{
     DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig,
-    ModelArchitecture, ModelType, SamplingParams, TokenType,
-    models::{Gpt2Model, LlamaModel},
+    ModelArchitecture, ModelType, SamplingParams, TokenType, WgpuContext,
+    models::{Gpt2Model, LlamaModel, PhiModel, QwenModel},
     registry,
 };
 use std::io::{self, Write};
@@ -35,10 +35,6 @@ pub async fn run(
     // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
 
-    if model_path.is_some() {
-        return Err(anyhow!("--model-path not yet implemented."));
-    }
-
     let model_type = ModelType::from_cli_name(model)
         .ok_or_else(|| anyhow!(model_not_found_error(model, Some("decoder"))))?;
 
@@ -66,8 +62,51 @@ pub async fn run(
         eprintln!("Loading model '{}'...", model);
     }
 
-    let loaded_model: Arc<dyn DecoderLanguageModel> = if model_type.is_llama_model() {
+    // A local path, which may be a `.gguf` file or a safetensors directory.
+    //
+    // `--model` still supplies the architecture, since a path on its own does not
+    // say which family the weights belong to. This is the only way to reach a
+    // quantised model: the registry has no GGUF entries, so `llama3.2-3b-instruct`
+    // resolves to the 6GB bf16 copy and decode streams four times the weights a
+    // Q4_K_M file would.
+    let loaded_model: Arc<dyn DecoderLanguageModel> = if let Some(path) = model_path {
+        let p = std::path::Path::new(path);
+        if !p.exists() {
+            return Err(anyhow!("--model-path not found: {path}"));
+        }
+        if !model_type.is_llama_model() {
+            return Err(anyhow!(
+                "--model-path currently supports Llama-family weights only. \
+                 Pass --model with a Llama architecture, or omit --model-path."
+            ));
+        }
+        if !quiet {
+            eprintln!("Loading weights from {path}...");
+        }
+        // `load_from_pretrained` is sync and cannot build a context itself, unlike
+        // the registry path which is async and does. Without one the GPU RoPE
+        // kernel has nothing to run on.
+        let context = if device.is_gpu() {
+            Some(WgpuContext::new().await?)
+        } else {
+            None
+        };
+        Arc::new(LlamaModel::from_pretrained(
+            p,
+            device,
+            context,
+            None,
+            Some(model_type),
+        )?)
+    } else if model_type.is_llama_model() {
         Arc::new(LlamaModel::from_registry(model_type, None, device, None, None).await?)
+    } else if model_type.is_qwen_model() {
+        // The registry has carried `is_qwen_model` all along and this dispatch
+        // never used it, so `kjarni chat` ran Qwen while `kjarni generate`
+        // rejected it as unsupported.
+        Arc::new(QwenModel::from_registry(model_type, None, device, None, None).await?)
+    } else if model_type.is_phi_model() {
+        Arc::new(PhiModel::from_registry(model_type, None, device, None, None).await?)
     } else if model_type.is_gpt2_model() {
         Arc::new(Gpt2Model::from_registry(model_type, None, device, None, None).await?)
     } else {
@@ -129,14 +168,14 @@ pub async fn run(
 }
 
 /// Check if the architecture is a supported decoder for generation
+/// Whether an architecture can generate text.
+///
+/// This asks the registry rather than keeping a second list. The hardcoded copy that
+/// used to live here had drifted: it omitted Phi3, so `generate --model phi3.5-mini`
+/// refused a model the engine implements and the registry already classifies as a
+/// decoder. Any list maintained in parallel with the registry will drift again.
 fn is_supported_decoder_architecture(arch: ModelArchitecture) -> bool {
-    matches!(
-        arch,
-        ModelArchitecture::GPT
-            | ModelArchitecture::Llama
-            | ModelArchitecture::Mistral
-            | ModelArchitecture::Qwen2
-    )
+    arch.category() == "decoder"
 }
 
 /// Build the decoding strategy based on parameters
@@ -205,6 +244,56 @@ mod tests {
     }
 
     #[test]
+    fn test_supported_phi3() {
+        assert!(is_supported_decoder_architecture(ModelArchitecture::Phi3));
+    }
+
+    /// The cases above are a list maintained in parallel with the registry, which
+    /// is the drift that made `generate` refuse Phi3 in the first place. This one
+    /// has no wildcard arm, so adding an architecture stops compiling here until
+    /// someone decides whether `generate` should accept it.
+    #[test]
+    fn test_every_architecture_is_classified() {
+        let all = [
+            ModelArchitecture::Llama,
+            ModelArchitecture::Qwen2,
+            ModelArchitecture::Mistral,
+            ModelArchitecture::Phi3,
+            ModelArchitecture::GPT,
+            ModelArchitecture::Bert,
+            ModelArchitecture::NomicBert,
+            ModelArchitecture::Mpnet,
+            ModelArchitecture::T5,
+            ModelArchitecture::Bart,
+            ModelArchitecture::Whisper,
+        ];
+
+        for arch in all {
+            let expected = match arch {
+                ModelArchitecture::Llama
+                | ModelArchitecture::Qwen2
+                | ModelArchitecture::Mistral
+                | ModelArchitecture::Phi3
+                | ModelArchitecture::GPT => true,
+                ModelArchitecture::Bert
+                | ModelArchitecture::NomicBert
+                | ModelArchitecture::Mpnet
+                | ModelArchitecture::T5
+                | ModelArchitecture::Bart
+                | ModelArchitecture::Whisper => false,
+            };
+
+            assert_eq!(
+                is_supported_decoder_architecture(arch),
+                expected,
+                "{} is classified as {:?} by the registry",
+                arch.display_name(),
+                arch.category()
+            );
+        }
+    }
+
+    #[test]
     fn test_unsupported_bert() {
         assert!(!is_supported_decoder_architecture(ModelArchitecture::Bert));
     }
@@ -233,10 +322,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_unsupported_phi3() {
-        assert!(!is_supported_decoder_architecture(ModelArchitecture::Phi3));
-    }
     #[test]
     fn test_strategy_greedy_flag() {
         let strategy = build_decoding_strategy(0.7, None, None, None, true);

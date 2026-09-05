@@ -10,8 +10,8 @@
     <PackageId>Kjarni.Extensions.AI</PackageId>
     <Version>0.1.4</Version>
     <Authors>Ólafur Aron Jóhannsson</Authors>
-    <Description>Microsoft.Extensions.AI provider for Kjarni — local embedding generation and local LLM chat for .NET with no Python, no ONNX, no Ollama daemon, and no cloud. Implements IEmbeddingGenerator and IChatClient, and plugs into Semantic Kernel.</Description>
-    <PackageTags>ai;ml;embeddings;chat;llm;ichatclient;llama;semantic-kernel;microsoft-extensions-ai;rag;search;nlp;inference;local;offline</PackageTags>
+    <Description>Microsoft.Extensions.AI provider for Kjarni: local embedding generation and local LLM chat for .NET with no Python, no ONNX, no Ollama daemon, and no cloud. Implements IEmbeddingGenerator and IChatClient, and plugs into Semantic Kernel.</Description>
+    <PackageTags>ai;ml;embeddings;chat;llm;ichatclient;iembeddinggenerator;llama;semantic-kernel;microsoft-extensions-ai;rag;search;nlp;inference;local;offline;dotnet;csharp;onnx;sentence-transformers</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/olafurjohannsson/kjarni</PackageProjectUrl>
     <RepositoryUrl>https://github.com/olafurjohannsson/kjarni</RepositoryUrl>

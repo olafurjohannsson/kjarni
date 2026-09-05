@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 description = "C FFI bindings for Kjarni"
 
+# crates.io ships the Rust source. The C# and Go bindings, their prebuilt native
+# libraries and the dist tree travel through NuGet, the kjarni-go repo and GitHub
+# releases instead; including them here is 96MB against a 10MiB limit.
+exclude = ["bindings/", "dist/", "examples/"]
+
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
@@ -12,7 +17,7 @@ default = []
 c-bindings = []
 
 [dependencies]
-kjarni = { path = "../kjarni" }
+kjarni = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 serde_json = "1.0"
 num_cpus = "1.16"

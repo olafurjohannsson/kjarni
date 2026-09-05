@@ -2,13 +2,19 @@
 name = "kjarni-cli"
 version.workspace = true
 edition.workspace = true
+description = "Command-line interface for the Kjarni inference engine: embeddings, classification, reranking, generation and search"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [[bin]]
 name = "kjarni"
 path = "src/main.rs"
 
 [dependencies]
-kjarni = { path = "../kjarni" }
+kjarni = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
 serde_json = { workspace = true }

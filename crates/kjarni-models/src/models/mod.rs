@@ -10,6 +10,7 @@ pub mod bart;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpt2;
 pub mod mistral;
+pub mod phi;
 pub mod qwen;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod t5;

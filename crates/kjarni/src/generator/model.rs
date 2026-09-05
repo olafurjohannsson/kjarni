@@ -201,9 +201,10 @@ impl Generator {
                 .await?;
                 Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
             }
-
             ModelArchitecture::Phi3 => Err(anyhow!("Phi3 model loading not yet implemented")),
-
+            // ModelArchitecture::Phi3 => {
+            //     use kjarni_models::models::
+            // }
             _ => Err(anyhow!(
                 "architecture {:?} is not supported for text generation",
                 info.architecture

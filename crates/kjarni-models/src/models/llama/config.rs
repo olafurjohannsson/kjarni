@@ -197,6 +197,8 @@ impl LlamaConfig {
                 original_max_position_embeddings: get_u32("rope.scaling.orig_ctx_len")
                     .map(|v| v as usize)
                     .unwrap_or(8192),
+                long_factor: None,
+                short_factor: None,
             });
 
             Ok(Arc::new(Self {
@@ -328,6 +330,117 @@ impl ModelConfig for LlamaConfig {
                 final_norm_bias: None,
                 layer: decoder_layer,
             }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Llama 3.2 3B Instruct, trimmed to the fields that decide the layout.
+    fn llama32_json() -> &'static str {
+        r#"{
+            "architectures": ["LlamaForCausalLM"],
+            "model_type": "llama",
+            "hidden_size": 3072,
+            "num_hidden_layers": 28,
+            "num_attention_heads": 24,
+            "num_key_value_heads": 8,
+            "intermediate_size": 8192,
+            "vocab_size": 128256,
+            "max_position_embeddings": 131072,
+            "rms_norm_eps": 1e-5,
+            "hidden_act": "silu",
+            "rope_theta": 500000.0,
+            "head_dim": 128,
+            "bos_token_id": 128000,
+            "eos_token_id": [128001, 128008, 128009],
+            "tie_word_embeddings": true,
+            "attention_bias": false,
+            "torch_dtype": "bfloat16"
+        }"#
+    }
+
+    #[test]
+    fn parses_and_reports_itself_as_llama() {
+        let cfg = LlamaConfig::from_json(llama32_json()).expect("llama config");
+        assert_eq!(cfg.model_type(), "llama");
+        assert_eq!(cfg.hidden_size, 3072);
+        assert_eq!(cfg.num_hidden_layers, 28);
+    }
+
+    #[test]
+    fn keeps_grouped_query_attention_distinct_from_full_attention() {
+        // Llama 3.2 has 24 query heads over 8 key/value heads. Collapsing those two
+        // numbers would build the wrong number of KV projections and the wrong cache.
+        let cfg = LlamaConfig::from_json(llama32_json()).unwrap();
+        let meta = cfg.metadata();
+        assert_eq!(meta.num_attention_heads, 24);
+        assert_eq!(meta.num_kv_heads, 8);
+        assert!(meta.num_kv_heads < meta.num_attention_heads, "GQA");
+    }
+
+    #[test]
+    fn head_dim_is_taken_from_the_config_not_derived() {
+        // 3072 / 24 is 128 here, so both routes agree, but the config states it and
+        // the stated value is the one that must win.
+        let cfg = LlamaConfig::from_json(llama32_json()).unwrap();
+        assert_eq!(cfg.metadata().head_dim, 128);
+    }
+
+    #[test]
+    fn attention_layout_names_separate_projections_without_bias() {
+        // Llama splits q, k and v, and has no attention biases. Naming bias tensors
+        // would send the loader looking for something that is not in the checkpoint.
+        let cfg = LlamaConfig::from_json(llama32_json()).unwrap();
+        let layout = cfg.layout();
+        let attn = &layout.decoder.as_ref().unwrap().layer.self_attn;
+
+        assert!(attn.q_weight.ends_with("self_attn.q_proj.weight"));
+        assert!(attn.k_weight.ends_with("self_attn.k_proj.weight"));
+        assert!(attn.v_weight.ends_with("self_attn.v_proj.weight"));
+        assert!(attn.q_bias.is_none(), "llama has no attention bias");
+        assert!(attn.k_bias.is_none());
+        assert!(attn.v_bias.is_none());
+    }
+
+    #[test]
+    fn a_tied_model_points_the_head_at_the_embedding_table() {
+        // Llama 3.2 ties, and the tied name is what makes the loader reuse one tensor
+        // rather than look for an lm_head that is not there.
+        let cfg = LlamaConfig::from_json(llama32_json()).unwrap();
+        assert!(cfg.tie_word_embeddings);
+        assert_eq!(cfg.layout().lm_head, "model.embed_tokens.weight");
+    }
+
+    #[test]
+    fn an_untied_model_points_the_head_at_its_own_tensor() {
+        let untied = llama32_json().replace(
+            "\"tie_word_embeddings\": true",
+            "\"tie_word_embeddings\": false",
+        );
+        let cfg = LlamaConfig::from_json(&untied).unwrap();
+        assert_eq!(cfg.layout().lm_head, "lm_head.weight");
+    }
+
+    #[test]
+    fn no_layout_name_carries_a_row_range() {
+        // Only fused architectures use the `[start:end]` suffix. If one appeared here
+        // it would mean a Phi layout had been copied across.
+        use kjarni_transformers::weights::parse_row_range;
+        let cfg = LlamaConfig::from_json(llama32_json()).unwrap();
+        let layer = &cfg.layout().decoder.unwrap().layer;
+        for name in [
+            &layer.self_attn.q_weight,
+            &layer.self_attn.k_weight,
+            &layer.self_attn.v_weight,
+            &layer.ffn.up_weight,
+        ] {
+            assert!(
+                parse_row_range(&name.replace("{}", "0")).is_none(),
+                "{name}"
+            );
         }
     }
 }

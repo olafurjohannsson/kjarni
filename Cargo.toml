@@ -19,7 +19,7 @@ exclude = ["crates/kjarni-examples"]
 
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.7"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -29,6 +29,16 @@ categories = ["science", "text-processing", "command-line-utilities"]
 
 
 [workspace.dependencies]
+# The workspace's own crates. Kept here so a release bumps one version rather
+# than editing the dependency line in every member: cargo publish requires a
+# `version` alongside `path`, and a stale one silently resolves to an older
+# release from crates.io.
+kjarni = { path = "crates/kjarni", version = "0.1.7" }
+kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.1.7" }
+kjarni-models = { path = "crates/kjarni-models", version = "0.1.7" }
+kjarni-search = { path = "crates/kjarni-search", version = "0.1.7" }
+kjarni-rag = { path = "crates/kjarni-rag", version = "0.1.7" }
+
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

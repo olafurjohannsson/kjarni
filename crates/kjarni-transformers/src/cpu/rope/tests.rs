@@ -645,3 +645,90 @@ mod tests {
         );
     }
 }
+
+// ── LongRoPE ────────────────────────────────────────────────────
+//
+// Phi-3 scales each rotary frequency by its own factor rather than sharing one, and
+// picks between two lists depending on how far the context reaches. Getting the wrong
+// list, or a list of the wrong length, mis-positions every token, and the model still
+// produces fluent text while doing it, so these are checked rather than assumed.
+
+use crate::models::base::RopeScalingConfig;
+
+/// Phi-3.5-mini's shape: 32 heads over 3072 hidden, so head_dim 96 and 48 factors.
+fn longrope(short: f32, long: f32, trained: usize) -> RopeScalingConfig {
+    RopeScalingConfig {
+        rope_type: "longrope".to_string(),
+        original_max_position_embeddings: trained,
+        short_factor: Some(vec![short; 48]),
+        long_factor: Some(vec![long; 48]),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn longrope_divides_each_frequency_by_its_factor() {
+    let head_dim = 96;
+    let theta = 10000.0;
+    let base = RoPE::new(head_dim, 64, theta);
+    // A flat factor of 2 should halve every inverse frequency, which is the same as
+    // the cache the base model would build at twice the wavelength.
+    let scaled = RoPE::new_with_scaling(head_dim, 64, theta, Some(&longrope(2.0, 8.0, 4096)));
+
+    assert_ne!(
+        base.cos_cache, scaled.cos_cache,
+        "a factor of 2 must change the cache"
+    );
+
+    // cos(p * inv_freq / 2) at position 2p equals cos(p * inv_freq) at position p.
+    let a = base.cos_cache[[1, 0]];
+    let b = scaled.cos_cache[[2, 0]];
+    assert!(
+        (a - b).abs() < 1e-5,
+        "halving the frequency should stretch positions: {a} vs {b}"
+    );
+}
+
+#[test]
+fn longrope_uses_short_factors_inside_the_trained_context() {
+    let head_dim = 96;
+    // max_seq_len 2048 is inside the 4096 the model was trained on, so the short list
+    // applies. Building with a different long list must therefore change nothing.
+    let a = RoPE::new_with_scaling(head_dim, 2048, 10000.0, Some(&longrope(1.5, 8.0, 4096)));
+    let b = RoPE::new_with_scaling(head_dim, 2048, 10000.0, Some(&longrope(1.5, 99.0, 4096)));
+    assert_eq!(a.cos_cache, b.cos_cache, "long_factor must be ignored here");
+}
+
+#[test]
+fn longrope_uses_long_factors_past_the_trained_context() {
+    let head_dim = 96;
+    // 8192 is past 4096, so the long list applies and changing it must matter.
+    let a = RoPE::new_with_scaling(head_dim, 8192, 10000.0, Some(&longrope(1.5, 8.0, 4096)));
+    let b = RoPE::new_with_scaling(head_dim, 8192, 10000.0, Some(&longrope(1.5, 99.0, 4096)));
+    assert_ne!(a.cos_cache, b.cos_cache, "long_factor must be used here");
+}
+
+#[test]
+fn a_factor_list_of_the_wrong_length_falls_back_instead_of_guessing() {
+    let head_dim = 96;
+    let mut bad = longrope(2.0, 2.0, 4096);
+    bad.short_factor = Some(vec![2.0; 7]); // should be head_dim / 2 = 48
+    let scaled = RoPE::new_with_scaling(head_dim, 64, 10000.0, Some(&bad));
+    let base = RoPE::new(head_dim, 64, 10000.0);
+    assert_eq!(
+        scaled.cos_cache, base.cos_cache,
+        "a mismatched list must fall back to plain RoPE, not index out of bounds"
+    );
+}
+
+#[test]
+fn an_unknown_strategy_falls_back_to_plain_rope() {
+    let head_dim = 96;
+    let cfg = RopeScalingConfig {
+        rope_type: "some_future_thing".to_string(),
+        ..Default::default()
+    };
+    let scaled = RoPE::new_with_scaling(head_dim, 64, 10000.0, Some(&cfg));
+    let base = RoPE::new(head_dim, 64, 10000.0);
+    assert_eq!(scaled.cos_cache, base.cos_cache);
+}

@@ -41,6 +41,7 @@ pub enum Commands {
         #[arg(short, long, default_value = DEFAULT_GENERATE_MODEL)]
         model: String,
 
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
@@ -96,6 +97,7 @@ pub enum Commands {
         model: String,
 
         /// Path to local model
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
@@ -147,6 +149,7 @@ pub enum Commands {
         model: String,
 
         /// Path to local model
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
@@ -191,25 +194,43 @@ pub enum Commands {
         quiet: bool,
     },
 
+    /// Show a model's metadata, config and tensor layout
+    Inspect {
+        /// Path to a .gguf, a .safetensors directory, or a name in ~/.cache/kjarni
+        path: String,
+    },
+
+    /// Generate embeddings for text
     Embed {
         /// Input text, file path, or stdin if not provided
         input: Option<String>,
 
+        /// Embedding model
         #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
+        /// Output format: raw, json
         #[arg(long, default_value = "raw")]
         format: String,
 
+        /// Scale each vector to unit length
         #[arg(long)]
         normalize: bool,
 
-        #[arg(long, default_value = "cls")]
+        /// Pooling strategy: mean, cls, max
+        ///
+        /// Mean matches what sentence-transformers does for these models, and what the
+        /// library bindings and presets already default to. Pooling changes the vector
+        /// itself, so a different choice here does not produce a slightly different
+        /// answer, it produces one that cannot be compared against the others.
+        #[arg(long, default_value = "mean")]
         pooling: String,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
@@ -228,6 +249,7 @@ pub enum Commands {
         model: String,
 
         /// Path to local model directory (not yet implemented)
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
@@ -326,6 +348,7 @@ pub enum Commands {
         #[arg(short, long, default_value = "minilm-l6-v2-cross-encoder")]
         model: String,
 
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
@@ -337,9 +360,11 @@ pub enum Commands {
         #[arg(short, long, default_value = "text")]
         format: String,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },
@@ -349,6 +374,7 @@ pub enum Commands {
         #[arg(short, long, default_value = DEFAULT_CHAT_MODEL)]
         model: String,
 
+        /// Load weights from a local file or directory instead of the registry
         #[arg(long)]
         model_path: Option<String>,
 
@@ -364,9 +390,11 @@ pub enum Commands {
         #[arg(short = 'n', long, default_value_t = 512)]
         max_tokens: usize,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },
@@ -407,9 +435,11 @@ pub enum Commands {
         #[arg(short, long, default_value = "text")]
         format: String,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },
@@ -426,9 +456,11 @@ pub enum Commands {
         #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },
@@ -473,6 +505,15 @@ pub enum ModelCommands {
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
+pub enum InspectCommands {
+    /// Inspect a model file
+    Model {
+        /// Path to the model file
+        path: String,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
 pub enum IndexCommands {
     /// Create a new index from documents
     Create {
@@ -487,21 +528,28 @@ pub enum IndexCommands {
         #[arg(long, conflicts_with = "inputs")]
         from_chunks: Option<String>,
 
-        /// Chunk size for splitting documents
-        #[arg(long, default_value_t = 1000)]
+        /// Chunk size in characters
+        ///
+        /// The default fits inside the encoder's window. minilm-l6-v2 reads 256
+        /// tokens, roughly 900 characters, so the previous default of 1000 left
+        /// about nine chunks in ten longer than the model reads, with the tail
+        /// dropped silently. The C# Indexer has always used 512; this matches it.
+        #[arg(long, default_value_t = 512)]
         chunk_size: usize,
 
-        /// Chunk overlap
-        #[arg(long, default_value_t = 200)]
+        /// Chunk overlap in characters
+        #[arg(long, default_value_t = 100)]
         chunk_overlap: usize,
 
         /// Encoder model for embeddings
         #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },
@@ -514,19 +562,23 @@ pub enum IndexCommands {
         /// Input files or directories to add
         inputs: Vec<String>,
 
-        /// Chunk size for splitting documents
-        #[arg(long, default_value_t = 1000)]
+        /// Chunk size in characters
+        ///
+        /// Matches `index create`; see the note there.
+        #[arg(long, default_value_t = 512)]
         chunk_size: usize,
 
-        #[arg(long, default_value_t = 200)]
+        #[arg(long, default_value_t = 100)]
         chunk_overlap: usize,
 
         #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
+        /// Run on the GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },
@@ -1191,8 +1243,8 @@ mod tests {
             } => {
                 assert_eq!(output, "output.idx");
                 assert!(inputs.is_empty());
-                assert_eq!(chunk_size, 1000);
-                assert_eq!(chunk_overlap, 200);
+                assert_eq!(chunk_size, 512);
+                assert_eq!(chunk_overlap, 100);
                 assert_eq!(model, "minilm-l6-v2");
             }
             _ => panic!("Expected Index Create command"),

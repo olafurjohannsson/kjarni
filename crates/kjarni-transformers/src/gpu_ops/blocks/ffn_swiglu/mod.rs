@@ -38,10 +38,13 @@ impl GpuSwiGLUFFNWeights {
 pub struct GpuSwiGLUFFN {
     fused_bind_group_layout_bf16: wgpu::BindGroupLayout,
     fused_bind_group_layout_f32: wgpu::BindGroupLayout,
+    fused_bind_group_layout_q4k: wgpu::BindGroupLayout,
     fused_gemv_bf16: wgpu::ComputePipeline,
     fused_bmm_bf16: wgpu::ComputePipeline,
     fused_gemv_f32: wgpu::ComputePipeline,
     fused_bmm_f32: wgpu::ComputePipeline,
+    fused_gemv_q4k: wgpu::ComputePipeline,
+    fused_bmm_q4k: wgpu::ComputePipeline,
     linear_layer: GpuLinearLayer,
     context: Arc<WgpuContext>,
 }
@@ -213,6 +216,70 @@ impl GpuSwiGLUFFN {
                 ],
             });
 
+        // Q4_K uses bindings 7 and 8 for the two packed weight buffers.
+        let fused_bind_group_layout_q4k =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Fused SwiGLU Q4_K Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let layout_q4k = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Fused SwiGLU Q4_K Pipeline Layout"),
+            bind_group_layouts: &[&fused_bind_group_layout_q4k],
+            push_constant_ranges: &[],
+        });
+
         let layout_bf16 = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Fused SwiGLU BF16 Pipeline Layout"),
             bind_group_layouts: &[&fused_bind_group_layout_bf16],
@@ -246,10 +313,13 @@ impl GpuSwiGLUFFN {
         Ok(Self {
             fused_bind_group_layout_bf16,
             fused_bind_group_layout_f32,
+            fused_bind_group_layout_q4k,
             fused_gemv_bf16: make_pipeline(&layout_bf16, "fused_gemv_bf16"),
             fused_bmm_bf16: make_pipeline(&layout_bf16, "fused_bmm_bf16"),
             fused_gemv_f32: make_pipeline(&layout_f32, "fused_gemv_f32"),
             fused_bmm_f32: make_pipeline(&layout_f32, "fused_bmm_f32"),
+            fused_gemv_q4k: make_pipeline(&layout_q4k, "fused_gemv_q4k"),
+            fused_bmm_q4k: make_pipeline(&layout_q4k, "fused_bmm_q4k"),
             linear_layer: GpuLinearLayer::new(context),
             context: context.clone(),
         })
@@ -301,7 +371,45 @@ impl GpuSwiGLUFFN {
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
 
-        let (pipeline, bind_group) = if is_bf16 {
+        let is_q4k = weights.gate_proj.dtype() == DType::Q4_K;
+
+        let (pipeline, bind_group) = if is_q4k {
+            let pipeline = if is_gemv {
+                &self.fused_gemv_q4k
+            } else {
+                &self.fused_bmm_q4k
+            };
+            let bind_group = self
+                .context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Fused SwiGLU Q4_K BindGroup"),
+                    layout: &self.fused_bind_group_layout_q4k,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: input.buffer().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: weights.gate_proj.buffer().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: weights.up_proj.buffer().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: output.buffer().as_entire_binding(),
+                        },
+                    ],
+                });
+            (pipeline, bind_group)
+        } else if is_bf16 {
             let pipeline = if is_gemv {
                 &self.fused_gemv_bf16
             } else {
@@ -384,8 +492,14 @@ impl GpuSwiGLUFFN {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                if is_gemv {
+                if is_gemv && is_q4k {
+                    // Each workgroup produces 2 output rows.
+                    pass.dispatch_workgroups(n.div_ceil(4), 1, 1);
+                } else if is_gemv {
                     pass.dispatch_workgroups(n, 1, 1);
+                } else if is_q4k {
+                    // 256-wide workgroup reducing one output element, not a 16x16 tile.
+                    pass.dispatch_workgroups(n, m, 1);
                 } else {
                     let groups_x = n.div_ceil(16);
                     let groups_y = m.div_ceil(16);

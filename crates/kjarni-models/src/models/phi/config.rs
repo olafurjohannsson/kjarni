@@ -86,7 +86,7 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct QwenConfig {
+pub struct PhiConfig {
     pub hidden_size: usize,
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
@@ -130,17 +130,17 @@ pub struct QwenConfig {
     pub use_cache: bool,
 }
 
-impl QwenConfig {
+impl PhiConfig {
     pub fn from_json(json: &str) -> Result<Self> {
         Ok(serde_json::from_str(json)?)
     }
 
     pub fn from_loader(loader: &dyn WeightLoader, config_json: Option<&str>) -> Result<Arc<Self>> {
         if loader.has_metadata() {
-            // GGUF usually stores Qwen2 metadata under "qwen2"
-            let arch = loader.get_string("general.architecture").unwrap_or("qwen2");
+            // GGUF usually stores Phi3 metadata under "phi3"
+            let arch = loader.get_string("general.architecture").unwrap_or("phi3");
 
-            // Helper to handle both "qwen2.key" and "llama.key" (some converters map it)
+            // Helper to handle both "phi3.key" and "llama.key" (some converters map it)
             let get_val = |k: &str| {
                 loader
                     .get_u32(&format!("{}.{}", arch, k))
@@ -186,17 +186,17 @@ impl QwenConfig {
                     .unwrap_or("silu")
                     .to_string(),
                 rope_theta: get_f32_val("rope.freq_base").unwrap_or(1000000.0),
-                // Qwen specific tokens
+                // Phi specific tokens (todo change to phi)
                 bos_token_id: 151643, // <|endoftext|> usually serves as BOS/EOS
                 eos_token_id: vec![151643, 151645], // <|endoftext|>, <|im_end|>
                 pad_token_id: Some(151643),
                 tie_word_embeddings: !loader.contains("output.weight"),
                 rope_scaling,
                 head_dim: get_val("attention.head_dim").map(|v| v as usize),
-                architectures: vec!["Qwen2ForCausalLM".to_string()],
+                architectures: vec!["Phi3ForCausalLM".to_string()],
                 model_type: arch.to_string(),
                 torch_dtype: Some("bfloat16".to_string()),
-                attention_bias: true, // Qwen usually has bias
+                attention_bias: true, // Phi usually has bias
                 attention_dropout: 0.0,
                 use_cache: true,
             }))
@@ -207,9 +207,9 @@ impl QwenConfig {
     }
 }
 
-impl ModelConfig for QwenConfig {
+impl ModelConfig for PhiConfig {
     fn model_type(&self) -> &str {
-        "qwen2"
+        "phi3"
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -226,7 +226,7 @@ impl ModelConfig for QwenConfig {
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position_embeddings,
             norm_eps: self.rms_norm_eps,
-            activation: Activation::SilU, // Qwen uses SwiGLU
+            activation: Activation::SilU, // Phi-3 uses SwiGLU, like Llama and Qwen
             rope_theta: Some(self.rope_theta),
             rope_scaling: self.rope_scaling.clone(),
             scale_embeddings: false,
@@ -246,33 +246,54 @@ impl ModelConfig for QwenConfig {
     fn layout(&self) -> ModelLayout {
         // Defines where to find tensors in the GGUF file
         let decoder_layer = DecoderLayerLayout {
+            // Phi-3 stores one fused `qkv_proj` of shape [3 * hidden, hidden] where
+            // Llama and Qwen store three tensors. The `[start:end]` suffix asks the
+            // loader for that row range, and rows of a [out, in] weight are output
+            // features, so this is the same split the reference implementation does.
+            //
+            // Phi-3 is full multi-head attention: num_key_value_heads equals
+            // num_attention_heads, so all three ranges are `hidden` rows wide.
             self_attn: AttentionLayout {
-                q_weight: "model.layers.{}.self_attn.q_proj.weight".to_string(),
-                // Qwen HAS Bias
-                q_bias: Some("model.layers.{}.self_attn.q_proj.bias".to_string()),
-
-                k_weight: "model.layers.{}.self_attn.k_proj.weight".to_string(),
-                k_bias: Some("model.layers.{}.self_attn.k_proj.bias".to_string()),
-
-                v_weight: "model.layers.{}.self_attn.v_proj.weight".to_string(),
-                v_bias: Some("model.layers.{}.self_attn.v_proj.bias".to_string()),
-
+                q_weight: format!(
+                    "model.layers.{{}}.self_attn.qkv_proj.weight[0:{}]",
+                    self.hidden_size
+                ),
+                k_weight: format!(
+                    "model.layers.{{}}.self_attn.qkv_proj.weight[{}:{}]",
+                    self.hidden_size,
+                    2 * self.hidden_size
+                ),
+                v_weight: format!(
+                    "model.layers.{{}}.self_attn.qkv_proj.weight[{}:{}]",
+                    2 * self.hidden_size,
+                    3 * self.hidden_size
+                ),
+                // attention_bias is false for Phi-3; there are no bias tensors.
+                q_bias: None,
+                k_bias: None,
+                v_bias: None,
                 o_weight: "model.layers.{}.self_attn.o_proj.weight".to_string(),
-                // Qwen output projection usually does NOT have bias, but we check anyway.
-                // If it's missing in GGUF, loader handles it.
                 o_bias: None,
-
                 norm_weight: "model.layers.{}.input_layernorm.weight".to_string(),
                 norm_bias: None,
             },
             cross_attn: None,
+            // Likewise `gate_up_proj` is one tensor of [2 * intermediate, hidden],
+            // gate first and up second.
             ffn: FeedForwardLayout {
-                up_weight: "model.layers.{}.mlp.up_proj.weight".to_string(),
+                gate_weight: Some(format!(
+                    "model.layers.{{}}.mlp.gate_up_proj.weight[0:{}]",
+                    self.intermediate_size
+                )),
+                gate_bias: None,
+                up_weight: format!(
+                    "model.layers.{{}}.mlp.gate_up_proj.weight[{}:{}]",
+                    self.intermediate_size,
+                    2 * self.intermediate_size
+                ),
                 up_bias: None,
                 down_weight: "model.layers.{}.mlp.down_proj.weight".to_string(),
                 down_bias: None,
-                gate_weight: Some("model.layers.{}.mlp.gate_proj.weight".to_string()),
-                gate_bias: None,
                 norm_weight: "model.layers.{}.post_attention_layernorm.weight".to_string(),
                 norm_bias: None,
             },
@@ -304,96 +325,127 @@ impl ModelConfig for QwenConfig {
 mod tests {
     use super::*;
 
-    /// Qwen2.5 0.5B Instruct, trimmed to the fields that decide the layout.
-    fn qwen25_json() -> &'static str {
+    /// The parts of Phi-3.5-mini's config.json that decide the layout.
+    fn phi35_json() -> String {
         r#"{
-            "architectures": ["Qwen2ForCausalLM"],
-            "model_type": "qwen2",
-            "hidden_size": 896,
-            "num_hidden_layers": 24,
-            "num_attention_heads": 14,
-            "num_key_value_heads": 2,
-            "intermediate_size": 4864,
-            "vocab_size": 151936,
-            "max_position_embeddings": 32768,
-            "rms_norm_eps": 1e-6,
+            "architectures": ["Phi3ForCausalLM"],
+            "model_type": "phi3",
+            "hidden_size": 3072,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 32,
+            "intermediate_size": 8192,
+            "vocab_size": 32064,
+            "max_position_embeddings": 131072,
+            "original_max_position_embeddings": 4096,
+            "rms_norm_eps": 1e-5,
             "hidden_act": "silu",
-            "rope_theta": 1000000.0,
-            "bos_token_id": 151643,
-            "eos_token_id": 151645,
-            "tie_word_embeddings": true,
-            "attention_bias": true,
-            "torch_dtype": "bfloat16"
+            "rope_theta": 10000.0,
+            "rope_scaling": {
+                "long_factor": [1.08, 1.11],
+                "short_factor": [1.0, 1.0],
+                "type": "longrope"
+            },
+            "bos_token_id": 1,
+            "eos_token_id": 32000,
+            "tie_word_embeddings": false,
+            "attention_bias": false,
+            "attention_dropout": 0.0,
+            "torch_dtype": "bfloat16",
+            "use_cache": true
         }"#
+        .to_string()
     }
 
     #[test]
-    fn parses_and_reports_itself_as_qwen() {
-        let cfg = QwenConfig::from_json(qwen25_json()).expect("qwen config");
-        assert_eq!(cfg.model_type(), "qwen2");
-        assert_eq!(cfg.hidden_size, 896);
-        assert_eq!(cfg.num_hidden_layers, 24);
+    fn parses_phi35_config_including_longrope() {
+        let cfg = PhiConfig::from_json(&phi35_json()).expect("phi config should parse");
+        assert_eq!(cfg.hidden_size, 3072);
+        assert_eq!(cfg.num_hidden_layers, 32);
+        // Phi-3 is full multi-head attention, not grouped-query.
+        assert_eq!(cfg.num_attention_heads, cfg.num_key_value_heads);
+        let scaling = cfg.rope_scaling.as_ref().expect("longrope scaling");
+        assert_eq!(scaling.rope_type, "longrope");
+        assert!(scaling.long_factor.is_some());
     }
 
     #[test]
-    fn qwen_names_its_attention_biases() {
-        // This is the one decoder family here that has q, k and v biases. Dropping them
-        // does not fail to load, because the loader treats a missing bias as absent; it
-        // just quietly computes attention without them. So the names have to be here.
-        let cfg = QwenConfig::from_json(qwen25_json()).unwrap();
-        let attn = &cfg.layout().decoder.unwrap().layer.self_attn;
-
-        assert!(
-            attn.q_bias
-                .as_deref()
-                .is_some_and(|b| b.ends_with("q_proj.bias")),
-            "qwen must name its q bias, got {:?}",
-            attn.q_bias
-        );
-        assert!(
-            attn.k_bias
-                .as_deref()
-                .is_some_and(|b| b.ends_with("k_proj.bias"))
-        );
-        assert!(
-            attn.v_bias
-                .as_deref()
-                .is_some_and(|b| b.ends_with("v_proj.bias"))
-        );
-        // The output projection has none, in Qwen as elsewhere.
-        assert!(attn.o_bias.is_none());
+    fn reports_itself_as_phi_not_qwen() {
+        // This file began as a copy of the Qwen config and reported "qwen2" for a while,
+        // which is the kind of thing nothing downstream complains about.
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        assert_eq!(cfg.model_type(), "phi3");
     }
 
     #[test]
-    fn keeps_the_aggressive_grouped_query_ratio() {
-        // 14 query heads over 2 key/value heads. A copied Llama config would give 8.
-        let meta = QwenConfig::from_json(qwen25_json()).unwrap().metadata();
-        assert_eq!(meta.num_attention_heads, 14);
-        assert_eq!(meta.num_kv_heads, 2);
+    fn head_dim_is_derived_and_is_not_128() {
+        // 3072 over 32 heads is 96. Llama and Qwen are 128, so a copied constant here
+        // would be wrong in a way that still runs.
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        assert_eq!(cfg.metadata().head_dim, 96);
     }
 
     #[test]
-    fn head_dim_is_derived_when_the_config_omits_it() {
-        // 896 / 14 = 64. Qwen2.5 0.5B does not state head_dim, so it must be computed.
-        let meta = QwenConfig::from_json(qwen25_json()).unwrap().metadata();
-        assert_eq!(meta.head_dim, 64);
+    fn attention_layout_names_row_ranges_of_the_fused_qkv() {
+        // Phi-3 ships one qkv_proj of [3 * hidden, hidden]. The three ranges must
+        // partition it in q, k, v order and cover it exactly.
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        let layout = cfg.layout();
+        let attn = &layout.decoder.as_ref().unwrap().layer.self_attn;
+
+        assert!(attn.q_weight.contains("qkv_proj"), "{}", attn.q_weight);
+        assert!(attn.q_weight.ends_with("[0:3072]"), "{}", attn.q_weight);
+        assert!(attn.k_weight.ends_with("[3072:6144]"), "{}", attn.k_weight);
+        assert!(attn.v_weight.ends_with("[6144:9216]"), "{}", attn.v_weight);
+
+        // Phi-3 has attention_bias false, so naming a bias tensor would look for
+        // something that does not exist.
+        assert!(attn.q_bias.is_none());
+        assert!(attn.k_bias.is_none());
+        assert!(attn.v_bias.is_none());
     }
 
     #[test]
-    fn a_tied_model_points_the_head_at_the_embedding_table() {
-        let cfg = QwenConfig::from_json(qwen25_json()).unwrap();
-        assert_eq!(cfg.layout().lm_head, "model.embed_tokens.weight");
+    fn ffn_layout_splits_the_fused_gate_up() {
+        // gate_up_proj is [2 * intermediate, hidden], gate first.
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        let layout = cfg.layout();
+        let ffn = &layout.decoder.as_ref().unwrap().layer.ffn;
+
+        let gate = ffn.gate_weight.as_ref().expect("phi is gated");
+        assert!(gate.contains("gate_up_proj"), "{gate}");
+        assert!(gate.ends_with("[0:8192]"), "{gate}");
+        assert!(ffn.up_weight.ends_with("[8192:16384]"), "{}", ffn.up_weight);
+        assert!(ffn.down_weight.contains("down_proj"), "{}", ffn.down_weight);
     }
 
     #[test]
-    fn ffn_is_gated_and_uses_separate_tensors() {
-        // Qwen is SwiGLU with separate gate and up, unlike Phi which fuses them.
+    fn every_layout_range_parses_back_out() {
+        // The loader reads these with `parse_row_range`, so a name it cannot parse
+        // would be looked up literally and fail at load time.
         use kjarni_transformers::weights::parse_row_range;
-        let cfg = QwenConfig::from_json(qwen25_json()).unwrap();
-        let ffn = &cfg.layout().decoder.unwrap().layer.ffn;
-        let gate = ffn.gate_weight.as_ref().expect("qwen is gated");
-        assert!(gate.ends_with("mlp.gate_proj.weight"), "{gate}");
-        assert!(ffn.up_weight.ends_with("mlp.up_proj.weight"));
-        assert!(parse_row_range(&gate.replace("{}", "0")).is_none());
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        let layout = cfg.layout();
+        let layer = &layout.decoder.as_ref().unwrap().layer;
+
+        for name in [
+            &layer.self_attn.q_weight,
+            &layer.self_attn.k_weight,
+            &layer.self_attn.v_weight,
+            layer.ffn.gate_weight.as_ref().unwrap(),
+            &layer.ffn.up_weight,
+        ] {
+            let resolved = name.replace("{}", "0");
+            assert!(
+                parse_row_range(&resolved).is_some(),
+                "layout emitted a range the loader cannot parse: {resolved}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_untied_model_points_the_head_at_its_own_tensor() {
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        assert_eq!(cfg.layout().lm_head, "lm_head.weight");
     }
 }

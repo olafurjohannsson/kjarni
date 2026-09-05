@@ -1,7 +1,13 @@
 [package]
 name = "kjarni-search"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
+description = "Vector search primitives for the Kjarni inference engine"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 
 [dependencies]

@@ -31,6 +31,27 @@ pub use mmap_cache::{clear_mmap_cache, mmap_cache_stats};
 pub use model_weights::{AttentionLayout, ModelWeights, raw_to_typed};
 pub use safetensors_loader::SafeTensorsLoader;
 
+/// Splits a layout name of the form `tensor[start:end]` into its parts.
+///
+/// A layout uses this to name a row range of a fused tensor. Phi-3 ships one
+/// `qkv_proj` of shape `[3 * hidden, hidden]` and one `gate_up_proj` of
+/// `[2 * intermediate, hidden]` where Llama and Qwen ship separate tensors, and a
+/// weight matrix is `[out_features, in_features]`, so a row range is exactly a subset
+/// of the output features.
+///
+/// Returns `None` for an ordinary name, which is the common case.
+pub fn parse_row_range(name: &str) -> Option<(&str, usize, usize)> {
+    let open = name.find('[')?;
+    let inner = name.strip_suffix(']')?.get(open + 1..)?;
+    let (start, end) = inner.split_once(':')?;
+    let start: usize = start.trim().parse().ok()?;
+    let end: usize = end.trim().parse().ok()?;
+    if start >= end {
+        return None;
+    }
+    Some((&name[..open], start, end))
+}
+
 /// Trait for loading model weights from various file formats
 pub trait WeightLoader: Send + Sync {
     /// Returns a raw tensor view by name.
@@ -692,5 +713,54 @@ mod more_tests {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod row_range_tests {
+    use super::parse_row_range;
+
+    #[test]
+    fn plain_names_are_left_alone() {
+        // The overwhelmingly common case: anything without a range must not be touched,
+        // including names that merely contain a bracket.
+        for name in [
+            "model.layers.0.self_attn.q_proj.weight",
+            "blk.0.attn_q.weight",
+            "",
+            "weird[name",
+            "weird]name",
+        ] {
+            assert_eq!(parse_row_range(name), None, "{name} should not parse");
+        }
+    }
+
+    #[test]
+    fn splits_a_range_off_the_end() {
+        assert_eq!(
+            parse_row_range("model.layers.0.self_attn.qkv_proj.weight[0:3072]"),
+            Some(("model.layers.0.self_attn.qkv_proj.weight", 0, 3072))
+        );
+        assert_eq!(
+            parse_row_range("m.mlp.gate_up_proj.weight[8192:16384]"),
+            Some(("m.mlp.gate_up_proj.weight", 8192, 16384))
+        );
+    }
+
+    #[test]
+    fn rejects_ranges_that_cannot_mean_anything() {
+        // An empty or inverted range would silently produce a zero-row weight matrix,
+        // so it has to be refused here rather than surface as a shape error later.
+        for bad in [
+            "t[5:5]", "t[9:3]", "t[0:]", "t[:8]", "t[a:b]", "t[0-8]", "t[0:8", "t[-1:8]",
+        ] {
+            assert_eq!(parse_row_range(bad), None, "{bad} should be refused");
+        }
+    }
+
+    #[test]
+    fn a_trailing_bracket_elsewhere_does_not_confuse_it() {
+        // The suffix must be at the end; a bracket mid-name is part of the name.
+        assert_eq!(parse_row_range("layers[0].weight"), None);
     }
 }

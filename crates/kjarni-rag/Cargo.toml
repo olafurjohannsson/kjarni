@@ -1,11 +1,17 @@
 [package]
 name = "kjarni-rag"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
+description = "Retrieval-augmented generation for the Kjarni inference engine"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 
 [dependencies]
-kjarni-search = { path = "../kjarni-search" }
+kjarni-search = { workspace = true }
 log = { workspace = true }
 text-splitter = { version = "0.27", features = ["markdown"] }
 memmap2 = "0.9"

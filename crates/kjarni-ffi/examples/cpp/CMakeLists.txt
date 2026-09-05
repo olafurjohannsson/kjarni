@@ -33,3 +33,15 @@ target_link_libraries(example PRIVATE kjarni_ffi)
 set_target_properties(example PROPERTIES
     BUILD_RPATH "${KJARNI_LIB_DIR}"
     INSTALL_RPATH "${KJARNI_LIB_DIR}")
+
+# The same program against the C header, pinned to C++11 so that the claim "this
+# works without C++23" is checked by the build rather than only by the docs.
+add_executable(hello_c_api hello_c_api.cpp)
+set_target_properties(hello_c_api PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
+
+target_compile_options(hello_c_api PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra>)
+
+target_include_directories(hello_c_api PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_link_directories(hello_c_api PRIVATE "${KJARNI_LIB_DIR}")
+target_link_libraries(hello_c_api PRIVATE kjarni_ffi)

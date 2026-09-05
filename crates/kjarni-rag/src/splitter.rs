@@ -14,10 +14,17 @@ pub struct SplitterConfig {
 }
 
 impl Default for SplitterConfig {
+    /// 512 characters, which fits inside the encoder window rather than just past it.
+    ///
+    /// `minilm-l6-v2` reads 256 tokens, about 900 characters of English. The previous
+    /// default of 1000 sat just over that line, so roughly nine chunks in ten lost
+    /// their tail before the encoder saw them, with no warning and a normal looking
+    /// vector out the other end. mpnet reads 384 tokens and has more room, but 512
+    /// is safe for both.
     fn default() -> Self {
         Self {
-            chunk_size: 1000,
-            chunk_overlap: 200,
+            chunk_size: 512,
+            chunk_overlap: 100,
             clean_markdown: true,
         }
     }

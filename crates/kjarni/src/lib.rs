@@ -29,9 +29,15 @@ pub use crate::summarizer::Summarizer;
 pub use crate::translator::Translator;
 
 // Re-export core types
+pub use kjarni_transformers::WgpuContext;
 pub use kjarni_transformers::models::base::DType;
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
 pub use kjarni_transformers::traits::Device;
+
+// Weight loaders, so `kjarni inspect` can read a file's own description of itself
+// without the CLI depending on kjarni-transformers directly.
+#[cfg(not(target_arch = "wasm32"))]
+pub use kjarni_transformers::weights::{GgufLoader, SafeTensorsLoader, WeightLoader};
 // Re-export generation
 pub use kjarni_transformers::common::{
     BeamSearchParams, DecodingStrategy, GenerationConfig, SamplingParams, StreamedToken, TokenType,
@@ -67,6 +73,7 @@ pub mod models {
     pub use kjarni_models::models::bart::model::BartModel;
     pub use kjarni_models::models::gpt2::Gpt2Model;
     pub use kjarni_models::models::llama::{LlamaConfig, LlamaModel};
+    pub use kjarni_models::models::phi::{PhiConfig, PhiModel};
     pub use kjarni_models::models::qwen::{QwenConfig, QwenModel};
 }
 pub mod kjarni_config;

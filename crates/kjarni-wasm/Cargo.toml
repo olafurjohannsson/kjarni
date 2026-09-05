@@ -9,12 +9,16 @@ license = "MIT"
 keywords = ["bert", "nlp", "wasm", "transformer", "embeddings"]
 categories = ["wasm", "text-processing", "encoding"]
 
+# The built bundle, the npm package and the Obsidian plugin fixtures are not part
+# of the Rust source distribution.
+exclude = ["pkg/", "ts/", "plugins/", "tests/browser/node_modules/", "scripts/__pycache__/"]
+
 [features]
 default = []  # No OpenBLAS by default
 openblas = ["dep:blas-src", "dep:openblas-src", "ndarray/blas"]
 
 [dependencies]
-kjarni-rag = { path = "../kjarni-rag" }
+kjarni-rag = { workspace = true }
 kjarni-search = { path = "../kjarni-search" }
 # The engine. This crate used to carry its own tokenizer, feedforward, SIMD and
 # weight-loading code; those are being replaced by the real implementations so a

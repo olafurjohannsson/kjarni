@@ -128,7 +128,10 @@ namespace Kjarni
         /// <param name="device">Compute device - "cpu" or "gpu"</param>
         /// <param name="cacheDir">Directory to cache downloaded models</param>
         /// <param name="chunkSize">Maximum chunk size in characters</param>
-        /// <param name="chunkOverlap">Overlap between chunks in characters</param>
+        /// <param name="chunkOverlap">Overlap between chunks in characters. Defaults to a
+        /// fifth of chunkSize, which is the engine's own rule: overlap exists so a passage
+        /// straddling a boundary still appears whole in one chunk, and an English sentence
+        /// runs 75 to 100 characters.</param>
         /// <param name="batchSize">Batch size for embedding operations</param>
         /// <param name="extensions">File extensions to include (null = defaults)</param>
         /// <param name="excludePatterns">Glob patterns to exclude</param>
@@ -141,7 +144,7 @@ namespace Kjarni
             string device = "cpu",
             string? cacheDir = null,
             int chunkSize = 512,
-            int chunkOverlap = 50,
+            int chunkOverlap = 100,
             int batchSize = 32,
             IEnumerable<string>? extensions = null,
             IEnumerable<string>? excludePatterns = null,

@@ -723,3 +723,71 @@ impl ModelConfig for DistilBertConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+
+    // The activation is read from `hidden_act` rather than assumed. It was hardcoded to
+    // the tanh approximation once, which made mpnet's embeddings differ from
+    // sentence-transformers by about 5e-4: small enough to look like rounding, large
+    // enough to change retrieval. These pin the mapping so it cannot regress to a
+    // constant.
+
+    fn mpnet_json(act: &str) -> String {
+        format!(
+            r#"{{
+                "hidden_size": 768,
+                "num_hidden_layers": 12,
+                "num_attention_heads": 12,
+                "intermediate_size": 3072,
+                "vocab_size": 30527,
+                "max_position_embeddings": 514,
+                "layer_norm_eps": 1e-5,
+                "hidden_act": "{act}"
+            }}"#
+        )
+    }
+
+    #[test]
+    fn mpnet_uses_exact_gelu_when_the_config_says_gelu() {
+        let cfg = MpnetConfig::from_json(&mpnet_json("gelu")).expect("mpnet config");
+        assert_eq!(cfg.metadata().activation, Activation::Gelu);
+    }
+
+    #[test]
+    fn mpnet_uses_the_tanh_approximation_only_when_asked() {
+        let cfg = MpnetConfig::from_json(&mpnet_json("gelu_new")).expect("mpnet config");
+        assert_eq!(cfg.metadata().activation, Activation::GeluNew);
+    }
+
+    #[test]
+    fn mpnet_honours_relu() {
+        let cfg = MpnetConfig::from_json(&mpnet_json("relu")).expect("mpnet config");
+        assert_eq!(cfg.metadata().activation, Activation::Relu);
+    }
+
+    #[test]
+    fn an_unknown_activation_falls_back_to_exact_gelu() {
+        // Exact GELU is the right default for a BERT-family encoder; the approximation
+        // is the special case and has to be requested.
+        let cfg = MpnetConfig::from_json(&mpnet_json("something_new")).expect("mpnet config");
+        assert_eq!(cfg.metadata().activation, Activation::Gelu);
+    }
+
+    #[test]
+    fn bert_reads_its_activation_too() {
+        let json = r#"{
+            "hidden_size": 384,
+            "num_hidden_layers": 6,
+            "num_attention_heads": 12,
+            "intermediate_size": 1536,
+            "vocab_size": 30522,
+            "max_position_embeddings": 512,
+            "layer_norm_eps": 1e-12,
+            "hidden_act": "gelu"
+        }"#;
+        let cfg = BertConfig::from_json(json).expect("bert config");
+        assert_eq!(cfg.metadata().activation, Activation::Gelu);
+    }
+}

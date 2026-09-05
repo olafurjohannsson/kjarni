@@ -276,6 +276,18 @@ pub async fn run_generation_loop(
     let mut cache = model.new_cache(1, cache_capacity, 1)?;
     let mut decode_token = backend.new_decode_token()?;
     let mut all_tokens = input_tokens.clone();
+    // Where the generated text starts, and how much of it has already been streamed.
+    //
+    // A token cannot be decoded on its own for every tokenizer. SentencePiece models,
+    // which is Phi-3, Mistral and Llama 2, mark a word boundary with a metaspace
+    // character that the decoder turns into a leading space only when it can see the
+    // token in context; decoding one token at a time drops it, and the stream arrives
+    // as "ThepopulationdensityintheUnitedStates". Byte-level BPE, which is Llama 3 and
+    // Qwen, carries the space inside the token and does not show the problem, which is
+    // why it went unnoticed. Decoding the generated run each step and emitting only the
+    // new tail is correct for both.
+    let prompt_len = all_tokens.len();
+    let mut emitted = 0usize;
 
     let mut stats = GenerationStats::new();
     stats.start_prefill(prompt_len);
@@ -366,9 +378,18 @@ pub async fn run_generation_loop(
 
         all_tokens.push(next_token);
 
-        let text = tokenizer
-            .decode(&[next_token], false)
+        let decoded = tokenizer
+            .decode(&all_tokens[prompt_len..], false)
             .map_err(|e| anyhow!("tokenizer decode error: {}", e))?;
+        // Multi-byte characters and multi-token emoji arrive in pieces, so only emit
+        // once the tail is valid UTF-8 on its own; otherwise wait for the next token.
+        let text = match decoded.get(emitted..) {
+            Some(tail) if !tail.is_empty() => {
+                emitted = decoded.len();
+                tail.to_string()
+            }
+            _ => continue,
+        };
 
         if tx
             .send(Ok(StreamedToken {

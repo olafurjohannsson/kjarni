@@ -27,6 +27,21 @@ impl GpuEmbeddingWeights {
         type_name: Option<&str>,
         target_dtype: Option<DType>,
     ) -> Result<Self> {
+        // The lookup shader reads embeddings as F32 or BF16 and cannot walk quantised
+        // blocks, so a quantised table has to be expanded whatever the caller asked
+        // for. Everything else quantised now stays packed by default, so without this
+        // an embedding table stored as Q4_K or Q6_K would reach the shader packed.
+        let target_dtype = match target_dtype {
+            Some(dt) if dt.is_quantized() => Some(DType::BF16),
+            None if weights
+                .tensor_dtype(word_name)
+                .is_ok_and(|dt| dt.is_quantized()) =>
+            {
+                Some(DType::BF16)
+            }
+            other => other,
+        };
+
         let word_embeddings = GpuTensor::from_model_weights(
             context,
             weights,

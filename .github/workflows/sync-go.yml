@@ -1,8 +1,15 @@
 name: Sync Go Bindings
 
+# Manual re-publish only. The real publish runs from ci.yml on a version tag:
+# a release created by CI uses GITHUB_TOKEN, and GitHub does not fire
+# `on: release` for those, so this workflow never ran on its own. Kept for
+# re-pushing the module without cutting a new release.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sync (e.g. v0.1.6)"
+        required: true
 
 jobs:
   sync-go:
@@ -19,21 +26,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release-assets
-          gh release download ${{ github.event.release.tag_name }} \
+          gh release download ${{ inputs.tag }} \
             --dir release-assets
 
       - name: Prepare Go repo content
         run: |
-          mkdir -p go-push/lib/linux-amd64
-          mkdir -p go-push/lib/linux-arm64
-          mkdir -p go-push/lib/darwin-arm64
-          mkdir -p go-push/lib/windows-amd64
+          # Underscores, and only the two platforms lib.go can load. Its switch
+          # handles linux and windows and reads these paths verbatim; the hyphenated
+          # four-platform layout this used to write would have failed at runtime.
+          mkdir -p go-push/lib/linux_amd64 go-push/lib/windows_amd64
 
-          # Extract platform binaries
-          tar -xzf release-assets/kjarni-x86_64-linux.tar.gz -C go-push/lib/linux-amd64
-          tar -xzf release-assets/kjarni-aarch64-linux.tar.gz -C go-push/lib/linux-arm64
-          tar -xzf release-assets/kjarni-aarch64-macos.tar.gz -C go-push/lib/darwin-arm64
-          unzip -o release-assets/kjarni-x86_64-windows.zip -d go-push/lib/windows-amd64
+          tar -xzf release-assets/kjarni-x86_64-linux.tar.gz -C go-push/lib/linux_amd64
+          unzip -o release-assets/kjarni-x86_64-windows.zip -d go-push/lib/windows_amd64
 
           # Copy Go source files from monorepo
           cp crates/kjarni-ffi/bindings/go/*.go go-push/
@@ -55,6 +59,6 @@ jobs:
           git add -A
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "Sync from kjarni ${{ github.event.release.tag_name }}" || echo "No changes"
-          git tag "${{ github.event.release.tag_name }}" 2>/dev/null || true
+          git commit -m "Sync from kjarni ${{ inputs.tag }}" || echo "No changes"
+          git tag "${{ inputs.tag }}" 2>/dev/null || true
           git push origin main --tags

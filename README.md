@@ -106,6 +106,11 @@ Windows builds are on the same [releases](https://github.com/olafurjohannsson/kj
 page; see [the C++ guide](crates/kjarni-ffi/examples/cpp/README.md) for those and for
 classification, reranking and chat.
 
+Only `kjarni.hpp` needs C++23, and only for `std::expected`. `kjarni.h` is plain C and
+works from C++11 upward, which is what every other binding here is built on;
+[`hello_c_api.cpp`](crates/kjarni-ffi/examples/cpp/hello_c_api.cpp) is the same program
+written that way.
+
 **Browser (WebAssembly)** — [npmjs.com/package/kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)
 
 ```bash

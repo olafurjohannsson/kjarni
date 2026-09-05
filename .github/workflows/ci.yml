@@ -303,6 +303,77 @@ jobs:
           cmake -B build -DKJARNI_LIB_DIR=${{ github.workspace }}/target/release
           cmake --build build
 
+  # ─── Go binding tests ───────────────────────────────────────────
+  #
+  # Until this job existed the Go bindings were only ever touched at release
+  # time, by publish-go, which runs on tags. That is how the module came to stop
+  # publishing after v0.1.4 without anyone noticing: its verify step failed on
+  # every tag and nothing else ever built the package.
+  #
+  # Two kinds of drift matter here and neither is visible to the compiler. The
+  # bindings resolve about forty symbols by name through purego, so a rename on
+  # the Rust side leaves both sides compiling and fails at the user's first call.
+  # And the module carries its native library as an embed, so a change to the
+  # layout of lib/ produces a module that builds and cannot load. The tests
+  # check both against the freshly built library and the generated header.
+  go-test:
+    name: Test (Go binding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: go-test
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-go-v1
+
+      - name: Build native FFI library
+        run: cargo build --release --package kjarni-ffi
+
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
+      - name: Download models used by the Go tests
+        run: ./target/release/kjarni model download minilm-l6-v2
+
+      # The repo keeps a checked-in copy of the library so the module builds from
+      # a plain clone. Tests run against a freshly built one instead, which is
+      # what makes the symbol checks meaningful: a stale binary would happily
+      # resolve names the current Rust source no longer exports.
+      - name: Stage the freshly built library
+        run: |
+          cp target/release/libkjarni_ffi.so \
+             crates/kjarni-ffi/bindings/go/lib/linux_amd64/
+
+      # -unsafeptr=false: these bindings call the library through purego, which
+      # requires converting between uintptr and unsafe.Pointer at every call. The
+      # check flags that pattern in seven places and cannot be satisfied without
+      # abandoning purego.
+      - name: Vet
+        working-directory: crates/kjarni-ffi/bindings/go
+        run: go vet -unsafeptr=false ./...
+
+      - name: Run Go tests
+        working-directory: crates/kjarni-ffi/bindings/go
+        run: go test -v ./...
+
+      # Real inference against a downloaded model, behind a build tag so a plain
+      # `go test ./...` stays hermetic for anyone who has cloned the module.
+      - name: Run Go integration tests
+        working-directory: crates/kjarni-ffi/bindings/go
+        run: go test -tags integration -v ./...
+
   # ─── WASM check (kjarni-transformers engine) ────────────────────
   wasm-check:
     name: WASM check (kjarni-transformers)
@@ -760,3 +831,133 @@ jobs:
             --api-key ${{ secrets.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+
+  # ─── Go module (pushed to the kjarni-go repo) ────────────────────
+  #
+  # Published from here rather than from a `release:` trigger. A release created
+  # by this workflow uses GITHUB_TOKEN, and GitHub deliberately does not fire
+  # `on: release` for those, so `sync-go.yml` never ran. Same reason the NuGet
+  # publish moved here.
+  publish-go:
+    name: Publish to kjarni-go
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      # The same artifacts the release job published, taken directly from the
+      # run rather than re-downloaded from the release.
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      # The directory names matter. `lib.go` embeds `lib/*` and then reads
+      # `lib/linux_amd64/libkjarni_ffi.so` by exact path, with underscores. The
+      # release-triggered workflow wrote hyphens, so had it ever fired it would
+      # have shipped a module that compiles and fails on the first call.
+      #
+      # Only the two platforms `lib.go` can load are shipped: its switch handles
+      # linux and windows and returns "unsupported OS" for anything else, and the
+      # libraries are embedded in the module, so an unused one is dead weight in
+      # every `go get`.
+      - name: Assemble module
+        run: |
+          mkdir -p go-push/lib/linux_amd64 go-push/lib/windows_amd64
+          cp artifacts/kjarni-x86_64-linux/libkjarni_ffi.so go-push/lib/linux_amd64/
+          cp artifacts/kjarni-x86_64-windows/kjarni_ffi.dll go-push/lib/windows_amd64/
+          cp crates/kjarni-ffi/bindings/go/*.go go-push/
+          cp crates/kjarni-ffi/bindings/go/go.mod go-push/
+          cp crates/kjarni-ffi/bindings/go/go.sum go-push/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h go-push/
+
+      # Fails before pushing if an embedded library is missing or the module does
+      # not build, which is otherwise only discoverable by a user at runtime.
+      - name: Verify module
+        run: |
+          for p in lib/linux_amd64/libkjarni_ffi.so lib/windows_amd64/kjarni_ffi.dll; do
+            test -s "go-push/$p" || { echo "::error::missing $p"; exit 1; }
+          done
+          cd go-push
+          # -unsafeptr=false: these bindings call the library through purego, which
+          # requires converting between uintptr and unsafe.Pointer at every call. The
+          # check flags that pattern in seven places and cannot be satisfied without
+          # abandoning purego, so it fails every run. It failed silently in the sense
+          # that mattered: the module stopped being published after v0.1.4 while the
+          # tag, the release and every other package kept going out.
+          go vet -unsafeptr=false ./...
+          go build ./...
+          # The same tests go-test runs on every push, now against the module
+          # exactly as assembled for publication: the libraries copied from the
+          # release artifacts, and the header copied alongside them. This is the
+          # only point at which that specific arrangement of files is checked.
+          go test ./...
+
+      - name: Push to kjarni-go
+        env:
+          GO_REPO_TOKEN: ${{ secrets.GO_REPO_PAT }}
+        run: |
+          DEST=$(mktemp -d)
+          git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-go.git "$DEST"
+          cp -r go-push/* "$DEST"/
+          cd "$DEST"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Sync from kjarni ${{ github.ref_name }}" || echo "No changes"
+          git tag "${{ github.ref_name }}"
+          git push origin main --tags
+
+  # ─── crates.io ──────────────────────────────────────────────────
+  #
+  # Cargo has no equivalent of `dotnet pack -p:Version=`: the version comes from
+  # Cargo.toml and nothing else, so the tag and the manifest have to agree. This
+  # checks that first and fails loudly rather than publishing a number nobody
+  # asked for, because crates.io versions are immutable and cannot be replaced.
+  #
+  # Order matters. Each crate must be indexed before anything that depends on it,
+  # which is why these are sequential rather than a matrix.
+  publish-crates:
+    name: Publish to crates.io
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Tag must match the workspace version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "tag=$TAG manifest=$MANIFEST"
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "::error::tag v$TAG does not match [workspace.package] version $MANIFEST"
+            exit 1
+          fi
+
+      # --no-verify: the crate was already built and tested by the jobs above,
+      # and re-verifying each one from a fresh package costs minutes per crate.
+      # `sleep` gives the index time to catch up; a dependent published too soon
+      # fails with "no matching package named ...".
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in kjarni-search kjarni-transformers kjarni-rag kjarni-models kjarni kjarni-cli kjarni-ffi; do
+            echo "::group::publish $crate"
+            cargo publish -p "$crate" --no-verify || {
+              # Already on crates.io at this version: not a failure when a
+              # partial publish is being retried.
+              cargo search "$crate" | grep -q "^$crate = \"${GITHUB_REF_NAME#v}\"" \
+                && echo "$crate ${GITHUB_REF_NAME#v} already published, continuing" \
+                || exit 1
+            }
+            echo "::endgroup::"
+            sleep 30
+          done

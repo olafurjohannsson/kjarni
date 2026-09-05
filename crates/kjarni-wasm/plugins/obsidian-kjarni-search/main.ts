@@ -42,8 +42,12 @@ interface KjarniSettings {
 }
 
 const DEFAULT_SETTINGS: KjarniSettings = {
-	chunkSize: 1000,
-	chunkOverlap: 200,
+	// all-MiniLM-L6-v2 reads 256 tokens, roughly 900 characters, and silently drops
+	// anything past that. Chunking at 1000 therefore threw away the tail of most
+	// chunks before they were ever encoded. 512 fits inside the window with room to
+	// spare; the overlap stays at a fifth of the chunk size, which is the engine's rule.
+	chunkSize: 512,
+	chunkOverlap: 100,
 	searchLimit: 10,
 	rerankerEnabled: true,
 	debugLogging: false,
