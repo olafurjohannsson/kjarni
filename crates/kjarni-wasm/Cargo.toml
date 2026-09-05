@@ -1,6 +1,6 @@
 [package]
 name = "kjarni-wasm"
-version = "0.3.4"
+version.workspace = true
 edition = "2024"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 description = "Local AI inference in the browser: embeddings, classification, reranking, semantic search and chat, compiled to WebAssembly."

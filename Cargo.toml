@@ -19,11 +19,13 @@ exclude = ["crates/kjarni-examples"]
 
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.9"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/olafurjohannsson/kjarni"
+homepage = "https://kjarni.ai"
+documentation = "https://docs.rs/kjarni"
 keywords = ["inference", "llm", "embeddings", "machine-learning", "transformers"]
 categories = ["science", "text-processing", "command-line-utilities"]
 
@@ -33,11 +35,11 @@ categories = ["science", "text-processing", "command-line-utilities"]
 # than editing the dependency line in every member: cargo publish requires a
 # `version` alongside `path`, and a stale one silently resolves to an older
 # release from crates.io.
-kjarni = { path = "crates/kjarni", version = "0.1.7" }
-kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.1.7" }
-kjarni-models = { path = "crates/kjarni-models", version = "0.1.7" }
-kjarni-search = { path = "crates/kjarni-search", version = "0.1.7" }
-kjarni-rag = { path = "crates/kjarni-rag", version = "0.1.7" }
+kjarni = { path = "crates/kjarni", version = "0.1.9" }
+kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.1.9" }
+kjarni-models = { path = "crates/kjarni-models", version = "0.1.9" }
+kjarni-search = { path = "crates/kjarni-search", version = "0.1.9" }
+kjarni-rag = { path = "crates/kjarni-rag", version = "0.1.9" }
 
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }

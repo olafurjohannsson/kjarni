@@ -19,3 +19,12 @@ obj/
 node_modules/
 .test-venv/
 .test-logs/
+
+# Local Python wheel builds. The native library is copied in by CI at publish
+# time; a copy left here by a local `python -m build` must never be committed.
+crates/kjarni-ffi/bindings/python/kjarni/*.so
+crates/kjarni-ffi/bindings/python/kjarni/*.dylib
+crates/kjarni-ffi/bindings/python/kjarni/*.dll
+crates/kjarni-ffi/bindings/python/build/
+crates/kjarni-ffi/bindings/python/dist/
+crates/kjarni-ffi/bindings/python/*.egg-info/

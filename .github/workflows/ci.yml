@@ -303,6 +303,25 @@ jobs:
           cmake -B build -DKJARNI_LIB_DIR=${{ github.workspace }}/target/release
           cmake --build build
 
+  # ─── Version consistency ────────────────────────────────────────
+  #
+  # crates.io takes the version from Cargo.toml and nothing else, so a tag that
+  # disagrees with the manifest aborts the publish after the release is already
+  # out. npm, NuGet and PyPI are stamped from the tag at publish time, so their
+  # committed versions do not decide what ships, but a stale one still misleads
+  # anyone building locally, and the FFI crate's version is compiled into
+  # kjarni_version() and reported to every language binding at runtime.
+  #
+  # Running on every push means the drift is a red build on the PR that caused
+  # it, rather than a failed publish on a tag that cannot be moved.
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./check-versions.sh
+
+
   # ─── Go binding tests ───────────────────────────────────────────
   #
   # Until this job existed the Go bindings were only ever touched at release
@@ -673,6 +692,13 @@ jobs:
       - name: Package archives
         run: |
           cd artifacts
+          # upload-artifact/download-artifact do not preserve permission bits, so
+          # everything arrives here as 644. Tarring that ships a CLI the user
+          # cannot run: `./kjarni` fails with "Permission denied" straight out of
+          # the archive. Restore the bit before packaging, not after.
+          for d in kjarni-x86_64-linux kjarni-aarch64-linux kjarni-aarch64-macos; do
+            chmod +x "$d"/kjarni "$d"/libkjarni_ffi.* 2>/dev/null || true
+          done
           tar -czf kjarni-x86_64-linux.tar.gz \
             -C kjarni-x86_64-linux .
           tar -czf kjarni-aarch64-linux.tar.gz \
@@ -913,6 +939,92 @@ jobs:
           git tag "${{ github.ref_name }}"
           git push origin main --tags
 
+  # ─── PyPI ───────────────────────────────────────────────────────
+  #
+  # Gated like the others: hung off `release` rather than `on: release`, because
+  # a release created with GITHUB_TOKEN does not fire that trigger.
+  #
+  # A matrix rather than one job, because the package is pure Python but
+  # ctypes-loads a native library that must sit next to _ffi.py. setuptools sees
+  # no ext_modules and builds py3-none-any, which would hand a Linux .so to a
+  # macOS user, so each wheel is retagged for the platform its binary is for.
+  # All four build on Linux since the binaries are already compiled.
+  # The linux tags say 2_17 because build-linux and build-linux-arm target
+  # glibc 2.17 through cargo-zigbuild, which is manylinux2014. A higher tag
+  # would refuse to install on systems the binary runs on perfectly well.
+  publish-pypi:
+    name: Publish to PyPI
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - artifact: kjarni-x86_64-linux
+            libname: libkjarni_ffi.so
+            plat: manylinux_2_17_x86_64
+          - artifact: kjarni-aarch64-linux
+            libname: libkjarni_ffi.so
+            plat: manylinux_2_17_aarch64
+          - artifact: kjarni-aarch64-macos
+            libname: libkjarni_ffi.dylib
+            plat: macosx_11_0_arm64
+          - artifact: kjarni-x86_64-windows
+            libname: kjarni_ffi.dll
+            plat: win_amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: nativelib/
+
+      # The version comes from check-versions.sh having already confirmed the
+      # tag and pyproject.toml agree, so nothing is stamped here.
+      - name: Place the native library
+        run: cp "nativelib/${{ matrix.libname }}" crates/kjarni-ffi/bindings/python/kjarni/
+
+      - name: Build wheel
+        working-directory: crates/kjarni-ffi/bindings/python
+        run: |
+          python -m pip install --upgrade build wheel
+          python -m build --wheel --outdir dist .
+          cd dist
+          python -m wheel tags --platform-tag ${{ matrix.plat }} --remove *.whl
+
+      # A wheel without its library installs cleanly and fails on import, which
+      # is only discoverable by a user. Check the contents, and on the one leg
+      # whose binary this runner can load, actually import it.
+      - name: Verify wheel
+        working-directory: crates/kjarni-ffi/bindings/python
+        run: |
+          WHL=$(ls dist/*.whl)
+          python -m zipfile -l "$WHL"
+          python -m zipfile -l "$WHL" | grep -q "kjarni/${{ matrix.libname }}" \
+            || { echo "::error::wheel is missing ${{ matrix.libname }}"; exit 1; }
+          if [ "${{ matrix.plat }}" = "manylinux_2_17_x86_64" ]; then
+            python -m pip install "$WHL"
+            cd "$RUNNER_TEMP"   # import the installed package, not the source tree
+            python -c "import kjarni; print('import ok, version', kjarni.version())"
+          fi
+
+      - name: Publish
+        working-directory: crates/kjarni-ffi/bindings/python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m pip install --upgrade twine
+          # --skip-existing so re-running one matrix leg does not fail the rest.
+          python -m twine upload --skip-existing dist/*.whl
+
+
   # ─── crates.io ──────────────────────────────────────────────────
   #
   # Cargo has no equivalent of `dotnet pack -p:Version=`: the version comes from
@@ -931,15 +1043,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Tag must match the workspace version
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          MANIFEST=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          echo "tag=$TAG manifest=$MANIFEST"
-          if [ "$TAG" != "$MANIFEST" ]; then
-            echo "::error::tag v$TAG does not match [workspace.package] version $MANIFEST"
-            exit 1
-          fi
+      # Checks the tag against the manifest, and every other version in the
+      # repo against it too. The tag check alone used to pass while the FFI
+      # crate published under a different number entirely.
+      - name: Versions must agree with the tag
+        run: ./check-versions.sh
 
       # --no-verify: the crate was already built and tested by the jobs above,
       # and re-verifying each one from a fresh package costs minutes per crate.

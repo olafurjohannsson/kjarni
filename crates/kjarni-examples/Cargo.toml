@@ -1,6 +1,6 @@
 [package]
 name = "kjarni-examples"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Examples for the Kjarni inference engine"
 publish = false

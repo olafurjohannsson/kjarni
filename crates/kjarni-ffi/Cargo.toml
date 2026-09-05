@@ -1,6 +1,6 @@
 [package]
 name = "kjarni-ffi"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "C FFI bindings for Kjarni"
 
@@ -8,7 +8,8 @@ description = "C FFI bindings for Kjarni"
 # libraries and the dist tree travel through NuGet, the kjarni-go repo and GitHub
 # releases instead; including them here is 96MB against a 10MiB limit.
 exclude = ["bindings/", "dist/", "examples/"]
-
+homepage.workspace = true
+documentation.workspace = true
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 

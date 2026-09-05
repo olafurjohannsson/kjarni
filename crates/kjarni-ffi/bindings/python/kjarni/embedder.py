@@ -1,5 +1,4 @@
 """High-level Embedder API."""
-import numpy as np
 from typing import Optional, List, Sequence
 from ctypes import c_void_p, c_char_p, c_float, byref, POINTER
 
@@ -78,7 +77,7 @@ class Embedder:
         result.free()
         return embedding
 
-    def encode_batch(self, texts: Sequence[str]) -> np.ndarray:
+    def encode_batch(self, texts: Sequence[str]):
         """Encode multiple texts.
         
         Args:
@@ -104,7 +103,13 @@ class Embedder:
         )
         check_error(err)
 
-        embeddings = result.to_numpy()
+        # numpy is optional. With it installed this returns a (rows, dim)
+        # ndarray, which is what anyone doing vector maths wants; without it,
+        # a list of lists, so the package has no hard dependency at all.
+        try:
+            embeddings = result.to_numpy()
+        except ImportError:
+            embeddings = result.to_list()
         result.free()
         return embeddings
 
