@@ -949,6 +949,9 @@ jobs:
   # no ext_modules and builds py3-none-any, which would hand a Linux .so to a
   # macOS user, so each wheel is retagged for the platform its binary is for.
   # All four build on Linux since the binaries are already compiled.
+  # The linux tags say 2_17 because build-linux and build-linux-arm target
+  # glibc 2.17 through cargo-zigbuild, which is manylinux2014. A higher tag
+  # would refuse to install on systems the binary runs on perfectly well.
   publish-pypi:
     name: Publish to PyPI
     needs: release
@@ -959,10 +962,10 @@ jobs:
         include:
           - artifact: kjarni-x86_64-linux
             libname: libkjarni_ffi.so
-            plat: manylinux_2_28_x86_64
+            plat: manylinux_2_17_x86_64
           - artifact: kjarni-aarch64-linux
             libname: libkjarni_ffi.so
-            plat: manylinux_2_28_aarch64
+            plat: manylinux_2_17_aarch64
           - artifact: kjarni-aarch64-macos
             libname: libkjarni_ffi.dylib
             plat: macosx_11_0_arm64
@@ -1005,7 +1008,7 @@ jobs:
           python -m zipfile -l "$WHL"
           python -m zipfile -l "$WHL" | grep -q "kjarni/${{ matrix.libname }}" \
             || { echo "::error::wheel is missing ${{ matrix.libname }}"; exit 1; }
-          if [ "${{ matrix.plat }}" = "manylinux_2_28_x86_64" ]; then
+          if [ "${{ matrix.plat }}" = "manylinux_2_17_x86_64" ]; then
             python -m pip install "$WHL"
             cd "$RUNNER_TEMP"   # import the installed package, not the source tree
             python -c "import kjarni; print('import ok, version', kjarni.version())"
