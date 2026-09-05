@@ -244,6 +244,56 @@ mod tests {
     }
 
     #[test]
+    fn test_supported_phi3() {
+        assert!(is_supported_decoder_architecture(ModelArchitecture::Phi3));
+    }
+
+    /// The cases above are a list maintained in parallel with the registry, which
+    /// is the drift that made `generate` refuse Phi3 in the first place. This one
+    /// has no wildcard arm, so adding an architecture stops compiling here until
+    /// someone decides whether `generate` should accept it.
+    #[test]
+    fn test_every_architecture_is_classified() {
+        let all = [
+            ModelArchitecture::Llama,
+            ModelArchitecture::Qwen2,
+            ModelArchitecture::Mistral,
+            ModelArchitecture::Phi3,
+            ModelArchitecture::GPT,
+            ModelArchitecture::Bert,
+            ModelArchitecture::NomicBert,
+            ModelArchitecture::Mpnet,
+            ModelArchitecture::T5,
+            ModelArchitecture::Bart,
+            ModelArchitecture::Whisper,
+        ];
+
+        for arch in all {
+            let expected = match arch {
+                ModelArchitecture::Llama
+                | ModelArchitecture::Qwen2
+                | ModelArchitecture::Mistral
+                | ModelArchitecture::Phi3
+                | ModelArchitecture::GPT => true,
+                ModelArchitecture::Bert
+                | ModelArchitecture::NomicBert
+                | ModelArchitecture::Mpnet
+                | ModelArchitecture::T5
+                | ModelArchitecture::Bart
+                | ModelArchitecture::Whisper => false,
+            };
+
+            assert_eq!(
+                is_supported_decoder_architecture(arch),
+                expected,
+                "{} is classified as {:?} by the registry",
+                arch.display_name(),
+                arch.category()
+            );
+        }
+    }
+
+    #[test]
     fn test_unsupported_bert() {
         assert!(!is_supported_decoder_architecture(ModelArchitecture::Bert));
     }
@@ -272,10 +322,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_unsupported_phi3() {
-        assert!(!is_supported_decoder_architecture(ModelArchitecture::Phi3));
-    }
     #[test]
     fn test_strategy_greedy_flag() {
         let strategy = build_decoding_strategy(0.7, None, None, None, true);
