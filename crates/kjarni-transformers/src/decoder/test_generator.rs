@@ -401,17 +401,25 @@ async fn test_generation_flow_control() {
         .unwrap();
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
 
-    // Prompt + 3 generated
+    // Three generated tokens, and the text of each is the new tail of the decoded run
+    // rather than that token decoded alone.
+    //
+    // Those differ, which is the whole point. This mock has no decoder configured, so
+    // the tokenizer joins tokens with a space and `decode([2, 2])` is "hello hello";
+    // the second token therefore contributes " hello", not "hello". Real SentencePiece
+    // tokenizers behave the same way, which is why Phi-3 and Mistral used to stream as
+    // "ThepopulationdensityintheUnitedStates". Asserting "hello" three times here would
+    // be asserting that the space is lost.
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].text, "hello");
     assert_eq!(tokens[0].id, 2);
     assert_eq!(tokens[0].token_type, TokenType::Generated);
 
-    assert_eq!(tokens[1].text, "hello");
+    assert_eq!(tokens[1].text, " hello");
     assert_eq!(tokens[1].id, 2);
     assert_eq!(tokens[1].token_type, TokenType::Generated);
 
-    assert_eq!(tokens[2].text, "hello");
+    assert_eq!(tokens[2].text, " hello");
     assert_eq!(tokens[2].id, 2);
     assert_eq!(tokens[2].token_type, TokenType::Generated);
 }

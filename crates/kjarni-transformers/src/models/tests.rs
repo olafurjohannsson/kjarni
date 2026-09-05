@@ -110,6 +110,8 @@ fn test_rope_scaling_serialization() {
         low_freq_factor: 1.0,
         original_max_position_embeddings: 8192,
         rope_type: "llama3".to_string(),
+        long_factor: None,
+        short_factor: None,
     };
 
     let json = serde_json::to_string(&config).unwrap();

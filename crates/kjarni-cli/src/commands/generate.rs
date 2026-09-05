@@ -6,7 +6,7 @@ use futures::{StreamExt, pin_mut};
 use kjarni::{
     DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig,
     ModelArchitecture, ModelType, SamplingParams, TokenType, WgpuContext,
-    models::{Gpt2Model, LlamaModel, QwenModel},
+    models::{Gpt2Model, LlamaModel, PhiModel, QwenModel},
     registry,
 };
 use std::io::{self, Write};
@@ -105,6 +105,8 @@ pub async fn run(
         // never used it, so `kjarni chat` ran Qwen while `kjarni generate`
         // rejected it as unsupported.
         Arc::new(QwenModel::from_registry(model_type, None, device, None, None).await?)
+    } else if model_type.is_phi_model() {
+        Arc::new(PhiModel::from_registry(model_type, None, device, None, None).await?)
     } else if model_type.is_gpt2_model() {
         Arc::new(Gpt2Model::from_registry(model_type, None, device, None, None).await?)
     } else {
@@ -166,14 +168,14 @@ pub async fn run(
 }
 
 /// Check if the architecture is a supported decoder for generation
+/// Whether an architecture can generate text.
+///
+/// This asks the registry rather than keeping a second list. The hardcoded copy that
+/// used to live here had drifted: it omitted Phi3, so `generate --model phi3.5-mini`
+/// refused a model the engine implements and the registry already classifies as a
+/// decoder. Any list maintained in parallel with the registry will drift again.
 fn is_supported_decoder_architecture(arch: ModelArchitecture) -> bool {
-    matches!(
-        arch,
-        ModelArchitecture::GPT
-            | ModelArchitecture::Llama
-            | ModelArchitecture::Mistral
-            | ModelArchitecture::Qwen2
-    )
+    arch.category() == "decoder"
 }
 
 /// Build the decoding strategy based on parameters

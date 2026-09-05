@@ -70,6 +70,67 @@ impl GpuTensor {
         (self.shape[1], self.shape[0])
     }
 
+    /// Uploads a row range of a larger tensor.
+    ///
+    /// Slicing happens on the CPU before upload, and keeps the source dtype so a bf16
+    /// checkpoint is not doubled on the way to the card.
+    #[allow(clippy::too_many_arguments)]
+    fn from_model_weight_rows(
+        ctx: &Arc<WgpuContext>,
+        weights: &ModelWeights,
+        base_name: &str,
+        start: usize,
+        end: usize,
+        target_dt: Option<DType>,
+        label: &str,
+    ) -> Result<Self> {
+        use ndarray::s;
+
+        let full = weights.get_typed_tensor(base_name)?;
+        let rows = full.shape().first().copied().unwrap_or(0);
+        anyhow::ensure!(
+            end <= rows && start < end,
+            "row range {start}..{end} does not fit '{base_name}' with {rows} rows"
+        );
+
+        // BF16 is the dtype the GPU kernels want anyway, so a BF16 checkpoint uploads
+        // without conversion and an F32 one is converted once, here, rather than twice.
+        let want_bf16 = target_dt.is_none_or(|t| t == DType::BF16);
+
+        match full {
+            CpuTensor::BF16(arr) if want_bf16 => {
+                let two = arr.into_dimensionality::<ndarray::Ix2>()?;
+                let slice = two.slice(s![start..end, ..]).to_owned();
+                let layout = slice.as_standard_layout();
+                let view = TensorView {
+                    name: label.to_string(),
+                    bytes: Cow::Borrowed(bytemuck::cast_slice(
+                        layout
+                            .as_slice()
+                            .ok_or_else(|| anyhow!("slice not contiguous"))?,
+                    )),
+                    shape: vec![end - start, two.shape()[1]],
+                    dtype: DType::BF16,
+                };
+                GpuTensor::from_raw(ctx, &view, label)
+            }
+            other => {
+                let two = match other {
+                    CpuTensor::F32(a) => a.into_dimensionality::<ndarray::Ix2>()?,
+                    CpuTensor::BF16(a) => a
+                        .mapv(|v| v.to_f32())
+                        .into_dimensionality::<ndarray::Ix2>()?,
+                    o => anyhow::bail!(
+                        "cannot take a row range of '{base_name}': {:?} is not a plain 2D array",
+                        o.dtype()
+                    ),
+                };
+                let slice = two.slice(s![start..end, ..]).to_owned();
+                GpuTensor::from_ndarray(ctx, &slice)
+            }
+        }
+    }
+
     /// Loads a tensor from model weights, using zero-copy when possible.
     pub fn from_model_weights(
         ctx: &Arc<WgpuContext>,
@@ -78,6 +139,15 @@ impl GpuTensor {
         target_dt: Option<DType>,
         label: &str,
     ) -> Result<Self> {
+        // A layout may name a row range of a fused tensor, as `name[start:end]`. Phi-3
+        // fuses q, k and v into one `qkv_proj`, and gate and up into one `gate_up_proj`,
+        // where other decoders ship them separately. The CPU factory understands the
+        // same syntax; without it here the GPU path fails with "tensor not found" on a
+        // name the CPU path loads happily.
+        if let Some((base, start, end)) = crate::weights::parse_row_range(name) {
+            return Self::from_model_weight_rows(ctx, weights, base, start, end, target_dt, label);
+        }
+
         // Q4_K is the one quantised format the GPU can read as it sits: the linear
         // primitive and the fused SwiGLU both have kernels that unpack the 4-bit
         // blocks in the shader. Uploading it packed is what took a 3B model from

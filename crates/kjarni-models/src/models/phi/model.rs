@@ -9,10 +9,10 @@ use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
+use super::config::PhiConfig;
 use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
-use crate::models::qwen::config::QwenConfig;
 #[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
 

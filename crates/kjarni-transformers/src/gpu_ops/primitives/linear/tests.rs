@@ -370,3 +370,84 @@ async fn q6k_packed_matches_cpu_and_expanded() -> Result<()> {
     }
     Ok(())
 }
+
+/// A row range of a fused tensor must upload the same rows the CPU factory slices.
+///
+/// Phi-3 fuses q, k and v into one `qkv_proj`, and the CPU and GPU paths reach it
+/// through different code: `CpuLayerFactory::build_linear` on one side and
+/// `GpuTensor::from_model_weights` on the other. Taking the wrong third on either side
+/// gives a model that still emits fluent text, so the two are compared directly.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn fused_row_range_uploads_the_same_rows_the_cpu_slices() -> Result<()> {
+    let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join(".cache/kjarni/microsoft_Phi-3.5-mini-instruct");
+    if !dir.exists() {
+        println!("Skipping: Phi-3.5-mini not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&dir)?;
+    let fused = "model.layers.0.self_attn.qkv_proj.weight";
+    let hidden = 3072usize;
+
+    let full = match weights.get_typed_tensor(fused)? {
+        crate::tensor::CpuTensor::BF16(a) => a.mapv(|v| v.to_f32()),
+        crate::tensor::CpuTensor::F32(a) => a,
+        other => anyhow::bail!("unexpected dtype {:?}", other.dtype()),
+    }
+    .into_dimensionality::<ndarray::Ix2>()?;
+    assert_eq!(
+        full.shape(),
+        &[3 * hidden, hidden],
+        "Phi-3 fuses q, k and v"
+    );
+
+    let context = WgpuContext::new().await?;
+
+    // q, k and v in turn, so a range taken from the wrong third is caught. Both upload
+    // dtypes are exercised: BF16 is what the decoder actually asks for, and F32 goes
+    // through the conversion branch.
+    for (name, start) in [("q", 0), ("k", hidden), ("v", 2 * hidden)] {
+        let ranged = format!("{fused}[{}:{}]", start, start + hidden);
+
+        // BF16, read back as raw bits since the buffer holds two bytes per value.
+        let gpu = GpuTensor::from_model_weights(&context, &weights, &ranged, None, name)?;
+        assert_eq!(gpu.shape(), &[hidden, hidden], "{name} shape");
+        assert_eq!(gpu.dtype(), DType::BF16, "{name} should stay BF16");
+
+        let (bits, _) = read_gpu_tensor_to_vec::<u16>(&gpu).await?;
+        let mut worst = 0.0f32;
+        for col in 0..hidden {
+            let got = half::bf16::from_bits(bits[col]).to_f32();
+            worst = worst.max((got - full[[start, col]]).abs());
+        }
+        println!(
+            "  {name} bf16 rows {start}..{}: max abs diff {worst:.3e}",
+            start + hidden
+        );
+        // The source is already BF16, so the slice is copied bit for bit.
+        assert!(
+            worst == 0.0,
+            "{name} bf16 did not upload the rows it was asked for"
+        );
+
+        // F32, which converts on the way and should still be the same rows.
+        let gpu_f32 =
+            GpuTensor::from_model_weights(&context, &weights, &ranged, Some(DType::F32), name)?;
+        assert_eq!(gpu_f32.dtype(), DType::F32);
+        let (values, _) = read_gpu_tensor_to_vec::<f32>(&gpu_f32).await?;
+        let mut worst_f32 = 0.0f32;
+        for col in 0..hidden {
+            worst_f32 = worst_f32.max((values[col] - full[[start, col]]).abs());
+        }
+        println!(
+            "  {name} f32  rows {start}..{}: max abs diff {worst_f32:.3e}",
+            start + hidden
+        );
+        assert!(
+            worst_f32 < 1e-6,
+            "{name} f32 did not upload the rows it was asked for"
+        );
+    }
+    Ok(())
+}

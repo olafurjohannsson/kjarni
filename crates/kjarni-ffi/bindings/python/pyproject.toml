@@ -9,6 +9,7 @@ description = "Kjarni - Cross-platform ML inference engine. Embeddings, classifi
 authors = [{name = "Ólafur Aron Jóhannsson"}]
 license = {text = "MIT or Apache-2.0"}
 requires-python = ">=3.8"
+dependencies = ["numpy>=1.20"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Programming Language :: Python :: 3",

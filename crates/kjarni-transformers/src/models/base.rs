@@ -12,18 +12,37 @@ use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
 
 /// Configuration for Rotary Position Embedding (RoPE) scaling.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// Different families fill in different halves of this. Llama 3 supplies a single
+/// `factor` with high and low frequency cutoffs. Phi-3 supplies LongRoPE, which is a
+/// per-dimension factor list instead of one number, and names its strategy under `type`
+/// rather than `rope_type`. Everything is therefore optional with a default, so that a
+/// checkpoint carrying one style parses without inventing values for the other.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RopeScalingConfig {
-    /// Global scaling factor applied to all frequencies.
+    /// Global scaling factor applied to all frequencies. Llama 3 style.
+    #[serde(default)]
     pub factor: f32,
     /// Scaling factor for high-frequency components.
+    #[serde(default)]
     pub high_freq_factor: f32,
     /// Scaling factor for low-frequency components.
+    #[serde(default)]
     pub low_freq_factor: f32,
     /// Maximum sequence length from base model training.
+    #[serde(default)]
     pub original_max_position_embeddings: usize,
-    /// Scaling strategy (e.g., "linear", "dynamic", "yarn").
+    /// Scaling strategy. HuggingFace writes this as `rope_type` for Llama and `type`
+    /// for Phi-3, so both spellings are accepted.
+    #[serde(default, alias = "type")]
     pub rope_type: String,
+    /// LongRoPE per-dimension factors, used beyond the trained context. One entry per
+    /// pair of head dimensions, so `head_dim / 2` of them.
+    #[serde(default)]
+    pub long_factor: Option<Vec<f32>>,
+    /// LongRoPE per-dimension factors, used within the trained context.
+    #[serde(default)]
+    pub short_factor: Option<Vec<f32>>,
 }
 
 pub enum PaddingSide {
@@ -350,5 +369,54 @@ pub trait LanguageModel: InferenceModel {
     /// Decodes a batch of token ID sequences.
     fn decode_batch(&self, token_ids: &[Vec<u32>]) -> Result<Vec<String>> {
         token_ids.iter().map(|ids| self.decode(ids)).collect()
+    }
+}
+
+#[cfg(test)]
+mod rope_scaling_config_tests {
+    use super::RopeScalingConfig;
+
+    #[test]
+    fn parses_llama3_style_scaling() {
+        let json = r#"{
+            "factor": 32.0,
+            "high_freq_factor": 4.0,
+            "low_freq_factor": 1.0,
+            "original_max_position_embeddings": 8192,
+            "rope_type": "llama3"
+        }"#;
+        let cfg: RopeScalingConfig = serde_json::from_str(json).expect("llama3 scaling");
+        assert_eq!(cfg.rope_type, "llama3");
+        assert_eq!(cfg.factor, 32.0);
+        assert_eq!(cfg.original_max_position_embeddings, 8192);
+        assert!(cfg.long_factor.is_none());
+    }
+
+    #[test]
+    fn parses_phi3_longrope_which_shares_none_of_llama3s_fields() {
+        // Phi-3 writes `type` rather than `rope_type` and supplies no `factor` at all.
+        // Before these fields were optional this failed with "missing field `factor`",
+        // which is what stopped the model loading.
+        let json = r#"{
+            "long_factor": [1.08, 1.11, 1.14],
+            "short_factor": [1.0, 1.0, 1.0],
+            "type": "longrope"
+        }"#;
+        let cfg: RopeScalingConfig = serde_json::from_str(json).expect("longrope scaling");
+        assert_eq!(cfg.rope_type, "longrope");
+        assert_eq!(
+            cfg.short_factor.as_deref(),
+            Some([1.0, 1.0, 1.0].as_slice())
+        );
+        assert_eq!(cfg.long_factor.as_ref().map(Vec::len), Some(3));
+        // The Llama fields default rather than being invented.
+        assert_eq!(cfg.factor, 0.0);
+        assert_eq!(cfg.original_max_position_embeddings, 0);
+    }
+
+    #[test]
+    fn an_empty_object_parses_to_defaults() {
+        let cfg: RopeScalingConfig = serde_json::from_str("{}").expect("empty scaling");
+        assert_eq!(cfg, RopeScalingConfig::default());
     }
 }

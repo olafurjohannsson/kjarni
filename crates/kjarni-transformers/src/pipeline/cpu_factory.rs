@@ -4,7 +4,7 @@ use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
 use crate::decoder::prelude::DecoderAttention;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
-use crate::tensor::DType;
+use crate::tensor::{CpuTensor, DType};
 use crate::traits::{AttentionLayout, FeedForwardLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
@@ -47,11 +47,69 @@ impl<'a> CpuLayerFactory<'a> {
         let weight_name = Self::resolve(weight_template, layer_idx);
         let bias_name = bias_template.map(|t| Self::resolve(t, layer_idx));
 
+        // A layout may name a row range of a fused tensor, as `name[start:end]`.
+        // Phi-3 ships one `qkv_proj` of shape [3 * hidden, hidden] and one
+        // `gate_up_proj` of [2 * intermediate, hidden] where other architectures ship
+        // separate tensors, and a weight matrix is [out_features, in_features], so
+        // taking a row range is exactly taking a subset of the output features.
+        if let Some((base, start, end)) = crate::weights::parse_row_range(&weight_name) {
+            return self.build_linear_from_rows(base, start, end, bias_name.as_deref());
+        }
+
         LinearLayer::builder(self.weights, &weight_name)
             .with_optional_bias(bias_name.as_deref())
             .with_target_dtype(self.target_dtype)
             .with_f32_strategy(self.f32_strategy)
             .build()
+    }
+
+    /// Builds a linear layer from a row range of a larger tensor.
+    ///
+    /// The slice keeps the source dtype rather than promoting to f32: a 3.8B model in
+    /// bf16 is 7.6GB and would be 15GB expanded, which is a steep price for reusing one
+    /// code path.
+    fn build_linear_from_rows(
+        &self,
+        base_name: &str,
+        start: usize,
+        end: usize,
+        bias_name: Option<&str>,
+    ) -> Result<LinearLayer> {
+        use ndarray::s;
+
+        let full = self.weights.get_typed_tensor(base_name)?;
+        let rows = full.shape().first().copied().unwrap_or(0);
+        anyhow::ensure!(
+            end <= rows && start < end,
+            "row range {start}..{end} does not fit '{base_name}' with {rows} rows"
+        );
+
+        let bias = match bias_name {
+            Some(n) => Some(self.weights.get_array1(n)?),
+            None => None,
+        };
+
+        match full {
+            CpuTensor::BF16(arr) => {
+                let two = arr.into_dimensionality::<ndarray::Ix2>()?;
+                Ok(LinearLayer::new_bf16(
+                    two.slice(s![start..end, ..]).to_owned(),
+                    bias,
+                ))
+            }
+            CpuTensor::F32(arr) => {
+                let two = arr.into_dimensionality::<ndarray::Ix2>()?;
+                Ok(LinearLayer::new_f32(
+                    two.slice(s![start..end, ..]).to_owned(),
+                    bias,
+                ))
+            }
+            other => anyhow::bail!(
+                "cannot take a row range of '{base_name}': {:?} is not stored as a plain \
+                 2D array. Fused projections are only split for F32 and BF16 checkpoints.",
+                other.dtype()
+            ),
+        }
     }
 
     pub fn build_norm(
@@ -917,5 +975,91 @@ mod tests {
         assert_eq!(ffn.gate.shape(), [8, 4]);
         assert!(matches!(attn_norm, Normalization::RMSNorm(_)));
         assert!(matches!(ffn_norm, Normalization::RMSNorm(_)));
+    }
+
+    // ── Fused projections ───────────────────────────────────────
+    //
+    // Phi-3 stores q, k and v in one tensor and gate and up in another. A layout names
+    // a row range of it, and these check that the range is taken from the right rows,
+    // because taking the wrong third produces a model that still generates fluent text.
+
+    #[test]
+    fn build_linear_takes_the_named_row_range_of_a_fused_tensor() {
+        // Nine rows of four, where row i is filled with the value i. Slicing rows 3..6
+        // must therefore give exactly the rows 3, 4 and 5.
+        let mut data = Vec::new();
+        for row in 0..9 {
+            data.extend(std::iter::repeat_n(row as f32, 4));
+        }
+        let (_dir, weights) = create_dummy_weights(vec![("l.0.qkv.weight", data, vec![9, 4])]);
+        let factory = CpuLayerFactory::new(&weights);
+
+        let mid = factory
+            .build_linear("l.{}.qkv.weight[3:6]", None, 0)
+            .unwrap();
+        let w = mid.weights_view();
+
+        assert_eq!(w.shape(), &[3, 4], "three rows of four");
+        for (i, expected) in [3.0f32, 4.0, 5.0].iter().enumerate() {
+            assert!(
+                w.row(i).iter().all(|v| (v - expected).abs() < 1e-6),
+                "row {i} should be all {expected}, got {:?}",
+                w.row(i)
+            );
+        }
+    }
+
+    #[test]
+    fn the_three_ranges_of_a_fused_qkv_partition_it() {
+        // What a Phi layout does, in miniature: hidden of 4, so q is rows 0..4,
+        // k is 4..8 and v is 8..12 of a [12, 4] tensor.
+        let mut data = Vec::new();
+        for row in 0..12 {
+            data.extend(std::iter::repeat_n(row as f32, 4));
+        }
+        let (_dir, weights) = create_dummy_weights(vec![("l.0.qkv.weight", data, vec![12, 4])]);
+        let factory = CpuLayerFactory::new(&weights);
+
+        for (template, first_row) in [
+            ("l.{}.qkv.weight[0:4]", 0.0),
+            ("l.{}.qkv.weight[4:8]", 4.0),
+            ("l.{}.qkv.weight[8:12]", 8.0),
+        ] {
+            let l = factory.build_linear(template, None, 0).unwrap();
+            let w = l.weights_view();
+            assert_eq!(w.shape(), &[4, 4], "{template}");
+            assert!(
+                (w[[0, 0]] - first_row).abs() < 1e-6,
+                "{template} should start at row {first_row}, got {}",
+                w[[0, 0]]
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_range_past_the_end_is_an_error_not_a_panic() {
+        let (_dir, weights) =
+            create_dummy_weights(vec![("l.0.qkv.weight", vec![0.0; 16], vec![4, 4])]);
+        let factory = CpuLayerFactory::new(&weights);
+
+        let err = factory
+            .build_linear("l.{}.qkv.weight[2:99]", None, 0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("does not fit"),
+            "expected a range error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_name_still_loads_the_whole_tensor() {
+        // The range syntax must not disturb the common path.
+        let (_dir, weights) =
+            create_dummy_weights(vec![("l.0.q.weight", vec![1.0; 16], vec![4, 4])]);
+        let factory = CpuLayerFactory::new(&weights);
+
+        let l = factory.build_linear("l.{}.q.weight", None, 0).unwrap();
+        assert_eq!(l.weights_view().shape(), &[4, 4]);
     }
 }

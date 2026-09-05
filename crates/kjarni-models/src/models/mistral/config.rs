@@ -141,6 +141,8 @@ impl MistralConfig {
                 original_max_position_embeddings: get_u32("rope.scaling.orig_ctx_len")
                     .map(|v| v as usize)
                     .unwrap_or(32768),
+                long_factor: None,
+                short_factor: None,
             });
 
             Ok(Arc::new(Self {
@@ -261,5 +263,89 @@ impl ModelConfig for MistralConfig {
                 layer: decoder_layer,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mistral 7B v0.3, trimmed to the fields that decide the layout.
+    fn mistral_json() -> &'static str {
+        r#"{
+            "architectures": ["MistralForCausalLM"],
+            "model_type": "mistral",
+            "hidden_size": 4096,
+            "num_hidden_layers": 32,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 8,
+            "intermediate_size": 14336,
+            "vocab_size": 32768,
+            "max_position_embeddings": 32768,
+            "rms_norm_eps": 1e-5,
+            "hidden_act": "silu",
+            "rope_theta": 1000000.0,
+            "bos_token_id": 1,
+            "eos_token_id": 2,
+            "tie_word_embeddings": false,
+            "attention_bias": false,
+            "torch_dtype": "bfloat16"
+        }"#
+    }
+
+    #[test]
+    fn parses_and_reports_itself_as_mistral() {
+        let cfg = MistralConfig::from_json(mistral_json()).expect("mistral config");
+        assert_eq!(cfg.model_type(), "mistral");
+        assert_eq!(cfg.hidden_size, 4096);
+        assert_eq!(cfg.num_hidden_layers, 32);
+    }
+
+    #[test]
+    fn head_dim_is_derived_as_128() {
+        let meta = MistralConfig::from_json(mistral_json()).unwrap().metadata();
+        assert_eq!(meta.head_dim, 128);
+        assert_eq!(meta.num_attention_heads, 32);
+        assert_eq!(meta.num_kv_heads, 8);
+    }
+
+    #[test]
+    fn mistral_has_no_attention_biases() {
+        let cfg = MistralConfig::from_json(mistral_json()).unwrap();
+        let attn = &cfg.layout().decoder.unwrap().layer.self_attn;
+        assert!(attn.q_bias.is_none());
+        assert!(attn.k_bias.is_none());
+        assert!(attn.v_bias.is_none());
+        assert!(attn.o_bias.is_none());
+    }
+
+    #[test]
+    fn the_head_is_always_its_own_tensor() {
+        // Mistral does not tie, and this layout says so unconditionally. If that ever
+        // becomes conditional, this is the test that should be revisited rather than
+        // the behaviour changing silently.
+        let cfg = MistralConfig::from_json(mistral_json()).unwrap();
+        assert_eq!(cfg.layout().lm_head, "lm_head.weight");
+
+        let tied = mistral_json().replace(
+            "\"tie_word_embeddings\": false",
+            "\"tie_word_embeddings\": true",
+        );
+        let cfg = MistralConfig::from_json(&tied).unwrap();
+        assert_eq!(
+            cfg.layout().lm_head,
+            "lm_head.weight",
+            "mistral's layout does not consult tie_word_embeddings"
+        );
+    }
+
+    #[test]
+    fn uses_separate_gate_and_up_tensors() {
+        use kjarni_transformers::weights::parse_row_range;
+        let cfg = MistralConfig::from_json(mistral_json()).unwrap();
+        let ffn = &cfg.layout().decoder.unwrap().layer.ffn;
+        let gate = ffn.gate_weight.as_ref().expect("mistral is gated");
+        assert!(gate.ends_with("mlp.gate_proj.weight"), "{gate}");
+        assert!(parse_row_range(&gate.replace("{}", "0")).is_none());
     }
 }

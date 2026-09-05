@@ -131,6 +131,8 @@ mod loaded_rope {
             low_freq_factor: 1.0,
             high_freq_factor: 4.0,
             original_max_position_embeddings: 8192,
+            long_factor: None,
+            short_factor: None,
         });
 
         let loaded = LoadedRoPE::new(None, &meta, false).unwrap();

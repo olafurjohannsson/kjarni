@@ -73,6 +73,7 @@ pub mod models {
     pub use kjarni_models::models::bart::model::BartModel;
     pub use kjarni_models::models::gpt2::Gpt2Model;
     pub use kjarni_models::models::llama::{LlamaConfig, LlamaModel};
+    pub use kjarni_models::models::phi::{PhiConfig, PhiModel};
     pub use kjarni_models::models::qwen::{QwenConfig, QwenModel};
 }
 pub mod kjarni_config;

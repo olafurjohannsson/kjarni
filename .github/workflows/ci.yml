@@ -303,6 +303,77 @@ jobs:
           cmake -B build -DKJARNI_LIB_DIR=${{ github.workspace }}/target/release
           cmake --build build
 
+  # ─── Go binding tests ───────────────────────────────────────────
+  #
+  # Until this job existed the Go bindings were only ever touched at release
+  # time, by publish-go, which runs on tags. That is how the module came to stop
+  # publishing after v0.1.4 without anyone noticing: its verify step failed on
+  # every tag and nothing else ever built the package.
+  #
+  # Two kinds of drift matter here and neither is visible to the compiler. The
+  # bindings resolve about forty symbols by name through purego, so a rename on
+  # the Rust side leaves both sides compiling and fails at the user's first call.
+  # And the module carries its native library as an embed, so a change to the
+  # layout of lib/ produces a module that builds and cannot load. The tests
+  # check both against the freshly built library and the generated header.
+  go-test:
+    name: Test (Go binding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: go-test
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-go-v1
+
+      - name: Build native FFI library
+        run: cargo build --release --package kjarni-ffi
+
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
+      - name: Download models used by the Go tests
+        run: ./target/release/kjarni model download minilm-l6-v2
+
+      # The repo keeps a checked-in copy of the library so the module builds from
+      # a plain clone. Tests run against a freshly built one instead, which is
+      # what makes the symbol checks meaningful: a stale binary would happily
+      # resolve names the current Rust source no longer exports.
+      - name: Stage the freshly built library
+        run: |
+          cp target/release/libkjarni_ffi.so \
+             crates/kjarni-ffi/bindings/go/lib/linux_amd64/
+
+      # -unsafeptr=false: these bindings call the library through purego, which
+      # requires converting between uintptr and unsafe.Pointer at every call. The
+      # check flags that pattern in seven places and cannot be satisfied without
+      # abandoning purego.
+      - name: Vet
+        working-directory: crates/kjarni-ffi/bindings/go
+        run: go vet -unsafeptr=false ./...
+
+      - name: Run Go tests
+        working-directory: crates/kjarni-ffi/bindings/go
+        run: go test -v ./...
+
+      # Real inference against a downloaded model, behind a build tag so a plain
+      # `go test ./...` stays hermetic for anyone who has cloned the module.
+      - name: Run Go integration tests
+        working-directory: crates/kjarni-ffi/bindings/go
+        run: go test -tags integration -v ./...
+
   # ─── WASM check (kjarni-transformers engine) ────────────────────
   wasm-check:
     name: WASM check (kjarni-transformers)
@@ -813,8 +884,19 @@ jobs:
             test -s "go-push/$p" || { echo "::error::missing $p"; exit 1; }
           done
           cd go-push
-          go vet ./...
+          # -unsafeptr=false: these bindings call the library through purego, which
+          # requires converting between uintptr and unsafe.Pointer at every call. The
+          # check flags that pattern in seven places and cannot be satisfied without
+          # abandoning purego, so it fails every run. It failed silently in the sense
+          # that mattered: the module stopped being published after v0.1.4 while the
+          # tag, the release and every other package kept going out.
+          go vet -unsafeptr=false ./...
           go build ./...
+          # The same tests go-test runs on every push, now against the module
+          # exactly as assembled for publication: the libraries copied from the
+          # release artifacts, and the header copied alongside them. This is the
+          # only point at which that specific arrangement of files is checked.
+          go test ./...
 
       - name: Push to kjarni-go
         env:

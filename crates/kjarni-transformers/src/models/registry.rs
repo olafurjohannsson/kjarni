@@ -224,6 +224,9 @@ impl ModelType {
     pub fn is_qwen_model(&self) -> bool {
         matches!(self.architecture(), ModelArchitecture::Qwen2)
     }
+    pub fn is_phi_model(&self) -> bool {
+        matches!(self.architecture(), ModelArchitecture::Phi3)
+    }
     /// Get the CLI-friendly slug (e.g., "llama3.2-1b")
     pub fn cli_name(&self) -> &'static str {
         match self {

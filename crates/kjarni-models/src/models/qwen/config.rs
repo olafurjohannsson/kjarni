@@ -166,6 +166,8 @@ impl QwenConfig {
                 original_max_position_embeddings: get_val("rope.scaling.orig_ctx_len")
                     .map(|v| v as usize)
                     .unwrap_or(32768),
+                long_factor: None,
+                short_factor: None,
             });
 
             Ok(Arc::new(Self {
@@ -295,5 +297,103 @@ impl ModelConfig for QwenConfig {
                 layer: decoder_layer,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Qwen2.5 0.5B Instruct, trimmed to the fields that decide the layout.
+    fn qwen25_json() -> &'static str {
+        r#"{
+            "architectures": ["Qwen2ForCausalLM"],
+            "model_type": "qwen2",
+            "hidden_size": 896,
+            "num_hidden_layers": 24,
+            "num_attention_heads": 14,
+            "num_key_value_heads": 2,
+            "intermediate_size": 4864,
+            "vocab_size": 151936,
+            "max_position_embeddings": 32768,
+            "rms_norm_eps": 1e-6,
+            "hidden_act": "silu",
+            "rope_theta": 1000000.0,
+            "bos_token_id": 151643,
+            "eos_token_id": 151645,
+            "tie_word_embeddings": true,
+            "attention_bias": true,
+            "torch_dtype": "bfloat16"
+        }"#
+    }
+
+    #[test]
+    fn parses_and_reports_itself_as_qwen() {
+        let cfg = QwenConfig::from_json(qwen25_json()).expect("qwen config");
+        assert_eq!(cfg.model_type(), "qwen2");
+        assert_eq!(cfg.hidden_size, 896);
+        assert_eq!(cfg.num_hidden_layers, 24);
+    }
+
+    #[test]
+    fn qwen_names_its_attention_biases() {
+        // This is the one decoder family here that has q, k and v biases. Dropping them
+        // does not fail to load, because the loader treats a missing bias as absent; it
+        // just quietly computes attention without them. So the names have to be here.
+        let cfg = QwenConfig::from_json(qwen25_json()).unwrap();
+        let attn = &cfg.layout().decoder.unwrap().layer.self_attn;
+
+        assert!(
+            attn.q_bias
+                .as_deref()
+                .is_some_and(|b| b.ends_with("q_proj.bias")),
+            "qwen must name its q bias, got {:?}",
+            attn.q_bias
+        );
+        assert!(
+            attn.k_bias
+                .as_deref()
+                .is_some_and(|b| b.ends_with("k_proj.bias"))
+        );
+        assert!(
+            attn.v_bias
+                .as_deref()
+                .is_some_and(|b| b.ends_with("v_proj.bias"))
+        );
+        // The output projection has none, in Qwen as elsewhere.
+        assert!(attn.o_bias.is_none());
+    }
+
+    #[test]
+    fn keeps_the_aggressive_grouped_query_ratio() {
+        // 14 query heads over 2 key/value heads. A copied Llama config would give 8.
+        let meta = QwenConfig::from_json(qwen25_json()).unwrap().metadata();
+        assert_eq!(meta.num_attention_heads, 14);
+        assert_eq!(meta.num_kv_heads, 2);
+    }
+
+    #[test]
+    fn head_dim_is_derived_when_the_config_omits_it() {
+        // 896 / 14 = 64. Qwen2.5 0.5B does not state head_dim, so it must be computed.
+        let meta = QwenConfig::from_json(qwen25_json()).unwrap().metadata();
+        assert_eq!(meta.head_dim, 64);
+    }
+
+    #[test]
+    fn a_tied_model_points_the_head_at_the_embedding_table() {
+        let cfg = QwenConfig::from_json(qwen25_json()).unwrap();
+        assert_eq!(cfg.layout().lm_head, "model.embed_tokens.weight");
+    }
+
+    #[test]
+    fn ffn_is_gated_and_uses_separate_tensors() {
+        // Qwen is SwiGLU with separate gate and up, unlike Phi which fuses them.
+        use kjarni_transformers::weights::parse_row_range;
+        let cfg = QwenConfig::from_json(qwen25_json()).unwrap();
+        let ffn = &cfg.layout().decoder.unwrap().layer.ffn;
+        let gate = ffn.gate_weight.as_ref().expect("qwen is gated");
+        assert!(gate.ends_with("mlp.gate_proj.weight"), "{gate}");
+        assert!(ffn.up_weight.ends_with("mlp.up_proj.weight"));
+        assert!(parse_row_range(&gate.replace("{}", "0")).is_none());
     }
 }
