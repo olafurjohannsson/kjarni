@@ -8,7 +8,6 @@ from ctypes import (
 from pathlib import Path
 import platform
 import json
-import numpy as np
 from typing import Optional, Callable
 
 def _find_library():
@@ -102,8 +101,10 @@ class KjarniFloat2DArray(Structure):
         ("cols", c_size_t),
     ]
 
-    def to_numpy(self) -> np.ndarray:
-        """Convert to NumPy array efficiently."""
+    def to_numpy(self):
+        """Convert to a NumPy array. Requires numpy; use to_list() otherwise."""
+        import numpy as np
+
         if not self.data or self.rows == 0 or self.cols == 0:
             return np.empty((0, 0), dtype=np.float32)
         total_size = self.rows * self.cols

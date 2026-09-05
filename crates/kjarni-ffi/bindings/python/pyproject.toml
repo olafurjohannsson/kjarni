@@ -4,17 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kjarni"
-version = "0.1.0a1"
+version = "0.1.9"
 description = "Kjarni - Cross-platform ML inference engine. Embeddings, classification, reranking, and RAG search."
 authors = [{name = "Ólafur Aron Jóhannsson"}]
 license = {text = "MIT or Apache-2.0"}
 requires-python = ">=3.8"
-dependencies = ["numpy>=1.20"]
+# No hard dependencies. numpy is imported on demand by encode_batch, which
+# falls back to a list of lists when it is absent.
+dependencies = []
+readme = "README.md"
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
 ]
+
+[project.optional-dependencies]
+numpy = ["numpy>=1.20"]
+
+[project.urls]
+Homepage = "https://kjarni.ai"
+Documentation = "https://kjarni.ai"
+Repository = "https://github.com/olafurjohannsson/kjarni"
+Issues = "https://github.com/olafurjohannsson/kjarni/issues"
+Changelog = "https://github.com/olafurjohannsson/kjarni/blob/main/CHANGELOG.md"
 
 [tool.setuptools.package-data]
 kjarni = ["*.so", "*.dylib", "*.dll", "lib/*"]
