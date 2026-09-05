@@ -11,7 +11,10 @@ use std::arch::x86_64::*;
 /// uses the integer kernel instead, which measured 1.95x faster. This is kept as the
 /// exact reference the GPU shader tests compare against, since those need a result
 /// with no int8 activation error in it.
-#[allow(dead_code, reason = "exact f32 reference for the GPU Q4_K parity tests")]
+#[allow(
+    dead_code,
+    reason = "exact f32 reference for the GPU Q4_K parity tests"
+)]
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn matmul_vec_q4_k_avx2(
     out_chunk: &mut [f32],

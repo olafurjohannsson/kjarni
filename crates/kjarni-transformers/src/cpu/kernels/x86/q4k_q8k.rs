@@ -198,8 +198,9 @@ mod q4k_q8k_test {
         let blocks_per_row = 8;
         let k = QK_K * blocks_per_row;
 
-        let w_blocks: Vec<BlockQ4_K> =
-            (0..blocks_per_row).map(|_| random_q4k_block(&mut rng)).collect();
+        let w_blocks: Vec<BlockQ4_K> = (0..blocks_per_row)
+            .map(|_| random_q4k_block(&mut rng))
+            .collect();
 
         for (label, a) in [
             ("gaussian", {
@@ -242,7 +243,9 @@ mod q4k_q8k_test {
                 "{label:>14}: exact {exact:>12.4}  live {:>12.4} (rel {live_err:.2e})  \
                  int8 {:>12.4} (rel {int_err:.2e})  sum|wa| {abs_sum:>12.1}  \
                  cancellation {:.0}x",
-                live_out[0], int_out, abs_sum / exact.abs().max(1e-9)
+                live_out[0],
+                int_out,
+                abs_sum / exact.abs().max(1e-9)
             );
 
             // The live path keeps the activations in f32, so it should track the exact
@@ -281,9 +284,8 @@ mod q4k_q8k_test {
     #[ignore = "diagnostic"]
     fn dump_gguf_dtypes() {
         use crate::weights::ModelWeights;
-        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(
-            ".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        );
+        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
         if !path.exists() {
             println!("Skipping: model not present");
             return;
@@ -291,9 +293,15 @@ mod q4k_q8k_test {
         let w = ModelWeights::new(&path).unwrap();
 
         let per_layer = [
-            "attn_q", "attn_k", "attn_v", "attn_output",
-            "ffn_gate", "ffn_up", "ffn_down",
-            "attn_norm", "ffn_norm",
+            "attn_q",
+            "attn_k",
+            "attn_v",
+            "attn_output",
+            "ffn_gate",
+            "ffn_up",
+            "ffn_down",
+            "attn_norm",
+            "ffn_norm",
         ];
         let mut totals: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
 
@@ -311,12 +319,19 @@ mod q4k_q8k_test {
                 }
             }
             for (dt, (count, bytes)) in seen {
-                println!("  {kind:<14} {dt:<6} x{count:<3} {:>8.1} MB", bytes as f64 / 1e6);
+                println!(
+                    "  {kind:<14} {dt:<6} x{count:<3} {:>8.1} MB",
+                    bytes as f64 / 1e6
+                );
             }
         }
         for n in ["token_embd.weight", "output.weight", "output_norm.weight"] {
             if let (Ok(dt), Ok(sz)) = (w.tensor_dtype(n), w.tensor_size_bytes(n)) {
-                println!("  {n:<20} {:<6}     {:>8.1} MB", format!("{dt:?}"), sz as f64 / 1e6);
+                println!(
+                    "  {n:<20} {:<6}     {:>8.1} MB",
+                    format!("{dt:?}"),
+                    sz as f64 / 1e6
+                );
                 let t = totals.entry(format!("{dt:?}")).or_insert((0, 0));
                 t.0 += 1;
                 t.1 += sz;
@@ -348,9 +363,8 @@ mod q4k_q8k_test {
         use crate::cpu::kernels::x86::q4_k::matmul_vec_q4_k_avx2;
         use crate::weights::ModelWeights;
 
-        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(
-            ".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        );
+        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
         if !path.exists() {
             println!("Skipping: {} not present", path.display());
             return;
@@ -358,15 +372,24 @@ mod q4k_q8k_test {
         let weights = ModelWeights::new(&path).expect("load gguf");
 
         // Whichever naming the loader exposes.
-        let name = ["blk.0.attn_q.weight", "model.layers.0.self_attn.q_proj.weight"]
-            .into_iter()
-            .find(|n| weights.tensor_dtype(n).is_ok())
-            .expect("no q_proj tensor found under either naming");
+        let name = [
+            "blk.0.attn_q.weight",
+            "model.layers.0.self_attn.q_proj.weight",
+        ]
+        .into_iter()
+        .find(|n| weights.tensor_dtype(n).is_ok())
+        .expect("no q_proj tensor found under either naming");
         let dt = weights.tensor_dtype(name).unwrap();
-        assert_eq!(dt, crate::tensor::DType::Q4_K, "{name} is {dt:?}, expected Q4_K");
+        assert_eq!(
+            dt,
+            crate::tensor::DType::Q4_K,
+            "{name} is {dt:?}, expected Q4_K"
+        );
 
         let blocks: Vec<BlockQ4_K> = weights
-            .with_raw_tensor(name, |v| Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec()))
+            .with_raw_tensor(name, |v| {
+                Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
+            })
             .expect("read blocks");
 
         let mut rng = get_rng();
@@ -432,9 +455,8 @@ mod q4k_q8k_test {
         use crate::weights::ModelWeights;
         use std::time::Instant;
 
-        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(
-            ".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        );
+        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
         if !path.exists() {
             println!("Skipping: model not present");
             return;

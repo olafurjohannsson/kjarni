@@ -1885,22 +1885,27 @@ mod q6k_path_tests {
             println!("Skipping: needs AVX2+FMA");
             return;
         }
-        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(
-            ".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        );
+        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
         if !path.exists() {
             println!("Skipping: model not present");
             return;
         }
         let w = ModelWeights::new(&path).unwrap();
-        assert_eq!(w.tensor_dtype("output.weight").unwrap(), crate::tensor::DType::Q6_K);
+        assert_eq!(
+            w.tensor_dtype("output.weight").unwrap(),
+            crate::tensor::DType::Q6_K
+        );
 
         let k = 3072usize;
         let rows = 256usize;
         let blocks_per_row = k / 256;
         let all: Vec<BlockQ6_K> = w
             .with_raw_tensor("output.weight", |v| {
-                Ok(bytemuck::cast_slice::<u8, BlockQ6_K>(&v.bytes)[..rows * blocks_per_row].to_vec())
+                Ok(
+                    bytemuck::cast_slice::<u8, BlockQ6_K>(&v.bytes)[..rows * blocks_per_row]
+                        .to_vec(),
+                )
             })
             .unwrap();
 

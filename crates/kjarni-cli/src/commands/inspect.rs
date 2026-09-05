@@ -123,7 +123,11 @@ fn inspect_gguf(path: &Path) -> Result<()> {
     }
     println!();
 
-    let mut names: Vec<String> = loader.tensor_names().into_iter().map(String::from).collect();
+    let mut names: Vec<String> = loader
+        .tensor_names()
+        .into_iter()
+        .map(String::from)
+        .collect();
     names.sort();
     let infos: BTreeMap<String, (DType, Vec<usize>)> = names
         .iter()
@@ -157,7 +161,11 @@ fn inspect_safetensors(dir: &Path) -> Result<()> {
     println!();
 
     let loader = SafeTensorsLoader::new(dir)?;
-    let mut names: Vec<String> = loader.tensor_names().into_iter().map(String::from).collect();
+    let mut names: Vec<String> = loader
+        .tensor_names()
+        .into_iter()
+        .map(String::from)
+        .collect();
     names.sort();
     let mut infos: BTreeMap<String, (DType, Vec<usize>)> = BTreeMap::new();
     for n in &names {

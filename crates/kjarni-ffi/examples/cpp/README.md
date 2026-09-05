@@ -52,6 +52,34 @@ Nothing is freed by hand. `Embedding` owns its `KjarniFloatArray`, `Embedder` ow
 its handle, and both release on scope exit — including when an early `return` skips
 the rest of a function.
 
+## If you cannot use C++23
+
+`kjarni.hpp` needs C++23 for `std::expected`. `kjarni.h` does not: it is the plain C ABI
+that every language binding in this project is built on, and it works from C++11 upward.
+
+`hello_c_api.cpp` is `hello.cpp` written against the C header instead. What you give up is
+the RAII and the `std::expected` returns, which is about fifteen lines to put back:
+
+```bash
+curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-ffi/examples/cpp/hello_c_api.cpp
+g++ -std=c++11 hello_c_api.cpp -I. -L. -lkjarni_ffi -Wl,-rpath,'$ORIGIN' -o hello_c_api && ./hello_c_api
+```
+
+```
+related:   0.5510
+unrelated: -0.0630
+```
+
+The same numbers as the C++23 version, because it is the same engine underneath. It builds
+unchanged under `-std=c++11`, `c++14`, `c++17` and `c++23`, and the CMake target for it is
+pinned to C++11 so that stays true.
+
+Two rules cover the manual memory. Any `KjarniFloatArray` you receive is freed with
+`kjarni_float_array_free` once you have copied what you need out of it, and any handle is
+freed with its matching `_free` function. Wrap the handle in a `unique_ptr` with a custom
+deleter and the second rule takes care of itself. `kjarni_last_error_message()` reports the
+most recent failure process wide, so read it immediately after the call that failed.
+
 ## Building
 
 ```bash

@@ -510,7 +510,7 @@ pub enum InspectCommands {
     Model {
         /// Path to the model file
         path: String,
-    }
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq)]

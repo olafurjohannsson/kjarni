@@ -29,10 +29,10 @@ pub use crate::summarizer::Summarizer;
 pub use crate::translator::Translator;
 
 // Re-export core types
+pub use kjarni_transformers::WgpuContext;
 pub use kjarni_transformers::models::base::DType;
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
 pub use kjarni_transformers::traits::Device;
-pub use kjarni_transformers::WgpuContext;
 
 // Weight loaders, so `kjarni inspect` can read a file's own description of itself
 // without the CLI depending on kjarni-transformers directly.

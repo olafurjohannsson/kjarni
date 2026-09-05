@@ -90,16 +90,15 @@ impl GpuTensor {
         // produces a model that still emits fluent text, just not the right text.
         if weights.tensor_dtype(name).ok() == Some(DType::Q4_K)
             && target_dt.is_none_or(|t| t == DType::Q4_K)
+            && let CpuTensor::Q4_K(matrix) = weights.get_typed_tensor(name)?
         {
-            if let CpuTensor::Q4_K(matrix) = weights.get_typed_tensor(name)? {
-                let view = TensorView {
-                    name: name.to_string(),
-                    bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
-                    shape: matrix.shape.to_vec(),
-                    dtype: DType::Q4_K,
-                };
-                return GpuTensor::from_raw(ctx, &view, label);
-            }
+            let view = TensorView {
+                name: name.to_string(),
+                bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+                shape: matrix.shape.to_vec(),
+                dtype: DType::Q4_K,
+            };
+            return GpuTensor::from_raw(ctx, &view, label);
         }
 
         // Q6_K likewise reads packed, but its 210-byte block is not a multiple of
@@ -113,23 +112,22 @@ impl GpuTensor {
         // the lookup packed and panics.
         if weights.tensor_dtype(name).ok() == Some(DType::Q6_K)
             && target_dt.is_none_or(|t| t == DType::Q6_K)
+            && let CpuTensor::Q6_K(matrix) = weights.get_typed_tensor(name)?
         {
-            if let CpuTensor::Q6_K(matrix) = weights.get_typed_tensor(name)? {
-                const SRC: usize = 210;
-                const DST: usize = 212;
-                let src = bytemuck::cast_slice::<_, u8>(matrix.blocks.as_slice());
-                let mut padded = vec![0u8; matrix.blocks.len() * DST];
-                for (i, chunk) in src.chunks_exact(SRC).enumerate() {
-                    padded[i * DST..i * DST + SRC].copy_from_slice(chunk);
-                }
-                let view = TensorView {
-                    name: name.to_string(),
-                    bytes: Cow::Owned(padded),
-                    shape: matrix.shape.to_vec(),
-                    dtype: DType::Q6_K,
-                };
-                return GpuTensor::from_raw(ctx, &view, label);
+            const SRC: usize = 210;
+            const DST: usize = 212;
+            let src = bytemuck::cast_slice::<_, u8>(matrix.blocks.as_slice());
+            let mut padded = vec![0u8; matrix.blocks.len() * DST];
+            for (i, chunk) in src.chunks_exact(SRC).enumerate() {
+                padded[i * DST..i * DST + SRC].copy_from_slice(chunk);
             }
+            let view = TensorView {
+                name: name.to_string(),
+                bytes: Cow::Owned(padded),
+                shape: matrix.shape.to_vec(),
+                dtype: DType::Q6_K,
+            };
+            return GpuTensor::from_raw(ctx, &view, label);
         }
 
         let upload_attempt = weights.with_raw_tensor(name, |raw| {

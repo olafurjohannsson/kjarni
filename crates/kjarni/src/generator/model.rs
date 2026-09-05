@@ -205,7 +205,6 @@ impl Generator {
             // ModelArchitecture::Phi3 => {
             //     use kjarni_models::models::
             // }
-
             _ => Err(anyhow!(
                 "architecture {:?} is not supported for text generation",
                 info.architecture

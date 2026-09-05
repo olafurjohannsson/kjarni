@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Model { action } => commands::model::run(action).await,
-        
+
         Commands::Inspect { path } => commands::inspect::run(path.as_ref()).await,
 
         Commands::Generate {

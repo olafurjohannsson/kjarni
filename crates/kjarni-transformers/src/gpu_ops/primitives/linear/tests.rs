@@ -113,10 +113,10 @@ fn report(label: &str, gpu: &Array2<f32>, cpu: &Array2<f32>, shape: &[usize]) {
 #[ignore = "GPU required"]
 async fn q4k_gemv_matches_cpu() -> Result<()> {
     for t in [
-        "blk.0.attn_q.weight",    // square, 3072x3072
-        "blk.0.attn_k.weight",    // GQA, narrow output
-        "blk.0.ffn_gate.weight",  // wide output, 8192x3072
-        "blk.1.ffn_down.weight",  // wide input, K=8192
+        "blk.0.attn_q.weight",   // square, 3072x3072
+        "blk.0.attn_k.weight",   // GQA, narrow output
+        "blk.0.ffn_gate.weight", // wide output, 8192x3072
+        "blk.1.ffn_down.weight", // wide input, K=8192
         "blk.3.ffn_down.weight",
         "blk.5.ffn_down.weight",
         "blk.0.attn_v.weight",
@@ -260,7 +260,10 @@ async fn q4k_gemv_bandwidth() -> Result<()> {
                     linear.encode(&mut enc, &gpu_in, w, &out);
                 }
                 context.queue.submit(std::iter::once(enc.finish()));
-                context.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None })?;
+                context.device.poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })?;
                 best = best.min(t.elapsed().as_secs_f64());
             }
             let per_call = best / reps as f64;
@@ -354,10 +357,16 @@ async fn q6k_packed_matches_cpu_and_expanded() -> Result<()> {
         // before its dot product, while this kernel keeps them in f32. So the GPU is
         // the more accurate of the two here and a few tenths of a percent apart is
         // the expected result, not summation noise.
-        assert!(d_cpu < 2e-2 * scale.max(1.0), "{name}: GPU vs CPU {d_cpu:.3e}");
+        assert!(
+            d_cpu < 2e-2 * scale.max(1.0),
+            "{name}: GPU vs CPU {d_cpu:.3e}"
+        );
         // Against BF16 the expansion rounds, so allow more, but a layout mismatch
         // would be orders of magnitude beyond this.
-        assert!(d_exp < 1e-1 * scale.max(1.0), "{name}: GPU vs expanded {d_exp:.3e}");
+        assert!(
+            d_exp < 1e-1 * scale.max(1.0),
+            "{name}: GPU vs expanded {d_exp:.3e}"
+        );
     }
     Ok(())
 }
