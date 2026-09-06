@@ -131,16 +131,24 @@ impl CpuDecoder for LlamaCpuDecoder {
         self
     }
 
+    // These read from metadata rather than returning 0, which is what they did
+    // until a probe asked the decoder its own geometry and got "0 heads, hidden 0"
+    // back for a 24-layer model. Nothing in the engine consumed them, so the
+    // stubs were invisible; anything introspecting the model needs them true.
     fn head_dim(&self) -> usize {
-        0
+        self.metadata.head_dim
     }
 
     fn hidden_size(&self) -> usize {
-        0
+        self.metadata.hidden_size
     }
 
     fn num_attention_heads(&self) -> usize {
-        0
+        self.metadata.num_attention_heads
+    }
+
+    fn num_kv_heads(&self) -> usize {
+        self.metadata.num_kv_heads
     }
 
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {

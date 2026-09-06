@@ -296,8 +296,8 @@ impl CpuDecoderOps for MistralModel {
             1, seq,
         ))
     }
-    fn embed(&self, _tokens: &Array2<u32>, _pos: usize) -> Result<Array3<f32>> {
-        unimplemented!()
+    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
+        self.pipeline.embeddings().embed_cpu(tokens, None, pos)
     }
 }
 

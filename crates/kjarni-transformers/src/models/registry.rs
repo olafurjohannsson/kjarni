@@ -926,16 +926,70 @@ async fn download_sentence_bert_config(model_dir: &Path, config_url: &str) {
 async fn download_sentence_bert_config(_model_dir: &Path, _config_url: &str) {}
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn download_file(model_dir: &Path, filename: &str, url: &str, _quiet: bool) -> Result<()> {
+async fn download_file(model_dir: &Path, filename: &str, url: &str, quiet: bool) -> Result<()> {
     let local_path = model_dir.join(filename);
     if local_path.exists() {
         return Ok(());
     }
 
+    // Downloaded to a .part file and renamed once complete. `local_path.exists()`
+    // above is the only "already downloaded" check there is, so a file appearing
+    // at the final name before it is whole would be taken for a finished
+    // download on the next run and loaded as a truncated tensor.
+    let part_path = local_path.with_extension(format!(
+        "{}.part",
+        local_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+    ));
+
+    // Multi-gigabyte shards over a CDN drop mid-transfer often enough that a
+    // single attempt is not a download strategy: this one died at 38% of 4.9GB.
+    // Each retry resumes from what is already on disk instead of starting over.
     let client = reqwest::Client::new();
+    const MAX_ATTEMPTS: u32 = 5;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match download_to_part(&client, url, filename, &part_path, quiet).await {
+            Ok(()) => break,
+            Err(e) if attempt < MAX_ATTEMPTS => {
+                if !quiet {
+                    eprintln!("    {filename} interrupted ({e}); retry {attempt}/{MAX_ATTEMPTS}");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2 * attempt as u64)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    tokio::fs::rename(&part_path, &local_path).await?;
+    Ok(())
+}
+
+/// Fetches `url` into `part_path`, continuing from whatever is already there.
+#[cfg(not(target_arch = "wasm32"))]
+async fn download_to_part(
+    client: &reqwest::Client,
+    url: &str,
+    filename: &str,
+    part_path: &Path,
+    quiet: bool,
+) -> Result<()> {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut have = tokio::fs::metadata(part_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+
     let mut req = client.get(url);
     if let Ok(token) = std::env::var("HF_TOKEN") {
         req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    if have > 0 {
+        req = req.header("Range", format!("bytes={have}-"));
     }
 
     let response = req.send().await?;
@@ -947,8 +1001,68 @@ async fn download_file(model_dir: &Path, filename: &str, url: &str, _quiet: bool
         ));
     }
 
-    let bytes = response.bytes().await?;
-    tokio::fs::write(&local_path, &bytes).await?;
+    // A server that ignores Range replies 200 with the whole file, so what is on
+    // disk is not a prefix of what is arriving and must be discarded.
+    if have > 0 && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        have = 0;
+    }
+
+    // content_length() describes this response, which on a resumed request is
+    // only the remaining bytes.
+    let total = response.content_length().map(|len| len + have);
+
+    let mut file = if have > 0 {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(part_path)
+            .await?
+    } else {
+        tokio::fs::File::create(part_path).await?
+    };
+
+    let mut stream = response.bytes_stream();
+    let mut downloaded = have;
+    let mut last_report = have;
+
+    // Streamed rather than collected: a 7B model ships ~5GB shards, and
+    // buffering a whole shard in memory before writing it needed as much free
+    // RAM as the shard was large.
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk).await?;
+        downloaded += chunk.len() as u64;
+
+        // Without this the process looks hung for minutes at a time.
+        if !quiet && downloaded - last_report >= 64 * 1024 * 1024 {
+            last_report = downloaded;
+            match total {
+                Some(total) if total > 0 => eprintln!(
+                    "    {} {:.0}% ({:.1} / {:.1} GB)",
+                    filename,
+                    (downloaded as f64 / total as f64) * 100.0,
+                    downloaded as f64 / 1e9,
+                    total as f64 / 1e9,
+                ),
+                _ => eprintln!("    {} {:.1} GB", filename, downloaded as f64 / 1e9),
+            }
+        }
+    }
+
+    file.flush().await?;
+
+    // The .part file is left in place on purpose: the next attempt resumes from
+    // it rather than re-fetching the whole shard.
+    if let Some(total) = total
+        && downloaded != total
+    {
+        return Err(anyhow!(
+            "incomplete download of {}: got {} of {} bytes",
+            filename,
+            downloaded,
+            total
+        ));
+    }
+
     Ok(())
 }
 

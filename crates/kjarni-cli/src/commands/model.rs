@@ -124,8 +124,13 @@ fn list(
     let arch_filter = filter_arch.as_deref().map(|s| s.to_lowercase());
     let task_filter = filter_task.as_deref().map(|s| s.to_lowercase());
 
+    // Must cover every value display_group() can return. "Generation (Decoder)"
+    // was missing, so gpt2 and distilgpt2 were absent from `model list` and
+    // `model info` entirely: base completion models, reachable by `generate`
+    // but undiscoverable.
     let groups = [
         "LLM (Decoder)",
+        "Generation (Decoder)",
         "Seq2Seq",
         "Embedding",
         "Re-Ranker",
