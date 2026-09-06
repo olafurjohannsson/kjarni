@@ -1,8 +1,17 @@
-//! Reads what the decoder actually computes, layer by layer, for one real prompt.
+//! What the decoder computes layer by layer, checked against what it should.
 //!
-//! Not a test of behaviour: a probe, to find out which signals are worth
-//! visualising before any of them get plumbed into a trace format.
-//! Run with: cargo test --release -p kjarni-models --test logit_lens_probe -- --nocapture
+//! `CpuDecoder::forward_layers` takes a layer range, so an intermediate hidden state
+//! can be projected through the same `lm_head` the final layer uses. That is the
+//! logit lens, and it needs no changes to the engine.
+//!
+//! These guard two things. That the geometry accessors report the model's real shape:
+//! `num_attention_heads`, `hidden_size` and `head_dim` on `LlamaCpuDecoder` all
+//! returned a hardcoded 0 until a probe asked and got "0 heads, hidden 0" back for a
+//! 24-layer model. Nothing in the engine consumed them, so the stubs were invisible.
+//! And that the whole stack still answers a factual prompt correctly end to end.
+//!
+//! Ignored by default: they load a real model from the local cache.
+//! Run with: cargo test --release -p kjarni-models --test logit_lens_probe -- --ignored --nocapture
 
 use kjarni_models::models::qwen::QwenModel;
 use kjarni_transformers::models::registry::ModelType;
@@ -54,6 +63,7 @@ async fn logit_lens_across_depth() {
     );
     let n = dec.num_layers();
     let mut json: Vec<String> = Vec::new();
+    let mut final_top = String::new();
     for l in 0..n {
         hidden = dec
             .forward_layers(&hidden, &mask, 0, None, l, l + 1)
@@ -94,6 +104,7 @@ async fn logit_lens_across_depth() {
             probs[idx[0]],
             entropy
         );
+        final_top = top[0].clone();
 
         let row: Vec<String> = idx[..6]
             .iter()
@@ -117,6 +128,12 @@ async fn logit_lens_across_depth() {
         json.join(",")
     );
     println!("JSON_END");
+
+    // End to end: the last layer must actually answer the question.
+    assert!(
+        final_top.contains("Paris"),
+        "final layer predicted {final_top:?}, expected Paris"
+    );
 }
 
 /// The same lens, but at every position rather than only the last.
@@ -167,6 +184,7 @@ async fn where_the_fact_lives() {
         .expect("embed");
     let mask = kjarni_transformers::utils::create_full_attention_mask(1, seq);
 
+    let mut last_row: Vec<String> = Vec::new();
     println!("\ntop token at each position, after each layer");
     print!("{:<6}", "layer");
     for n in &names {
@@ -193,10 +211,28 @@ async fn where_the_fact_lives() {
             let t = tok.decode(&[best as u32], false).unwrap_or_default();
             let t = t.trim().replace('\n', "\\n");
             let t: String = t.chars().take(12).collect();
-            print!("{:>14}", if t.is_empty() { "_".into() } else { t });
+            let shown = if t.is_empty() { "_".to_string() } else { t };
+            print!("{shown:>14}");
+            if l + 1 == dec.num_layers() {
+                last_row.push(shown);
+            }
         }
         println!();
     }
+
+    // A causal model predicts at every position. By the final layer each one should
+    // name its true continuation, which is what makes the mid-stack noise a property
+    // of the probe rather than of the model.
+    assert_eq!(
+        last_row.last().map(String::as_str),
+        Some("Paris"),
+        "final position should predict Paris, got {last_row:?}"
+    );
+    assert_eq!(
+        last_row.get(3).map(String::as_str),
+        Some("is"),
+        "the France position should predict 'is', got {last_row:?}"
+    );
 }
 
 /// Is the garbage a property of the model, or of the instrument?
@@ -251,10 +287,35 @@ async fn distance_to_final_representation() {
     };
 
     println!("\n{:<6} {:>10} {:>12}", "layer", "cos->final", "norm");
+    let mut sims = Vec::new();
+    let mut norms = Vec::new();
     for (i, s) in states.iter().enumerate() {
         let norm: f32 = s.iter().map(|x| x * x).sum::<f32>().sqrt();
-        println!("{:<6} {:>10.4} {:>12.1}", i + 1, cos(s, &final_state), norm);
+        let sim = cos(s, &final_state);
+        println!("{:<6} {:>10.4} {:>12.1}", i + 1, sim, norm);
+        sims.push(sim);
+        norms.push(norm);
     }
+
+    // The last layer is trivially identical to itself.
+    assert!(
+        (sims[sims.len() - 1] - 1.0).abs() < 1e-4,
+        "final layer must match itself"
+    );
+    // Early states sit close to orthogonal to their own final form, which is why
+    // reading them through lm_head yields noise: the head expects the final basis.
+    assert!(
+        sims[0] < 0.4,
+        "layer 1 alignment {} unexpectedly high",
+        sims[0]
+    );
+    // Every layer adds to the residual stream rather than replacing it.
+    assert!(
+        norms[norms.len() - 2] > norms[0] * 5.0,
+        "residual norm should accumulate: {} -> {}",
+        norms[0],
+        norms[norms.len() - 2]
+    );
 }
 
 /// One combined dump: softmax shape, per-position readout, and basis alignment.
