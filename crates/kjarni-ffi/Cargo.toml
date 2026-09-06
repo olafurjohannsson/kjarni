@@ -10,6 +10,10 @@ description = "C FFI bindings for Kjarni"
 exclude = ["bindings/", "dist/", "examples/"]
 homepage.workspace = true
 documentation.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 

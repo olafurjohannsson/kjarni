@@ -252,8 +252,14 @@ impl LanguageModel for PhiModel {
             set.insert(*id);
         }
 
-        if let Some(im_end) = self.tokenizer().token_to_id("<|im_end|>") {
-            set.insert(im_end);
+        // Phi-3's chat template ends a turn with <|end|> (32007), not the
+        // ChatML <|im_end|> this was copied from: that token does not exist in
+        // the Phi tokenizer, so generation ran past the end of the turn and the
+        // terminator was decoded into the reply as literal text.
+        for token in ["<|end|>", "<|endoftext|>"] {
+            if let Some(id) = self.tokenizer().token_to_id(token) {
+                set.insert(id);
+            }
         }
 
         set

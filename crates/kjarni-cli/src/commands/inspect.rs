@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use kjarni::{DType, GgufLoader, SafeTensorsLoader, WeightLoader};
+use kjarni::{ModelType, registry};
 
 pub async fn run(path: &str) -> Result<()> {
     let target = resolve(path)?;
@@ -50,8 +51,25 @@ fn resolve(path: &str) -> Result<PathBuf> {
             return Ok(cached);
         }
     }
+
+    // A registry name, the way every other command takes it: `inspect mistral-7b`
+    // rather than `inspect mistralai_Mistral-7B-Instruct-v0.3`. The cache
+    // directory is derived from the repo id, which is not what `model list`
+    // prints, so without this the name shown to the user is the one name that
+    // does not work here.
+    if let Some(model_type) = ModelType::from_cli_name(path) {
+        let dir = model_type.cache_dir(&registry::cache_dir());
+        if dir.exists() {
+            return Ok(dir);
+        }
+        return Err(anyhow!(
+            "'{path}' is a known model but is not downloaded. \
+             Run: kjarni model download {path}"
+        ));
+    }
+
     Err(anyhow!(
-        "'{path}' is not a path, and nothing by that name is in ~/.cache/kjarni"
+        "'{path}' is not a path, a cached directory, or a known model name"
     ))
 }
 

@@ -34,6 +34,9 @@ pub async fn run(
 
     // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
+    if gpu && let Some(mt) = ModelType::from_cli_name(model) {
+        super::util::check_gpu_capacity(mt)?;
+    }
 
     let model_type = ModelType::from_cli_name(model)
         .ok_or_else(|| anyhow!(model_not_found_error(model, Some("decoder"))))?;

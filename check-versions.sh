@@ -134,6 +134,33 @@ for c in "${CSPROJ[@]}"; do
   report "$c" "$(grep -m1 -oE '<Version>[^<]+</Version>' "$c" | sed -E 's/<\/?Version>//g')" "$WANT"
 done
 
+# ── metadata crates.io requires ───────────────────────────────────
+#
+# crates.io rejects a publish with 400 for a missing license, and it does so per
+# crate, at the end of a loop that has already published the others. kjarni-ffi
+# failed exactly this way at v0.1.9 after the six before it had gone out, which
+# cannot be undone: those versions are immutable. Check it here instead.
+echo
+echo "crates.io metadata:"
+while read -r name field; do
+  if [ "$field" = "ok" ]; then
+    printf '  ok    %-46s license, description, repository\n' "$name"
+  else
+    printf '  FAIL  %-46s missing: %s\n' "$name" "$field"
+    fail=1
+  fi
+done < <(cargo metadata --no-deps --format-version 1 2>/dev/null | python3 -c '
+import json, sys
+# Only crates the publish loop actually pushes.
+published = {"kjarni", "kjarni-cli", "kjarni-ffi", "kjarni-models",
+             "kjarni-rag", "kjarni-search", "kjarni-transformers"}
+for p in sorted(json.load(sys.stdin)["packages"], key=lambda x: x["name"]):
+    if p["name"] not in published:
+        continue
+    missing = [f for f in ("license", "description", "repository") if not p.get(f)]
+    print(p["name"], ",".join(missing) if missing else "ok")
+')
+
 # ── the tag, when CI is running on one ────────────────────────────
 if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
   echo

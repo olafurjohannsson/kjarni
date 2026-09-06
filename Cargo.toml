@@ -19,7 +19,7 @@ exclude = ["crates/kjarni-examples"]
 
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -35,11 +35,11 @@ categories = ["science", "text-processing", "command-line-utilities"]
 # than editing the dependency line in every member: cargo publish requires a
 # `version` alongside `path`, and a stale one silently resolves to an older
 # release from crates.io.
-kjarni = { path = "crates/kjarni", version = "0.1.9" }
-kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.1.9" }
-kjarni-models = { path = "crates/kjarni-models", version = "0.1.9" }
-kjarni-search = { path = "crates/kjarni-search", version = "0.1.9" }
-kjarni-rag = { path = "crates/kjarni-rag", version = "0.1.9" }
+kjarni = { path = "crates/kjarni", version = "0.1.10" }
+kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.1.10" }
+kjarni-models = { path = "crates/kjarni-models", version = "0.1.10" }
+kjarni-search = { path = "crates/kjarni-search", version = "0.1.10" }
+kjarni-rag = { path = "crates/kjarni-rag", version = "0.1.10" }
 
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -54,7 +54,9 @@ wgpu = "27.0.1"
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive", "extern_crate_alloc"] }
 matrixmultiply = "0.3.10"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+# "stream" is what lets the model downloader write shards to disk as they
+# arrive rather than buffering a whole multi-gigabyte file in memory first.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream"] }
 async-trait = "0.1.89"
 rand = "0.8"
 rand_distr = "0.4"

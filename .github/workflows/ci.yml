@@ -994,9 +994,17 @@ jobs:
         working-directory: crates/kjarni-ffi/bindings/python
         run: |
           python -m pip install --upgrade build wheel
+          # Start from an empty dist. The repo has carried a stale 0.1.0a1 wheel
+          # here before, and anything left in this directory is swept up by the
+          # glob below: retagged as though it were this build, then uploaded.
+          rm -rf dist
           python -m build --wheel --outdir dist .
           cd dist
           python -m wheel tags --platform-tag ${{ matrix.plat }} --remove *.whl
+          # Exactly one wheel must remain, or the steps below silently operate on
+          # whichever the glob happens to return first.
+          count=$(ls -1 *.whl | wc -l)
+          [ "$count" -eq 1 ] || { echo "::error::expected 1 wheel, found $count"; ls -l; exit 1; }
 
       # A wheel without its library installs cleanly and fails on import, which
       # is only discoverable by a user. Check the contents, and on the one leg
