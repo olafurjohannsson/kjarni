@@ -5,8 +5,8 @@
 //! Run with: cargo test --release -p kjarni-models --test logit_lens_probe -- --nocapture
 
 use kjarni_models::models::qwen::QwenModel;
-use kjarni_transformers::{Device, LanguageModel};
 use kjarni_transformers::models::registry::ModelType;
+use kjarni_transformers::{Device, LanguageModel};
 
 #[tokio::test]
 #[ignore = "loads a real model from the local cache"]
@@ -31,16 +31,27 @@ async fn logit_lens_across_depth() {
     let seq = ids.len();
     println!("\nprompt   {prompt:?}");
     println!("tokens   {ids:?}");
-    println!("geometry {} layers, {} heads, hidden {}, vocab {}",
-        dec.num_layers(), dec.num_attention_heads(), dec.hidden_size(), pipe.lm_head().vocab_size());
+    println!(
+        "geometry {} layers, {} heads, hidden {}, vocab {}",
+        dec.num_layers(),
+        dec.num_attention_heads(),
+        dec.hidden_size(),
+        pipe.lm_head().vocab_size()
+    );
 
     let token_arr = ndarray::Array2::from_shape_vec((1, seq), ids.clone()).unwrap();
-    let mut hidden = pipe.embeddings().embed_cpu(&token_arr, None, 0).expect("embed");
+    let mut hidden = pipe
+        .embeddings()
+        .embed_cpu(&token_arr, None, 0)
+        .expect("embed");
     let mask = kjarni_transformers::utils::create_full_attention_mask(1, seq);
 
     // Step one layer at a time, projecting the running hidden state through the
     // same lm_head the final layer uses. That is the logit lens.
-    println!("\n{:<6} {:<28} {:>8} {:>9}", "layer", "top-5 after this layer", "top prob", "entropy");
+    println!(
+        "\n{:<6} {:<28} {:>8} {:>9}",
+        "layer", "top-5 after this layer", "top prob", "entropy"
+    );
     let n = dec.num_layers();
     let mut json: Vec<String> = Vec::new();
     for l in 0..n {
@@ -61,13 +72,28 @@ async fn logit_lens_across_depth() {
         let mut idx: Vec<usize> = (0..probs.len()).collect();
         idx.sort_by(|a, b| probs[*b].partial_cmp(&probs[*a]).unwrap());
 
-        let entropy: f32 = -probs.iter().filter(|p| **p > 0.0).map(|p| p * p.log2()).sum::<f32>();
+        let entropy: f32 = -probs
+            .iter()
+            .filter(|p| **p > 0.0)
+            .map(|p| p * p.log2())
+            .sum::<f32>();
         let top: Vec<String> = idx[..5]
             .iter()
-            .map(|i| tok.decode(&[*i as u32], false).unwrap_or_default().trim().to_string())
+            .map(|i| {
+                tok.decode(&[*i as u32], false)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string()
+            })
             .collect();
 
-        println!("{:<6} {:<28} {:>8.4} {:>9.2}", l + 1, top.join(" "), probs[idx[0]], entropy);
+        println!(
+            "{:<6} {:<28} {:>8.4} {:>9.2}",
+            l + 1,
+            top.join(" "),
+            probs[idx[0]],
+            entropy
+        );
 
         let row: Vec<String> = idx[..6]
             .iter()
@@ -76,15 +102,22 @@ async fn logit_lens_across_depth() {
                 format!("[{:?},{:.5}]", t, probs[*i])
             })
             .collect();
-        json.push(format!("{{\"layer\":{},\"entropy\":{:.4},\"top\":[{}]}}",
-            l + 1, entropy, row.join(",")));
+        json.push(format!(
+            "{{\"layer\":{},\"entropy\":{:.4},\"top\":[{}]}}",
+            l + 1,
+            entropy,
+            row.join(",")
+        ));
     }
 
     println!("\nJSON_BEGIN");
-    println!("{{\"prompt\":{:?},\"layers\":[{}]}}", prompt, json.join(","));
+    println!(
+        "{{\"prompt\":{:?},\"layers\":[{}]}}",
+        prompt,
+        json.join(",")
+    );
     println!("JSON_END");
 }
-
 
 /// The same lens, but at every position rather than only the last.
 ///
@@ -96,40 +129,67 @@ async fn logit_lens_across_depth() {
 #[ignore = "loads a real model from the local cache"]
 async fn where_the_fact_lives() {
     let model = QwenModel::from_registry(
-        ModelType::Qwen2_5_0_5B_Instruct, None, Device::Cpu, None, None,
-    ).await.expect("load qwen2.5-0.5b");
+        ModelType::Qwen2_5_0_5B_Instruct,
+        None,
+        Device::Cpu,
+        None,
+        None,
+    )
+    .await
+    .expect("load qwen2.5-0.5b");
 
     let pipe = model.pipeline();
     let dec = pipe.cpu_decoder().expect("cpu decoder");
     let tok = model.tokenizer();
 
     let prompt = "The capital of France is";
-    let ids: Vec<u32> = tok.encode(prompt, false).expect("tokenize").get_ids().to_vec();
+    let ids: Vec<u32> = tok
+        .encode(prompt, false)
+        .expect("tokenize")
+        .get_ids()
+        .to_vec();
     let seq = ids.len();
 
-    let names: Vec<String> = ids.iter()
-        .map(|i| tok.decode(&[*i], false).unwrap_or_default().trim().to_string())
+    let names: Vec<String> = ids
+        .iter()
+        .map(|i| {
+            tok.decode(&[*i], false)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        })
         .collect();
 
     let token_arr = ndarray::Array2::from_shape_vec((1, seq), ids.clone()).unwrap();
-    let mut hidden = pipe.embeddings().embed_cpu(&token_arr, None, 0).expect("embed");
+    let mut hidden = pipe
+        .embeddings()
+        .embed_cpu(&token_arr, None, 0)
+        .expect("embed");
     let mask = kjarni_transformers::utils::create_full_attention_mask(1, seq);
 
     println!("\ntop token at each position, after each layer");
     print!("{:<6}", "layer");
-    for n in &names { print!("{:>14}", n); }
+    for n in &names {
+        print!("{:>14}", n);
+    }
     println!();
 
     for l in 0..dec.num_layers() {
-        hidden = dec.forward_layers(&hidden, &mask, 0, None, l, l + 1).expect("fwd");
+        hidden = dec
+            .forward_layers(&hidden, &mask, 0, None, l, l + 1)
+            .expect("fwd");
         let normed = dec.final_norm(&hidden).expect("norm");
         let logits = pipe.lm_head().forward_cpu(&normed).expect("lm_head");
 
         print!("{:<6}", l + 1);
         for pos in 0..seq {
             let row = logits.slice(ndarray::s![0, pos, ..]);
-            let best = row.iter().enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0;
+            let best = row
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap()
+                .0;
             let t = tok.decode(&[best as u32], false).unwrap_or_default();
             let t = t.trim().replace('\n', "\\n");
             let t: String = t.chars().take(12).collect();
@@ -150,15 +210,24 @@ async fn where_the_fact_lives() {
 #[ignore = "loads a real model from the local cache"]
 async fn distance_to_final_representation() {
     let model = QwenModel::from_registry(
-        ModelType::Qwen2_5_0_5B_Instruct, None, Device::Cpu, None, None,
-    ).await.expect("load qwen2.5-0.5b");
+        ModelType::Qwen2_5_0_5B_Instruct,
+        None,
+        Device::Cpu,
+        None,
+        None,
+    )
+    .await
+    .expect("load qwen2.5-0.5b");
 
     let pipe = model.pipeline();
     let dec = pipe.cpu_decoder().expect("cpu decoder");
     let tok = model.tokenizer();
 
-    let ids: Vec<u32> = tok.encode("The capital of France is", false)
-        .expect("tokenize").get_ids().to_vec();
+    let ids: Vec<u32> = tok
+        .encode("The capital of France is", false)
+        .expect("tokenize")
+        .get_ids()
+        .to_vec();
     let seq = ids.len();
     let arr = ndarray::Array2::from_shape_vec((1, seq), ids).unwrap();
     let mut hidden = pipe.embeddings().embed_cpu(&arr, None, 0).expect("embed");
@@ -167,7 +236,9 @@ async fn distance_to_final_representation() {
     // Keep the last-position hidden state after every layer.
     let mut states: Vec<Vec<f32>> = Vec::new();
     for l in 0..dec.num_layers() {
-        hidden = dec.forward_layers(&hidden, &mask, 0, None, l, l + 1).expect("fwd");
+        hidden = dec
+            .forward_layers(&hidden, &mask, 0, None, l, l + 1)
+            .expect("fwd");
         states.push(hidden.slice(ndarray::s![0, seq - 1, ..]).to_vec());
     }
     let final_state = states.last().unwrap().clone();
@@ -191,8 +262,14 @@ async fn distance_to_final_representation() {
 #[ignore = "loads a real model from the local cache"]
 async fn dump_everything_json() {
     let model = QwenModel::from_registry(
-        ModelType::Qwen2_5_0_5B_Instruct, None, Device::Cpu, None, None,
-    ).await.expect("load qwen2.5-0.5b");
+        ModelType::Qwen2_5_0_5B_Instruct,
+        None,
+        Device::Cpu,
+        None,
+        None,
+    )
+    .await
+    .expect("load qwen2.5-0.5b");
     let pipe = model.pipeline();
     let dec = pipe.cpu_decoder().expect("cpu decoder");
     let tok = model.tokenizer();
@@ -200,8 +277,15 @@ async fn dump_everything_json() {
     let prompt = "The capital of France is";
     let ids: Vec<u32> = tok.encode(prompt, false).expect("tok").get_ids().to_vec();
     let seq = ids.len();
-    let names: Vec<String> = ids.iter()
-        .map(|i| tok.decode(&[*i], false).unwrap_or_default().trim().to_string()).collect();
+    let names: Vec<String> = ids
+        .iter()
+        .map(|i| {
+            tok.decode(&[*i], false)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        })
+        .collect();
 
     let arr = ndarray::Array2::from_shape_vec((1, seq), ids).unwrap();
     let mut hidden = pipe.embeddings().embed_cpu(&arr, None, 0).expect("embed");
@@ -211,7 +295,9 @@ async fn dump_everything_json() {
     let mut layers: Vec<String> = Vec::new();
 
     for l in 0..dec.num_layers() {
-        hidden = dec.forward_layers(&hidden, &mask, 0, None, l, l + 1).expect("fwd");
+        hidden = dec
+            .forward_layers(&hidden, &mask, 0, None, l, l + 1)
+            .expect("fwd");
         states.push(hidden.slice(ndarray::s![0, seq - 1, ..]).to_vec());
 
         let normed = dec.final_norm(&hidden).expect("norm");
@@ -225,37 +311,72 @@ async fn dump_everything_json() {
         let probs: Vec<f32> = exp.iter().map(|v| v / sum).collect();
         let mut idx: Vec<usize> = (0..probs.len()).collect();
         idx.sort_by(|a, b| probs[*b].partial_cmp(&probs[*a]).unwrap());
-        let h: f32 = -probs.iter().filter(|p| **p > 0.0).map(|p| p * p.log2()).sum::<f32>();
-        let top: Vec<String> = idx[..12].iter()
-            .map(|i| format!("[{:?},{:.6}]",
-                tok.decode(&[*i as u32], false).unwrap_or_default(), probs[*i]))
+        let h: f32 = -probs
+            .iter()
+            .filter(|p| **p > 0.0)
+            .map(|p| p * p.log2())
+            .sum::<f32>();
+        let top: Vec<String> = idx[..12]
+            .iter()
+            .map(|i| {
+                format!(
+                    "[{:?},{:.6}]",
+                    tok.decode(&[*i as u32], false).unwrap_or_default(),
+                    probs[*i]
+                )
+            })
             .collect();
 
         // top token at every position
-        let grid: Vec<String> = (0..seq).map(|p| {
-            let r = logits.slice(ndarray::s![0, p, ..]);
-            let b = r.iter().enumerate().max_by(|a, c| a.1.partial_cmp(c.1).unwrap()).unwrap().0;
-            format!("{:?}", tok.decode(&[b as u32], false).unwrap_or_default().trim())
-        }).collect();
+        let grid: Vec<String> = (0..seq)
+            .map(|p| {
+                let r = logits.slice(ndarray::s![0, p, ..]);
+                let b = r
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, c| a.1.partial_cmp(c.1).unwrap())
+                    .unwrap()
+                    .0;
+                format!(
+                    "{:?}",
+                    tok.decode(&[b as u32], false).unwrap_or_default().trim()
+                )
+            })
+            .collect();
 
         let norm: f32 = states[l].iter().map(|x| x * x).sum::<f32>().sqrt();
         layers.push(format!(
             "{{\"l\":{},\"h\":{:.3},\"norm\":{:.1},\"top\":[{}],\"grid\":[{}]}}",
-            l + 1, h, norm, top.join(","), grid.join(",")));
+            l + 1,
+            h,
+            norm,
+            top.join(","),
+            grid.join(",")
+        ));
     }
 
     let fin = states.last().unwrap().clone();
-    let cos: Vec<String> = states.iter().map(|s| {
-        let d: f32 = s.iter().zip(&fin).map(|(x, y)| x * y).sum();
-        let a: f32 = s.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let b: f32 = fin.iter().map(|x| x * x).sum::<f32>().sqrt();
-        format!("{:.4}", d / (a * b))
-    }).collect();
+    let cos: Vec<String> = states
+        .iter()
+        .map(|s| {
+            let d: f32 = s.iter().zip(&fin).map(|(x, y)| x * y).sum();
+            let a: f32 = s.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let b: f32 = fin.iter().map(|x| x * x).sum::<f32>().sqrt();
+            format!("{:.4}", d / (a * b))
+        })
+        .collect();
 
     println!("\nJSON_BEGIN");
-    println!("{{\"prompt\":{:?},\"positions\":[{}],\"cos\":[{}],\"layers\":[{}]}}",
+    println!(
+        "{{\"prompt\":{:?},\"positions\":[{}],\"cos\":[{}],\"layers\":[{}]}}",
         prompt,
-        names.iter().map(|n| format!("{:?}", n)).collect::<Vec<_>>().join(","),
-        cos.join(","), layers.join(","));
+        names
+            .iter()
+            .map(|n| format!("{:?}", n))
+            .collect::<Vec<_>>()
+            .join(","),
+        cos.join(","),
+        layers.join(",")
+    );
     println!("JSON_END");
 }
