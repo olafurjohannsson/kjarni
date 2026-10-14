@@ -57,6 +57,10 @@ namespace Kjarni
     {
         private const string LibName = "kjarni_ffi";
 
+        // NativeLibrary does not exist in netstandard2.1. Unity, the reason that target
+        // exists, resolves "kjarni_ffi" against its own Plugins folder, so there the
+        // default DllImport lookup is what we want.
+#if !NETSTANDARD2_1
         static Native()
         {
             NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, ImportResolver);
@@ -131,6 +135,8 @@ namespace Kjarni
                 return $"osx-{arch}";
             return $"linux-{arch}";
         }
+#endif
+
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniFloatArray
         {

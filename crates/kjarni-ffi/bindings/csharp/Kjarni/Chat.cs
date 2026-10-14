@@ -112,13 +112,33 @@ namespace Kjarni
     }
 
     /// <summary>
+    /// The one callback native code is ever given for streamed tokens.
+    /// </summary>
+    /// <remarks>
+    /// IL2CPP can only hand native code a delegate to a static method, so a lambda
+    /// capturing the caller's handler throws there. Instead the handler travels as a
+    /// <see cref="GCHandle"/> in <c>user_data</c> and this method recovers it. The
+    /// static field keeps the delegate itself alive for the life of the process.
+    /// </remarks>
+    internal static class TokenStream
+    {
+        internal static readonly Native.KjarniStreamCallback Callback = OnToken;
+
+        [AOT.MonoPInvokeCallback(typeof(Native.KjarniStreamCallback))]
+        private static bool OnToken(IntPtr textPtr, IntPtr userData)
+        {
+            var onToken = (Func<string, bool>)GCHandle.FromIntPtr(userData).Target!;
+            return onToken(Marshal.PtrToStringUTF8(textPtr) ?? "");
+        }
+    }
+
+    /// <summary>
     /// High-level chat interface for conversational AI using local decoder models.
     /// </summary>
     public class Chat : IDisposable
     {
         private IntPtr _handle;
         private bool _disposed;
-        private Native.KjarniStreamCallback? _activeCallback;
 
         /// <summary>
         /// Create a new Chat instance.
@@ -190,20 +210,16 @@ namespace Kjarni
         public void Stream(string message, Func<string, bool> onToken)
         {
             ThrowIfDisposed();
-            _activeCallback = (textPtr, _) =>
-            {
-                var text = Marshal.PtrToStringUTF8(textPtr) ?? "";
-                return onToken(text);
-            };
+            var onTokenHandle = GCHandle.Alloc(onToken);
             try
             {
                 Native.CheckError(Native.kjarni_chat_stream(
                     _handle, message, IntPtr.Zero,
-                    _activeCallback, IntPtr.Zero, IntPtr.Zero));
+                    TokenStream.Callback, GCHandle.ToIntPtr(onTokenHandle), IntPtr.Zero));
             }
             finally
             {
-                _activeCallback = null;
+                onTokenHandle.Free();
             }
         }
 
@@ -214,20 +230,16 @@ namespace Kjarni
         {
             ThrowIfDisposed();
             var nativeConfig = ToNativeConfig(config);
-            _activeCallback = (textPtr, _) =>
-            {
-                var text = Marshal.PtrToStringUTF8(textPtr) ?? "";
-                return onToken(text);
-            };
+            var onTokenHandle = GCHandle.Alloc(onToken);
             try
             {
                 Native.CheckError(Native.kjarni_chat_stream_config(
                     _handle, message, ref nativeConfig,
-                    _activeCallback, IntPtr.Zero, IntPtr.Zero));
+                    TokenStream.Callback, GCHandle.ToIntPtr(onTokenHandle), IntPtr.Zero));
             }
             finally
             {
-                _activeCallback = null;
+                onTokenHandle.Free();
             }
         }
 
@@ -313,11 +325,7 @@ namespace Kjarni
             var turns = Materialize(history);
             var pins = new HistoryPins(turns);
 
-            _activeCallback = (textPtr, _) =>
-            {
-                var text = Marshal.PtrToStringUTF8(textPtr) ?? "";
-                return onToken(text);
-            };
+            var onTokenHandle = GCHandle.Alloc(onToken);
             try
             {
                 KjarniErrorCode code;
@@ -326,20 +334,20 @@ namespace Kjarni
                     var nativeConfig = ToNativeConfig(config.Value);
                     code = Native.kjarni_chat_stream_with_history_config(
                         _handle, pins.Roles, pins.Contents, (UIntPtr)turns.Count,
-                        message, ref nativeConfig, _activeCallback, IntPtr.Zero, IntPtr.Zero);
+                        message, ref nativeConfig, TokenStream.Callback, GCHandle.ToIntPtr(onTokenHandle), IntPtr.Zero);
                 }
                 else
                 {
                     code = Native.kjarni_chat_stream_with_history(
                         _handle, pins.Roles, pins.Contents, (UIntPtr)turns.Count,
-                        message, IntPtr.Zero, _activeCallback, IntPtr.Zero, IntPtr.Zero);
+                        message, IntPtr.Zero, TokenStream.Callback, GCHandle.ToIntPtr(onTokenHandle), IntPtr.Zero);
                 }
 
                 Native.CheckError(code);
             }
             finally
             {
-                _activeCallback = null;
+                onTokenHandle.Free();
                 pins.Dispose();
             }
         }
@@ -484,7 +492,6 @@ namespace Kjarni
         private IntPtr _handle;
         private readonly Chat _chat;
         private bool _disposed;
-        private Native.KjarniStreamCallback? _activeCallback;
 
         internal ChatConversation(Chat chat)
         {
@@ -521,20 +528,16 @@ namespace Kjarni
         public void Stream(string message, Func<string, bool> onToken)
         {
             ThrowIfDisposed();
-            _activeCallback = (textPtr, _) =>
-            {
-                var text = Marshal.PtrToStringUTF8(textPtr) ?? "";
-                return onToken(text);
-            };
+            var onTokenHandle = GCHandle.Alloc(onToken);
             try
             {
                 Native.CheckError(Native.kjarni_chat_conversation_stream(
                     _handle, message, IntPtr.Zero,
-                    _activeCallback, IntPtr.Zero, IntPtr.Zero));
+                    TokenStream.Callback, GCHandle.ToIntPtr(onTokenHandle), IntPtr.Zero));
             }
             finally
             {
-                _activeCallback = null;
+                onTokenHandle.Free();
             }
         }
 

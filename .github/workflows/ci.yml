@@ -640,6 +640,7 @@ jobs:
           mkdir -p dist
           cp target/x86_64-pc-windows-msvc/release/kjarni.exe dist/
           cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll dist/
+          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll.lib dist/kjarni_ffi.lib
           cp crates/kjarni-ffi/include/kjarni.h dist/
           cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
