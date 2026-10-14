@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 ### A panic in the engine no longer kills the host process
 
