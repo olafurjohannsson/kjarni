@@ -9,7 +9,7 @@
 
     <!-- Package metadata -->
     <PackageId>Kjarni</PackageId>
-    <Version>0.2.3</Version>
+    <Version>0.2.4</Version>
     <Authors>Ólafur Aron Jóhannsson</Authors>
     <Description>Local AI inference for .NET: embeddings, classification, reranking and search, running in your process. No Python runtime, no ONNX Runtime, no Ollama daemon, no CUDA toolkit. GPU support runs on Vulkan, DirectX 12 and Metal, so AMD, Intel and Apple Silicon work without NVIDIA.</Description>
     <PackageTags>ai;ml;embeddings;classification;reranking;rag;search;nlp;inference;transformers;local;offline;dotnet;csharp;onnx;sentence-transformers;semantic-kernel;microsoft-extensions-ai;gpu;webgpu</PackageTags>
@@ -22,9 +22,10 @@
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 
-  <!-- Built into net8.0; a package everywhere else. -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  <!-- No package dependencies on any target: Unity cannot restore them, so the
+       netstandard2.1 build has to be two files, Kjarni.dll and the native library. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kjarni.Tests" />
   </ItemGroup>
 
   <!-- README and icon -->

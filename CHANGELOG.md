@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.2.4
+
+### Windows no longer needs the Visual C++ Redistributable
+
+`kjarni_ffi.dll` and `kjarni.exe` imported `VCRUNTIME140.dll`, the Visual C++
+Redistributable. Most machines have it; a clean install or a minimal VM does not, and
+there the failure did not point at the cause: .NET reported
+`DllNotFoundException: Unable to load DLL 'kjarni_ffi'` with the file sitting next to
+the executable, because Windows reports a missing dependency of a DLL as the DLL itself
+failing to load.
+
+The C runtime is now linked statically for `x86_64-pc-windows-msvc`
+(`.cargo/config.toml`). The binaries import only libraries that ship with Windows,
+including the Universal CRT, which is part of Windows 10 and later. Release CI checks
+the import table and fails if `VCRUNTIME` comes back.
+
+### Indexing progress callbacks work under IL2CPP
+
+`Indexer.Create` and `Indexer.Add` passed `onProgress` to native code as a lambda.
+IL2CPP, Unity's ahead-of-time backend, can only hand native code a delegate to a static
+method, so passing `onProgress` there threw. Progress now goes through one static
+callback marked `[MonoPInvokeCallback]`, with the handler carried in `user_data`, the
+same way chat streaming already worked. Nothing changes for callers.
+
+### The netstandard2.1 package has no dependencies
+
+`Kjarni` for netstandard2.1 depended on `System.Text.Json` 8.0.5, used in exactly one
+place: reading the metadata attached to each search result. Unity cannot restore NuGet
+dependencies, so that one call meant hand-installing `System.Text.Json` and its chain
+(`System.Memory`, `System.Buffers`, `Microsoft.Bcl.AsyncInterfaces` and the rest)
+before the package would load.
+
+The metadata is always a flat object of string keys and string values, since the
+native side serialises a `HashMap<String, String>`, so a small internal parser now
+reads it instead. Both targets have no package dependencies, and using Kjarni from
+Unity is two files: `Kjarni.dll` and the native library. `SearchResult.Metadata` is
+unchanged.
+
 ## 0.2.3
 
 ### A panic in the engine no longer kills the host process
