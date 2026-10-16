@@ -107,6 +107,46 @@ namespace Kjarni
     }
 
     /// <summary>
+    /// The one callback native code is ever given for indexing progress.
+    /// </summary>
+    /// <remarks>
+    /// Same shape as <see cref="TokenStream"/>, for the same reason: IL2CPP can only
+    /// hand native code a delegate to a static method, so a lambda capturing the
+    /// caller's handler throws there. The handler travels as a <see cref="GCHandle"/>
+    /// in <c>user_data</c> and this method recovers it.
+    /// </remarks>
+    internal static class ProgressStream
+    {
+        internal static readonly Native.KjarniProgressCallback Callback = OnProgress;
+
+        [AOT.MonoPInvokeCallback(typeof(Native.KjarniProgressCallback))]
+        private static void OnProgress(Native.KjarniProgress progress, IntPtr userData)
+        {
+            var onProgress = (Action<Progress>)GCHandle.FromIntPtr(userData).Target!;
+
+            var stage = progress.Stage switch
+            {
+                KjarniProgressStage.Scanning => "scanning",
+                KjarniProgressStage.Loading => "loading",
+                KjarniProgressStage.Embedding => "embedding",
+                KjarniProgressStage.Writing => "writing",
+                KjarniProgressStage.Committing => "committing",
+                _ => "unknown"
+            };
+
+            var message = progress.Message != IntPtr.Zero
+                ? Marshal.PtrToStringUTF8(progress.Message)
+                : null;
+
+            onProgress(new Progress(
+                stage,
+                (int)progress.Current,
+                (int)progress.Total,
+                message));
+        }
+    }
+
+    /// <summary>
     /// Document indexer.
     /// </summary>
     /// <example>
@@ -250,45 +290,26 @@ namespace Kjarni
             }
             else
             {
-                // Callback path
-                Native.KjarniProgressCallback? callback = null;
-                if (onProgress != null)
+                // Callback path. The handler travels in user_data; see ProgressStream.
+                var onProgressHandle = onProgress != null ? GCHandle.Alloc(onProgress) : default;
+                try
                 {
-                    callback = (progress, userData) =>
-                    {
-                        var stage = progress.Stage switch
-                        {
-                            KjarniProgressStage.Scanning => "scanning",
-                            KjarniProgressStage.Loading => "loading",
-                            KjarniProgressStage.Embedding => "embedding",
-                            KjarniProgressStage.Writing => "writing",
-                            KjarniProgressStage.Committing => "committing",
-                            _ => "unknown"
-                        };
-
-                        var message = progress.Message != IntPtr.Zero
-                            ? Marshal.PtrToStringUTF8(progress.Message)
-                            : null;
-
-                        onProgress(new Progress(
-                            stage,
-                            (int)progress.Current,
-                            (int)progress.Total,
-                            message));
-                    };
+                    var err = Native.kjarni_indexer_create_with_callback(
+                        _handle,
+                        indexPath,
+                        utf8Inputs.Pointers,
+                        (UIntPtr)utf8Inputs.Length,
+                        force ? 1 : 0,
+                        onProgress != null ? ProgressStream.Callback : null,
+                        onProgress != null ? GCHandle.ToIntPtr(onProgressHandle) : IntPtr.Zero,
+                        cancelToken?.Handle ?? IntPtr.Zero,
+                        out stats);
+                    Native.CheckError(err);
                 }
-
-                var err = Native.kjarni_indexer_create_with_callback(
-                    _handle,
-                    indexPath,
-                    utf8Inputs.Pointers,
-                    (UIntPtr)utf8Inputs.Length,
-                    force ? 1 : 0,
-                    callback,
-                    IntPtr.Zero,
-                    cancelToken?.Handle ?? IntPtr.Zero,
-                    out stats);
-                Native.CheckError(err);
+                finally
+                {
+                    if (onProgressHandle.IsAllocated) onProgressHandle.Free();
+                }
             }
 
             return new IndexStats(
@@ -336,44 +357,25 @@ namespace Kjarni
             }
             else
             {
-                // Callback path
-                Native.KjarniProgressCallback? callback = null;
-                if (onProgress != null)
+                // Callback path. The handler travels in user_data; see ProgressStream.
+                var onProgressHandle = onProgress != null ? GCHandle.Alloc(onProgress) : default;
+                try
                 {
-                    callback = (progress, userData) =>
-                    {
-                        var stage = progress.Stage switch
-                        {
-                            KjarniProgressStage.Scanning => "scanning",
-                            KjarniProgressStage.Loading => "loading",
-                            KjarniProgressStage.Embedding => "embedding",
-                            KjarniProgressStage.Writing => "writing",
-                            KjarniProgressStage.Committing => "committing",
-                            _ => "unknown"
-                        };
-
-                        var message = progress.Message != IntPtr.Zero
-                            ? Marshal.PtrToStringUTF8(progress.Message)
-                            : null;
-
-                        onProgress(new Progress(
-                            stage,
-                            (int)progress.Current,
-                            (int)progress.Total,
-                            message));
-                    };
+                    var err = Native.kjarni_indexer_add_with_callback(
+                        _handle,
+                        indexPath,
+                        utf8Inputs.Pointers,
+                        (UIntPtr)utf8Inputs.Length,
+                        onProgress != null ? ProgressStream.Callback : null,
+                        onProgress != null ? GCHandle.ToIntPtr(onProgressHandle) : IntPtr.Zero,
+                        cancelToken?.Handle ?? IntPtr.Zero,
+                        out docsAdded);
+                    Native.CheckError(err);
                 }
-
-                var err = Native.kjarni_indexer_add_with_callback(
-                    _handle,
-                    indexPath,
-                    utf8Inputs.Pointers,
-                    (UIntPtr)utf8Inputs.Length,
-                    callback,
-                    IntPtr.Zero,
-                    cancelToken?.Handle ?? IntPtr.Zero,
-                    out docsAdded);
-                Native.CheckError(err);
+                finally
+                {
+                    if (onProgressHandle.IsAllocated) onProgressHandle.Free();
+                }
             }
 
             return (int)docsAdded;
