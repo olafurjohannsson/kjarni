@@ -778,39 +778,7 @@ pub fn matmul_4d_decode_gqa(
     k_transposed: &ArrayView4<f32>,
     n_rep: usize,
 ) -> Array4<f32> {
-    let (batch, heads, _, dim) = q.dim();
-    let cache_len = k_transposed.shape()[3];
-    let mut out = Array4::<f32>::zeros((batch, heads, 1, cache_len));
-
-    out.outer_iter_mut()
-        .zip(q.outer_iter())
-        .enumerate()
-        .par_bridge()
-        .for_each(|(b_idx, (mut out_b, q_b))| {
-            let k_batch = k_transposed.index_axis(Axis(0), b_idx);
-            out_b
-                .outer_iter_mut()
-                .zip(q_b.outer_iter())
-                .enumerate()
-                .for_each(|(h_idx, (mut out_h, q_h))| {
-                    let kv_head_idx = h_idx / n_rep;
-                    let k_head = k_batch.index_axis(Axis(0), kv_head_idx);
-                    let q_ptr = q_h.as_ptr();
-                    let out_s = out_h.as_slice_mut().unwrap();
-
-                    #[allow(clippy::needless_range_loop, reason = "indexed numeric loop; the index addresses more than the iterated slice")]
-                    for t in 0..cache_len {
-                        let mut sum = 0.0;
-                        for d in 0..dim {
-                            unsafe {
-                                sum += *q_ptr.add(d) * *k_head.uget((d, t));
-                            }
-                        }
-                        out_s[t] = sum;
-                    }
-                });
-        });
-    out
+    decode_scores(q.view(), k_transposed.view(), n_rep)
 }
 
 pub fn matmul_4d_context_gqa(
@@ -818,101 +786,83 @@ pub fn matmul_4d_context_gqa(
     v: &ArrayView4<f32>,
     n_rep: usize,
 ) -> Array4<f32> {
-    let (batch, heads, _, cache_len) = scores.dim();
-    let dim = v.shape()[3];
-    let mut out = Array4::<f32>::zeros((batch, heads, 1, dim));
-
-    out.outer_iter_mut()
-        .zip(scores.outer_iter())
-        .enumerate()
-        .par_bridge()
-        .for_each(|(b_idx, (mut out_b, s_b))| {
-            let v_batch = v.index_axis(Axis(0), b_idx);
-            out_b
-                .outer_iter_mut()
-                .zip(s_b.outer_iter())
-                .enumerate()
-                .for_each(|(h_idx, (mut out_h, s_h))| {
-                    let kv_head_idx = h_idx / n_rep;
-                    let v_head = v_batch.index_axis(Axis(0), kv_head_idx);
-                    let s_ptr = s_h.as_ptr();
-                    let out_s = out_h.as_slice_mut().unwrap();
-
-                    #[allow(clippy::needless_range_loop, reason = "indexed numeric loop; the index addresses more than the iterated slice")]
-                    for d in 0..dim {
-                        let mut sum = 0.0;
-                        for t in 0..cache_len {
-                            unsafe {
-                                sum += *s_ptr.add(t) * *v_head.uget((t, d));
-                            }
-                        }
-                        out_s[d] = sum;
-                    }
-                });
-        });
-    out
+    decode_context(scores.view(), v.view(), n_rep)
 }
 
 /// Optimized Decode Score (Non-GQA): Q=[B, H, 1, D], K=[B, H, D, S]
 pub fn matmul_4d_decode(q: &Array4<f32>, k_transposed: &Array4<f32>) -> Array4<f32> {
-    let (batch, heads, _, dim) = q.dim();
-    let cache_len = k_transposed.shape()[3];
-    let mut out = Array4::<f32>::zeros((batch, heads, 1, cache_len));
-
-    out.outer_iter_mut()
-        .zip(q.outer_iter())
-        .zip(k_transposed.outer_iter())
-        .par_bridge()
-        .for_each(|((mut out_b, q_b), k_b)| {
-            out_b
-                .outer_iter_mut()
-                .zip(q_b.outer_iter())
-                .zip(k_b.outer_iter())
-                .for_each(|((mut out_h, q_h), k_h)| {
-                    let q_ptr = q_h.as_ptr();
-                    let out_s = out_h.as_slice_mut().unwrap();
-                    for t in 0..cache_len {
-                        let mut sum = 0.0;
-                        for d in 0..dim {
-                            unsafe {
-                                sum += *q_ptr.add(d) * k_h[[d, t]];
-                            }
-                        }
-                        out_s[t] = sum;
-                    }
-                });
-        });
-    out
+    decode_scores(q.view(), k_transposed.view(), 1)
 }
 
 ///  Scores=[B, H, 1, S], V=[B, H, S, D]
 pub fn matmul_4d_context(scores: &Array4<f32>, v: &Array4<f32>) -> Array4<f32> {
+    decode_context(scores.view(), v.view(), 1)
+}
+
+/// One query row's attention scores per head: `Q=[B, H, 1, D]` against
+/// `K=[B, H / n_rep, D, S]`, query head `h` reading key head `h / n_rep`.
+///
+/// One task per head, and the cache read a row at a time. This used to run
+/// only the batch in parallel, which in decoding is one, so every head went
+/// through a single thread; and it walked K down its columns, a stride of
+/// the whole cache length per read. For Whisper's cross-attention, 1500
+/// encoder positions in 12 layers, that was 40% of each decoded token.
+///
+/// Each score sums its products in the same order as before, so results are
+/// bit for bit unchanged.
+fn decode_scores(q: ArrayView4<f32>, k_transposed: ArrayView4<f32>, n_rep: usize) -> Array4<f32> {
+    let (batch, heads, _, dim) = q.dim();
+    let cache_len = k_transposed.shape()[3];
+    let mut out = Array4::<f32>::zeros((batch, heads, 1, cache_len));
+    if cache_len == 0 {
+        return out;
+    }
+    out.as_slice_mut()
+        .expect("fresh array")
+        .par_chunks_mut(cache_len)
+        .enumerate()
+        .for_each(|(i, out)| {
+            let (b, h) = (i / heads, i % heads);
+            let k = k_transposed.index_axis(Axis(0), b);
+            let k = k.index_axis(Axis(0), h / n_rep);
+            let k = k.as_standard_layout();
+            let k = k.as_slice().expect("standard layout");
+            for d in 0..dim {
+                let qd = q[[b, h, 0, d]];
+                for (o, &kv) in out.iter_mut().zip(&k[d * cache_len..(d + 1) * cache_len]) {
+                    *o += qd * kv;
+                }
+            }
+        });
+    out
+}
+
+/// One query row's attention output per head: `scores=[B, H, 1, S]` against
+/// `V=[B, H / n_rep, S, D]`. The counterpart of `decode_scores`, and fixed
+/// the same way: a task per head, V read by rows, the same summation order.
+fn decode_context(scores: ArrayView4<f32>, v: ArrayView4<f32>, n_rep: usize) -> Array4<f32> {
     let (batch, heads, _, cache_len) = scores.dim();
     let dim = v.shape()[3];
     let mut out = Array4::<f32>::zeros((batch, heads, 1, dim));
-
-    out.outer_iter_mut()
-        .zip(scores.outer_iter())
-        .zip(v.outer_iter())
-        .par_bridge()
-        .for_each(|((mut out_b, s_b), v_b)| {
-            out_b
-                .outer_iter_mut()
-                .zip(s_b.outer_iter())
-                .zip(v_b.outer_iter())
-                .for_each(|((mut out_h, s_h), v_h)| {
-                    let s_ptr = s_h.as_ptr();
-                    let out_s = out_h.as_slice_mut().unwrap();
-                    for d in 0..dim {
-                        let mut sum = 0.0;
-                        for t in 0..cache_len {
-                            unsafe {
-                                sum += *s_ptr.add(t) * v_h[[t, d]];
-                            }
-                        }
-                        out_s[d] = sum;
-                    }
-                });
+    if dim == 0 {
+        return out;
+    }
+    out.as_slice_mut()
+        .expect("fresh array")
+        .par_chunks_mut(dim)
+        .enumerate()
+        .for_each(|(i, out)| {
+            let (b, h) = (i / heads, i % heads);
+            let v = v.index_axis(Axis(0), b);
+            let v = v.index_axis(Axis(0), h / n_rep);
+            let v = v.as_standard_layout();
+            let v = v.as_slice().expect("standard layout");
+            for t in 0..cache_len {
+                let st = scores[[b, h, 0, t]];
+                for (o, &vv) in out.iter_mut().zip(&v[t * dim..(t + 1) * dim]) {
+                    *o += st * vv;
+                }
+            }
         });
     out
 }

@@ -5,6 +5,7 @@ use std::arch::x86_64::*;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
+use rayon::prelude::*;
 
 use crate::tensor::CpuTensor;
 
@@ -143,9 +144,75 @@ impl LayerNorm {
     }
 }
 
+/// Rows per task when normalising in parallel: enough work per task to cover
+/// rayon's overhead at hidden sizes from 384 up.
+const ROWS_PER_TASK: usize = 32;
+/// Below this many values a forward pass is a single short document, and
+/// threads cost more than they save.
+const PARALLEL_MIN: usize = 1 << 15;
+
 impl LayerNorm {
     pub fn new(weight: Array1<f32>, bias: Array1<f32>, eps: f32) -> Self {
         Self { weight, bias, eps }
+    }
+
+    /// `rows = layer_norm(rows + residual)` in place, one row per token,
+    /// across threads. Without a residual it is a plain in-place norm.
+    ///
+    /// This is the post-norm encoder's add-and-norm in one pass. It used to be
+    /// a serial add, a serial norm into scratch and a copy back: on a batch of
+    /// 64 documents through multilingual-e5-small that was 12% of the forward
+    /// pass, done on one core of 24.
+    pub fn add_and_norm_rows(&self, rows: &mut [f32], residual: Option<&[f32]>) {
+        let hidden = self.weight.len();
+        assert!(
+            rows.len().is_multiple_of(hidden),
+            "rows are not whole rows of {hidden}"
+        );
+        if let Some(r) = residual {
+            assert_eq!(
+                r.len(),
+                rows.len(),
+                "residual is not the same size as the rows"
+            );
+        }
+        let weight = self.weight.as_slice().expect("contiguous weight");
+        let bias = self.bias.as_slice().expect("contiguous bias");
+        let eps = self.eps;
+        let block = ROWS_PER_TASK * hidden;
+
+        let work = |(i, chunk): (usize, &mut [f32])| {
+            let residual = residual.map(|r| &r[i * block..i * block + chunk.len()]);
+            for (j, row) in chunk.chunks_exact_mut(hidden).enumerate() {
+                let res = residual.map(|r| &r[j * hidden..(j + 1) * hidden]);
+                add_norm_row(row, res, weight, bias, eps);
+            }
+        };
+        if rows.len() >= PARALLEL_MIN {
+            rows.par_chunks_mut(block).enumerate().for_each(work);
+        } else {
+            rows.chunks_mut(block).enumerate().for_each(work);
+        }
+    }
+
+    /// `out = layer_norm(rows)`, across threads. For pre-norm layers, which
+    /// keep the un-normalised rows for the residual.
+    pub fn norm_rows_into(&self, rows: &[f32], out: &mut [f32]) {
+        assert_eq!(
+            rows.len(),
+            out.len(),
+            "output is not the same size as the input"
+        );
+        let block = ROWS_PER_TASK * self.weight.len();
+        let copy = |(o, r): (&mut [f32], &[f32])| o.copy_from_slice(r);
+        if rows.len() >= PARALLEL_MIN {
+            out.par_chunks_mut(block)
+                .zip(rows.par_chunks(block))
+                .for_each(copy);
+        } else {
+            out.chunks_mut(block).zip(rows.chunks(block)).for_each(copy);
+        }
+        self.add_and_norm_rows(out, None);
     }
     pub fn from_weights(
         weights: &crate::weights::ModelWeights,
@@ -229,6 +296,73 @@ impl LayerNorm {
     pub fn forward_3d(&self, hidden: &Array3<f32>) -> Array3<f32> {
         self.forward(&hidden.view())
     }
+}
+
+/// One row of `layer_norm(row + residual)`, compiled for AVX2 where the CPU
+/// has it.
+#[inline]
+fn add_norm_row(row: &mut [f32], residual: Option<&[f32]>, weight: &[f32], bias: &[f32], eps: f32) {
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+        // SAFETY: the features this was compiled for were just checked.
+        unsafe { add_norm_row_avx2(row, residual, weight, bias, eps) };
+        return;
+    }
+    add_norm_row_portable(row, residual, weight, bias, eps);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+unsafe fn add_norm_row_avx2(
+    row: &mut [f32],
+    residual: Option<&[f32]>,
+    weight: &[f32],
+    bias: &[f32],
+    eps: f32,
+) {
+    add_norm_row_portable(row, residual, weight, bias, eps);
+}
+
+/// Plain loops shaped so LLVM vectorises them: eight independent sums
+/// rather than one, since float addition may not be reordered for it.
+/// Mean first, then variance about it: the two-pass form, as the scalar
+/// path has always done.
+#[inline(always)]
+fn add_norm_row_portable(
+    row: &mut [f32],
+    residual: Option<&[f32]>,
+    weight: &[f32],
+    bias: &[f32],
+    eps: f32,
+) {
+    if let Some(r) = residual {
+        for (x, &r) in row.iter_mut().zip(r) {
+            *x += r;
+        }
+    }
+    let n = row.len() as f32;
+    let mean = lane_sum(row, |x| x) / n;
+    let var = lane_sum(row, |x| (x - mean) * (x - mean)) / n;
+    let inv_std = 1.0 / (var + eps).sqrt();
+    for ((x, &w), &b) in row.iter_mut().zip(weight).zip(bias) {
+        *x = (*x - mean) * inv_std * w + b;
+    }
+}
+
+#[inline(always)]
+fn lane_sum(xs: &[f32], f: impl Fn(f32) -> f32) -> f32 {
+    let mut acc = [0.0f32; 8];
+    let mut chunks = xs.chunks_exact(8);
+    for c in &mut chunks {
+        for i in 0..8 {
+            acc[i] += f(c[i]);
+        }
+    }
+    let mut sum: f32 = acc.iter().sum();
+    for &x in chunks.remainder() {
+        sum += f(x);
+    }
+    sum
 }
 
 #[cfg(test)]

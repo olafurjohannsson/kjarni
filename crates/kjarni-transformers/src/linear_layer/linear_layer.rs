@@ -174,6 +174,15 @@ impl LinearLayer {
             LinearData::F32(w) => match self.f32_strategy {
                 F32MatmulStrategy::CustomSimd => {
                     let (m, _) = input.dim();
+                    // The kernels below write through raw pointers, so a
+                    // buffer of the wrong size is memory corruption rather than
+                    // an error unless it is caught here.
+                    assert!(
+                        output.ncols() == w.nrows() && output.nrows() >= m,
+                        "matmul output is {:?}, needs at least {m} rows of {}",
+                        output.dim(),
+                        w.nrows()
+                    );
                     let bias = self.bias.as_ref().map(|b| b.as_slice().unwrap());
 
                     // Measured on MiniLM and Qwen 0.5B shapes across m from 1 to
@@ -241,12 +250,13 @@ impl LinearLayer {
                         }
                         result
                     } else {
-                        // Batch path - pass bias to kernel (fused, faster)
-                        ops::matmul::matmul_2d_cpu_f32_batched(
-                            input,
-                            &w.view(),
-                            self.bias.as_ref().map(|b| b.as_slice().unwrap()),
-                        )
+                        // The same kernels `matmul_noalloc` picks by row count.
+                        // The 64-row-block kernel used here split work by
+                        // rows only, so a handful of rows, such as a few
+                        // sequences decoding together, ran on one thread.
+                        let mut out = Array2::<f32>::zeros((m, self.out_features()));
+                        self.matmul_noalloc(input, &mut out);
+                        out
                     }
                 }
                 F32MatmulStrategy::Faer => {

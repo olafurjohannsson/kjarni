@@ -96,12 +96,36 @@ pub fn tanh_scalar(x: f32) -> f32 {
     tanhf(x)
 }
 
+/// Values per task for the element-wise activations below.
+const ACTIVATION_BLOCK: usize = 1 << 13;
+
+/// GELU over a slice, in blocks across threads.
+///
+/// One rayon task per value cost more than the GELU itself: on a batch of 64
+/// documents through multilingual-e5-small that was 354 million tasks and 8%
+/// of the whole forward pass. Blocks keep libm's exact `erff` and `tanhf`.
+/// A vectorised rational approximation was faster still, but it is a few
+/// ulps off, and that was enough to flip the sign of a near-constant row
+/// after layer norm in the GPU/CPU cross-decoder parity test.
+fn gelu_slice(slice: &mut [f32], tanh_form: bool, use_parallel: bool) {
+    let block = |xs: &mut [f32]| {
+        if tanh_form {
+            xs.iter_mut().for_each(|x| *x = gelu_new_scalar(*x));
+        } else {
+            xs.iter_mut().for_each(|x| *x = gelu_scalar(*x));
+        }
+    };
+    if use_parallel {
+        rayon::slice::ParallelSliceMut::par_chunks_mut(slice, ACTIVATION_BLOCK).for_each(block);
+    } else {
+        block(slice);
+    }
+}
+
 fn apply_activation_slice(slice: &mut [f32], activation: Activation, use_parallel: bool) {
     match (activation, use_parallel) {
-        (Activation::Gelu, true) => slice.par_iter_mut().for_each(|x| *x = gelu_scalar(*x)),
-        (Activation::Gelu, false) => slice.iter_mut().for_each(|x| *x = gelu_scalar(*x)),
-        (Activation::GeluNew, true) => slice.par_iter_mut().for_each(|x| *x = gelu_new_scalar(*x)),
-        (Activation::GeluNew, false) => slice.iter_mut().for_each(|x| *x = gelu_new_scalar(*x)),
+        (Activation::Gelu, _) => gelu_slice(slice, false, use_parallel),
+        (Activation::GeluNew, _) => gelu_slice(slice, true, use_parallel),
         (Activation::Relu, true) => slice.par_iter_mut().for_each(|x| *x = relu_scalar(*x)),
         (Activation::Relu, false) => slice.iter_mut().for_each(|x| *x = relu_scalar(*x)),
         (Activation::SilU, true) => slice.par_iter_mut().for_each(|x| *x = silu_scalar(*x)),
@@ -319,6 +343,30 @@ pub fn softmax_4d_inplace(scores: &mut Array4<f32>) {
 
 #[cfg(test)]
 mod tests {
+    /// The block path must give exactly what the scalar functions give, in
+    /// both forms and in parallel: GELU feeds layer norm, where a last-ulp
+    /// difference on a near-constant row can flip a sign.
+    #[test]
+    fn gelu_blocks_match_the_scalar_functions_exactly() {
+        let xs: Vec<f32> = (-60_000..=60_000).map(|i| i as f32 * 1e-4).collect();
+        for (tanh_form, parallel) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut ys = xs.clone();
+            gelu_slice(&mut ys, tanh_form, parallel);
+            for (&x, &y) in xs.iter().zip(&ys) {
+                let want = if tanh_form {
+                    gelu_new_scalar(x)
+                } else {
+                    gelu_scalar(x)
+                };
+                assert_eq!(
+                    y.to_bits(),
+                    want.to_bits(),
+                    "gelu({x}), tanh form {tanh_form}"
+                );
+            }
+        }
+    }
+
     use super::*;
     use approx::assert_relative_eq;
     use ndarray::{Array, arr1};

@@ -104,6 +104,45 @@ fn vision_tower_matches_huggingface_on_reference_pixels() {
     assert!(worst < 1e-3, "worst element differs by {worst}");
 }
 
+/// A batch must give each image the vector it gets alone.
+///
+/// Batching only changes how the work is shaped, but a mask, a pooled row or a
+/// projection taken from the wrong image would still produce plausible unit
+/// vectors. The reference image goes in the middle, between two others, so an
+/// off-by-one in either direction shows.
+#[test]
+fn a_batch_embeds_each_image_as_it_would_alone() {
+    let (Some(fx), Some(dir)) = (fixtures(), model_dir()) else {
+        eprintln!("skipping: set KJARNI_CLIP_FIXTURES and download clip-vit-base-32");
+        return;
+    };
+
+    let model = ClipVisionModel::from_dir(&dir).expect("load CLIP vision tower");
+    let edge = model.config().vision_config.image_size;
+    let reference = Array3::from_shape_vec((3, edge, edge), read_f32(&fx.join("pixel_values.f32")))
+        .expect("shape pixel_values");
+    let dark = Array3::from_elem((3, edge, edge), -1.5f32);
+    let ramp = Array3::from_shape_fn((3, edge, edge), |(c, y, x)| {
+        (c as f32 - 1.0) + (y as f32 - x as f32) / edge as f32
+    });
+    let batch = [dark, reference, ramp];
+
+    let together = model.embed_image_tensors(&batch).expect("embed batch");
+    assert_eq!(together.nrows(), 3);
+    for (i, image) in batch.iter().enumerate() {
+        let alone = model.embed_image_tensor(image).expect("embed alone");
+        let worst = together
+            .row(i)
+            .iter()
+            .zip(&alone)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-5, "image {i} differs by {worst} in a batch");
+    }
+    let want = read_f32(&fx.join("image_embeds.f32"));
+    assert!(cosine(together.row(1).as_slice().unwrap(), &want) > 0.9999);
+}
+
 /// Preprocessing alone, against the tensor HF's own processor produced.
 ///
 /// Split out because this is the half most likely to drift: bicubic against

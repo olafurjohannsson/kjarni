@@ -151,6 +151,7 @@ pub enum ModelType {
     MiniLML6V2,
     NomicEmbedText,
     BgeM3,
+    MultilingualE5Small,
     MiniLML6V2CrossEncoder,
     MpnetBaseV2,
     DistilBertBaseCased,
@@ -261,6 +262,7 @@ impl ModelType {
             Self::MiniLML6V2 => "minilm-l6-v2",
             Self::NomicEmbedText => "nomic-embed-text",
             Self::BgeM3 => "bge-m3",
+            Self::MultilingualE5Small => "multilingual-e5-small",
             Self::MpnetBaseV2 => "mpnet-base-v2",
             Self::DistilBertBaseCased => "distilbert-base",
 
@@ -452,6 +454,22 @@ impl ModelType {
                 description: "Massive multilingual embedding model. State of the art for diverse languages.",
                 size_mb: 2200,
                 params_millions: 567,
+            },
+            Self::MultilingualE5Small => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::Embedding,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/model.safetensors",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Small multilingual embeddings, about 100 languages. Prefix texts with \"query: \" or \"passage: \".",
+                size_mb: 470,
+                params_millions: 118,
             },
             Self::DistilBertSST2 => ModelInfo {
                 architecture: ModelArchitecture::Bert,
@@ -913,6 +931,7 @@ impl ModelType {
                 Some(Self::NomicEmbedText)
             }
             "bge-m3" | "baai/bge-m3" => Some(Self::BgeM3),
+            "intfloat/multilingual-e5-small" => Some(Self::MultilingualE5Small),
             "distilbert-base-uncased-finetuned-sst-2-english" => Some(Self::DistilBertSST2),
             "twitter-roberta-base-sentiment-latest" => Some(Self::TwitterRobertaSentiment),
             "bert-base-multilingual-uncased-sentiment"

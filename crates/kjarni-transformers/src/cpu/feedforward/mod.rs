@@ -36,6 +36,11 @@ impl FeedForward {
             FeedForward::Legacy(ffn) => ffn.dense1_weight.shape()[0],
         }
     }
+    /// Whether `forward_noalloc` handles this kind.
+    pub fn supports_noalloc(&self) -> bool {
+        !matches!(self, FeedForward::Legacy(_))
+    }
+
     pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
         match self {
             FeedForward::StandardNew(ffn) => ffn.forward_noalloc(hidden, buffers),
