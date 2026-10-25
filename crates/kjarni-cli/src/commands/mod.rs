@@ -7,6 +7,7 @@ pub mod generate;
 pub mod image;
 pub mod index;
 pub mod inspect;
+pub mod mcp;
 pub mod model;
 pub mod rerank;
 pub mod search;

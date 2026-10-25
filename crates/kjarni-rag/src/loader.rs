@@ -68,7 +68,10 @@ impl LoaderConfig {
         self
     }
 
-    /// Exclude files matching pattern (e.g., "*.min.js", "node_modules/**")
+    /// Exclude paths matching a pattern: a directory or file name such as
+    /// "node_modules" or "target", the same with "/**" ("node_modules/**"), or
+    /// a name with `*` wildcards ("*.min.js"). A match on any component of a
+    /// path excludes it, and an excluded directory is never entered.
     pub fn exclude(mut self, pattern: &str) -> Self {
         self.exclude_patterns.push(pattern.to_string());
         self
@@ -183,19 +186,26 @@ impl DocumentLoader {
             walkdir::WalkDir::new(dir).max_depth(1)
         };
 
-        for entry in walker.into_iter().filter_map(|e| e.ok()) {
+        // Hidden and excluded directories are pruned rather than walked and
+        // filtered: a repository's .git, target or node_modules can hold more
+        // files than everything else together. The directory asked for is
+        // always walked, whatever its name.
+        let walker = walker.into_iter().filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            if !self.config.include_hidden && name.starts_with('.') {
+                return false;
+            }
+            !self.is_excluded(&name)
+        });
+
+        for entry in walker.filter_map(|e| e.ok()) {
             let path = entry.path();
 
             // Skip directories
             if !path.is_file() {
-                continue;
-            }
-
-            // Skip hidden files
-            if !self.config.include_hidden
-                && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && name.starts_with('.')
-            {
                 continue;
             }
 
@@ -214,6 +224,14 @@ impl DocumentLoader {
         }
 
         Ok(all_chunks)
+    }
+
+    /// Whether a file or directory name matches an exclude pattern.
+    fn is_excluded(&self, name: &str) -> bool {
+        self.config.exclude_patterns.iter().any(|pattern| {
+            let pattern = pattern.trim_end_matches("/**").trim_end_matches('/');
+            wildcard_match(pattern, name)
+        })
     }
 
     /// Load chunks from multiple paths (files or directories)
@@ -290,11 +308,79 @@ pub fn load_documents(paths: &[&str], config: Option<LoaderConfig>) -> Result<Ve
     loader.load_paths(&path_refs)
 }
 
+/// `*` matches any run of characters, everything else matches itself.
+fn wildcard_match(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or("");
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let parts: Vec<&str> = parts.collect();
+    let Some((last, middle)) = parts.split_last() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        match rest.find(part) {
+            Some(i) => rest = &rest[i + part.len()..],
+            None => return false,
+        }
+    }
+    rest.ends_with(last) && rest.len() >= last.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn wildcards_match_whole_names() {
+        assert!(wildcard_match("node_modules", "node_modules"));
+        assert!(!wildcard_match("node_modules", "node_modules2"));
+        assert!(wildcard_match("*.min.js", "app.min.js"));
+        assert!(!wildcard_match("*.min.js", "app.js"));
+        assert!(wildcard_match("test_*", "test_data"));
+        assert!(wildcard_match("a*b*c", "aXbYc"));
+        assert!(!wildcard_match("a*b*c", "aXbY"));
+        assert!(wildcard_match("*", "anything"));
+    }
+
+    /// A repository's build output and VCS folders must not be indexed: they
+    /// were walked file by file, and only a hidden file's own name was checked.
+    #[test]
+    fn excluded_and_hidden_directories_are_not_walked() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        for f in [
+            "src/main.rs",
+            "README.md",
+            "target/debug/build/out.rs",
+            "node_modules/pkg/index.js",
+            ".git/hooks/pre-commit.sh",
+            "web/app.min.js",
+            "web/app.js",
+        ] {
+            let path = d.join(f);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "some indexable text").unwrap();
+        }
+        let config = LoaderConfig::default()
+            .exclude("target")
+            .exclude("node_modules/**")
+            .exclude("*.min.js");
+        let loader = DocumentLoader::new(config);
+        let mut sources: Vec<String> = loader
+            .load_directory(d)
+            .unwrap()
+            .into_iter()
+            .filter_map(|c| c.metadata.source)
+            .map(|s| Path::new(&s).strip_prefix(d).unwrap().display().to_string())
+            .collect();
+        sources.sort();
+        sources.dedup();
+        assert_eq!(sources, ["README.md", "src/main.rs", "web/app.js"]);
+    }
 
     #[test]
     fn test_loader_default() {

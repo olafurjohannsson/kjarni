@@ -259,6 +259,10 @@ pub enum Commands {
         quiet: bool,
     },
 
+    /// Serve Kjarni's tools to AI agents over MCP (stdio): folder search,
+    /// transcription, classification, reranking and similarity
+    Mcp,
+
     /// Transcribe audio to text
     Transcribe {
         /// Path to audio file (wav, mp3, flac, ogg)
