@@ -53,11 +53,13 @@ pub struct KjarniScanReport {
     pub skipped: usize,
 }
 
-/// Loads CLIP from a model directory, as `kjarni model download` leaves it.
+/// Loads CLIP from a model directory, as `kjarni model download` leaves it. A
+/// null `model_dir` uses the default model, clip-vit-base-32, downloading it on
+/// first use, the same as every other capability.
 ///
 /// # Safety
-/// `model_dir` must be a valid NUL-terminated path. `out` must be a valid pointer
-/// to write the handle into.
+/// `model_dir` must be null or a valid NUL-terminated path. `out` must be a valid
+/// pointer to write the handle into.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_image_index_new(
     model_dir: *const c_char,
@@ -68,15 +70,25 @@ pub unsafe extern "C" fn kjarni_image_index_new(
         KjarniErrorCode::Panic,
         || -> KjarniErrorCode {
             unsafe {
-                if out.is_null() || model_dir.is_null() {
+                if out.is_null() {
                     return KjarniErrorCode::NullPointer;
                 }
-                let dir = match CStr::from_ptr(model_dir).to_str() {
-                    Ok(s) => s,
-                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                let dir = if model_dir.is_null() {
+                    match default_model_dir() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            set_last_error(format!("{e:#}"));
+                            return KjarniErrorCode::ModelNotFound;
+                        }
+                    }
+                } else {
+                    match CStr::from_ptr(model_dir).to_str() {
+                        Ok(s) => std::path::PathBuf::from(s),
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    }
                 };
 
-                match ImageIndex::load(Path::new(dir)) {
+                match ImageIndex::load(&dir) {
                     Ok(inner) => {
                         *out = Box::into_raw(Box::new(KjarniImageIndex { inner }));
                         KjarniErrorCode::Ok
@@ -89,6 +101,15 @@ pub unsafe extern "C" fn kjarni_image_index_new(
             }
         },
     )
+}
+
+/// The default CLIP checkpoint's directory, downloading it first if needed.
+fn default_model_dir() -> anyhow::Result<std::path::PathBuf> {
+    const MODEL: &str = "clip-vit-base-32";
+    if !kjarni::registry::is_model_downloaded(MODEL)? {
+        get_runtime().block_on(kjarni::registry::download_model(MODEL, false, true))?;
+    }
+    kjarni::registry::model_path(MODEL)
 }
 
 /// Frees an image index.

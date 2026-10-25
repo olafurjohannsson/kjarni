@@ -23,9 +23,16 @@
 #ifndef KJARNI_HPP
 #define KJARNI_HPP
 
+// Image search is part of the library's default build. Define KJARNI_NO_IMAGE_IO
+// when linking a library built with --no-default-features, which leaves it out.
+#if !defined(KJARNI_NO_IMAGE_IO) && !defined(KJARNI_IMAGE_IO)
+#define KJARNI_IMAGE_IO
+#endif
+
 #include "kjarni.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstddef>
 #include <expected>
 #include <memory>
@@ -143,6 +150,27 @@ private:
 
     Owned raw_{};
 };
+
+/// Adopts a `char*` the C API allocated and returns an owning string.
+inline std::string adopt(char* raw) {
+    if (!raw) return {};
+    std::string s{raw};
+    kjarni_string_free(raw);
+    return s;
+}
+
+/// Joins items with commas, for the C config fields that take a list that way.
+inline std::string join(std::span<const std::string> items) {
+    std::string out;
+    for (const auto& item : items) {
+        if (!out.empty()) out += ',';
+        out += item;
+    }
+    return out;
+}
+
+/// Null for an empty string: the C API reads null as "use the default".
+inline const char* or_null(const std::string& s) noexcept { return s.empty() ? nullptr : s.c_str(); }
 
 /// Trampoline letting any C++ callable serve as a `KjarniStreamCallbackFn`.
 template <typename F>
@@ -572,6 +600,483 @@ private:
 
     detail::Handle<KjarniChat, kjarni_chat_free> handle_;
 };
+
+// ─── Indexer ─────────────────────────────────────────────────────
+
+/// What an indexing run did.
+struct IndexStats {
+    std::size_t documents_indexed{};
+    std::size_t chunks_created{};
+    std::size_t dimension{};
+    std::uint64_t size_bytes{};
+    std::size_t files_processed{};
+    std::size_t files_skipped{};
+    std::uint64_t elapsed_ms{};
+};
+
+struct IndexerOptions {
+    std::string model = "minilm-l6-v2";
+    std::string cache_dir;
+    /// Characters per chunk; 0 keeps the library's default.
+    std::size_t chunk_size = 0;
+    /// Characters shared by neighbouring chunks; 0 keeps the library's default.
+    std::size_t chunk_overlap = 0;
+    /// File extensions to index, e.g. {"md", "txt"}; empty keeps the defaults.
+    std::vector<std::string> extensions;
+    /// Names or `*` patterns to skip, e.g. {"node_modules", "*.min.js"}.
+    std::vector<std::string> exclude;
+    bool recursive = true;
+    bool include_hidden = false;
+    bool gpu = false;
+    bool quiet = true;
+};
+
+/// Builds a search index on disk from files and folders.
+class Indexer {
+public:
+    using Options = IndexerOptions;
+
+    [[nodiscard]] static Result<Indexer> create(const IndexerOptions& opts = {}) {
+        KjarniIndexerConfig cfg = kjarni_indexer_config_default();
+        const std::string extensions = detail::join(opts.extensions);
+        const std::string exclude = detail::join(opts.exclude);
+        cfg.model_name = opts.model.c_str();
+        cfg.cache_dir = detail::or_null(opts.cache_dir);
+        if (opts.chunk_size) cfg.chunk_size = opts.chunk_size;
+        if (opts.chunk_overlap) cfg.chunk_overlap = opts.chunk_overlap;
+        cfg.extensions = detail::or_null(extensions);
+        cfg.exclude_patterns = detail::or_null(exclude);
+        cfg.recursive = opts.recursive ? 1 : 0;
+        cfg.include_hidden = opts.include_hidden ? 1 : 0;
+        cfg.device = opts.gpu ? KJARNI_DEVICE_GPU : KJARNI_DEVICE_CPU;
+        cfg.quiet = opts.quiet ? 1 : 0;
+
+        KjarniIndexer* raw = nullptr;
+        if (auto e = detail::check(kjarni_indexer_new(&cfg, &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return Indexer{raw};
+    }
+
+    /// Indexes `inputs` (files and folders) into a new index at `index_path`.
+    /// `force` replaces an index already there.
+    [[nodiscard]] Result<IndexStats> create_index(std::string_view index_path,
+                                                  std::span<const std::string> inputs,
+                                                  bool force = false) const {
+        const std::string path{index_path};
+        detail::CStrings ptrs{inputs};
+        KjarniIndexStats stats{};
+        if (auto e = detail::check(kjarni_indexer_create(handle_.get(), path.c_str(), ptrs.data(),
+                                                         ptrs.size(), force ? 1 : 0, &stats));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return IndexStats{stats.documents_indexed, stats.chunks_created, stats.dimension,
+                          stats.size_bytes,        stats.files_processed, stats.files_skipped,
+                          stats.elapsed_ms};
+    }
+
+    /// Adds `inputs` to an existing index; returns how many chunks were added.
+    [[nodiscard]] Result<std::size_t> add(std::string_view index_path,
+                                          std::span<const std::string> inputs) const {
+        const std::string path{index_path};
+        detail::CStrings ptrs{inputs};
+        std::size_t added = 0;
+        if (auto e = detail::check(
+                kjarni_indexer_add(handle_.get(), path.c_str(), ptrs.data(), ptrs.size(), &added));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return added;
+    }
+
+private:
+    explicit Indexer(KjarniIndexer* raw) noexcept : handle_(raw) {}
+
+    detail::Handle<KjarniIndexer, kjarni_indexer_free> handle_;
+};
+
+// ─── Searcher ────────────────────────────────────────────────────
+
+enum class SearchMode { keyword = KJARNI_SEARCH_MODE_KEYWORD, semantic = KJARNI_SEARCH_MODE_SEMANTIC, hybrid = KJARNI_SEARCH_MODE_HYBRID };
+
+struct SearcherOptions {
+    /// Must be the model the index was built with.
+    std::string model = "minilm-l6-v2";
+    /// A cross-encoder for reranking, e.g. "minilm-l6-v2-cross-encoder"; empty for none.
+    std::string rerank_model;
+    std::string cache_dir;
+    SearchMode mode = SearchMode::hybrid;
+    std::size_t top_k = 10;
+    bool gpu = false;
+    bool quiet = true;
+};
+
+/// Per-query overrides; anything left unset uses the searcher's defaults.
+struct SearchOptions {
+    std::optional<SearchMode> mode;
+    std::size_t top_k = 0;
+    std::optional<bool> rerank;
+    /// Drop results scoring below this.
+    float threshold = 0.f;
+    /// Only files whose path matches this `*` pattern.
+    std::string source_pattern;
+    std::string filter_key;
+    std::string filter_value;
+};
+
+/// Searches an index built by `Indexer`, by keyword, meaning or both.
+class Searcher {
+public:
+    using Options = SearcherOptions;
+
+    [[nodiscard]] static Result<Searcher> create(const SearcherOptions& opts = {}) {
+        KjarniSearcherConfig cfg = kjarni_searcher_config_default();
+        cfg.model_name = opts.model.c_str();
+        cfg.rerank_model = detail::or_null(opts.rerank_model);
+        cfg.cache_dir = detail::or_null(opts.cache_dir);
+        cfg.default_mode = static_cast<KjarniSearchMode>(opts.mode);
+        if (opts.top_k) cfg.default_top_k = opts.top_k;
+        cfg.device = opts.gpu ? KJARNI_DEVICE_GPU : KJARNI_DEVICE_CPU;
+        cfg.quiet = opts.quiet ? 1 : 0;
+
+        KjarniSearcher* raw = nullptr;
+        if (auto e = detail::check(kjarni_searcher_new(&cfg, &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return Searcher{raw};
+    }
+
+    [[nodiscard]] Result<std::vector<Hit>> search(std::string_view index_path,
+                                                  std::string_view query) const {
+        const std::string path{index_path}, q{query};
+        detail::Owning<KjarniSearchResults, kjarni_search_results_free> out;
+        if (auto e = detail::check(kjarni_searcher_search(handle_.get(), path.c_str(), q.c_str(), out.out()));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return hits(out.raw());
+    }
+
+    [[nodiscard]] Result<std::vector<Hit>> search(std::string_view index_path, std::string_view query,
+                                                  const SearchOptions& options) const {
+        const std::string path{index_path}, q{query};
+        KjarniSearchOptions o = kjarni_search_options_default();
+        if (options.mode) o.mode = static_cast<std::int32_t>(*options.mode);
+        if (options.top_k) o.top_k = options.top_k;
+        if (options.rerank) o.use_reranker = *options.rerank ? 1 : 0;
+        o.threshold = options.threshold;
+        o.source_pattern = detail::or_null(options.source_pattern);
+        o.filter_key = detail::or_null(options.filter_key);
+        o.filter_value = detail::or_null(options.filter_value);
+        detail::Owning<KjarniSearchResults, kjarni_search_results_free> out;
+        if (auto e = detail::check(kjarni_searcher_search_with_options(handle_.get(), path.c_str(),
+                                                                        q.c_str(), &o, out.out()));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return hits(out.raw());
+    }
+
+    [[nodiscard]] bool has_reranker() const noexcept { return kjarni_searcher_has_reranker(handle_.get()); }
+
+private:
+    explicit Searcher(KjarniSearcher* raw) noexcept : handle_(raw) {}
+
+    static std::vector<Hit> hits(const KjarniSearchResults& raw) {
+        std::vector<Hit> out;
+        out.reserve(raw.len);
+        for (std::size_t i = 0; i < raw.len; ++i) {
+            const auto& r = raw.results[i];
+            out.push_back({r.score, r.document_id, r.text ? r.text : "",
+                           r.metadata_json ? r.metadata_json : ""});
+        }
+        return out;
+    }
+
+    detail::Handle<KjarniSearcher, kjarni_searcher_free> handle_;
+};
+
+// ─── Transcriber ─────────────────────────────────────────────────
+
+/// One timed piece of a transcript, in seconds from the start.
+struct Segment {
+    float start{};
+    float end{};
+    std::string text;
+};
+
+struct Transcript {
+    std::string text;
+    /// ISO code of the language transcribed: the one given, or the one detected.
+    std::string language;
+    float duration_secs{};
+    std::vector<Segment> segments;
+};
+
+struct TranscriberOptions {
+    std::string model = "whisper-small";
+    /// ISO code such as "en" or "is"; empty detects it from the audio.
+    std::string language;
+    /// Translate the speech into English instead of transcribing it.
+    bool translate = false;
+    bool gpu = false;
+    bool quiet = true;
+};
+
+/// Speech to text with Whisper.
+class Transcriber {
+public:
+    using Options = TranscriberOptions;
+
+    [[nodiscard]] static Result<Transcriber> create(const TranscriberOptions& opts = {}) {
+        KjarniTranscriberConfig cfg = kjarni_transcriber_config_default();
+        cfg.model_name = opts.model.c_str();
+        cfg.language = detail::or_null(opts.language);
+        cfg.translate = opts.translate ? 1 : 0;
+        cfg.device = opts.gpu ? KJARNI_DEVICE_GPU : KJARNI_DEVICE_CPU;
+        cfg.quiet = opts.quiet ? 1 : 0;
+
+        KjarniTranscriber* raw = nullptr;
+        if (auto e = detail::check(kjarni_transcriber_new(&cfg, &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return Transcriber{raw};
+    }
+
+    /// Transcribes a wav, mp3, flac or ogg file.
+    [[nodiscard]] Result<Transcript> transcribe_file(std::string_view path) const {
+        const std::string p{path};
+        detail::Owning<KjarniTranscription, kjarni_transcription_free> out;
+        if (auto e = detail::check(kjarni_transcriber_transcribe_file(handle_.get(), p.c_str(), out.out()));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return transcript(out.raw());
+    }
+
+    /// Transcribes mono samples in -1..1 at any sample rate.
+    [[nodiscard]] Result<Transcript> transcribe(std::span<const float> samples,
+                                                std::uint32_t sample_rate) const {
+        detail::Owning<KjarniTranscription, kjarni_transcription_free> out;
+        if (auto e = detail::check(kjarni_transcriber_transcribe_pcm(
+                handle_.get(), samples.data(), samples.size(), sample_rate, out.out()));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return transcript(out.raw());
+    }
+
+private:
+    explicit Transcriber(KjarniTranscriber* raw) noexcept : handle_(raw) {}
+
+    static Transcript transcript(const KjarniTranscription& raw) {
+        Transcript t{raw.text ? raw.text : "", raw.language ? raw.language : "", raw.duration_secs, {}};
+        t.segments.reserve(raw.len);
+        for (std::size_t i = 0; i < raw.len; ++i) {
+            const auto& s = raw.segments[i];
+            t.segments.push_back({s.start, s.end, s.text ? s.text : ""});
+        }
+        return t;
+    }
+
+    detail::Handle<KjarniTranscriber, kjarni_transcriber_free> handle_;
+};
+
+// ─── Summarizer ──────────────────────────────────────────────────
+
+struct SummarizerOptions {
+    std::string model = "distilbart-cnn";
+    std::string cache_dir;
+    /// Summary length bounds in tokens; 0 keeps the model's defaults.
+    std::size_t min_length = 0;
+    std::size_t max_length = 0;
+    bool gpu = false;
+    bool quiet = true;
+};
+
+/// Summarizes article-length text.
+class Summarizer {
+public:
+    using Options = SummarizerOptions;
+
+    [[nodiscard]] static Result<Summarizer> create(const SummarizerOptions& opts = {}) {
+        KjarniSummarizerConfig cfg = kjarni_summarizer_config_default();
+        cfg.model_name = opts.model.c_str();
+        cfg.cache_dir = detail::or_null(opts.cache_dir);
+        cfg.min_length = opts.min_length;
+        cfg.max_length = opts.max_length;
+        cfg.device = opts.gpu ? KJARNI_DEVICE_GPU : KJARNI_DEVICE_CPU;
+        cfg.quiet = opts.quiet ? 1 : 0;
+
+        KjarniSummarizer* raw = nullptr;
+        if (auto e = detail::check(kjarni_summarizer_new(&cfg, &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return Summarizer{raw};
+    }
+
+    [[nodiscard]] Result<std::string> summarize(std::string_view text) const {
+        const std::string t{text};
+        char* out = nullptr;
+        if (auto e = detail::check(kjarni_summarizer_summarize(handle_.get(), t.c_str(), &out)); !e) {
+            return std::unexpected(e.error());
+        }
+        return detail::adopt(out);
+    }
+
+private:
+    explicit Summarizer(KjarniSummarizer* raw) noexcept : handle_(raw) {}
+
+    detail::Handle<KjarniSummarizer, kjarni_summarizer_free> handle_;
+};
+
+// ─── Translator ──────────────────────────────────────────────────
+
+struct TranslatorOptions {
+    std::string model = "flan-t5-base";
+    std::string cache_dir;
+    /// Default languages for `translate(text)`, e.g. "en" and "de".
+    std::string from;
+    std::string to;
+    bool gpu = false;
+    bool quiet = true;
+};
+
+/// Translates text between languages.
+class Translator {
+public:
+    using Options = TranslatorOptions;
+
+    [[nodiscard]] static Result<Translator> create(const TranslatorOptions& opts = {}) {
+        KjarniTranslatorConfig cfg = kjarni_translator_config_default();
+        cfg.model_name = opts.model.c_str();
+        cfg.cache_dir = detail::or_null(opts.cache_dir);
+        cfg.from = detail::or_null(opts.from);
+        cfg.to = detail::or_null(opts.to);
+        cfg.device = opts.gpu ? KJARNI_DEVICE_GPU : KJARNI_DEVICE_CPU;
+        cfg.quiet = opts.quiet ? 1 : 0;
+
+        KjarniTranslator* raw = nullptr;
+        if (auto e = detail::check(kjarni_translator_new(&cfg, &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return Translator{raw};
+    }
+
+    /// Translates between the default languages given at creation.
+    [[nodiscard]] Result<std::string> translate(std::string_view text) const {
+        return run(text, nullptr, nullptr);
+    }
+
+    [[nodiscard]] Result<std::string> translate(std::string_view text, std::string_view from,
+                                                std::string_view to) const {
+        const std::string f{from}, t{to};
+        return run(text, f.c_str(), t.c_str());
+    }
+
+private:
+    explicit Translator(KjarniTranslator* raw) noexcept : handle_(raw) {}
+
+    [[nodiscard]] Result<std::string> run(std::string_view text, const char* from, const char* to) const {
+        const std::string t{text};
+        char* out = nullptr;
+        if (auto e = detail::check(kjarni_translator_translate(handle_.get(), t.c_str(), from, to, &out)); !e) {
+            return std::unexpected(e.error());
+        }
+        return detail::adopt(out);
+    }
+
+    detail::Handle<KjarniTranslator, kjarni_translator_free> handle_;
+};
+
+#if defined(KJARNI_IMAGE_IO)
+// ─── Image search ────────────────────────────────────────────────
+
+struct ImageHit {
+    std::string path;
+    /// Cosine similarity; small even for good matches, so only the order matters.
+    float score{};
+};
+
+struct ScanReport {
+    std::size_t added{};
+    /// Files that could not be decoded.
+    std::size_t skipped{};
+};
+
+struct ImageIndexOptions {
+    /// A CLIP model directory; empty uses clip-vit-base-32, downloaded on first use.
+    std::string model_dir;
+};
+
+/// Photos searched by description, with CLIP. Not safe to share across threads
+/// while adding.
+class ImageIndex {
+public:
+    using Options = ImageIndexOptions;
+
+    [[nodiscard]] static Result<ImageIndex> create(const ImageIndexOptions& opts = {}) {
+        KjarniImageIndex* raw = nullptr;
+        if (auto e = detail::check(kjarni_image_index_new(detail::or_null(opts.model_dir), &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return ImageIndex{raw};
+    }
+
+    [[nodiscard]] std::expected<void, Error> add(std::string_view path) {
+        const std::string p{path};
+        return detail::check(kjarni_image_index_add(handle_.get(), p.c_str()));
+    }
+
+    /// Adds every JPEG and PNG under `dir`.
+    [[nodiscard]] Result<ScanReport> add_directory(std::string_view dir) {
+        const std::string d{dir};
+        KjarniScanReport report{};
+        if (auto e = detail::check(kjarni_image_index_add_directory(handle_.get(), d.c_str(), &report)); !e) {
+            return std::unexpected(e.error());
+        }
+        return ScanReport{report.added, report.skipped};
+    }
+
+    [[nodiscard]] Result<std::vector<ImageHit>> search(std::string_view query, std::size_t top_k = 10) const {
+        const std::string q{query};
+        detail::Owning<KjarniImageResults, kjarni_image_results_free> out;
+        if (auto e = detail::check(kjarni_image_index_search(handle_.get(), q.c_str(), top_k, out.out())); !e) {
+            return std::unexpected(e.error());
+        }
+        std::vector<ImageHit> hits;
+        hits.reserve(out.raw().len);
+        for (std::size_t i = 0; i < out.raw().len; ++i) {
+            hits.push_back({out.raw().hits[i].path ? out.raw().hits[i].path : "", out.raw().hits[i].score});
+        }
+        return hits;
+    }
+
+    /// Writes the vectors (not the images) to `path`.
+    [[nodiscard]] std::expected<void, Error> save(std::string_view path) const {
+        const std::string p{path};
+        return detail::check(kjarni_image_index_save(handle_.get(), p.c_str()));
+    }
+
+    /// Restores vectors saved by `save`; returns how many.
+    [[nodiscard]] Result<std::size_t> load(std::string_view path) {
+        const std::string p{path};
+        std::size_t count = 0;
+        if (auto e = detail::check(kjarni_image_index_load(handle_.get(), p.c_str(), &count)); !e) {
+            return std::unexpected(e.error());
+        }
+        return count;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return kjarni_image_index_len(handle_.get()); }
+
+private:
+    explicit ImageIndex(KjarniImageIndex* raw) noexcept : handle_(raw) {}
+
+    detail::Handle<KjarniImageIndex, kjarni_image_index_free> handle_;
+};
+#endif  // KJARNI_IMAGE_IO
 
 /// Library version, e.g. "0.1.0".
 [[nodiscard]] inline std::string_view version() noexcept {

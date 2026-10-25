@@ -1,6 +1,7 @@
 // Package kjarni provides text classification, embeddings, semantic search,
-// and reranking using pre-trained transformer models, running inside your
-// process against a native library. Models download automatically on first use
+// reranking, chat, speech to text, summarization, translation and image search
+// using pre-trained models, running inside your process against a native
+// library. Models download automatically on first use
 // and are cached on disk, so everything after that works offline.
 //
 // The same engine ships for other runtimes: Kjarni on NuGet for C#, kjarni-wasm
@@ -19,4 +20,19 @@
 //	defer emb.Close()
 //
 //	vec, err := emb.Encode("hello world")
+//
+// # Beyond text embeddings
+//
+//	tr, _ := kjarni.NewTranscriber("", kjarni.WithLanguage("en"))
+//	transcript, _ := tr.TranscribeFile("meeting.wav")
+//
+//	sum, _ := kjarni.NewSummarizer("")
+//	summary, _ := sum.Summarize(article)
+//
+//	tl, _ := kjarni.NewTranslator("", kjarni.WithLanguages("en", "de"))
+//	german, _ := tl.Translate("The house is small.")
+//
+//	photos, _ := kjarni.NewImageIndex("")
+//	photos.AddDirectory("Pictures")
+//	hits, _ := photos.Search("a red car", 5)
 package kjarni

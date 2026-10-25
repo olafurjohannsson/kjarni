@@ -220,6 +220,6 @@ func parseRerankResults(results ffiRerankResults, documents []string) []RerankRe
 
 func freeRerankResults(results ffiRerankResults) {
     if _rerankResultsFreeSym != 0 {
-        purego.SyscallN(_rerankResultsFreeSym, uintptr(unsafe.Pointer(&results)))
+        callWithStruct(_rerankResultsFreeSym, unsafe.Pointer(&results), unsafe.Sizeof(results))
     }
 }

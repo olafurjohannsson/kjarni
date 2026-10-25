@@ -1,6 +1,7 @@
 package kjarni
 
 import (
+	"runtime"
 	"errors"
 	"fmt"
 	"sync"
@@ -240,14 +241,8 @@ func (c *Chat) StreamWithConfig(message string, config *GenerationConfig, onToke
 		configPtr = uintptr(unsafe.Pointer(&ffiConfig))
 	}
 
-	// callback
-	cb := purego.NewCallback(func(textPtr uintptr, userData uintptr) uintptr {
-		text := goString(textPtr)
-		if onToken(text) {
-			return 1 // continue
-		}
-		return 0 // stop
-	})
+	cb, userData, release := registerStream(onToken)
+	defer release()
 
 	r1, _, _ := purego.SyscallN(
 		_chatStreamSym,
@@ -255,7 +250,7 @@ func (c *Chat) StreamWithConfig(message string, config *GenerationConfig, onToke
 		msgPtr,
 		configPtr,
 		cb,
-		0, // userData
+		userData,
 		0, // cancelToken
 	)
 
@@ -401,13 +396,8 @@ func (cc *ChatConversation) Stream(message string, onToken func(token string) bo
 	msgPtr, keepMsg := cString(message)
 	defer keepMsg()
 
-	cb := purego.NewCallback(func(textPtr uintptr, userData uintptr) uintptr {
-		text := goString(textPtr)
-		if onToken(text) {
-			return 1
-		}
-		return 0
-	})
+	cb, userData, release := registerStream(onToken)
+	defer release()
 
 	r1, _, _ := purego.SyscallN(
 		_chatConversationStreamSym,
@@ -415,7 +405,7 @@ func (cc *ChatConversation) Stream(message string, onToken func(token string) bo
 		msgPtr,
 		0, // default genConfig
 		cb,
-		0, // userData
+		userData,
 		0, // cancelToken
 	)
 
@@ -475,4 +465,97 @@ func toFFIGenConfig(config GenerationConfig) ffiGenerationConfig {
 		MaxNewTokens:    config.MaxNewTokens,
 		DoSample:        config.DoSample,
 	}
+}
+// ChatRole is who wrote a turn of a transcript.
+type ChatRole int32
+
+const (
+	RoleSystem    ChatRole = 0
+	RoleUser      ChatRole = 1
+	RoleAssistant ChatRole = 2
+)
+
+// ChatTurn is one message of a transcript the caller keeps.
+type ChatTurn struct {
+	Role    ChatRole
+	Content string
+}
+
+// history lays out a transcript as the parallel arrays the C API takes.
+func history(turns []ChatTurn) (roles uintptr, contents uintptr, keep func()) {
+	if len(turns) == 0 {
+		return 0, 0, func() {}
+	}
+	r := make([]int32, len(turns))
+	texts := make([]string, len(turns))
+	for i, t := range turns {
+		r[i] = int32(t.Role)
+		texts[i] = t.Content
+	}
+	contents, keepContents := cStringArray(texts)
+	return uintptr(unsafe.Pointer(&r[0])), contents, func() {
+		keepContents()
+		runtime.KeepAlive(r)
+	}
+}
+
+// SendWithHistory replies to message given prior turns, oldest first, without
+// keeping any state. It suits callers that own the transcript and replay it every
+// turn; ChatConversation is simpler otherwise. A RoleSystem turn replaces the
+// system prompt given to NewChat. config may be nil for the defaults.
+func (c *Chat) SendWithHistory(turns []ChatTurn, message string, config *GenerationConfig) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return "", errors.New("chat is closed")
+	}
+
+	roles, contents, keepHistory := history(turns)
+	defer keepHistory()
+	msgPtr, keepMsg := cString(message)
+	defer keepMsg()
+	var configPtr uintptr
+	var ffiConfig ffiGenerationConfig
+	if config != nil {
+		ffiConfig = toFFIGenConfig(*config)
+		configPtr = uintptr(unsafe.Pointer(&ffiConfig))
+	}
+
+	var resultPtr uintptr
+	r1, _, _ := purego.SyscallN(_chatSendWithHistorySym, c.handle, roles, contents, uintptr(len(turns)),
+		msgPtr, configPtr, uintptr(unsafe.Pointer(&resultPtr)))
+	if code := int32(r1); code != 0 {
+		return "", lastError(code)
+	}
+	return takeString(resultPtr), nil
+}
+
+// StreamWithHistory is SendWithHistory, streamed through onToken. Return false
+// from onToken to stop.
+func (c *Chat) StreamWithHistory(turns []ChatTurn, message string, config *GenerationConfig, onToken func(token string) bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("chat is closed")
+	}
+
+	roles, contents, keepHistory := history(turns)
+	defer keepHistory()
+	msgPtr, keepMsg := cString(message)
+	defer keepMsg()
+	var configPtr uintptr
+	var ffiConfig ffiGenerationConfig
+	if config != nil {
+		ffiConfig = toFFIGenConfig(*config)
+		configPtr = uintptr(unsafe.Pointer(&ffiConfig))
+	}
+	cb, userData, release := registerStream(onToken)
+	defer release()
+
+	r1, _, _ := purego.SyscallN(_chatStreamWithHistorySym, c.handle, roles, contents, uintptr(len(turns)),
+		msgPtr, configPtr, cb, userData, 0)
+	if code := int32(r1); code != 0 {
+		return lastError(code)
+	}
+	return nil
 }

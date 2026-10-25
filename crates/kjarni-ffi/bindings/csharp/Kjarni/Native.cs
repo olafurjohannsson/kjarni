@@ -821,6 +821,207 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_chat_context_size(IntPtr handle);
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniTranscriberConfig
+        {
+            public KjarniDevice Device;
+            public IntPtr ModelName;
+            public IntPtr Language;
+            public int Translate;
+            public int Quiet;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniTranscriptionSegment
+        {
+            public float Start;
+            public float End;
+            public IntPtr Text;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniTranscription
+        {
+            public IntPtr Text;
+            public IntPtr Language;
+            public float DurationSecs;
+            public IntPtr Segments;
+            public UIntPtr Len;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniSummarizerConfig
+        {
+            public KjarniDevice Device;
+            public IntPtr CacheDir;
+            public IntPtr ModelName;
+            public UIntPtr MinLength;
+            public UIntPtr MaxLength;
+            public int Quiet;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniTranslatorConfig
+        {
+            public KjarniDevice Device;
+            public IntPtr CacheDir;
+            public IntPtr ModelName;
+            public IntPtr From;
+            public IntPtr To;
+            public int Quiet;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniImageHit
+        {
+            public IntPtr Path;
+            public float Score;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniImageResults
+        {
+            public IntPtr Hits;
+            public UIntPtr Len;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniScanReport
+        {
+            public UIntPtr Added;
+            public UIntPtr Skipped;
+        }
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniTranscriberConfig kjarni_transcriber_config_default();
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_transcriber_new(
+            ref KjarniTranscriberConfig config,
+            out IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_transcriber_free(IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_transcriber_transcribe_file(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+            out KjarniTranscription result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_transcriber_transcribe_pcm(
+            IntPtr handle,
+            float[] samples,
+            UIntPtr len,
+            uint sampleRate,
+            out KjarniTranscription result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_transcription_free(KjarniTranscription transcription);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniSummarizerConfig kjarni_summarizer_config_default();
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_summarizer_new(
+            ref KjarniSummarizerConfig config,
+            out IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_summarizer_free(IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_summarizer_summarize(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string text,
+            out IntPtr result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniTranslatorConfig kjarni_translator_config_default();
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_translator_new(
+            ref KjarniTranslatorConfig config,
+            out IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_translator_free(IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_translator_translate(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string text,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string? from,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string? to,
+            out IntPtr result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_image_index_new(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string? modelDir,
+            out IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_image_index_free(IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_image_index_add(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_image_index_add_directory(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string dir,
+            out KjarniScanReport report);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_image_index_search(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
+            UIntPtr topK,
+            out KjarniImageResults results);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_image_results_free(KjarniImageResults results);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_image_index_save(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_image_index_load(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+            out UIntPtr count);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern UIntPtr kjarni_image_index_len(IntPtr handle);
+
+        /// <summary>
+        /// Copies a string the engine allocated and frees the original.
+        /// </summary>
+        public static string TakeString(IntPtr ptr)
+        {
+            if (ptr == IntPtr.Zero) return "";
+            try
+            {
+                return Marshal.PtrToStringUTF8(ptr) ?? "";
+            }
+            finally
+            {
+                kjarni_string_free(ptr);
+            }
+        }
+
+        /// <summary>
+        /// Allocates a UTF-8 copy for a config field, or null for null or empty.
+        /// Release it with <see cref="Marshal.FreeCoTaskMem"/>, which ignores null.
+        /// </summary>
+        public static IntPtr Utf8OrNull(string? s) =>
+            string.IsNullOrEmpty(s) ? IntPtr.Zero : Marshal.StringToCoTaskMemUTF8(s);
+
         public static void CheckError(KjarniErrorCode err)
         {
             if (err != KjarniErrorCode.Ok)

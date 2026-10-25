@@ -1,8 +1,8 @@
 package kjarni
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"unsafe"
 
@@ -23,8 +23,27 @@ const (
 
 // SearchResult holds a single search result with its relevance score.
 type SearchResult struct {
-	Score float32
-	Text  string
+	Score      float32
+	Text       string
+	DocumentID int
+	// Metadata stored with the chunk, such as "source", the file it came from.
+	Metadata map[string]any
+}
+
+// SearchOptions overrides a Searcher's defaults for one query. The zero value
+// changes nothing.
+type SearchOptions struct {
+	// TopK is the most results to return; 0 means 10.
+	TopK int
+	// NoRerank skips the reranker for this query when the Searcher has one.
+	NoRerank bool
+	// Threshold drops results scoring below it.
+	Threshold float32
+	// SourcePattern keeps only chunks from files matching this `*` pattern, e.g. "*.md".
+	SourcePattern string
+	// FilterKey and FilterValue keep only chunks whose metadata has that pair.
+	FilterKey   string
+	FilterValue string
 }
 
 type ffiSearcherConfig struct {
@@ -75,16 +94,16 @@ type Searcher struct {
 // Pass a non-empty rerankerModel to enable cross-encoder reranking of results.
 // Pass an empty string to disable reranking.
 func NewSearcher(model string, rerankerModel string, opts ...Option) (*Searcher, error) {
-	var initErr error
-	ffiOnce.Do(func() { initErr = initFFI() })
-	if initErr != nil {
-		return nil, fmt.Errorf("initializing kjarni: %w", initErr)
+	if err := ensureInit(); err != nil {
+		return nil, err
 	}
 
 	o := applyOptions(opts)
 
 	modelStr, keepModel := cString(model)
 	defer keepModel()
+	cacheDir, keepCacheDir := cStringOrNull(o.cacheDir)
+	defer keepCacheDir()
 
 	var rerankPtr uintptr
 	var keepRerank func()
@@ -96,6 +115,7 @@ func NewSearcher(model string, rerankerModel string, opts ...Option) (*Searcher,
 	var config ffiSearcherConfig
 	config.Device = deviceCode(o.device)
 	config.ModelName = modelStr
+	config.CacheDir = cacheDir
 	config.RerankModel = rerankPtr
 	config.DefaultMode = int32(Hybrid)
 	config.Quiet = boolToInt(o.quiet)
@@ -115,8 +135,14 @@ func NewSearcher(model string, rerankerModel string, opts ...Option) (*Searcher,
 	return &Searcher{handle: handle}, nil
 }
 
-// Search queries the index at indexPath and returns results using the given mode.
+// Search queries the index at indexPath and returns up to 10 results using the
+// given mode, reranked when the Searcher has a reranker.
 func (s *Searcher) Search(indexPath string, query string, mode SearchMode) ([]SearchResult, error) {
+	return s.SearchWithOptions(indexPath, query, mode, SearchOptions{})
+}
+
+// SearchWithOptions is Search with per-query overrides.
+func (s *Searcher) SearchWithOptions(indexPath string, query string, mode SearchMode, opts SearchOptions) ([]SearchResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -128,11 +154,29 @@ func (s *Searcher) Search(indexPath string, query string, mode SearchMode) ([]Se
 	defer keepPath()
 	queryPtr, keepQuery := cString(query)
 	defer keepQuery()
+	sourcePtr, keepSource := cStringOrNull(opts.SourcePattern)
+	defer keepSource()
+	keyPtr, keepKey := cStringOrNull(opts.FilterKey)
+	defer keepKey()
+	valuePtr, keepValue := cStringOrNull(opts.FilterValue)
+	defer keepValue()
 
 	var searchOpts ffiSearchOptions
 	searchOpts.Mode = int32(mode)
 	searchOpts.TopK = 10
-	searchOpts.UseReranker = 1
+	if opts.TopK > 0 {
+		searchOpts.TopK = uintptr(opts.TopK)
+	}
+	// -1 reranks when a reranker was configured. This used to send 1, asking for
+	// a reranker on every query whether or not one existed.
+	searchOpts.UseReranker = -1
+	if opts.NoRerank {
+		searchOpts.UseReranker = 0
+	}
+	searchOpts.Threshold = opts.Threshold
+	searchOpts.SourcePattern = sourcePtr
+	searchOpts.FilterKey = keyPtr
+	searchOpts.FilterValue = valuePtr
 
 	var results ffiSearchResults
 	r1, _, _ := purego.SyscallN(
@@ -180,8 +224,12 @@ func parseSearchResults(results ffiSearchResults) []SearchResult {
 		ptr := results.Results + uintptr(i)*structSize
 		item := (*ffiSearchResult)(unsafe.Pointer(ptr))
 		out[i] = SearchResult{
-			Score: item.Score,
-			Text:  goString(item.Text),
+			Score:      item.Score,
+			Text:       goString(item.Text),
+			DocumentID: int(item.DocumentId),
+		}
+		if meta := goString(item.MetadataJson); meta != "" {
+			_ = json.Unmarshal([]byte(meta), &out[i].Metadata)
 		}
 	}
 
@@ -190,6 +238,6 @@ func parseSearchResults(results ffiSearchResults) []SearchResult {
 
 func freeSearchResults(results ffiSearchResults) {
     if _searchResultsFreeSym != 0 {
-        purego.SyscallN(_searchResultsFreeSym, uintptr(unsafe.Pointer(&results)))
+        callWithStruct(_searchResultsFreeSym, unsafe.Pointer(&results), unsafe.Sizeof(results))
     }
 }

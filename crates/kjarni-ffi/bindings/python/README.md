@@ -165,6 +165,49 @@ for hit in searcher.search("how do I change my password", top_k=5):
 `SearchMode` selects keyword, semantic or hybrid retrieval, and the searcher can carry
 a reranker for the second pass.
 
+## Chat
+
+```python
+from kjarni import Chat
+
+chat = Chat("qwen2.5-0.5b-instruct", quiet=True)
+print(chat.send("What is the capital of France?"))
+
+chat.stream("Write a haiku about Reykjavík.", lambda token: print(token, end="", flush=True))
+
+convo = chat.conversation()          # keeps its own history
+convo.send("Remember this: the secret word is banana.")
+convo.send("What is the secret word?")
+
+chat.send_with_history([("user", "My name is Anna."), ("assistant", "Hi Anna.")], "What is my name?")
+```
+
+Sampling settings are keyword arguments: `temperature`, `top_k`, `top_p`, `min_p`,
+`repetition_penalty`, `max_new_tokens`, `do_sample`. Return `False` from a stream
+callback to stop generating.
+
+## Speech, summaries, translation and photos
+
+```python
+from kjarni import Transcriber, Summarizer, Translator, ImageIndex
+
+t = Transcriber(language="en").transcribe_file("meeting.wav")
+print(t.text, t.segments[0].start, t.segments[0].end)
+
+print(Summarizer().summarize(article))
+
+print(Translator(source="en", target="de").translate("The house is small."))  # Das Haus ist klein.
+
+photos = ImageIndex()                # CLIP, downloaded on first use
+photos.add_directory("Pictures")
+for hit in photos.search("a red car", top_k=5):
+    print(hit.path, hit.score)
+photos.save("photos.idx")
+```
+
+`Transcriber.transcribe(samples, sample_rate)` takes mono PCM at any rate; a NumPy
+float32 array or `array("f")` is passed without copying.
+
 ## Choosing a model
 
 | Model | Dimensions | Input limit | Notes |

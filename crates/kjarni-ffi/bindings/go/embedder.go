@@ -225,12 +225,12 @@ func float2DArrayToSlice(arr ffiFloat2DArray) [][]float32 {
 
 func freeFloatArray(arr ffiFloatArray) {
     if _floatArrayFreeSym != 0 {
-        purego.SyscallN(_floatArrayFreeSym, uintptr(unsafe.Pointer(&arr)))
+        callWithStruct(_floatArrayFreeSym, unsafe.Pointer(&arr), unsafe.Sizeof(arr))
     }
 }
 
 func freeFloat2DArray(arr ffiFloat2DArray) {
     if _float2DArrayFreeSym != 0 {
-        purego.SyscallN(_float2DArrayFreeSym, uintptr(unsafe.Pointer(&arr)))
+        callWithStruct(_float2DArrayFreeSym, unsafe.Pointer(&arr), unsafe.Sizeof(arr))
     }
 }

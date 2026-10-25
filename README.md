@@ -7,7 +7,7 @@
 [![CI](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-**Local embeddings, semantic search, classification, reranking and chat for C#, Go, Rust, Python, C++ and the command line.**
+**Local embeddings, semantic search, classification, reranking, chat, speech to text, summarization, translation and image search for C#, Go, Rust, Python, C++ and the command line.**
 
 Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine.
 
@@ -217,6 +217,26 @@ echo "I love this product" | kjarni classify
 
 **More examples:** [C#](crates/kjarni-ffi/bindings/csharp/examples) (RAG pipeline, ASP.NET API, Semantic Kernel) · [C++](crates/kjarni-ffi/examples/cpp) and [Qt/QML](crates/kjarni-ffi/examples/qml) · [browser](crates/kjarni-wasm/examples) · [Go](crates/kjarni-ffi/bindings/go/examples) · [Rust](crates/kjarni-examples/examples) · or try the [live demo](https://kjarni.ai/demo) with nothing installed.
 
+## What each language can do
+
+Every capability is in every native binding. Each one wraps the same C ABI, so the
+same input gives byte-identical output in all of them, which the tests check.
+
+| Capability | Rust | C# | Go | Python | C / C++ | CLI | Browser (WASM) |
+| ---------- | :--: | :-: | :-: | :----: | :-----: | :-: | :------------: |
+| Embeddings and similarity | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Classification | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Reranking | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Indexing and hybrid search | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Chat and streaming | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Speech to text (Whisper) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Summarization | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Translation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Image search by description (CLIP) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+
+The browser build covers the encoder and chat paths; Whisper, the seq2seq models and
+CLIP are native only for now.
+
 ## For AI agents (MCP)
 
 `kjarni mcp` serves Kjarni's capabilities to any MCP client (Claude Code, Cursor, Claude Desktop, VS Code) as tools that run on your machine: `search_folder` (semantic and hybrid search over a folder of documents or code, indexed on first use and kept up to date), `transcribe`, `classify`, `rerank` and `similarity`.
@@ -383,7 +403,7 @@ Referenced by short name; the underlying HuggingFace model is listed for searcha
 
 \* Downloaded from a safetensors conversion mirrored under [`olafuraron`](https://huggingface.co/olafuraron); the upstream model and its license are unchanged.
 
-`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation runs through the same engine, in C#, Rust, the CLI and the browser. If raw single-model generation throughput is what you are optimising for, [llama.cpp](https://github.com/ggerganov/llama.cpp) is more specialised. Kjarni's lane is breadth of language and deployment rather than raw generation speed: the same engine behind a NuGet package, a Go module, a C header, a CLI binary and a WASM bundle.
+`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation runs through the same engine in every language binding, the CLI and the browser. If raw single-model generation throughput is what you are optimising for, [llama.cpp](https://github.com/ggerganov/llama.cpp) is more specialised. Kjarni's lane is breadth of language and deployment rather than raw generation speed: the same engine behind a NuGet package, a Go module, a C header, a CLI binary and a WASM bundle.
 
 ## FAQ
 
