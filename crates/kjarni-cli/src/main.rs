@@ -150,6 +150,7 @@ async fn main() -> Result<()> {
             .await
         }
 
+        Commands::Mcp => commands::mcp::run().await,
         Commands::Transcribe {
             file,
             model,

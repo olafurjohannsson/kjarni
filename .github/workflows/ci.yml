@@ -762,6 +762,20 @@ jobs:
         with:
           path: artifacts/
 
+      - name: Check Windows binaries need no Visual C++ Redistributable
+        run: |
+          # .cargo/config.toml links the C runtime statically for the msvc
+          # target. If that stops applying (a RUSTFLAGS override, a toolchain
+          # change), the binaries quietly go back to importing VCRUNTIME140.dll
+          # and fail to load on a clean Windows install. Catch it here.
+          for f in artifacts/kjarni-x86_64-windows/kjarni_ffi.dll \
+                   artifacts/kjarni-x86_64-windows/kjarni.exe; do
+            if objdump -p "$f" | grep -i 'DLL Name: vcruntime'; then
+              echo "::error::$f imports the Visual C++ runtime"
+              exit 1
+            fi
+          done
+
       - name: Package archives
         run: |
           cd artifacts

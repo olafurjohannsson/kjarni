@@ -1,2 +1,13 @@
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+# Link the C runtime statically on Windows. Without this kjarni_ffi.dll and
+# kjarni.exe import VCRUNTIME140.dll, which is the Visual C++ Redistributable:
+# present on most machines, absent on a clean install, and when it is missing
+# .NET reports `DllNotFoundException: kjarni_ffi` with the file sitting right
+# there. The Universal CRT ships with Windows 10 and later and stays dynamic.
+#
+# A RUSTFLAGS environment variable replaces this table rather than adding to
+# it, so any job that sets RUSTFLAGS for a Windows build must repeat it.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

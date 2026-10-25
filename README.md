@@ -237,6 +237,22 @@ same input gives byte-identical output in all of them, which the tests check.
 The browser build covers the encoder and chat paths; Whisper, the seq2seq models and
 CLIP are native only for now.
 
+## For AI agents (MCP)
+
+`kjarni mcp` serves Kjarni's capabilities to any MCP client (Claude Code, Cursor, Claude Desktop, VS Code) as tools that run on your machine: `search_folder` (semantic and hybrid search over a folder of documents or code, indexed on first use and kept up to date), `transcribe`, `classify`, `rerank` and `similarity`.
+
+```bash
+claude mcp add kjarni -- kjarni mcp          # Claude Code
+```
+
+For Cursor, Claude Desktop and other clients, add it to the client's MCP configuration:
+
+```json
+{ "mcpServers": { "kjarni": { "command": "kjarni", "args": ["mcp"] } } }
+```
+
+Nothing leaves your machine, there is no API key, and models load once per session. Indexes are kept in Kjarni's cache, never in your folders; build output, dependencies and hidden folders are skipped.
+
 ## Why Kjarni exists
 
 Adding semantic search or classification to a .NET or Go application usually means standing up a Python service, shipping a 2GB PyTorch image, or exporting models to ONNX and hand-writing the tokenization and pooling around them. If your data cannot leave the building — legal, healthcare, defense, finance — the hosted-API path is closed to you entirely.
