@@ -16,6 +16,10 @@ use super::types::*;
 use super::validation;
 
 /// High-level Whisper transcriber.
+/// 30-second chunks decoded together. Past four, each more adds its own
+/// cross-attention cache to every step and the gain is small.
+const DECODE_BATCH: usize = 4;
+
 pub struct Transcriber {
     model: Arc<WhisperModel>,
     model_type: ModelType,
@@ -114,47 +118,65 @@ impl Transcriber {
         samples: &[f32],
         duration_secs: f32,
     ) -> TranscriberResult<TranscriptionResult> {
-        let config = self.build_config();
+        let mut config = self.build_config();
         let mel_config = self.model.expected_mel_config();
 
         let chunks = WhisperModel::chunk_audio(samples, WHISPER_SAMPLE_RATE);
         let total_chunks = chunks.len();
         let mut chunk_results: Vec<WhisperChunkResult> = Vec::with_capacity(total_chunks);
 
-        for (i, chunk) in chunks.iter().enumerate() {
-            let offset = i as f32 * WHISPER_CHUNK_LENGTH_SECS;
+        // Chunks decode DECODE_BATCH at a time. Decoding reads all the
+        // decoder's weights for every token, which is what bounds its speed,
+        // and a batch shares each read: four chunks together decode in half
+        // the time of four one after another, with the same output.
+        for (group, batch) in chunks.chunks(DECODE_BATCH).enumerate() {
+            let first = group * DECODE_BATCH;
+            let mut encoded = Vec::with_capacity(batch.len());
+            for (j, chunk) in batch.iter().enumerate() {
+                self.report_progress(
+                    TranscriptionStage::Encoding,
+                    first + j,
+                    total_chunks,
+                    Some(&format!("Chunk {}/{}", first + j + 1, total_chunks)),
+                );
+                let mel = compute_mel_spectrogram(chunk, &mel_config)
+                    .map_err(TranscriberError::TranscriptionFailed)?;
+                encoded.push(
+                    self.model
+                        .encode_mel(&mel)
+                        .map_err(TranscriberError::TranscriptionFailed)?,
+                );
+            }
 
-            // Mel spectrogram
-            self.report_progress(
-                TranscriptionStage::Encoding,
-                i,
-                total_chunks,
-                Some(&format!("Chunk {}/{}", i + 1, total_chunks)),
-            );
+            // No language given: Whisper decides from the first chunk, as
+            // OpenAI's own transcribe does, and the whole file uses it.
+            if config.language.is_none() {
+                config.language = Some(
+                    self.model
+                        .detect_language(&encoded[0])
+                        .map_err(TranscriberError::TranscriptionFailed)?,
+                );
+            }
 
-            let mel = compute_mel_spectrogram(chunk, &mel_config)
-                .map_err(TranscriberError::TranscriptionFailed)?;
-
-            // Encoder
-            let encoder_out = self
-                .model
-                .encode_mel(&mel)
-                .map_err(TranscriberError::TranscriptionFailed)?;
-
-            // Decoder
             self.report_progress(
                 TranscriptionStage::Decoding,
-                i,
+                first,
                 total_chunks,
-                Some(&format!("Chunk {}/{}", i + 1, total_chunks)),
+                Some(&format!(
+                    "Chunks {}-{}/{}",
+                    first + 1,
+                    first + batch.len(),
+                    total_chunks
+                )),
             );
-
-            let result = self
-                .model
-                .decode_chunk(&encoder_out, &config, offset, None)
-                .map_err(TranscriberError::TranscriptionFailed)?;
-
-            chunk_results.push(result);
+            let offsets: Vec<f32> = (first..first + batch.len())
+                .map(|i| i as f32 * WHISPER_CHUNK_LENGTH_SECS)
+                .collect();
+            chunk_results.extend(
+                self.model
+                    .decode_chunks(&encoded, &config, &offsets)
+                    .map_err(TranscriberError::TranscriptionFailed)?,
+            );
         }
 
         // Stitch
@@ -162,7 +184,7 @@ impl Transcriber {
 
         let (text, segments) = WhisperModel::stitch_segments(chunk_results);
 
-        let language = self.language.clone().unwrap_or_else(|| "en".to_string());
+        let language = config.language.unwrap_or_else(|| "en".to_string());
 
         Ok(TranscriptionResult {
             text,
@@ -204,7 +226,7 @@ impl Transcriber {
         std::pin::Pin<Box<dyn Stream<Item = TranscriberResult<TranscribedToken>> + Send>>,
     > {
         let model = self.model.clone();
-        let config = self.build_config();
+        let mut config = self.build_config();
         let mel_config = model.expected_mel_config();
 
         // Resample if needed
@@ -239,6 +261,17 @@ impl Transcriber {
                         return;
                     }
                 };
+
+                // No language given: detected from the first chunk.
+                if config.language.is_none() {
+                    match model.detect_language(&encoder_out) {
+                        Ok(code) => config.language = Some(code),
+                        Err(e) => {
+                            let _ = tx.blocking_send(Err(TranscriberError::TranscriptionFailed(e)));
+                            return;
+                        }
+                    }
+                }
 
                 // Decode with per-token callback into channel
                 let tx_ref = &tx;

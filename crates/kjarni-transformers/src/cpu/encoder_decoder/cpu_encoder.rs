@@ -441,12 +441,21 @@ impl CpuTransformerCore for Seq2SeqCPUEncoder {
 #[async_trait]
 impl CpuEncoder for Seq2SeqCPUEncoder {
     fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+        // The feed-forward width comes from the layers themselves: T5's
+        // metadata reports an intermediate size of 0, and buffers sized from
+        // it were written past their end.
+        let intermediate = self
+            .layers
+            .iter()
+            .map(|l| l.feedforward.out_features())
+            .max()
+            .unwrap_or(self.meta.intermediate_size);
         EncoderBuffers::new_auto(
             max_batch,
             max_seq,
             self.meta.hidden_size,
             self.meta.num_attention_heads,
-            self.meta.intermediate_size,
+            intermediate,
         )
     }
     fn forward_layers(
@@ -458,7 +467,28 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let position_bias = self.compute_position_bias(&hidden)?;
-        for layer in self.layers.iter().take(end_layer).skip(start_layer) {
+        let layers = self.layers.iter().take(end_layer).skip(start_layer);
+
+        // The buffered path is the one the sentence encoders use: parallel
+        // norms, tiled attention, nothing allocated per layer. On Whisper's
+        // 1500 audio positions it is about three times as fast. Layers whose
+        // feed-forward has no buffered form keep the allocating path.
+        if self.layers.iter().all(|l| l.feedforward.supports_noalloc()) {
+            let (batch, seq, _) = hidden.dim();
+            let mut buffers = self.create_buffers(batch, seq);
+            for layer in layers {
+                layer.forward_noalloc(
+                    &mut hidden,
+                    attention_mask,
+                    position_bias.as_ref(),
+                    self.pre_norm,
+                    None,
+                    &mut buffers,
+                )?;
+            }
+            return Ok(hidden);
+        }
+        for layer in layers {
             hidden = layer.forward(
                 hidden,
                 attention_mask,

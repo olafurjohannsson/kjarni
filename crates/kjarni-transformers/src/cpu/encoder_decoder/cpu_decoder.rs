@@ -478,13 +478,17 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         let seq_len = hidden_states.dim().1;
         let total_len = position_offset + seq_len;
 
-        let causal_mask = crate::utils::masks::create_causal_mask(seq_len, total_len);
-
-        // Combine with Decoder Padding Mask (Self-Attention Mask)
-        let self_attn_mask = match decoder_padding_mask {
-            Some(pad) => Some(combine_masks(&causal_mask, pad)),
-            None => Some(causal_mask),
-        };
+        // Only a padding mask over every key, `[batch, total_len]`, goes to
+        // self-attention, which applies the causal mask itself. The causal mask
+        // used to be multiplied in here, making a `[seq, total]` array that
+        // attention reads as `[batch, key]`: whenever the batch size equalled
+        // the prompt length, each sequence was masked by a row of the causal
+        // mask, and the first could see only its first token. Whisper with
+        // timestamps has a three-token prompt, so batches of three chunks
+        // decoded the first one to nothing.
+        let self_attn_mask = decoder_padding_mask
+            .filter(|pad| pad.dim() == (hidden_states.dim().0, total_len))
+            .cloned();
 
         // Encoder Padding Mask is used for Cross-Attention
         let cross_attn_mask = encoder_padding_mask;
@@ -526,9 +530,6 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
             new_self_attn_kv: new_self_attn_kvs,
         })
     }
-}
-fn combine_masks(a: &Array2<f32>, b: &Array2<f32>) -> Array2<f32> {
-    a * b
 }
 
 #[cfg(test)]

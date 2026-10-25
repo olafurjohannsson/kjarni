@@ -24,6 +24,27 @@ impl Normalization {
             Normalization::RMSNorm(_rms) => panic!("RMSNorm does not support noalloc 2D forward"),
         }
     }
+    /// `rows = norm(rows + residual)` in place; see `LayerNorm::add_and_norm_rows`.
+    pub fn add_and_norm_rows(&self, rows: &mut [f32], residual: Option<&[f32]>) {
+        match self {
+            Normalization::LayerNorm(ln) => ln.add_and_norm_rows(rows, residual),
+            Normalization::RMSNorm(_rms) => panic!("RMSNorm does not support add_and_norm_rows"),
+        }
+    }
+
+    /// `norm(hidden)` as a new array, leaving `hidden` for the residual.
+    /// Layer norm runs across threads; RMS norm as it always has.
+    pub fn forward_rows(&self, hidden: &Array3<f32>) -> Array3<f32> {
+        match (self, hidden.as_slice()) {
+            (Normalization::LayerNorm(ln), Some(rows)) => {
+                let mut out = Array3::<f32>::zeros(hidden.dim());
+                ln.norm_rows_into(rows, out.as_slice_mut().expect("fresh array"));
+                out
+            }
+            _ => self.forward(hidden),
+        }
+    }
+
     pub fn as_rms_norm(&self) -> Option<&RMSNorm> {
         match self {
             Normalization::RMSNorm(rms) => Some(rms),

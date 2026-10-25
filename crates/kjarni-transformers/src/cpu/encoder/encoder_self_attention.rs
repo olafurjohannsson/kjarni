@@ -165,10 +165,8 @@ impl EncoderSelfAttention {
             .view()
             .into_shape_with_order((tokens, hidden_dim))?;
 
-        // writes to buffers.q, buffers.k, buffers.v
         self.qkv_proj.forward_noalloc(&hidden_2d, buffers);
 
-        // Get slices
         let q_slice = buffers.q.slice(s![..tokens, ..]);
         let k_slice = buffers.k.slice(s![..tokens, ..]);
         let v_slice = buffers.v.slice(s![..tokens, ..]);
@@ -208,23 +206,29 @@ impl EncoderSelfAttention {
             let q_4d = q_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
             let k_4d = k_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
 
-            buffers
-                .q_heads
-                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
-                .assign(&q_4d.view().permuted_axes([0, 2, 1, 3]));
-            buffers
-                .k_heads_t
-                .slice_mut(s![..batch, .., ..self.head_dim, ..seq_len])
-                .assign(&k_4d.view().permuted_axes([0, 2, 3, 1]));
+            par_assign(
+                buffers
+                    .q_heads
+                    .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
+                q_4d.view().permuted_axes([0, 2, 1, 3]),
+            );
+            par_assign(
+                buffers
+                    .k_heads_t
+                    .slice_mut(s![..batch, .., ..self.head_dim, ..seq_len]),
+                k_4d.view().permuted_axes([0, 2, 3, 1]),
+            );
         }
 
         // V is untouched by RoPE, so it is the same either way.
         {
             let v_4d = v_slice.to_shape((batch, seq_len, self.num_heads, self.head_dim))?;
-            buffers
-                .v_heads
-                .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim])
-                .assign(&v_4d.view().permuted_axes([0, 2, 1, 3]));
+            par_assign(
+                buffers
+                    .v_heads
+                    .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
+                v_4d.view().permuted_axes([0, 2, 1, 3]),
+            );
         }
 
         // Two paths. The T5 style relative position bias is a [1, heads, seq, seq]
@@ -578,6 +582,22 @@ fn tiled_attention(
                         .for_each_init(scratch, work);
                 });
         });
+}
+
+/// `dst = src` for the head transposes, one batch item per task.
+///
+/// A strided 4D copy that ran on one thread: on a batch of 64 documents it
+/// cost more than the attention output projection.
+fn par_assign(mut dst: ndarray::ArrayViewMut4<f32>, src: ndarray::ArrayView4<f32>) {
+    use rayon::prelude::*;
+    if dst.shape()[0] > 1 && dst.len() >= 1 << 16 {
+        dst.outer_iter_mut()
+            .into_par_iter()
+            .zip(src.outer_iter().into_par_iter())
+            .for_each(|(mut d, s)| d.assign(&s));
+    } else {
+        dst.assign(&src);
+    }
 }
 
 /// Batched matmul

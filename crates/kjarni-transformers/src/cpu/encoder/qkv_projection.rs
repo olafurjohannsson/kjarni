@@ -120,18 +120,32 @@ impl QKVProjection {
                 let k_slice = buffers.k.as_slice_mut().unwrap();
                 let v_slice = buffers.v.as_slice_mut().unwrap();
 
-                for t in 0..tokens {
-                    let src_offset = t * 3 * h;
-                    let dst_offset = t * h;
-
-                    q_slice[dst_offset..dst_offset + h]
-                        .copy_from_slice(&qkv_slice[src_offset..src_offset + h]);
-
-                    k_slice[dst_offset..dst_offset + h]
-                        .copy_from_slice(&qkv_slice[src_offset + h..src_offset + 2 * h]);
-
-                    v_slice[dst_offset..dst_offset + h]
-                        .copy_from_slice(&qkv_slice[src_offset + 2 * h..src_offset + 3 * h]);
+                // Split across threads, a block of tokens each: serially this
+                // was half the cost of the projection on a large batch.
+                const ROWS: usize = 64;
+                let split =
+                    |(((qkv, q), k), v): (((&[f32], &mut [f32]), &mut [f32]), &mut [f32])| {
+                        for (t, row) in qkv.chunks_exact(3 * h).enumerate() {
+                            q[t * h..(t + 1) * h].copy_from_slice(&row[..h]);
+                            k[t * h..(t + 1) * h].copy_from_slice(&row[h..2 * h]);
+                            v[t * h..(t + 1) * h].copy_from_slice(&row[2 * h..]);
+                        }
+                    };
+                let (qkv, q, k, v) = (
+                    &qkv_slice[..tokens * 3 * h],
+                    &mut q_slice[..tokens * h],
+                    &mut k_slice[..tokens * h],
+                    &mut v_slice[..tokens * h],
+                );
+                if tokens > ROWS {
+                    use rayon::prelude::*;
+                    qkv.par_chunks(ROWS * 3 * h)
+                        .zip(q.par_chunks_mut(ROWS * h))
+                        .zip(k.par_chunks_mut(ROWS * h))
+                        .zip(v.par_chunks_mut(ROWS * h))
+                        .for_each(split);
+                } else {
+                    split((((qkv, q), k), v));
                 }
             }
         }

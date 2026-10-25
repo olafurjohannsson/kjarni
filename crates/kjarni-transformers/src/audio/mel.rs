@@ -82,28 +82,35 @@ pub fn compute_mel_spectrogram(audio: &[f32], config: &MelConfig) -> Result<Arra
         fmax,
     )?;
 
-    // Compute STFT
-    let mut spectrogram = Array2::<f32>::zeros((config.n_fft / 2 + 1, n_frames));
+    // Compute STFT: every frame windowed into one row, then the DFT as two
+    // matrix products against cosine and sine tables. Per frame and bin this
+    // used to evaluate sin and cos afresh, 240 million of each for one
+    // 30-second chunk, and took longer than the encoder's first layers.
     let window = hann_window(config.n_fft);
-
-    for frame_idx in 0..n_frames {
-        let start = frame_idx * config.hop_length;
-        let end = start + config.n_fft;
-
-        if end > n_samples {
-            break;
+    let n_bins = config.n_fft / 2 + 1;
+    let valid = (0..n_frames)
+        .take_while(|f| f * config.hop_length + config.n_fft <= n_samples)
+        .count();
+    let mut frames = Array2::<f32>::zeros((valid, config.n_fft));
+    for (f, mut row) in frames.outer_iter_mut().enumerate() {
+        let start = f * config.hop_length;
+        for ((out, &sample), &w) in row
+            .iter_mut()
+            .zip(&audio_processed[start..start + config.n_fft])
+            .zip(&window)
+        {
+            *out = sample * w;
         }
-
-        let windowed: Vec<f32> = audio_processed[start..end]
-            .iter()
-            .zip(window.iter())
-            .map(|(s, w)| s * w)
-            .collect();
-
-        let magnitudes = compute_fft_magnitude(&windowed)?;
-
-        for (i, &mag) in magnitudes.iter().enumerate() {
-            spectrogram[[i, frame_idx]] = if config.power { mag * mag } else { mag };
+    }
+    let (cos, sin) = dft_tables(config.n_fft);
+    let re = frames.dot(&cos);
+    let im = frames.dot(&sin);
+    // Frames past the end of the audio stay zero, as before.
+    let mut spectrogram = Array2::<f32>::zeros((n_bins, n_frames));
+    for f in 0..valid {
+        for k in 0..n_bins {
+            let power = re[[f, k]] * re[[f, k]] + im[[f, k]] * im[[f, k]];
+            spectrogram[[k, f]] = if config.power { power } else { power.sqrt() };
         }
     }
 
@@ -239,30 +246,24 @@ fn hann_window(size: usize) -> Vec<f32> {
         .collect()
 }
 
-/// Compute FFT magnitude using DFT (replace with rustfft for production).
-fn compute_fft_magnitude(samples: &[f32]) -> Result<Vec<f32>> {
-    let n = samples.len();
-    let n_bins = n / 2 + 1;
-    let mut magnitudes = vec![0.0f32; n_bins];
-
-    #[allow(
-        clippy::needless_range_loop,
-        reason = "indexed numeric loop; the index addresses more than the iterated slice"
-    )]
-    for k in 0..n_bins {
-        let mut real = 0.0f32;
-        let mut imag = 0.0f32;
-
-        for (i, &sample) in samples.iter().enumerate() {
-            let angle = -2.0 * std::f32::consts::PI * (k * i) as f32 / n as f32;
-            real += sample * angle.cos();
-            imag += sample * angle.sin();
+/// `[n, n/2 + 1]` tables of cos and -sin for a real DFT of length `n`.
+///
+/// Angles come from `k * i mod n` in f64: the product itself grows to
+/// 40,000 for Whisper's 400-point frames, past where an f32 angle keeps its
+/// last digits, and that error was the largest part of the difference from
+/// HuggingFace's features.
+fn dft_tables(n: usize) -> (Array2<f32>, Array2<f32>) {
+    let bins = n / 2 + 1;
+    let mut cos = Array2::<f32>::zeros((n, bins));
+    let mut sin = Array2::<f32>::zeros((n, bins));
+    for i in 0..n {
+        for k in 0..bins {
+            let angle = -2.0 * std::f64::consts::PI * ((k * i) % n) as f64 / n as f64;
+            cos[[i, k]] = angle.cos() as f32;
+            sin[[i, k]] = angle.sin() as f32;
         }
-
-        magnitudes[k] = (real * real + imag * imag).sqrt();
     }
-
-    Ok(magnitudes)
+    (cos, sin)
 }
 
 /// Whisper's convolutional frontend that converts mel spectrograms to hidden states.
@@ -304,78 +305,80 @@ impl AudioConvFrontend {
 
     /// Process mel spectrogram to hidden states.
     pub fn forward(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
-        // Conv1: kernel=3, stride=1, padding=1
-        let x = self.conv1d(mel, &self.conv1_weight, &self.conv1_bias, 1, 1)?;
-        let x = gelu_3d(&x);
-
-        // Conv2: kernel=3, stride=2, padding=1 (downsamples time by 2)
-        let x = self.conv1d(&x, &self.conv2_weight, &self.conv2_bias, 2, 1)?;
-        let x = gelu_3d(&x);
-
-        // Transpose: [batch, hidden, time] -> [batch, time, hidden]
-        let x = x.permuted_axes([0, 2, 1]).as_standard_layout().to_owned();
-
-        // Add position embeddings
-        let (batch, seq_len, hidden_size) = x.dim();
-        let mut output = x;
-
+        let (batch, _, _) = mel.dim();
+        let mut outputs = Vec::with_capacity(batch);
         for b in 0..batch {
-            for s in 0..seq_len.min(self.position_embeddings.nrows()) {
-                for h in 0..hidden_size {
-                    output[[b, s, h]] += self.position_embeddings[[s, h]];
-                }
-            }
+            // Time-major from here on, which is the layout both convolutions
+            // read and the encoder wants: [time, channels].
+            let x = mel.slice(s![b, .., ..]).t().as_standard_layout().to_owned();
+            // Conv1: kernel=3, stride=1, padding=1
+            let mut x = conv1d(&x.view(), &self.conv1_weight, &self.conv1_bias, 1, 1);
+            gelu_inplace(&mut x);
+            // Conv2: kernel=3, stride=2, padding=1 (downsamples time by 2)
+            let mut x = conv1d(&x.view(), &self.conv2_weight, &self.conv2_bias, 2, 1);
+            gelu_inplace(&mut x);
+
+            let rows = x.nrows().min(self.position_embeddings.nrows());
+            let mut head = x.slice_mut(s![..rows, ..]);
+            head += &self.position_embeddings.slice(s![..rows, ..]);
+            outputs.push(x);
         }
-
-        Ok(output)
-    }
-
-    /// 1D convolution implementation.
-    fn conv1d(
-        &self,
-        input: &Array3<f32>,
-        weight: &Array3<f32>,
-        bias: &Array1<f32>,
-        stride: usize,
-        padding: usize,
-    ) -> Result<Array3<f32>> {
-        let (batch, in_channels, in_time) = input.dim();
-        let (out_channels, weight_in_ch, kernel_size) = weight.dim();
-
-        assert_eq!(in_channels, weight_in_ch, "Channel mismatch");
-
-        let out_time = (in_time + 2 * padding - kernel_size) / stride + 1;
-        let mut output = Array3::<f32>::zeros((batch, out_channels, out_time));
-
-        // TODO: replace with SIMD
-        for b in 0..batch {
-            for oc in 0..out_channels {
-                for t in 0..out_time {
-                    let t_start = t * stride;
-                    let mut sum = bias[oc];
-
-                    for ic in 0..in_channels {
-                        for k in 0..kernel_size {
-                            let t_in = t_start + k;
-                            if t_in >= padding && t_in < in_time + padding {
-                                let actual_t = t_in - padding;
-                                sum += input[[b, ic, actual_t]] * weight[[oc, ic, k]];
-                            }
-                        }
-                    }
-
-                    output[[b, oc, t]] = sum;
-                }
-            }
-        }
-
-        Ok(output)
+        let views: Vec<_> = outputs.iter().map(|x| x.view()).collect();
+        Ok(ndarray::stack(ndarray::Axis(0), &views)?)
     }
 }
 
-/// GELU activation for 3D arrays. TODO: use activateion crate
-fn gelu_3d(x: &Array3<f32>) -> Array3<f32> {
-    x.mapv(|v| v * 0.5 * (1.0 + (v * 0.7978845608 * (1.0 + 0.044715 * v * v)).tanh()))
+/// 1D convolution over `[time, channels]`, as one matrix product.
+///
+/// Each output step's receptive field, every input channel at every kernel
+/// tap, is gathered into one row (im2col), and the kernel, read as
+/// `[out, in * kernel]`, multiplies all the rows at once. Whisper's second
+/// convolution is 2.6 billion multiply-adds per 30 seconds of audio; done one
+/// indexed scalar at a time it was most of the encoder's time.
+fn conv1d(
+    input: &ndarray::ArrayView2<f32>,
+    weight: &Array3<f32>,
+    bias: &Array1<f32>,
+    stride: usize,
+    padding: usize,
+) -> Array2<f32> {
+    let (in_time, in_channels) = input.dim();
+    let (out_channels, weight_in_ch, kernel_size) = weight.dim();
+    assert_eq!(in_channels, weight_in_ch, "Channel mismatch");
+
+    let out_time = (in_time + 2 * padding - kernel_size) / stride + 1;
+    let mut columns = Array2::<f32>::zeros((out_time, in_channels * kernel_size));
+    for (t, mut row) in columns.outer_iter_mut().enumerate() {
+        for k in 0..kernel_size {
+            // Taps that fall in the padding stay zero.
+            let Some(t_in) = (t * stride + k)
+                .checked_sub(padding)
+                .filter(|&t| t < in_time)
+            else {
+                continue;
+            };
+            for (ic, &v) in input.row(t_in).iter().enumerate() {
+                row[ic * kernel_size + k] = v;
+            }
+        }
+    }
+    let kernel = weight
+        .view()
+        .into_shape_with_order((out_channels, in_channels * kernel_size))
+        .expect("conv weights are contiguous");
+    let mut output = columns.dot(&kernel.t());
+    output += bias;
+    output
+}
+
+/// Whisper's exact, erf-based GELU, across threads. The tanh approximation
+/// this used to apply is a different function, and Whisper's checkpoints
+/// were trained with this one.
+fn gelu_inplace(x: &mut Array2<f32>) {
+    crate::activations::apply_activation_2d_mut(
+        &mut x.view_mut(),
+        crate::activations::Activation::Gelu,
+    );
 }
 
 /// Create sinusoidal position embeddings.
@@ -2120,6 +2123,52 @@ mod audio_frontend_tests {
 
         Ok(())
     }
+    #[test]
+    fn mel_matches_a_direct_f64_dft() {
+        // A chirp, so every frame has different content, two seconds long.
+        let audio: Vec<f32> = (0..32_000)
+            .map(|i| {
+                let t = i as f64 / 16_000.0;
+                (0.3 * (2.0 * std::f64::consts::PI * (200.0 + 900.0 * t) * t).sin()) as f32
+            })
+            .collect();
+        let config = MelConfig::whisper();
+        let got = compute_mel_spectrogram(&audio, &config).unwrap();
+
+        // The same pipeline with the DFT written out in f64.
+        let padded = pad_reflect(&audio, config.n_fft / 2);
+        let window = hann_window(config.n_fft);
+        let bins = config.n_fft / 2 + 1;
+        let mut power = Array2::<f32>::zeros((bins, 3000));
+        for f in 0..3000 {
+            let start = f * config.hop_length;
+            if start + config.n_fft > padded.len() {
+                break;
+            }
+            for k in 0..bins {
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for i in 0..config.n_fft {
+                    let x = padded[start + i] as f64 * window[i] as f64;
+                    let a = -2.0 * std::f64::consts::PI * (k * i) as f64 / config.n_fft as f64;
+                    re += x * a.cos();
+                    im += x * a.sin();
+                }
+                power[[k, f]] = (re * re + im * im) as f32;
+            }
+        }
+        let filters =
+            create_mel_filterbank_librosa(16_000, config.n_fft, config.n_mels, 0.0, 8000.0)
+                .unwrap();
+        let want = whisper_log_mel(&filters.dot(&power));
+
+        let worst = got
+            .iter()
+            .zip(&want)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-4, "mel differs from a direct DFT by {worst}");
+    }
+
     #[test]
     fn test_mel_spectrogram_shape() {
         let config = MelConfig::default(); // n_mels = 80

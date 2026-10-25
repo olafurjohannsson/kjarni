@@ -151,6 +151,7 @@ pub enum ModelType {
     MiniLML6V2,
     NomicEmbedText,
     BgeM3,
+    MultilingualE5Small,
     MiniLML6V2CrossEncoder,
     MpnetBaseV2,
     DistilBertBaseCased,
@@ -261,6 +262,7 @@ impl ModelType {
             Self::MiniLML6V2 => "minilm-l6-v2",
             Self::NomicEmbedText => "nomic-embed-text",
             Self::BgeM3 => "bge-m3",
+            Self::MultilingualE5Small => "multilingual-e5-small",
             Self::MpnetBaseV2 => "mpnet-base-v2",
             Self::DistilBertBaseCased => "distilbert-base",
 
@@ -452,6 +454,22 @@ impl ModelType {
                 description: "Massive multilingual embedding model. State of the art for diverse languages.",
                 size_mb: 2200,
                 params_millions: 567,
+            },
+            Self::MultilingualE5Small => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::Embedding,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/model.safetensors",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Small multilingual embeddings, about 100 languages. Prefix texts with \"query: \" or \"passage: \".",
+                size_mb: 470,
+                params_millions: 118,
             },
             Self::DistilBertSST2 => ModelInfo {
                 architecture: ModelArchitecture::Bert,
@@ -913,6 +931,7 @@ impl ModelType {
                 Some(Self::NomicEmbedText)
             }
             "bge-m3" | "baai/bge-m3" => Some(Self::BgeM3),
+            "intfloat/multilingual-e5-small" => Some(Self::MultilingualE5Small),
             "distilbert-base-uncased-finetuned-sst-2-english" => Some(Self::DistilBertSST2),
             "twitter-roberta-base-sentiment-latest" => Some(Self::TwitterRobertaSentiment),
             "bert-base-multilingual-uncased-sentiment"
@@ -1803,8 +1822,14 @@ mod tests {
         /// A server that answers everything with `status` and counts requests.
         ///
         /// Returns the port and the counter. Deliberately not a real HTTP stack:
-        /// it writes a fixed response and closes, which is all the client needs to
-        /// classify the answer.
+        /// it reads the request headers, writes a fixed response and closes, which
+        /// is all the client needs to classify the answer.
+        ///
+        /// The read matters. Closing a socket with the request still unread in its
+        /// receive buffer makes the OS reset the connection, and the reset can
+        /// reach the client before the response does. The client then sees a
+        /// connection error, which it rightly retries, and a 404 test counted five
+        /// requests. That raced on CI runners and almost never locally.
         async fn counting_server(status: &'static str) -> (u16, Arc<AtomicUsize>) {
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let port = listener.local_addr().expect("addr").port();
@@ -1817,6 +1842,7 @@ mod tests {
                         return;
                     };
                     counter.fetch_add(1, Ordering::SeqCst);
+                    read_request_head(&mut sock).await;
                     let body = format!(
                         "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     );
@@ -1825,6 +1851,20 @@ mod tests {
                 }
             });
             (port, hits)
+        }
+
+        /// Reads until the blank line that ends the request headers, or until
+        /// the client stops sending. A GET has no body, so that is all of it.
+        async fn read_request_head(sock: &mut tokio::net::TcpStream) {
+            use tokio::io::AsyncReadExt;
+            let mut head = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                match sock.read(&mut buf).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => head.extend_from_slice(&buf[..n]),
+                }
+            }
         }
 
         /// Milliseconds rather than the real 2/4/6/8 second schedule, so a test

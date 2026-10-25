@@ -243,6 +243,74 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
             return Ok(Vec::new());
         }
 
+        // A batch is padded to its longest text, and padding costs as much as
+        // real tokens. Documents vary: 64 chunks of 200 words came to 64 x 406
+        // positions when most needed 250 to 350. So texts of similar length go
+        // through together, in sub-batches sized by a token budget, and come
+        // back in the order they were given. Padding is masked, so the vectors
+        // are the same either way.
+        if texts.len() <= MIN_TEXTS_TO_BUCKET {
+            return self.encode_padded_batch(texts, config).await;
+        }
+        let lengths: Vec<usize> = self
+            .encode_batch_texts(texts)?
+            .iter()
+            .map(|e| e.get_attention_mask().iter().filter(|&&m| m != 0).count())
+            .collect();
+        let mut order: Vec<usize> = (0..texts.len()).collect();
+        order.sort_by_key(|&i| lengths[i]);
+
+        let mut out: Vec<Vec<f32>> = vec![Vec::new(); texts.len()];
+        let mut start = 0;
+        while start < order.len() {
+            let mut end = start + 1;
+            while end < order.len()
+                && end - start < MAX_TEXTS_PER_BATCH
+                && (end + 1 - start) * lengths[order[end]] <= TOKENS_PER_BATCH
+            {
+                end += 1;
+            }
+            let group: Vec<&str> = order[start..end].iter().map(|&i| texts[i]).collect();
+            for (&i, v) in order[start..end]
+                .iter()
+                .zip(self.encode_padded_batch(&group, config).await?)
+            {
+                out[i] = v;
+            }
+            start = end;
+        }
+        Ok(out)
+    }
+}
+
+/// A handful of texts wastes little on padding, and sorting them would mean
+/// tokenizing twice for nothing.
+const MIN_TEXTS_TO_BUCKET: usize = 16;
+/// Positions, padding included, per forward pass when bucketing by length:
+/// enough rows for the matmuls to use every core, small enough that the
+/// per-batch buffers stay a few hundred megabytes.
+const TOKENS_PER_BATCH: usize = 8192;
+/// Cap for short texts such as queries, where the token budget alone would
+/// put thousands in one pass.
+const MAX_TEXTS_PER_BATCH: usize = 256;
+
+/// One forward pass over texts padded to the longest of them.
+#[async_trait]
+trait EncodePadded {
+    async fn encode_padded_batch(
+        &self,
+        texts: &[&str],
+        config: &EncodingConfig,
+    ) -> Result<Vec<Vec<f32>>>;
+}
+
+#[async_trait]
+impl<T: EncoderLanguageModel + Sync> EncodePadded for T {
+    async fn encode_padded_batch(
+        &self,
+        texts: &[&str],
+        config: &EncodingConfig,
+    ) -> Result<Vec<Vec<f32>>> {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
         let mut pooled = match config.pooling_strategy {
