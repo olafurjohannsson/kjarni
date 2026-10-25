@@ -27,6 +27,11 @@ colored = "2"
 bincode = "1"
 walkdir = "2.5.0"
 tempfile = "3.23.0"
+
+[target.'cfg(unix)'.dependencies]
+# `kjarni mcp` points stdout at stderr, keeping the real stdout for protocol
+# messages only.
+libc = "0.2"
 [lints]
 workspace = true
 
