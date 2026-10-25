@@ -405,8 +405,13 @@ mod tests {
             assert_eq!(kjarni_transcriber_new(&config, &mut t), KjarniErrorCode::Ok);
             let silence = vec![0.0f32; 16000];
             let mut out = KjarniTranscription::empty();
-            let code =
-                kjarni_transcriber_transcribe_pcm(t, silence.as_ptr(), silence.len(), 16000, &mut out);
+            let code = kjarni_transcriber_transcribe_pcm(
+                t,
+                silence.as_ptr(),
+                silence.len(),
+                16000,
+                &mut out,
+            );
             assert_eq!(code, KjarniErrorCode::Ok);
             assert!((out.duration_secs - 1.0).abs() < 0.01);
             assert_eq!(CStr::from_ptr(out.language).to_str().unwrap(), "en");

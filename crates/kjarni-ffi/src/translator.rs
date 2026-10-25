@@ -1,7 +1,9 @@
 //! Translation over the C ABI.
 
 use crate::error::set_last_error;
-use crate::{KjarniDevice, KjarniErrorCode, get_runtime, opt_str, owned_c_string, seq2seq_error_code};
+use crate::{
+    KjarniDevice, KjarniErrorCode, get_runtime, opt_str, owned_c_string, seq2seq_error_code,
+};
 use kjarni::translator::{Translator, TranslatorError};
 use std::ffi::{CStr, c_char};
 use std::ptr;
@@ -199,10 +201,19 @@ mod tests {
     #[test]
     fn null_arguments_are_errors_not_crashes() {
         unsafe {
-            assert_eq!(kjarni_translator_new(ptr::null(), ptr::null_mut()), KjarniErrorCode::NullPointer);
+            assert_eq!(
+                kjarni_translator_new(ptr::null(), ptr::null_mut()),
+                KjarniErrorCode::NullPointer
+            );
             let mut out = ptr::null_mut();
             assert_eq!(
-                kjarni_translator_translate(ptr::null(), ptr::null(), ptr::null(), ptr::null(), &mut out),
+                kjarni_translator_translate(
+                    ptr::null(),
+                    ptr::null(),
+                    ptr::null(),
+                    ptr::null(),
+                    &mut out
+                ),
                 KjarniErrorCode::NullPointer
             );
             kjarni_translator_free(ptr::null_mut());
@@ -223,7 +234,13 @@ mod tests {
 
             // No languages anywhere: a clear configuration error.
             let mut out = ptr::null_mut();
-            let code = kjarni_translator_translate(t, c"Hello".as_ptr(), ptr::null(), ptr::null(), &mut out);
+            let code = kjarni_translator_translate(
+                t,
+                c"Hello".as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                &mut out,
+            );
             assert_eq!(code, KjarniErrorCode::InvalidConfig);
             assert!(out.is_null());
 

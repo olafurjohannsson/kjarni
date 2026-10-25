@@ -1,7 +1,9 @@
 //! Summarization over the C ABI.
 
 use crate::error::set_last_error;
-use crate::{KjarniDevice, KjarniErrorCode, get_runtime, opt_str, owned_c_string, seq2seq_error_code};
+use crate::{
+    KjarniDevice, KjarniErrorCode, get_runtime, opt_str, owned_c_string, seq2seq_error_code,
+};
 use kjarni::summarizer::{Summarizer, SummarizerError};
 use std::ffi::{CStr, c_char};
 use std::ptr;
@@ -179,7 +181,10 @@ mod tests {
     #[test]
     fn null_arguments_are_errors_not_crashes() {
         unsafe {
-            assert_eq!(kjarni_summarizer_new(ptr::null(), ptr::null_mut()), KjarniErrorCode::NullPointer);
+            assert_eq!(
+                kjarni_summarizer_new(ptr::null(), ptr::null_mut()),
+                KjarniErrorCode::NullPointer
+            );
             let mut out = ptr::null_mut();
             assert_eq!(
                 kjarni_summarizer_summarize(ptr::null(), ptr::null(), &mut out),
@@ -217,12 +222,18 @@ mod tests {
             // around fifty tokens, so a short input comes back padded, not shorter.
             let text = c"The city council voted on Tuesday to build a new central library downtown, ending a debate that has run for almost a decade. The building, designed by a local architecture firm, will open in 2028 and will hold two hundred thousand books, a children's wing, a public makerspace with 3D printers and a recording studio, and meeting rooms that community groups can book for free. Construction is expected to cost forty million dollars, paid for by a bond that voters approved last year by a wide margin. Supporters said the current library, built in 1962, is too small and cannot be made accessible to wheelchair users without a costly renovation. Opponents argued that the money would be better spent on branch libraries in outlying neighbourhoods, several of which have cut their opening hours. The mayor said the branches would keep their budgets and that two of them would get longer hours next year. The old building will be sold, and the proceeds will go to the city's affordable housing fund. Work on the site begins in the spring, after the demolition of a disused parking garage that currently stands there.";
             let mut out = ptr::null_mut();
-            assert_eq!(kjarni_summarizer_summarize(s, text.as_ptr(), &mut out), KjarniErrorCode::Ok);
+            assert_eq!(
+                kjarni_summarizer_summarize(s, text.as_ptr(), &mut out),
+                KjarniErrorCode::Ok
+            );
             let summary = CStr::from_ptr(out).to_str().unwrap().to_string();
             crate::kjarni_string_free(out);
             kjarni_summarizer_free(s);
             assert!(!summary.trim().is_empty());
-            assert!(summary.len() < text.to_bytes().len(), "a summary should be shorter: {summary}");
+            assert!(
+                summary.len() < text.to_bytes().len(),
+                "a summary should be shorter: {summary}"
+            );
         }
     }
 }

@@ -35,7 +35,9 @@ use tokio::runtime::Runtime;
 ///
 /// `ptr` must be null or point to a nul-terminated string that outlives the
 /// returned reference.
-pub(crate) unsafe fn opt_str<'a>(ptr: *const std::ffi::c_char) -> Result<Option<&'a str>, KjarniErrorCode> {
+pub(crate) unsafe fn opt_str<'a>(
+    ptr: *const std::ffi::c_char,
+) -> Result<Option<&'a str>, KjarniErrorCode> {
     if ptr.is_null() {
         return Ok(None);
     }
