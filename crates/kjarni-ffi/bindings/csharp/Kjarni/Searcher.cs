@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 
 namespace Kjarni
 {
@@ -244,28 +243,7 @@ namespace Kjarni
                         var json = Marshal.PtrToStringUTF8(item.MetadataJson);
                         if (!string.IsNullOrEmpty(json))
                         {
-                            try
-                            {
-                                var parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-                                if (parsed != null)
-                                {
-                                    foreach (var kvp in parsed)
-                                    {
-                                        metadata[kvp.Key] = kvp.Value.ValueKind switch
-                                        {
-                                            JsonValueKind.String => kvp.Value.GetString() ?? "",
-                                            JsonValueKind.Number => kvp.Value.GetDouble(),
-                                            JsonValueKind.True => true,
-                                            JsonValueKind.False => false,
-                                            _ => kvp.Value.ToString()
-                                        };
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                                // Ignore JSON parse errors
-                            }
+                            metadata = MetadataJson.Parse(json);
                         }
                     }
 
