@@ -1,6 +1,8 @@
 package kjarni
 
 import (
+	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -135,6 +137,42 @@ var (
 
 	// String free (needed for chat results)
 	_stringFreeSym uintptr
+
+	// Chat with caller-held history
+	_chatSendWithHistorySym   uintptr
+	_chatStreamWithHistorySym uintptr
+
+	// Indexer additions
+	_indexerAddSym uintptr
+
+	// Transcriber
+	_transcriberNewSym            uintptr
+	_transcriberFree              func(handle uintptr)
+	_transcriberTranscribeFileSym uintptr
+	_transcriberTranscribePCMSym  uintptr
+	_transcriptionFreeSym         uintptr
+
+	// Summarizer
+	_summarizerNewSym       uintptr
+	_summarizerFree         func(handle uintptr)
+	_summarizerSummarizeSym uintptr
+
+	// Translator
+	_translatorNewSym       uintptr
+	_translatorFree         func(handle uintptr)
+	_translatorTranslateSym uintptr
+
+	// Image search. Absent from a library built without the image-io feature,
+	// so a failed lookup leaves these zero and NewImageIndex reports it.
+	_imageIndexNewSym          uintptr
+	_imageIndexFreeSym         uintptr
+	_imageIndexAddSym          uintptr
+	_imageIndexAddDirectorySym uintptr
+	_imageIndexSearchSym       uintptr
+	_imageResultsFreeSym       uintptr
+	_imageIndexSaveSym         uintptr
+	_imageIndexLoadSym         uintptr
+	_imageIndexLenSym          uintptr
 )
 
 func initFFI() error {
@@ -303,6 +341,60 @@ func initFFI() error {
 		return err
 	}
 
+	if _chatSendWithHistorySym, err = purego.Dlsym(handle, "kjarni_chat_send_with_history"); err != nil {
+		return err
+	}
+	if _chatStreamWithHistorySym, err = purego.Dlsym(handle, "kjarni_chat_stream_with_history"); err != nil {
+		return err
+	}
+	if _indexerAddSym, err = purego.Dlsym(handle, "kjarni_indexer_add"); err != nil {
+		return err
+	}
+
+	// Transcriber
+	if _transcriberNewSym, err = purego.Dlsym(handle, "kjarni_transcriber_new"); err != nil {
+		return err
+	}
+	purego.RegisterLibFunc(&_transcriberFree, handle, "kjarni_transcriber_free")
+	if _transcriberTranscribeFileSym, err = purego.Dlsym(handle, "kjarni_transcriber_transcribe_file"); err != nil {
+		return err
+	}
+	if _transcriberTranscribePCMSym, err = purego.Dlsym(handle, "kjarni_transcriber_transcribe_pcm"); err != nil {
+		return err
+	}
+	if _transcriptionFreeSym, err = purego.Dlsym(handle, "kjarni_transcription_free"); err != nil {
+		return err
+	}
+
+	// Summarizer
+	if _summarizerNewSym, err = purego.Dlsym(handle, "kjarni_summarizer_new"); err != nil {
+		return err
+	}
+	purego.RegisterLibFunc(&_summarizerFree, handle, "kjarni_summarizer_free")
+	if _summarizerSummarizeSym, err = purego.Dlsym(handle, "kjarni_summarizer_summarize"); err != nil {
+		return err
+	}
+
+	// Translator
+	if _translatorNewSym, err = purego.Dlsym(handle, "kjarni_translator_new"); err != nil {
+		return err
+	}
+	purego.RegisterLibFunc(&_translatorFree, handle, "kjarni_translator_free")
+	if _translatorTranslateSym, err = purego.Dlsym(handle, "kjarni_translator_translate"); err != nil {
+		return err
+	}
+
+	// Image search: optional, so lookup failures are not errors.
+	_imageIndexNewSym, _ = purego.Dlsym(handle, "kjarni_image_index_new")
+	_imageIndexFreeSym, _ = purego.Dlsym(handle, "kjarni_image_index_free")
+	_imageIndexAddSym, _ = purego.Dlsym(handle, "kjarni_image_index_add")
+	_imageIndexAddDirectorySym, _ = purego.Dlsym(handle, "kjarni_image_index_add_directory")
+	_imageIndexSearchSym, _ = purego.Dlsym(handle, "kjarni_image_index_search")
+	_imageResultsFreeSym, _ = purego.Dlsym(handle, "kjarni_image_results_free")
+	_imageIndexSaveSym, _ = purego.Dlsym(handle, "kjarni_image_index_save")
+	_imageIndexLoadSym, _ = purego.Dlsym(handle, "kjarni_image_index_load")
+	_imageIndexLenSym, _ = purego.Dlsym(handle, "kjarni_image_index_len")
+
 	return nil
 }
 
@@ -346,17 +438,127 @@ func goString(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
-	var length int
-	for {
-		b := *(*byte)(unsafe.Pointer(ptr + uintptr(length)))
-		if b == 0 {
-			break
+	p := unsafe.Pointer(ptr)
+	n := 0
+	for *(*byte)(unsafe.Add(p, n)) != 0 {
+		n++
+	}
+	// One copy, rather than a bounds-checked read per byte into a second buffer.
+	return string(unsafe.Slice((*byte)(p), n))
+}
+
+// callWithStruct calls a C function whose only parameter is a struct passed by
+// value, such as kjarni_float_array_free(KjarniFloatArray).
+//
+// purego.SyscallN takes machine words, so the struct has to be laid out the way
+// the platform ABI would pass it:
+//
+//   - Windows x64 passes any struct larger than 8 bytes as a pointer to a copy.
+//   - System V x86-64 passes a struct of up to 16 bytes in two registers, and a
+//     larger one on the stack, after the six integer argument registers.
+//
+// Passing &s everywhere, as these bindings used to, is only right on Windows. On
+// Linux the callee read the pointer as the struct's data field and an unrelated
+// register as its length, so every result it was asked to free was leaked.
+func callWithStruct(sym uintptr, s unsafe.Pointer, size uintptr) {
+	if runtime.GOOS == "windows" {
+		purego.SyscallN(sym, uintptr(s))
+		return
+	}
+	words := unsafe.Slice((*uintptr)(s), (size+7)/8)
+	if size <= 16 {
+		purego.SyscallN(sym, words...)
+		return
+	}
+	args := make([]uintptr, 6, 6+len(words))
+	purego.SyscallN(sym, append(args, words...)...)
+}
+
+// ensureInit loads the library once, for constructors.
+func ensureInit() error {
+	var initErr error
+	ffiOnce.Do(func() { initErr = initFFI() })
+	if initErr != nil {
+		return fmt.Errorf("initializing kjarni: %w", initErr)
+	}
+	return nil
+}
+
+// cStringOrNull is cString, but NULL for "", which the C API reads as "use the
+// default".
+func cStringOrNull(s string) (uintptr, func()) {
+	if s == "" {
+		return 0, func() {}
+	}
+	return cString(s)
+}
+
+// takeString copies a string the engine allocated and frees it.
+func takeString(ptr uintptr) string {
+	if ptr == 0 {
+		return ""
+	}
+	s := goString(ptr)
+	purego.SyscallN(_stringFreeSym, ptr)
+	return s
+}
+
+// cStringArray converts strings to a C `const char* const*`. The returned func
+// keeps the backing memory alive and must be deferred.
+func cStringArray(items []string) (uintptr, func()) {
+	if len(items) == 0 {
+		return 0, func() {}
+	}
+	ptrs := make([]uintptr, len(items))
+	keeps := make([]func(), len(items))
+	for i, s := range items {
+		ptrs[i], keeps[i] = cString(s)
+	}
+	return uintptr(unsafe.Pointer(&ptrs[0])), func() {
+		for _, k := range keeps {
+			k()
 		}
-		length++
+		runtime.KeepAlive(ptrs)
 	}
-	bytes := make([]byte, length)
-	for i := 0; i < length; i++ {
-		bytes[i] = *(*byte)(unsafe.Pointer(ptr + uintptr(i)))
+}
+
+// Streaming.
+//
+// purego never releases a callback and allows about two thousand per process, so
+// creating one per Stream call, as these bindings used to, panicked a long-running
+// program after that many streamed replies. One trampoline is created instead,
+// and each call is told apart by the user_data the C API hands back.
+
+var (
+	streamOnce sync.Once
+	streamCB   uintptr
+	streamMu   sync.Mutex
+	streamFns  = map[uintptr]func(string) bool{}
+	streamNext uintptr
+)
+
+// registerStream returns the shared callback and the user_data identifying
+// onToken; release must be called once the native call has returned.
+func registerStream(onToken func(string) bool) (cb uintptr, userData uintptr, release func()) {
+	streamOnce.Do(func() {
+		streamCB = purego.NewCallback(func(textPtr uintptr, userData uintptr) uintptr {
+			streamMu.Lock()
+			fn := streamFns[userData]
+			streamMu.Unlock()
+			if fn == nil || !fn(goString(textPtr)) {
+				return 0 // stop
+			}
+			return 1 // continue
+		})
+	})
+	streamMu.Lock()
+	streamNext++
+	id := streamNext
+	streamFns[id] = onToken
+	streamMu.Unlock()
+	return streamCB, id, func() {
+		streamMu.Lock()
+		delete(streamFns, id)
+		streamMu.Unlock()
 	}
-	return string(bytes)
 }

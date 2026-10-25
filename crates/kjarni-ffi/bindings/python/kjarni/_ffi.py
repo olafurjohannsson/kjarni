@@ -23,7 +23,8 @@ def _find_library():
     search_paths = [
         Path(__file__).parent / lib_name,
         Path(__file__).parent / "lib" / lib_name,
-        Path(__file__).parent.parent.parent.parent.parent / "target" / "release" / lib_name,
+        # The workspace build: kjarni/ python/ bindings/ kjarni-ffi/ crates/ <root>.
+        Path(__file__).parents[5] / "target" / "release" / lib_name,
     ]
 
     for path in search_paths:
@@ -89,7 +90,9 @@ class KjarniFloatArray(Structure):
     def to_list(self) -> list:
         if not self.data or self.len == 0:
             return []
-        return [self.data[i] for i in range(self.len)]
+        # Slicing a ctypes pointer copies in C; indexing it element by element
+        # costs a Python call per float.
+        return self.data[: self.len]
 
     def free(self):
         _lib.kjarni_float_array_free(self)
@@ -117,11 +120,8 @@ class KjarniFloat2DArray(Structure):
     def to_list(self) -> list:
         if not self.data or self.rows == 0 or self.cols == 0:
             return []
-        result = []
-        for i in range(self.rows):
-            row = [self.data[i * self.cols + j] for j in range(self.cols)]
-            result.append(row)
-        return result
+        flat = self.data[: self.rows * self.cols]
+        return [flat[i * self.cols:(i + 1) * self.cols] for i in range(self.rows)]
 
     def free(self):
         _lib.kjarni_float_2d_array_free(self)
@@ -320,7 +320,7 @@ _lib.kjarni_float_array_free.argtypes = [KjarniFloatArray]
 _lib.kjarni_float_2d_array_free.restype = None
 _lib.kjarni_float_2d_array_free.argtypes = [KjarniFloat2DArray]
 _lib.kjarni_string_free.restype = None
-_lib.kjarni_string_free.argtypes = [c_char_p]
+_lib.kjarni_string_free.argtypes = [c_void_p]
 _lib.kjarni_class_results_free.restype = None
 _lib.kjarni_class_results_free.argtypes = [KjarniClassResults]
 _lib.kjarni_rerank_results_free.restype = None
@@ -443,6 +443,26 @@ _lib.kjarni_searcher_model_name.restype = c_size_t
 _lib.kjarni_searcher_model_name.argtypes = [c_void_p, c_char_p, c_size_t]
 _lib.kjarni_searcher_reranker_model.restype = c_size_t
 _lib.kjarni_searcher_reranker_model.argtypes = [c_void_p, c_char_p, c_size_t]
+
+def take_string(ptr: c_void_p) -> str:
+    """Decode a string the engine allocated, then free it.
+
+    Owned strings come back through `char**` out-parameters typed as c_void_p, not
+    c_char_p: ctypes would copy a c_char_p into bytes and drop the pointer, leaving
+    nothing to free.
+    """
+    if not ptr.value:
+        return ""
+    try:
+        return ctypes.string_at(ptr.value).decode("utf-8")
+    finally:
+        _lib.kjarni_string_free(ptr.value)
+
+
+def encode_or_none(s: Optional[str]) -> Optional[bytes]:
+    """UTF-8 for a config field, or None (NULL, "use the default") for None or empty."""
+    return s.encode("utf-8") if s else None
+
 
 class KjarniException(Exception):
     """Exception raised by Kjarni operations."""

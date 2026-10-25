@@ -18,17 +18,20 @@ authors.workspace = true
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-default = []
+# Image search is on by default so the shipped libraries, and every binding
+# built on them, have it. An embedder that holds decoded pixels already and
+# wants no JPEG or PNG decoder can build with --no-default-features.
+default = ["image-io"]
 c-bindings = []
 
-# CLIP image search. Off by default: a host that already holds decoded pixels
-# needs no JPEG decoder, and this pulls one in.
+# CLIP image search: decoding JPEG and PNG to index a folder of photos.
 image-io = ["kjarni/image-io"]
 
 [dependencies]
 kjarni = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 serde_json = "1.0"
+anyhow = { workspace = true }
 num_cpus = "1.16"
 futures = "0.3.31"
 rayon = "1.10"

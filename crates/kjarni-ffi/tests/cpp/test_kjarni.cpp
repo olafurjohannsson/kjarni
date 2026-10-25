@@ -16,8 +16,11 @@
 
 #include "kjarni.hpp"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -56,12 +59,24 @@ static_assert(std::is_move_constructible_v<kjarni::Classifier>);
 static_assert(std::is_move_constructible_v<kjarni::Reranker>);
 static_assert(std::is_move_constructible_v<kjarni::Chat>);
 static_assert(std::is_move_constructible_v<kjarni::Embedding>);
+static_assert(std::is_move_constructible_v<kjarni::Indexer>);
+static_assert(std::is_move_constructible_v<kjarni::Searcher>);
+static_assert(std::is_move_constructible_v<kjarni::Transcriber>);
+static_assert(std::is_move_constructible_v<kjarni::Summarizer>);
+static_assert(std::is_move_constructible_v<kjarni::Translator>);
+static_assert(std::is_move_constructible_v<kjarni::ImageIndex>);
 
 static_assert(!std::is_copy_constructible_v<kjarni::Embedder>);
 static_assert(!std::is_copy_constructible_v<kjarni::Classifier>);
 static_assert(!std::is_copy_constructible_v<kjarni::Reranker>);
 static_assert(!std::is_copy_constructible_v<kjarni::Chat>);
 static_assert(!std::is_copy_constructible_v<kjarni::Embedding>);
+static_assert(!std::is_copy_constructible_v<kjarni::Indexer>);
+static_assert(!std::is_copy_constructible_v<kjarni::Searcher>);
+static_assert(!std::is_copy_constructible_v<kjarni::Transcriber>);
+static_assert(!std::is_copy_constructible_v<kjarni::Summarizer>);
+static_assert(!std::is_copy_constructible_v<kjarni::Translator>);
+static_assert(!std::is_copy_constructible_v<kjarni::ImageIndex>);
 
 // A Result must not silently decay to bool in a condition where the value was meant.
 static_assert(std::is_same_v<kjarni::Result<int>, std::expected<int, kjarni::Error>>);
@@ -304,6 +319,208 @@ void test_ownership() {
     ok(!held.has_value(), "resetting the optional destroys it cleanly");
 }
 
+// ─── Fixtures ────────────────────────────────────────────────────
+
+namespace fs = std::filesystem;
+
+/// The repo root, found from this file so the tests run from any directory.
+fs::path repo_root() { return fs::path{__FILE__}.parent_path() / "../../../.."; }
+
+/// A scratch directory, emptied first and removed when it goes out of scope.
+struct TempDir {
+    fs::path path;
+    explicit TempDir(const char* name) : path(fs::temp_directory_path() / name) {
+        fs::remove_all(path);
+        fs::create_directories(path);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
+
+void write_file(const fs::path& p, const char* text) { std::ofstream{p} << text; }
+
+bool contains(std::string haystack, std::string_view needle) {
+    for (auto& c : haystack) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return haystack.find(needle) != std::string::npos;
+}
+
+// ─── Indexer and searcher ────────────────────────────────────────
+
+void test_index_and_search() {
+    section("indexer + searcher");
+
+    TempDir docs{"kjarni_cpp_docs"};
+    write_file(docs.path / "cats.txt", "Cats are small carnivorous mammals that purr and chase mice.");
+    write_file(docs.path / "rust.md", "Rust is a systems programming language focused on memory safety.");
+    write_file(docs.path / "bread.txt", "Sourdough bread is leavened with a starter of wild yeast.");
+    write_file(docs.path / "skip.log", "This file has an extension that is not indexed.");
+    const std::string index = (docs.path / "index").string();
+
+    auto indexer = kjarni::Indexer::create({.extensions = {"txt", "md"}});
+    if (!indexer) { ok(false, "indexer loads"); return; }
+
+    const std::vector<std::string> inputs{docs.path.string()};
+    auto stats = indexer->create_index(index, inputs);
+    ok(stats.has_value(), "an index is built");
+    if (!stats) return;
+    ok(stats->documents_indexed == 3, "only the listed extensions are indexed");
+    ok(stats->dimension == 384, "minilm vectors have 384 dimensions");
+
+    auto again = indexer->create_index(index, inputs);
+    ok(!again.has_value(), "building over an existing index fails without force");
+    ok(indexer->create_index(index, inputs, /*force=*/true).has_value(), "force replaces it");
+
+    write_file(docs.path / "tea.txt", "Green tea is brewed from unoxidised leaves of the tea plant.");
+    const std::vector<std::string> extra{(docs.path / "tea.txt").string()};
+    auto added = indexer->add(index, extra);
+    ok(added.has_value() && *added >= 1, "a file can be added to an existing index");
+
+    auto searcher = kjarni::Searcher::create();
+    if (!searcher) { ok(false, "searcher loads"); return; }
+    ok(!searcher->has_reranker(), "no reranker unless one is asked for");
+
+    auto hits = searcher->search(index, "feline pets");
+    ok(hits.has_value() && !hits->empty(), "a search returns hits");
+    if (hits && !hits->empty()) ok(contains(hits->front().text, "cats"), "the cat document ranks first");
+    if (hits && !hits->empty()) ok(contains(hits->front().metadata_json, "cats.txt"), "hits carry their source");
+
+    auto semantic = searcher->search(index, "a drink made from leaves",
+                                     {.mode = kjarni::SearchMode::semantic, .top_k = 1});
+    ok(semantic.has_value() && semantic->size() == 1, "top_k limits the results");
+    if (semantic && !semantic->empty()) ok(contains(semantic->front().text, "tea"), "an added document is found");
+
+    auto keyword = searcher->search(index, "sourdough", {.mode = kjarni::SearchMode::keyword});
+    ok(keyword.has_value() && !keyword->empty(), "keyword search finds an exact word");
+    if (keyword && !keyword->empty()) ok(contains(keyword->front().text, "sourdough"), "and ranks it first");
+
+    auto filtered = searcher->search(index, "programming", {.source_pattern = "*.md"});
+    ok(filtered.has_value(), "a source pattern is accepted");
+    if (filtered) {
+        bool all_md = !filtered->empty();
+        for (const auto& h : *filtered) all_md = all_md && contains(h.metadata_json, "rust.md");
+        ok(all_md, "a source pattern keeps only matching files");
+    }
+
+    auto missing = searcher->search((docs.path / "nope").string(), "x");
+    ok(!missing.has_value(), "searching a missing index fails");
+}
+
+// ─── Transcriber ─────────────────────────────────────────────────
+
+void test_transcriber() {
+    section("transcriber");
+
+    auto t = kjarni::Transcriber::create({.language = "en"});
+    if (!t) { ok(false, "whisper loads"); return; }
+
+    const auto wav = repo_root() / "crates/kjarni/tests/fixtures/speech.wav";
+    auto r = t->transcribe_file(wav.string());
+    ok(r.has_value(), "a wav file is transcribed");
+    if (r) {
+        ok(!r->text.empty(), "the transcript has text");
+        ok(r->language == "en", "the given language is reported");
+        ok(r->duration_secs > 0.f, "the duration is reported");
+        ok(!r->segments.empty(), "segments are returned");
+        bool ordered = true;
+        for (const auto& s : r->segments) ordered = ordered && s.end >= s.start;
+        ok(ordered, "every segment ends after it starts");
+    }
+
+    // A second of silence at 8 kHz exercises resampling and must not fail.
+    const std::vector<float> silence(8000, 0.f);
+    ok(t->transcribe(silence, 8000).has_value(), "PCM at another sample rate is accepted");
+    ok(!t->transcribe(silence, 0).has_value(), "a zero sample rate is rejected");
+    ok(!t->transcribe_file("/no/such/file.wav").has_value(), "a missing file is an error");
+}
+
+// ─── Summarizer and translator ───────────────────────────────────
+
+void test_summarizer() {
+    section("summarizer");
+
+    auto s = kjarni::Summarizer::create();
+    if (!s) { ok(false, "summarizer loads"); return; }
+
+    const std::string article =
+        "The city council voted on Tuesday to approve a new public library in the "
+        "downtown district. The library will include a children's wing, a maker space "
+        "with 3D printers, and a cafe. Construction is expected to begin next spring and "
+        "take about eighteen months. Council members said the project would be funded "
+        "through a combination of municipal bonds and private donations. Several "
+        "residents spoke in favour of the plan at the meeting, citing the lack of quiet "
+        "study spaces in the area. A small group opposed it, arguing the money would be "
+        "better spent on road repairs. The mayor said the library would become a "
+        "cornerstone of the community and help revitalise the downtown area, which has "
+        "seen several businesses close over the past few years.";
+    auto out = s->summarize(article);
+    ok(out.has_value() && !out->empty(), "an article is summarized");
+    if (out) ok(out->size() < article.size(), "the summary is shorter than the article");
+
+    ok(!kjarni::Summarizer::create({.model = "no-such-model"}).has_value(), "an unknown model fails");
+}
+
+void test_translator() {
+    section("translator");
+
+    auto t = kjarni::Translator::create({.from = "en", .to = "de"});
+    if (!t) { ok(false, "translator loads"); return; }
+
+    auto out = t->translate("The house is small.");
+    ok(out.has_value() && contains(*out, "haus"), "default languages translate en to de");
+
+    auto explicit_langs = t->translate("The house is small.", "English", "German");
+    ok(explicit_langs.has_value() && contains(*explicit_langs, "haus"), "languages can be named per call");
+
+    auto bare = kjarni::Translator::create();
+    if (bare) {
+        auto err = bare->translate("hello");
+        ok(!err.has_value() && err.error().code() == KJARNI_ERROR_CODE_INVALID_CONFIG,
+           "no languages anywhere is an invalid config");
+    }
+}
+
+// ─── Image search ────────────────────────────────────────────────
+
+void test_image_index() {
+    section("image index");
+
+    auto idx = kjarni::ImageIndex::create();
+    if (!idx) { ok(false, "CLIP loads"); return; }
+    ok(idx->size() == 0, "a new index is empty");
+
+    const auto photos = repo_root() / "tests/fixtures/clip/photos";
+    auto report = idx->add_directory(photos.string());
+    ok(report.has_value() && report->added >= 4, "a directory of photos is indexed");
+    if (report) ok(report->skipped == 0, "every photo decodes");
+
+    const std::pair<const char*, const char*> cases[] = {
+        {"a sandy beach under a blue sky", "beach_holiday"},
+        {"a dense green forest with trees", "deep_forest"},
+        {"a red car", "red_car"},
+        {"a snowy mountain peak", "snowy_mountain"},
+    };
+    for (const auto& [query, expected] : cases) {
+        auto hits = idx->search(query, 2);
+        ok(hits.has_value() && hits->size() == 2, "top_k limits image hits");
+        if (hits && !hits->empty()) ok(contains(hits->front().path, expected), query);
+    }
+
+    TempDir dir{"kjarni_cpp_images"};
+    const std::string saved = (dir.path / "photos.idx").string();
+    ok(idx->save(saved).has_value(), "the index saves");
+
+    auto restored = kjarni::ImageIndex::create();
+    if (!restored) { ok(false, "a second index loads"); return; }
+    auto count = restored->load(saved);
+    ok(count.has_value() && *count == idx->size(), "a saved index restores every vector");
+    auto hits = restored->search("a red car", 1);
+    ok(hits && !hits->empty() && contains(hits->front().path, "red_car"), "a restored index searches the same");
+
+    ok(!idx->add("/no/such/photo.jpg").has_value(), "a missing photo is an error");
+}
+
 // ─── Version ─────────────────────────────────────────────────────
 
 void test_version() {
@@ -321,6 +538,11 @@ int main() {
     test_classifier();
     test_reranker();
     test_ownership();
+    test_index_and_search();
+    test_transcriber();
+    test_summarizer();
+    test_translator();
+    test_image_index();
     test_version();
 
     std::fprintf(stderr, "\n%d checks, %d failed\n", checks, failures);

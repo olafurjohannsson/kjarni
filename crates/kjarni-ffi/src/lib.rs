@@ -10,6 +10,9 @@ mod indexer;
 mod panic;
 mod reranker;
 mod searcher;
+mod summarizer;
+mod transcriber;
+mod translator;
 
 pub use callback::*;
 pub use classifier::*;
@@ -19,9 +22,50 @@ pub use indexer::*;
 use kjarni::cosine_similarity;
 pub use reranker::*;
 pub use searcher::*;
+pub use summarizer::*;
+pub use transcriber::*;
+pub use translator::*;
 
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
+
+/// An optional UTF-8 C string: null is `None`, invalid UTF-8 is an error.
+///
+/// # Safety
+///
+/// `ptr` must be null or point to a nul-terminated string that outlives the
+/// returned reference.
+pub(crate) unsafe fn opt_str<'a>(ptr: *const std::ffi::c_char) -> Result<Option<&'a str>, KjarniErrorCode> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    unsafe { std::ffi::CStr::from_ptr(ptr) }
+        .to_str()
+        .map(Some)
+        .map_err(|_| KjarniErrorCode::InvalidUtf8)
+}
+
+/// Writes an owned C string for the caller to free with `kjarni_string_free`.
+/// Interior NULs, which a C string cannot hold, are dropped rather than cutting
+/// the text short.
+pub(crate) fn owned_c_string(s: &str) -> *mut std::ffi::c_char {
+    std::ffi::CString::new(s.replace('\0', ""))
+        .expect("NULs removed")
+        .into_raw()
+}
+
+/// The error code for a failure in the shared sequence-to-sequence layer under
+/// summarization and translation.
+pub(crate) fn seq2seq_error_code(e: &kjarni::seq2seq::Seq2SeqError) -> KjarniErrorCode {
+    use kjarni::seq2seq::Seq2SeqError as E;
+    match e {
+        E::UnknownModel(_) | E::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
+        E::DownloadFailed { .. } | E::LoadFailed { .. } => KjarniErrorCode::LoadFailed,
+        E::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
+        E::GenerationFailed(_) => KjarniErrorCode::InferenceFailed,
+        E::IncompatibleModel { .. } | E::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+    }
+}
 
 /// Global tokio runtime for async operations
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();

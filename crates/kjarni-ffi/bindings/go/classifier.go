@@ -179,6 +179,6 @@ func parseClassResults(results ffiClassResults) *ClassifyResult {
 
 func freeClassResults(results ffiClassResults) {
     if _classResultsFreeSymGlobal != 0 {
-        purego.SyscallN(_classResultsFreeSymGlobal, uintptr(unsafe.Pointer(&results)))
+        callWithStruct(_classResultsFreeSymGlobal, unsafe.Pointer(&results), unsafe.Sizeof(results))
     }
 }

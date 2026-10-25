@@ -2,7 +2,7 @@ package kjarni
 
 import (
 	"errors"
-	"fmt"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -57,24 +57,37 @@ type Indexer struct {
 // NewIndexer creates an indexer using the given embedding model.
 // The model is used to generate vectors for each text chunk during indexing.
 func NewIndexer(model string, opts ...Option) (*Indexer, error) {
-	var initErr error
-	ffiOnce.Do(func() { initErr = initFFI() })
-	if initErr != nil {
-		return nil, fmt.Errorf("initializing kjarni: %w", initErr)
+	if err := ensureInit(); err != nil {
+		return nil, err
 	}
 
 	o := applyOptions(opts)
 
 	modelStr, keepModel := cString(model)
 	defer keepModel()
+	cacheDir, keepCacheDir := cStringOrNull(o.cacheDir)
+	defer keepCacheDir()
+	extensions, keepExtensions := cStringOrNull(strings.Join(o.extensions, ","))
+	defer keepExtensions()
+	exclude, keepExclude := cStringOrNull(strings.Join(o.exclude, ","))
+	defer keepExclude()
 
 	var config ffiIndexerConfig
 	config.Device = deviceCode(o.device)
+	config.CacheDir = cacheDir
 	config.ModelName = modelStr
 	config.ChunkSize = 512
 	config.ChunkOverlap = 100
+	if o.chunkSize > 0 {
+		config.ChunkSize = uintptr(o.chunkSize)
+		config.ChunkOverlap = uintptr(o.chunkOverlap)
+	}
 	config.BatchSize = 32
-	config.Recursive = 1
+	config.Extensions = extensions
+	config.ExcludePatterns = exclude
+	config.Recursive = boolToInt(!o.notRecursive)
+	config.IncludeHidden = boolToInt(o.includeHidden)
+	config.MaxFileSize = 10 * 1024 * 1024
 	config.Quiet = boolToInt(o.quiet)
 
 	var handle uintptr
@@ -92,14 +105,54 @@ func NewIndexer(model string, opts ...Option) (*Indexer, error) {
 	return &Indexer{handle: handle}, nil
 }
 
-// Create builds a new search index at indexPath from the given input directories.
-// Files are chunked, embedded, and stored for later retrieval with a Searcher.
+// Create builds a new search index at indexPath from the given files and
+// directories. Files are chunked, embedded, and stored for later retrieval with a
+// Searcher. It fails if an index already exists there; see Recreate.
 func (idx *Indexer) Create(indexPath string, inputs []string) (*IndexStats, error) {
+	return idx.create(indexPath, inputs, false)
+}
+
+// Recreate is Create, replacing any index already at indexPath.
+func (idx *Indexer) Recreate(indexPath string, inputs []string) (*IndexStats, error) {
+	return idx.create(indexPath, inputs, true)
+}
+
+// Add indexes more files and directories into the existing index at indexPath,
+// returning how many chunks were added.
+func (idx *Indexer) Add(indexPath string, inputs []string) (int, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	if idx.closed {
+		return 0, errors.New("indexer is closed")
+	}
+	if len(inputs) == 0 {
+		return 0, errors.New("no input paths given")
+	}
+
+	pathPtr, keepPath := cString(indexPath)
+	defer keepPath()
+	inputsPtr, keepInputs := cStringArray(inputs)
+	defer keepInputs()
+
+	var added uintptr
+	r1, _, _ := purego.SyscallN(_indexerAddSym, idx.handle, pathPtr, inputsPtr, uintptr(len(inputs)),
+		uintptr(unsafe.Pointer(&added)))
+	if code := int32(r1); code != 0 {
+		return 0, lastError(code)
+	}
+	return int(added), nil
+}
+
+func (idx *Indexer) create(indexPath string, inputs []string, force bool) (*IndexStats, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	if idx.closed {
 		return nil, errors.New("indexer is closed")
+	}
+	// The C call reads the first input unconditionally through &cStrs[0].
+	if len(inputs) == 0 {
+		return nil, errors.New("no input paths given")
 	}
 
 	pathPtr, keepPath := cString(indexPath)
@@ -123,7 +176,7 @@ func (idx *Indexer) Create(indexPath string, inputs []string) (*IndexStats, erro
 		pathPtr,
 		uintptr(unsafe.Pointer(&cStrs[0])),
 		uintptr(len(inputs)),
-		0, // force = false
+		uintptr(boolToInt(force)),
 		uintptr(unsafe.Pointer(&stats)),
 	)
 

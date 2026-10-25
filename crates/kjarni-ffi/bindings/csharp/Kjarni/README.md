@@ -2,7 +2,8 @@
 
 **Local AI inference for .NET. One package, running inside your process.**
 
-Sentiment analysis, embeddings, semantic search, reranking and local LLM chat, on the CPU you
+Sentiment analysis, embeddings, semantic search, reranking, local LLM chat, speech to text,
+summarization, translation and photo search, on the CPU you
 already have. Add the package, name a model, call a method. Models download on first use and
 everything after that works offline.
 
@@ -168,6 +169,29 @@ var results = searcher.Search("my_index", "how do returns work?", mode: SearchMo
 ```
 
 Search modes: `Semantic`, `Keyword` (BM25), `Hybrid`.
+
+## Speech, summaries, translation and photos
+
+```csharp
+using var transcriber = new Transcriber(language: "en");
+var t = transcriber.TranscribeFile("meeting.wav");
+Console.WriteLine(t.Text);                     // and t.Segments, each with Start and End
+
+using var summarizer = new Summarizer();
+Console.WriteLine(summarizer.Summarize(article));
+
+using var translator = new Translator(from: "en", to: "de");
+Console.WriteLine(translator.Translate("The house is small."));   // Das Haus ist klein.
+
+using var photos = new ImageIndex();           // CLIP, downloaded on first use
+photos.AddDirectory("Pictures");
+foreach (var hit in photos.Search("a red car", 5))
+    Console.WriteLine(hit.Path);
+photos.Save("photos.idx");                     // reload later with Load, no re-encoding
+```
+
+`Transcribe(samples, sampleRate)` takes mono PCM at any sample rate, for audio you
+already have in memory.
 
 ## Models
 

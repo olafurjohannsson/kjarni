@@ -154,6 +154,21 @@ typedef struct KjarniReranker KjarniReranker;
 typedef struct KjarniSearcher KjarniSearcher;
 
 /**
+ * Opaque handle to a Summarizer.
+ */
+typedef struct KjarniSummarizer KjarniSummarizer;
+
+/**
+ * Opaque handle to a Transcriber.
+ */
+typedef struct KjarniTranscriber KjarniTranscriber;
+
+/**
+ * Opaque handle to a Translator.
+ */
+typedef struct KjarniTranslator KjarniTranslator;
+
+/**
  * Float array returned by FFI functions. Caller must free with kjarni_float_array_free.
  */
 typedef struct KjarniFloatArray {
@@ -550,6 +565,114 @@ typedef struct KjarniSearcherConfig {
   uintptr_t default_top_k;
   int32_t quiet;
 } KjarniSearcherConfig;
+
+/**
+ * Configuration for a Summarizer.
+ */
+typedef struct KjarniSummarizerConfig {
+  enum KjarniDevice device;
+  const char *cache_dir;
+  /**
+   * Model name, e.g. "distilbart-cnn" (the default) or "bart-large-cnn".
+   */
+  const char *model_name;
+  /**
+   * Minimum summary length in tokens. 0 uses the model's default.
+   */
+  uintptr_t min_length;
+  /**
+   * Maximum summary length in tokens. 0 uses the model's default.
+   */
+  uintptr_t max_length;
+  /**
+   * Non-zero suppresses progress output.
+   */
+  int32_t quiet;
+} KjarniSummarizerConfig;
+
+/**
+ * Configuration for a Transcriber.
+ */
+typedef struct KjarniTranscriberConfig {
+  enum KjarniDevice device;
+  /**
+   * Model name, e.g. "whisper-small" (the default) or "whisper-large-v3".
+   */
+  const char *model_name;
+  /**
+   * Spoken language as an ISO code such as "en" or "is". Null detects it from
+   * the audio.
+   */
+  const char *language;
+  /**
+   * Non-zero translates the speech into English instead of transcribing it.
+   */
+  int32_t translate;
+  /**
+   * Non-zero suppresses progress output.
+   */
+  int32_t quiet;
+} KjarniTranscriberConfig;
+
+/**
+ * One timed piece of a transcript. `text` is owned by the enclosing
+ * [`KjarniTranscription`].
+ */
+typedef struct KjarniTranscriptionSegment {
+  /**
+   * Start, in seconds from the beginning of the audio.
+   */
+  float start;
+  /**
+   * End, in seconds from the beginning of the audio.
+   */
+  float end;
+  char *text;
+} KjarniTranscriptionSegment;
+
+/**
+ * A transcript. Free with [`kjarni_transcription_free`].
+ */
+typedef struct KjarniTranscription {
+  /**
+   * The whole transcript.
+   */
+  char *text;
+  /**
+   * The language transcribed, as an ISO code: the one given, or the one
+   * detected.
+   */
+  char *language;
+  float duration_secs;
+  struct KjarniTranscriptionSegment *segments;
+  uintptr_t len;
+} KjarniTranscription;
+
+/**
+ * Configuration for a Translator.
+ */
+typedef struct KjarniTranslatorConfig {
+  enum KjarniDevice device;
+  const char *cache_dir;
+  /**
+   * Model name, e.g. "flan-t5-base" (the default) or "flan-t5-large".
+   */
+  const char *model_name;
+  /**
+   * Default source language ("english", "en", ...), used when a call passes
+   * none. Null for no default.
+   */
+  const char *from;
+  /**
+   * Default target language, used when a call passes none. Null for no
+   * default.
+   */
+  const char *to;
+  /**
+   * Non-zero suppresses progress output.
+   */
+  int32_t quiet;
+} KjarniTranslatorConfig;
 
 #ifdef __cplusplus
 extern "C" {
@@ -1010,11 +1133,13 @@ void kjarni_clear_error(void);
 
 #if defined(KJARNI_IMAGE_IO)
 /**
- * Loads CLIP from a model directory, as `kjarni model download` leaves it.
+ * Loads CLIP from a model directory, as `kjarni model download` leaves it. A
+ * null `model_dir` uses the default model, clip-vit-base-32, downloading it on
+ * first use, the same as every other capability.
  *
  * # Safety
- * `model_dir` must be a valid NUL-terminated path. `out` must be a valid pointer
- * to write the handle into.
+ * `model_dir` must be null or a valid NUL-terminated path. `out` must be a valid
+ * pointer to write the handle into.
  */
 enum KjarniErrorCode kjarni_image_index_new(const char *model_dir, struct KjarniImageIndex **out);
 #endif
@@ -1554,6 +1679,158 @@ uintptr_t kjarni_searcher_model_name(const struct KjarniSearcher *searcher,
 uintptr_t kjarni_searcher_reranker_model(const struct KjarniSearcher *searcher,
                                          char *buf,
                                          uintptr_t buf_len);
+
+/**
+ * Get default summarizer configuration.
+ */
+struct KjarniSummarizerConfig kjarni_summarizer_config_default(void);
+
+/**
+ * Create a new Summarizer. Downloads the model on first use.
+ *
+ * # Safety
+ *
+ * - `config` must be null (defaults) or point to a valid config whose strings
+ *   are null or nul-terminated.
+ * - `out` must be a valid, writable pointer.
+ */
+enum KjarniErrorCode kjarni_summarizer_new(const struct KjarniSummarizerConfig *config,
+                                           struct KjarniSummarizer **out);
+
+/**
+ * Free a Summarizer.
+ *
+ * # Safety
+ *
+ * - `summarizer` must be null, or a handle from `kjarni_summarizer_new` not
+ *   already freed.
+ */
+void kjarni_summarizer_free(struct KjarniSummarizer *summarizer);
+
+/**
+ * Summarize a text.
+ *
+ * # Safety
+ *
+ * - `summarizer` must be a live handle; `text` a nul-terminated string.
+ * - `out` must be a valid, writable pointer. On success it receives a string the
+ *   caller frees with `kjarni_string_free`; on failure it is set to null.
+ */
+enum KjarniErrorCode kjarni_summarizer_summarize(const struct KjarniSummarizer *summarizer,
+                                                 const char *text,
+                                                 char **out);
+
+/**
+ * Get default transcriber configuration.
+ */
+struct KjarniTranscriberConfig kjarni_transcriber_config_default(void);
+
+/**
+ * Free a transcript and every string in it.
+ *
+ * # Safety
+ *
+ * - `transcription` must be a value written by a transcribe call, passed here
+ *   exactly once.
+ */
+void kjarni_transcription_free(struct KjarniTranscription transcription);
+
+/**
+ * Create a new Transcriber. Downloads the model on first use.
+ *
+ * # Safety
+ *
+ * - `config` must be null (defaults) or point to a valid config whose strings
+ *   are null or nul-terminated.
+ * - `out` must be a valid, writable pointer.
+ */
+enum KjarniErrorCode kjarni_transcriber_new(const struct KjarniTranscriberConfig *config,
+                                            struct KjarniTranscriber **out);
+
+/**
+ * Free a Transcriber.
+ *
+ * # Safety
+ *
+ * - `transcriber` must be null, or a handle from `kjarni_transcriber_new` not
+ *   already freed.
+ */
+void kjarni_transcriber_free(struct KjarniTranscriber *transcriber);
+
+/**
+ * Transcribe an audio file (wav, mp3, flac or ogg).
+ *
+ * # Safety
+ *
+ * - `transcriber` must be a live handle; `path` a nul-terminated string.
+ * - `out` must be a valid, writable pointer. It is written on success and on
+ *   failure; free it with `kjarni_transcription_free` either way.
+ */
+enum KjarniErrorCode kjarni_transcriber_transcribe_file(const struct KjarniTranscriber *transcriber,
+                                                        const char *path,
+                                                        struct KjarniTranscription *out);
+
+/**
+ * Transcribe raw mono PCM samples in -1..1 at any sample rate; they are
+ * resampled to 16 kHz.
+ *
+ * # Safety
+ *
+ * - `transcriber` must be a live handle.
+ * - `samples` must point to `len` readable floats (it may be null when `len` is 0).
+ * - `out` must be a valid, writable pointer; free it with
+ *   `kjarni_transcription_free` either way.
+ */
+enum KjarniErrorCode kjarni_transcriber_transcribe_pcm(const struct KjarniTranscriber *transcriber,
+                                                       const float *samples,
+                                                       uintptr_t len,
+                                                       uint32_t sample_rate,
+                                                       struct KjarniTranscription *out);
+
+/**
+ * Get default translator configuration.
+ */
+struct KjarniTranslatorConfig kjarni_translator_config_default(void);
+
+/**
+ * Create a new Translator. Downloads the model on first use.
+ *
+ * # Safety
+ *
+ * - `config` must be null (defaults) or point to a valid config whose strings
+ *   are null or nul-terminated.
+ * - `out` must be a valid, writable pointer.
+ */
+enum KjarniErrorCode kjarni_translator_new(const struct KjarniTranslatorConfig *config,
+                                           struct KjarniTranslator **out);
+
+/**
+ * Free a Translator.
+ *
+ * # Safety
+ *
+ * - `translator` must be null, or a handle from `kjarni_translator_new` not
+ *   already freed.
+ */
+void kjarni_translator_free(struct KjarniTranslator *translator);
+
+/**
+ * Translate a text. A null `from` or `to` uses the translator's default for it;
+ * with neither a language nor a default, this fails with
+ * `KJARNI_ERROR_INVALID_CONFIG`.
+ *
+ * # Safety
+ *
+ * - `translator` must be a live handle; `text` a nul-terminated string; `from`
+ *   and `to` null or nul-terminated.
+ * - `out` must be a valid, writable pointer. On success it receives a string the
+ *   caller frees with `kjarni_string_free`; on failure it is set to null.
+ */
+enum KjarniErrorCode kjarni_translator_translate(const struct KjarniTranslator *translator,
+                                                 const char *text,
+                                                 const char *from,
+                                                 const char *to,
+                                                 char **out);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -67,7 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # One key per job, deliberately. These three jobs download different model
-      # sets (15 here, 9 for csharp-test, 3 for cpp-test) and run concurrently.
+      # sets (15 here, 9 for csharp-test, 7 for cpp-test) and run concurrently.
       # `actions/cache` keys are immutable and a job only saves when it missed, so
       # a single shared key is won permanently by whichever job saves first --
       # usually cpp-test, which downloads the least. Every later run would then
@@ -197,6 +197,8 @@ jobs:
       # GPU tests self-skip via SkippableFact when no adapter is present,
       # so the whole suite runs on a CPU-only runner.
       - name: Run C# tests
+        env:
+          KJARNI_SKIP_HEAVY: "1"
         run: >
           dotnet test
           crates/kjarni-ffi/bindings/csharp/Kjarni.sln
@@ -234,7 +236,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-cpp-v3
+          key: kjarni-models-cpp-v4
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
@@ -272,12 +274,20 @@ jobs:
       - name: Build CLI for model downloads
         run: cargo build --release --package kjarni-cli
 
+      # The C++ job is the one that runs every capability against a real model,
+      # about 3.5GB in all. The other binding jobs set KJARNI_SKIP_HEAVY, since
+      # each would otherwise cache its own copy and together overrun the
+      # repository's 10GB cache.
       - name: Download models used by the C++ tests
         run: |
           CLI=./target/release/kjarni
           $CLI model download minilm-l6-v2
           $CLI model download minilm-l6-v2-cross-encoder
           $CLI model download distilbert-sentiment
+          $CLI model download whisper-small
+          $CLI model download distilbart-cnn
+          $CLI model download flan-t5-base
+          $CLI model download clip-vit-base-32
 
       - name: Build C++ tests
         working-directory: crates/kjarni-ffi/tests/cpp
@@ -397,7 +407,51 @@ jobs:
       # `go test ./...` stays hermetic for anyone who has cloned the module.
       - name: Run Go integration tests
         working-directory: crates/kjarni-ffi/bindings/go
+        env:
+          KJARNI_SKIP_HEAVY: "1"
         run: go test -tags integration -v ./...
+
+  # ─── Python binding tests ───────────────────────────────────────
+  #
+  # The bindings are plain ctypes, so nothing checks a struct layout or a
+  # signature until a call is made. These tests make them. Heavy models are
+  # skipped here and covered by the C++ job, which drives the same C ABI.
+  python-test:
+    name: Test (Python binding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: python-test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-python-v1
+
+      - name: Build native FFI library
+        run: cargo build --release --package kjarni-ffi
+
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
+      - name: Download models used by the Python tests
+        run: ./target/release/kjarni model download minilm-l6-v2
+
+      - name: Run Python tests
+        working-directory: crates/kjarni-ffi/bindings/python
+        env:
+          KJARNI_SKIP_HEAVY: "1"
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v
 
   # ─── WASM check (kjarni-transformers engine) ────────────────────
   wasm-check:

@@ -193,9 +193,26 @@ Kjarni frees, and each type has its own function — `kjarni_float_array_free`,
 
 ## What's available
 
-Embeddings, classification, reranking, indexing, search and chat. Transcription,
-summarization and translation exist in the engine and on the command line but are
-not in the C ABI yet.
+Everything the engine does: embeddings, classification, reranking, indexing and
+hybrid search, chat, speech to text, summarization, translation and image search.
+
+```cpp
+auto t = kjarni::Transcriber::create({.language = "en"});
+auto text = t->transcribe_file("meeting.wav");          // text, language, timed segments
+
+auto s = kjarni::Summarizer::create();
+auto summary = s->summarize(article);
+
+auto tr = kjarni::Translator::create({.from = "en", .to = "de"});
+auto german = tr->translate("The house is small.");      // "Das Haus ist klein."
+
+auto photos = kjarni::ImageIndex::create();               // CLIP, downloaded on first use
+(void)photos->add_directory("Pictures/");
+auto hits = photos->search("a red car", 5);
+```
+
+Image search needs a library built with its default features; define
+`KJARNI_NO_IMAGE_IO` before including the headers if yours was built without them.
 
 ## Getting the library
 

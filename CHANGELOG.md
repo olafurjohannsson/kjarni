@@ -1,5 +1,65 @@
 # Changelog
 
+## Unreleased
+
+### Every capability in every language
+
+Speech to text, summarization, translation and image search were in the engine and
+on the command line but not in the C ABI, so no binding could reach them. They are
+now `kjarni_transcriber_*`, `kjarni_summarizer_*`, `kjarni_translator_*` and
+`kjarni_image_index_*`, and every binding wraps all of them:
+
+| Added | C++ | C# | Go | Python |
+| ----- | :-: | :-: | :-: | :----: |
+| Transcriber, Summarizer, Translator, ImageIndex | ✓ | ✓ | ✓ | ✓ |
+| Indexer, Searcher | ✓ | | | |
+| Chat (with streaming, history, conversations) | | | | ✓ |
+| Chat with caller-held history | | | ✓ | |
+| Indexer `Add`, `Recreate`, extensions, excludes, chunking | | | ✓ | |
+| Search options and result metadata | | | ✓ | |
+
+The same input now gives byte-identical output from C++, C#, Go and Python for
+transcription, summaries, translation, image and hybrid search scores, and greedy
+chat.
+
+`image-io` is now a default feature of `kjarni-ffi`, so the published libraries
+include image search; `--no-default-features` leaves it out, and each binding
+reports that rather than failing to load. `kjarni_image_index_new` with a null model
+directory now uses clip-vit-base-32, downloaded on first use.
+
+### The Go binding leaked every result
+
+C functions that take a struct by value, such as
+`kjarni_float_array_free(KjarniFloatArray)`, were called through purego with a
+pointer to the struct. That is the Windows x64 convention; on Linux the struct
+travels in registers, so the free read the Go pointer as its data field and an
+unrelated register as its length, found zero, and did nothing. Every embedding,
+classification, rerank and search result leaked: about 28MB per 300 batches of 64
+embeddings. A new test measures RSS across that loop.
+
+### The Go binding panicked after about two thousand streamed replies
+
+Each `Stream` call created a purego callback. purego never frees one and allows about
+two thousand per process, so a long-running chat server panicked. All streams now
+share one callback and are told apart by `user_data`.
+
+### Smaller fixes
+
+- Go: `Indexer.Create` with no inputs indexed out of range and panicked; it now
+  returns an error. `Searcher.Search` requested the reranker on every query whether
+  or not one was configured; it now uses the searcher's default.
+- Go: `goString` copied byte by byte through two loops; it is one copy now.
+- Python: the in-repo library path pointed at `crates/target/release`, one directory
+  short, so a development checkout silently loaded whatever `libkjarni_ffi` was on
+  the system path instead.
+- Python: embeddings were copied out of the engine one float at a time through the
+  interpreter; they are sliced in C now.
+- Python now has a test suite, run in CI. The C++ job downloads the larger models
+  and runs every capability; the C#, Go and Python jobs set `KJARNI_SKIP_HEAVY` and
+  skip those, rather than each caching its own 3.5GB.
+
+The browser build is unchanged: Whisper, the seq2seq models and CLIP are native only.
+
 ## 0.2.3
 
 ### A panic in the engine no longer kills the host process
