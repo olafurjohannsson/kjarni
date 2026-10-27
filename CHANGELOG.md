@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6
 
 ### Faster batches for reranking, classification and embeddings
 
