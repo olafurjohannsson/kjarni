@@ -208,7 +208,7 @@ pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) 
         mat_a,
         mat_b.transpose(),
         1.0,
-        faer::Par::rayon(0),
+        crate::utils::faer_par(),
     );
 
     c
@@ -925,7 +925,7 @@ pub fn matmul_2d_f32_faer_noalloc(
             a_f,
             b_f.transpose(),
             1.0f32,
-            faer::Par::rayon(0),
+            crate::utils::faer_par(),
         );
     }
 
@@ -2057,7 +2057,7 @@ where
             faer::MatRef::from_row_major_slice(a_slice, m, k),
             faer::MatRef::from_row_major_slice(buf, rows, k).transpose(),
             1.0,
-            faer::Par::rayon(0),
+            crate::utils::faer_par(),
         );
         start += rows;
     }

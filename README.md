@@ -295,27 +295,19 @@ against PyTorch's: embeddings agree to within 3e-7.
   <img alt="Time to load a model" src="bench/charts/encoders-load-light.svg">
 </picture>
 
-- **Embeddings, reranking, classification:** faster than PyTorch on every task, within about 10% of ONNX Runtime either way, and loads 10 to 40 times faster than PyTorch.
-- **Speech to text:** whisper-small transcribes a minute of audio at 10× real time, ahead of openai-whisper and of faster-whisper at full precision; faster-whisper's int8 mode is faster still.
-- **Image search:** CLIP indexing on par with open_clip.
-- **Where it is behind:** text generation reaches 56 to 78% of llama.cpp's prompt speed and 77 to 81% of its generation speed on the same GGUF files; summarization and translation take about 1.6× PyTorch's time; and the larger models use more memory than PyTorch does.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/encoders-memory-dark.svg">
+  <img alt="Memory in use" src="bench/charts/encoders-memory-light.svg">
+</picture>
+
+- **Embeddings, reranking, classification:** faster than PyTorch on every task and level with ONNX Runtime on reranking and classification; ONNX Runtime is 11 to 17% faster on embeddings. Loads 10 to 25 times faster than PyTorch and 4 to 7 times faster than ONNX Runtime.
+- **Same answers as PyTorch:** embeddings, rerank scores and class probabilities agree with PyTorch's to within 4e-6, as closely as ONNX Runtime's do.
+- **Speech to text:** whisper-small transcribes a minute of audio at 11.5× real time, ahead of openai-whisper (8.2×) and faster-whisper at full precision (6.9×); faster-whisper's int8 mode is faster still (13.7×).
+- **Image search:** CLIP indexes 57 images a second against open_clip's 52, and loads in 0.3 s against 3.5 s.
+- **Memory:** a loaded model takes about the size of its weight file, less than the same model elsewhere: Whisper-small 1.1 GB against 1.4 GB in openai-whisper and 1.7 GB in faster-whisper, distilbart 1.3 GB against 1.7 GB, CLIP 0.8 GB against 1.2 GB.
+- **Where it is behind:** text generation runs at 70 to 79% of llama.cpp's speed on the same GGUF files; prompt processing is level with llama.cpp on Qwen2.5 0.5B and at 66% on Llama 3.2 1B. Summarization and translation take 1.1 to 1.4× PyTorch's time, and on short clips openai-whisper transcribes faster.
 
 Method, every number and how to reproduce them: [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
-
-## Verified against PyTorch
-
-Kjarni's outputs are tested for numerical parity against PyTorch/HuggingFace golden values, and its GPU path is tested for parity against its own CPU path — encoders, cross-encoders, decoders, RoPE, RMSNorm, and full generation traces:
-
-```
-test models::sentence_encoder::...::test_torch_sentence_encoder_golden_values ... ok
-test models::sequence_classifier::...::test_cross_encoder_rerank_torch_parity ... ok
-test tests::encoder_parity_test::test_encoder_cpu_gpu_parity                   ... ok
-test tests::decoder_parity_test::test_full_text_generation_parity              ... ok
-
-test result: ok. 44 passed; 0 failed
-```
-
-A reimplemented engine is only worth using if it agrees with the reference implementation. These tests are how that claim is kept honest.
 
 ## What it does
 

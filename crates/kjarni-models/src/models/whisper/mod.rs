@@ -5,8 +5,8 @@ mod transcriber;
 pub use config::WhisperConfig;
 pub use model::WhisperModel;
 pub use transcriber::{
-    WHISPER_CHUNK_LENGTH_SECS, WHISPER_CHUNK_SAMPLES, WHISPER_SAMPLE_RATE, WhisperChunkResult,
-    WhisperSegment, WhisperTask, WhisperTranscriberConfig,
+    AudioChunk, WHISPER_CHUNK_LENGTH_SECS, WHISPER_CHUNK_SAMPLES, WHISPER_SAMPLE_RATE,
+    WhisperChunkResult, WhisperSegment, WhisperTask, WhisperTranscriberConfig,
 };
 
 // #[derive(Debug, Clone, PartialEq)]

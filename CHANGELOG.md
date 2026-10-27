@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6
 
 ### Faster batches for reranking, classification and embeddings
 
@@ -10,11 +10,11 @@ and results are in [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
 - **Reranking and classification group inputs by length.** Both padded a whole batch
   to its longest member and used the encoder's allocating forward pass. They now
   use the same length-bucketed, buffered path as embeddings: reranking 64 documents
-  went from 561 ms to 260 ms, faster than PyTorch's 301 ms.
+  went from 561 ms to 246 ms, faster than PyTorch's 273 ms.
 - **Batch classification in the C API.** `kjarni_classifier_classify_batch` runs many
   texts through the model together, and every binding uses it: `classify_batch` in
   Python, `ClassifyBatch` in C# and Go, `classify(span)` in C++. 64 texts went from
-  681 ms, one at a time, to 162 ms, against PyTorch's 218 ms.
+  681 ms, one at a time, to 157 ms, against PyTorch's 223 ms.
 - **Encoder buffers are reused across calls.** Each forward pass allocated and zeroed
   a couple of hundred megabytes of scratch space, 40 ms of a 260 ms MiniLM batch.
   Whisper and the BART and T5 encoders reuse them too.
@@ -22,12 +22,12 @@ and results are in [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
 - The embedding layer norm and the position and token-type additions run in
   parallel instead of on one thread.
 
-### Prompts are processed up to twelve times faster
+### Prompts are processed more than ten times faster
 
 A 500-token prompt took Qwen2.5 0.5B ten seconds before the first token; it now
-takes about one. Prompt processing on the same GGUF files went from 41 to 472
-tokens a second (llama.cpp: 607) on Qwen2.5 0.5B and from 20 to 238 on Llama 3.2
-1B (llama.cpp: 426).
+takes about one. Prompt processing on the same GGUF files went from 41 to 615
+tokens a second (llama.cpp: 611) on Qwen2.5 0.5B and from 20 to 282 on Llama 3.2
+1B (llama.cpp: 424).
 
 - **Prompts use the streaming attention path.** It was reserved for an all-ones
   mask, but Llama-family models pass a causal mask for a prompt, which asks for
@@ -39,6 +39,46 @@ tokens a second (llama.cpp: 607) on Qwen2.5 0.5B and from 20 to 238 on Llama 3.2
   multiplied with faer.
 - **Only the last position's logits are computed for a prompt**, the only ones
   used: on a 152k vocabulary, 70 GFLOP saved per 500-token prompt.
+
+### Models hold one copy of their weights
+
+Whisper-small went from 2.8 GB to 1.1 GB once loaded, distilbart-cnn from 3.5 GB
+to 1.3 GB and CLIP from 1.3 GB to 0.65 GB: about the size of their weight files,
+and less than the same models take in PyTorch. Three things held extra copies:
+
+- **The mmap cache never let go.** It held every weight file mapped for the life
+  of the process, after its weights had been copied out and even after the model
+  was dropped. It holds weak references now.
+- **`StdFeedForward` stored its matrices twice**, in public fields beside the
+  layers that use them. In Whisper and BART the feed-forward is most of the model.
+- **The token embedding table was loaded three times** for encoder-decoder
+  models, by the encoder, the decoder and the pipeline. `ModelWeights` now hands
+  out one shared copy (`get_shared_array2`).
+- **Loading peaked at twice the model.** The mapped file stayed resident while
+  its weights were copied out of it. Each tensor's pages are now released as soon
+  as it is copied, so Whisper-small peaks at 1.28 GB instead of 2.97 GB.
+
+A test loads Whisper-small and distilbart-cnn and checks each holds under 1.3
+times its weight file once loaded, and peaks under 1.5 times while loading; they
+are at 1.03 and 1.05.
+
+### Whisper keeps every sentence on long audio
+
+Audio was cut into fixed 30-second windows, wherever the 30 seconds fell. Whisper
+drops an unfinished phrase at the end of a window and guesses at the fragment that
+opens the next, so a sentence spanning a cut went missing. A cut could also send a
+window into a loop to the 448-token limit: a 54-second recording took 30 seconds.
+
+- **Windows are cut at pauses**: the latest clear pause in a window's last five
+  seconds.
+- **Whisper's timestamp rules** from OpenAI's decoder are applied, so segments carry
+  real start and end times instead of one segment per 30-second window.
+- **Text invented in a window's padding is dropped.** Past the end of the speech,
+  Whisper carries on into the silence, continuing a phrase it expects. A segment
+  that starts there, and `[BLANK_AUDIO]`, are discarded, and no segment opens in the
+  window's last half-second.
+
+Transcribing long audio takes about a quarter longer, from the timestamp tokens.
 
 ### Quantized chat in every language, and Qwen from GGUF
 
@@ -131,6 +171,73 @@ share one callback and are told apart by `user_data`.
 The browser build is unchanged: Whisper, the seq2seq models and CLIP are native only.
 
 ## 0.2.4
+
+### `kjarni mcp`: Kjarni as tools for AI agents
+
+`kjarni mcp` serves Kjarni to any MCP client (Claude Code, Cursor, Claude Desktop,
+VS Code) as tools that run locally: `search_folder` (semantic and hybrid search over
+a folder of documents or code, indexed on first use and kept up to date),
+`transcribe`, `classify`, `rerank` and `similarity`. Models load once per session,
+and indexes live in Kjarni's cache, never in the folders searched.
+
+```bash
+claude mcp add kjarni -- kjarni mcp
+```
+
+### Whisper is four times faster and detects the language
+
+Three minutes of English went from 64 s to 16 s on CPU.
+
+- **The mel spectrogram** computed a naive DFT per bin. It is now two matrix
+  multiplies against cos/sin tables built once: 1.5 s to 15 ms per chunk, and 100
+  times closer to HuggingFace's features (worst difference 1.7e-3 to 1.7e-5).
+- **The convolutional front end** is im2col and a matmul instead of scalar loops,
+  with Whisper's exact erf GELU in place of the tanh approximation. Encoder output
+  against HuggingFace: worst difference 0.27 to 0.0025.
+- **The encoder** runs the buffered path, about three times faster on 1,500
+  positions.
+- **Single-query attention** gets one task per head and reads the cache by rows,
+  with bit-identical results: cross-attention 10.9 s to 4.9 s on three minutes.
+- **Up to four chunks decode together**, sharing each read of the weights. The
+  output is identical and decoding takes half the time.
+- **The language is detected** from the first chunk. Auto-detect was a stub that
+  always answered English.
+- A greedy decode stuck repeating a phrase ends its chunk after four repeats.
+
+### Faster CPU encoders, and multilingual-e5-small
+
+- Embedding batches are grouped by token length, so each text is padded to its
+  neighbours rather than to the longest in the call.
+- Residual add and layer norm are fused and run in parallel across rows. GELU, the
+  head transposes and the fused QKV split run in parallel too.
+- Per 200-word chunk on a 24-thread i7-13700: multilingual-e5-small 72 to 41 ms,
+  mpnet 272 to 148 ms, bge-m3 539 to 352 ms. Vectors match sentence-transformers to
+  2e-7.
+- **multilingual-e5-small** (intfloat, MIT, about 100 languages) joins the registry.
+  Texts take a `query: ` or `passage: ` prefix.
+- CLIP: `embed_image_tensors` embeds a batch of images about four times faster per
+  image than one at a time, and the patch projection is one matmul (60 to 2 ms per
+  image).
+
+### Batched decoding masked the wrong tokens
+
+The decoder multiplied the causal mask into the padding mask and passed the result
+as `[batch, key]`. When the batch size equalled the prompt length, each sequence was
+masked by a causal row, and the first saw only its first token. Self-attention
+already applies the causal mask, so only a real `[batch, total_len]` padding mask
+is passed now.
+
+### Smaller fixes
+
+- The indexer honours exclusions: a pattern such as `node_modules`,
+  `node_modules/**` or `*.min.js` matches any component of a path, and an excluded
+  or hidden directory is never entered, rather than walked and filtered file by
+  file.
+- `LinearLayer::matmul` with a few rows ran on one thread; it uses the same kernels
+  as `matmul_noalloc` now. `matmul_noalloc` asserts its output shape, since its
+  kernels write through raw pointers and a wrong-sized buffer was silent memory
+  corruption.
+- A Qt example, `crates/kjarni-ffi/examples/qt`, searches help articles from QML.
 
 ### Windows no longer needs the Visual C++ Redistributable
 

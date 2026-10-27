@@ -6,6 +6,14 @@ generated the same text. Prints JSON.
 """
 import json, os, sys, time, resource
 
+def rss_now_mb():
+    """Resident memory now, after the work: what the process keeps."""
+    for line in open("/proc/self/status"):
+        if line.startswith("VmRSS:"):
+            return int(line.split()[1]) / 1024
+    return float("nan")
+
+
 ENGINE, TASK = sys.argv[1], sys.argv[2]
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -51,4 +59,4 @@ times = []
 for _ in range(RUNS):
     s = time.perf_counter(); run(); times.append(time.perf_counter() - s)
 print(json.dumps(dict(engine=ENGINE, task=TASK, load_ms=load_ms, ms=min(times) * 1000, output=output.strip(),
-                      peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)))
+                      peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, rss_mb=rss_now_mb())))

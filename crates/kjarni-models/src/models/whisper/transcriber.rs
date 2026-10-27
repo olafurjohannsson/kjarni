@@ -41,6 +41,14 @@ const LANGUAGES: &[&str] = &[
 /// Each timestamp token represents 0.02 seconds.
 const TIMESTAMP_RESOLUTION: f32 = 0.02;
 
+/// The least audio left in a window for a new segment to open: half a second.
+const MIN_SEGMENT_TOKENS: u32 = 25;
+
+/// The timestamp token at which a window's audio ends and its padding begins.
+fn audio_end_timestamp(chunk: &AudioChunk) -> u32 {
+    TIMESTAMP_BEGIN + (chunk.duration_secs / TIMESTAMP_RESOLUTION).round() as u32
+}
+
 /// Configuration for Whisper transcription, passed down from the high-level API.
 #[derive(Debug, Clone)]
 pub struct WhisperTranscriberConfig {
@@ -95,38 +103,72 @@ pub struct WhisperChunkResult {
     pub text: String,
 }
 
+/// One window of audio for Whisper: up to 30 seconds of it, zero-padded to 30.
+#[derive(Debug, Clone)]
+pub struct AudioChunk {
+    pub samples: Vec<f32>,
+    /// Where the window starts in the whole recording.
+    pub start_secs: f32,
+    /// How much of the window is audio rather than padding.
+    pub duration_secs: f32,
+}
+
+/// How far back from a window's 30-second limit to look for a pause to cut at.
+const CUT_SEARCH_SECS: f32 = 5.0;
+/// The stretch whose energy is compared when choosing where to cut.
+const CUT_WINDOW_SECS: f32 = 0.2;
+
+/// Where to cut in `samples[lo..hi]`: the middle of the latest
+/// `CUT_WINDOW_SECS` stretch about as quiet as the quietest one. Taking the
+/// latest pause rather than the very quietest keeps windows full, so a minute
+/// of speech fits in two windows rather than spilling a few seconds into a third.
+fn quietest_point(samples: &[f32], lo: usize, hi: usize, sample_rate: u32) -> usize {
+    let window = (CUT_WINDOW_SECS * sample_rate as f32) as usize;
+    let step = (window / 10).max(1);
+    let energies: Vec<(usize, f32)> = (lo..=hi.saturating_sub(window))
+        .step_by(step)
+        .map(|at| (at, samples[at..at + window].iter().map(|x| x * x).sum()))
+        .collect();
+    let quietest = energies.iter().fold(f32::INFINITY, |m, &(_, e)| m.min(e));
+    // Twice the quietest, or a level of 1e-3 (-60 dB), whichever is higher.
+    let quiet_enough = (2.0 * quietest).max(1e-6 * window as f32);
+    energies
+        .iter()
+        .rev()
+        .find(|&&(_, e)| e <= quiet_enough)
+        .map_or(hi, |&(at, _)| at + window / 2)
+}
+
 impl WhisperModel {
-    /// Split audio samples into 30-second chunks.
-    pub fn chunk_audio(samples: &[f32], sample_rate: u32) -> Vec<Vec<f32>> {
+    /// Split audio into windows of at most 30 seconds, cut at pauses.
+    ///
+    /// A window cut mid-word loses the word: Whisper drops an unfinished phrase
+    /// at the end of one window and guesses at the fragment that opens the
+    /// next, so a sentence spanning a fixed 30-second cut went missing. Each
+    /// cut is made at the quietest point of the window's last five seconds.
+    pub fn chunk_audio(samples: &[f32], sample_rate: u32) -> Vec<AudioChunk> {
         let chunk_size = (WHISPER_CHUNK_LENGTH_SECS * sample_rate as f32) as usize;
-
-        if samples.is_empty() {
-            return vec![];
-        }
-
-        // Short audio — single padded chunk
-        if samples.len() <= chunk_size {
-            let mut chunk = samples.to_vec();
-            chunk.resize(chunk_size, 0.0);
-            return vec![chunk];
-        }
+        let search = (CUT_SEARCH_SECS * sample_rate as f32) as usize;
+        let secs = |n: usize| n as f32 / sample_rate as f32;
 
         let mut chunks = Vec::new();
         let mut offset = 0;
-
         while offset < samples.len() {
-            let end = (offset + chunk_size).min(samples.len());
+            let end = if samples.len() - offset <= chunk_size {
+                samples.len()
+            } else {
+                let limit = offset + chunk_size;
+                quietest_point(samples, limit - search, limit, sample_rate)
+            };
             let mut chunk = samples[offset..end].to_vec();
-
-            // Zero-pad the last chunk to a full 30 seconds
-            if chunk.len() < chunk_size {
-                chunk.resize(chunk_size, 0.0);
-            }
-
-            chunks.push(chunk);
-            offset += chunk_size;
+            chunk.resize(chunk_size, 0.0);
+            chunks.push(AudioChunk {
+                samples: chunk,
+                start_secs: secs(offset),
+                duration_secs: secs(end - offset),
+            });
+            offset = end;
         }
-
         chunks
     }
 
@@ -157,9 +199,11 @@ impl WhisperModel {
         &self,
         encoder_hidden_states: &Array3<f32>,
         config: &WhisperTranscriberConfig,
-        chunk_time_offset: f32,
+        chunk: &AudioChunk,
         mut on_token: Option<&mut dyn FnMut(u32, &str) -> bool>,
     ) -> Result<WhisperChunkResult> {
+        let chunk_time_offset = chunk.start_secs;
+        let audio_end = audio_end_timestamp(chunk);
         let tokenizer = self.tokenizer();
         let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
         let prompt_tokens = self.build_prompt_tokens(config);
@@ -206,7 +250,7 @@ impl WhisperModel {
         let logits = decoder_ops.project_to_logits(&output.last_hidden_state)?;
         let last_logits = logits.slice(s![0, -1_i32, ..]);
 
-        let mut next_token = Self::pick_token(&last_logits, config, eos_token_id);
+        let mut next_token = Self::pick_token(&last_logits, &[], config, eos_token_id, audio_end);
         let mut generated_ids: Vec<u32> = vec![next_token];
 
         // Notify callback
@@ -247,7 +291,13 @@ impl WhisperModel {
             let logits = decoder_ops.project_to_logits(&output.last_hidden_state)?;
             let last_logits = logits.slice(s![0, -1_i32, ..]);
 
-            next_token = Self::pick_token(&last_logits, config, eos_token_id);
+            next_token = Self::pick_token(
+                &last_logits,
+                &generated_ids,
+                config,
+                eos_token_id,
+                audio_end,
+            );
             generated_ids.push(next_token);
             if let Some(keep) = looping_tail(&generated_ids) {
                 generated_ids.truncate(keep);
@@ -279,14 +329,14 @@ impl WhisperModel {
         &self,
         encoder_hidden_states: &[Array3<f32>],
         config: &WhisperTranscriberConfig,
-        chunk_time_offsets: &[f32],
+        chunks: &[AudioChunk],
     ) -> Result<Vec<WhisperChunkResult>> {
         let n = encoder_hidden_states.len();
         if n <= 1 {
             return encoder_hidden_states
                 .iter()
-                .zip(chunk_time_offsets)
-                .map(|(e, &offset)| self.decode_chunk(e, config, offset, None))
+                .zip(chunks)
+                .map(|(e, chunk)| self.decode_chunk(e, config, chunk, None))
                 .collect();
         }
         let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
@@ -338,7 +388,13 @@ impl WhisperModel {
                 if done[b] {
                     continue;
                 }
-                next[b] = Self::pick_token(&logits.slice(s![b, -1_i32, ..]), config, eos_token_id);
+                next[b] = Self::pick_token(
+                    &logits.slice(s![b, -1_i32, ..]),
+                    &generated[b],
+                    config,
+                    eos_token_id,
+                    audio_end_timestamp(&chunks[b]),
+                );
                 generated[b].push(next[b]);
                 done[b] = next[b] == eos_token_id;
                 if let Some(keep) = looping_tail(&generated[b]) {
@@ -354,8 +410,8 @@ impl WhisperModel {
 
         generated
             .into_iter()
-            .zip(chunk_time_offsets)
-            .map(|(ids, &offset)| self.finalize_chunk(ids, config, offset))
+            .zip(chunks)
+            .map(|(ids, chunk)| self.finalize_chunk(ids, config, chunk.start_secs))
             .collect()
     }
 
@@ -400,33 +456,91 @@ impl WhisperModel {
     }
 
     /// Greedy argmax over logits, suppressing special tokens as configured.
+    /// The next token, greedily. With timestamps on, Whisper's own rules
+    /// apply (`ApplyTimestampRules` in OpenAI's decoding.py): a segment opens
+    /// with a timestamp in the first second, timestamps come in pairs and never
+    /// go back, and one is taken whenever the timestamps together are likelier
+    /// than the best text token. Left to plain argmax, Whisper rarely closes a
+    /// segment, so nothing marks text it invents past the end of the audio.
+    ///
+    /// No segment opens within `MIN_SEGMENT_SECS` of `audio_end`, the timestamp
+    /// where the window's audio gives way to padding: past the speech, Whisper
+    /// fills the silence with a two-second segment after another to 30 seconds.
     fn pick_token(
         logits: &ndarray::ArrayView1<f32>,
+        generated: &[u32],
         config: &WhisperTranscriberConfig,
         eos_token_id: u32,
+        audio_end: u32,
     ) -> u32 {
-        logits
-            .iter()
-            .enumerate()
-            .filter(|(idx, _)| {
-                let id = *idx as u32;
-                // Always allow regular vocabulary tokens
-                if id < FIRST_SPECIAL_TOKEN {
-                    return true;
-                }
-                // Always allow EOS
-                if id == eos_token_id {
-                    return true;
-                }
-                // Allow timestamp tokens only when timestamps are enabled
-                if config.timestamps && id >= TIMESTAMP_BEGIN {
-                    return true;
-                }
-                false
-            })
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(idx, _)| idx as u32)
-            .unwrap_or(eos_token_id)
+        let argmax = |allowed: &dyn Fn(u32) -> bool| {
+            logits
+                .iter()
+                .enumerate()
+                .filter(|&(id, _)| allowed(id as u32))
+                .max_by(|(_, a), (_, b)| a.total_cmp(b))
+                .map_or(eos_token_id, |(id, _)| id as u32)
+        };
+        let is_text = |id: u32| id < FIRST_SPECIAL_TOKEN;
+        if !config.timestamps {
+            return argmax(&|id| is_text(id) || id == eos_token_id);
+        }
+
+        let is_ts = |id: u32| id >= TIMESTAMP_BEGIN;
+        let last_was_ts = generated.last().is_some_and(|&t| is_ts(t));
+        let penultimate_was_ts = generated.len() < 2 || is_ts(generated[generated.len() - 2]);
+        let (mut text_ok, ts_ok) = match (last_was_ts, penultimate_was_ts) {
+            // A segment just closed: the next opens one or ends the chunk.
+            (true, false) => (false, true),
+            // A segment just opened: text comes next.
+            (true, true) => (true, false),
+            _ => (true, true),
+        };
+        let first_ts = match generated.iter().rev().find(|&&t| is_ts(t)) {
+            // The timestamp that opens a segment may repeat the one that
+            // closed the last; any other must be later.
+            Some(&t) if last_was_ts && !penultimate_was_ts => t,
+            Some(&t) => t + 1,
+            None => TIMESTAMP_BEGIN,
+        };
+        // The first segment starts within the first second.
+        let last_ts = if generated.is_empty() {
+            text_ok = false;
+            TIMESTAMP_BEGIN + 50
+        } else {
+            u32::MAX
+        };
+        // A timestamp right after a closing one opens the next segment.
+        let opening = last_was_ts && !penultimate_was_ts;
+        let last_ts = if opening {
+            last_ts.min(audio_end.saturating_sub(MIN_SEGMENT_TOKENS))
+        } else {
+            last_ts
+        };
+        let ts_allowed = |id: u32| ts_ok && is_ts(id) && id >= first_ts && id <= last_ts;
+        // The chunk may end anywhere but before its first token.
+        let text_allowed =
+            |id: u32| (text_ok && is_text(id)) || (id == eos_token_id && !generated.is_empty());
+
+        if text_ok && ts_ok {
+            // Take a timestamp when they are together likelier than any text.
+            let max = logits.iter().fold(f32::NEG_INFINITY, |m, &x| m.max(x));
+            let ts_mass: f32 = logits
+                .iter()
+                .enumerate()
+                .filter(|&(id, _)| ts_allowed(id as u32))
+                .map(|(_, &x)| (x - max).exp())
+                .sum();
+            let best_text = logits
+                .iter()
+                .enumerate()
+                .filter(|&(id, _)| text_allowed(id as u32))
+                .fold(f32::NEG_INFINITY, |m, (_, &x)| m.max(x));
+            if ts_mass > (best_text - max).exp() {
+                return argmax(&ts_allowed);
+            }
+        }
+        argmax(&|id| text_allowed(id) || ts_allowed(id))
     }
 
     /// Build the decoder prompt token sequence for the given config.
@@ -585,33 +699,7 @@ impl WhisperModel {
             all_segments.extend(result.segments);
         }
 
-        let merged = Self::merge_boundary_segments(all_segments);
-        (full_text, merged)
-    }
-
-    /// Merge segments that meet exactly at chunk boundaries (e.g. 30.0 -> 30.0).
-    fn merge_boundary_segments(segments: Vec<WhisperSegment>) -> Vec<WhisperSegment> {
-        if segments.len() < 2 {
-            return segments;
-        }
-
-        let mut merged: Vec<WhisperSegment> = Vec::with_capacity(segments.len());
-
-        for seg in segments {
-            let should_merge = merged.last().is_some_and(|prev| {
-                (prev.end - seg.start).abs() < 0.02 && is_chunk_boundary(prev.end)
-            });
-
-            if should_merge {
-                let prev = merged.last_mut().unwrap();
-                prev.end = seg.end;
-                prev.text.push_str(&seg.text);
-            } else {
-                merged.push(seg);
-            }
-        }
-
-        merged
+        (full_text, all_segments)
     }
 }
 
@@ -644,11 +732,6 @@ fn looping_tail(ids: &[u32]) -> Option<usize> {
     })
 }
 
-fn is_chunk_boundary(time: f32) -> bool {
-    let rem = time % WHISPER_CHUNK_LENGTH_SECS;
-    rem < 0.02 || (WHISPER_CHUNK_LENGTH_SECS - rem) < 0.02
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,9 +742,11 @@ mod tests {
         let chunks = WhisperModel::chunk_audio(&samples, 16_000);
 
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].len(), WHISPER_CHUNK_SAMPLES);
-        assert_eq!(chunks[0][0], 1.0);
-        assert_eq!(chunks[0][100_000], 0.0); // zero-padded
+        assert_eq!(chunks[0].samples.len(), WHISPER_CHUNK_SAMPLES);
+        assert_eq!(chunks[0].samples[0], 1.0);
+        assert_eq!(chunks[0].samples[100_000], 0.0); // zero-padded
+        assert_eq!(chunks[0].start_secs, 0.0);
+        assert_eq!(chunks[0].duration_secs, 6.25);
     }
 
     #[test]
@@ -670,19 +755,7 @@ mod tests {
         let chunks = WhisperModel::chunk_audio(&samples, 16_000);
 
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].len(), WHISPER_CHUNK_SAMPLES);
-    }
-
-    #[test]
-    fn test_chunk_audio_multi() {
-        let samples = vec![1.0; WHISPER_CHUNK_SAMPLES + 100]; // 30s + tiny bit
-        let chunks = WhisperModel::chunk_audio(&samples, 16_000);
-
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].len(), WHISPER_CHUNK_SAMPLES);
-        assert_eq!(chunks[1].len(), WHISPER_CHUNK_SAMPLES);
-        assert_eq!(chunks[1][99], 1.0);
-        assert_eq!(chunks[1][100], 0.0); // zero-padded
+        assert_eq!(chunks[0].samples.len(), WHISPER_CHUNK_SAMPLES);
     }
 
     #[test]
@@ -692,24 +765,88 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_timestamps_basic() {
-        let segments = WhisperModel::merge_boundary_segments(vec![
-            WhisperSegment {
-                start: 0.0,
-                end: 30.0,
-                text: "Hello ".into(),
-            },
-            WhisperSegment {
-                start: 30.0,
-                end: 45.0,
-                text: "world.".into(),
-            },
-        ]);
+    fn long_audio_is_cut_at_a_pause() {
+        // 50 s of sound with a half-second pause at 27 s.
+        let sr = 16_000;
+        let mut samples = vec![0.5f32; 50 * sr];
+        samples[27 * sr..27 * sr + sr / 2].fill(0.0);
+        let chunks = WhisperModel::chunk_audio(&samples, sr as u32);
 
-        assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].text, "Hello world.");
-        assert!((segments[0].start - 0.0).abs() < 0.01);
-        assert!((segments[0].end - 45.0).abs() < 0.01);
+        assert_eq!(chunks.len(), 2);
+        let cut = chunks[1].start_secs;
+        assert!((27.0..27.5).contains(&cut), "cut at {cut}");
+        assert_eq!(chunks[0].duration_secs, cut);
+        assert!((chunks[1].duration_secs - (50.0 - cut)).abs() < 1e-3);
+        // Every sample lands in exactly one window, in order.
+        let joined: Vec<f32> = chunks
+            .iter()
+            .flat_map(|c| c.samples[..(c.duration_secs * sr as f32).round() as usize].to_vec())
+            .collect();
+        assert_eq!(joined, samples);
+    }
+
+    #[test]
+    fn audio_without_a_pause_still_fits_its_windows() {
+        let samples = vec![0.5f32; 95 * 16_000];
+        let chunks = WhisperModel::chunk_audio(&samples, 16_000);
+        let (last, full) = chunks.split_last().unwrap();
+        assert!(
+            full.iter()
+                .all(|c| (25.0..=30.0).contains(&c.duration_secs))
+        );
+        assert!(last.duration_secs <= 30.0);
+        let total: f32 = chunks.iter().map(|c| c.duration_secs).sum();
+        assert!((total - 95.0).abs() < 1e-3);
+    }
+
+    const VOCAB: usize = 51_865;
+
+    fn pick(logits: &ndarray::Array1<f32>, generated: &[u32], audio_end_secs: f32) -> u32 {
+        let config = WhisperTranscriberConfig {
+            timestamps: true,
+            ..Default::default()
+        };
+        let audio_end = TIMESTAMP_BEGIN + (audio_end_secs / TIMESTAMP_RESOLUTION) as u32;
+        WhisperModel::pick_token(&logits.view(), generated, &config, EOT_TOKEN, audio_end)
+    }
+
+    #[test]
+    fn a_chunk_opens_with_a_timestamp_in_its_first_second() {
+        let mut logits = ndarray::Array1::<f32>::zeros(VOCAB);
+        logits[400] = 10.0; // text
+        logits[EOT_TOKEN as usize] = 9.0;
+        logits[(TIMESTAMP_BEGIN + 200) as usize] = 5.0; // 4 s: too late
+        logits[(TIMESTAMP_BEGIN + 10) as usize] = 1.0;
+        assert_eq!(pick(&logits, &[], 30.0), TIMESTAMP_BEGIN + 10);
+    }
+
+    #[test]
+    fn no_segment_opens_in_the_padding() {
+        let mut logits = ndarray::Array1::<f32>::zeros(VOCAB);
+        // A segment closed at 11 s in an 11.2 s window: Whisper would open
+        // another, but half a second is not left, so the chunk ends.
+        let closed = [TIMESTAMP_BEGIN, 400, TIMESTAMP_BEGIN + 550];
+        logits[(TIMESTAMP_BEGIN + 550) as usize] = 10.0;
+        logits[EOT_TOKEN as usize] = 1.0;
+        assert_eq!(pick(&logits, &closed, 11.2), EOT_TOKEN);
+        // With audio left, it opens one.
+        assert_eq!(pick(&logits, &closed, 20.0), TIMESTAMP_BEGIN + 550);
+    }
+
+    #[test]
+    fn timestamps_together_likelier_than_any_text_close_the_segment() {
+        let mut logits = ndarray::Array1::<f32>::zeros(VOCAB);
+        let open = [TIMESTAMP_BEGIN, 400];
+        logits.fill(-20.0);
+        logits[401] = 3.0;
+        // No single timestamp beats the text token, but forty of them do.
+        for t in 100..140 {
+            logits[(TIMESTAMP_BEGIN + t) as usize] = 1.0;
+        }
+        logits[(TIMESTAMP_BEGIN + 120) as usize] = 1.5;
+        assert_eq!(pick(&logits, &open, 30.0), TIMESTAMP_BEGIN + 120);
+        // A segment that has just opened takes text, never a timestamp.
+        assert_eq!(pick(&logits, &[TIMESTAMP_BEGIN], 30.0), 401);
     }
 
     #[test]
@@ -727,14 +864,5 @@ mod tests {
         // Distinct timestamps keep the same word from counting as a loop.
         let stamped: Vec<u32> = (0..8).flat_map(|i| [TIMESTAMP_BEGIN + i, 42]).collect();
         assert_eq!(looping_tail(&stamped), None);
-    }
-
-    #[test]
-    fn test_is_chunk_boundary() {
-        assert!(is_chunk_boundary(30.0));
-        assert!(is_chunk_boundary(60.0));
-        assert!(is_chunk_boundary(29.99));
-        assert!(!is_chunk_boundary(15.0));
-        assert!(!is_chunk_boundary(29.5));
     }
 }

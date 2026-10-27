@@ -82,8 +82,8 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
         load_gpu: bool,
     ) -> Result<(Option<EmbeddingData>, Option<GpuTensor>)> {
         let cpu = if load_cpu {
-            let arr = self.weights.get_array2(key)?;
-            Some(EmbeddingData::F32(Arc::new(arr)))
+            // Shared with the CPU encoder and decoder, which load the same table.
+            Some(EmbeddingData::F32(self.weights.get_shared_array2(key)?))
         } else {
             None
         };

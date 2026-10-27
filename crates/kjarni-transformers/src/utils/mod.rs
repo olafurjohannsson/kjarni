@@ -128,3 +128,13 @@ fn get_p_core_count() -> Option<usize> {
     }
     None
 }
+
+/// Parallelism for faer's matmul: rayon natively, sequential on wasm32, where
+/// faer is built without `rayon` (its thread pool does not compile there).
+#[inline]
+pub(crate) fn faer_par() -> faer::Par {
+    #[cfg(not(target_arch = "wasm32"))]
+    return faer::Par::rayon(0);
+    #[cfg(target_arch = "wasm32")]
+    return faer::Par::Seq;
+}

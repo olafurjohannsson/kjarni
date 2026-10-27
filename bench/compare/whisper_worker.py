@@ -6,6 +6,14 @@ ENGINE: kjarni | openai-whisper | faster-whisper | faster-whisper-int8
 """
 import json, os, sys, time, resource
 
+def rss_now_mb():
+    """Resident memory now, after the work: what the process keeps."""
+    for line in open("/proc/self/status"):
+        if line.startswith("VmRSS:"):
+            return int(line.split()[1]) / 1024
+    return float("nan")
+
+
 ENGINE, AUDIO = sys.argv[1], sys.argv[2]
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 RUNS = 3
@@ -42,4 +50,4 @@ with wave.open(AUDIO) as w:
     duration = w.getnframes() / w.getframerate()
 print(json.dumps(dict(engine=ENGINE, audio=os.path.basename(AUDIO), audio_secs=duration, load_ms=load_ms,
                       secs=min(times), realtime_x=duration / min(times), text=text.strip(),
-                      peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)))
+                      peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, rss_mb=rss_now_mb())))

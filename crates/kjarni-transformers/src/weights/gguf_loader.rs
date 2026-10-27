@@ -348,6 +348,10 @@ impl GgufHfMapper for GgufLoader {
 }
 
 impl WeightLoader for GgufLoader {
+    fn release(&self, bytes: &[u8]) {
+        crate::weights::mmap_cache::release_pages(&self.mmap, bytes);
+    }
+
     fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let gguf_name = self.translate_name(name);
 
@@ -423,7 +427,7 @@ fn transcode_to_q8_0(
     decode: fn(&[u8], &mut [i8; 32]),
     name: &str,
 ) -> Result<Vec<u8>> {
-    if raw.len() % block != 0 {
+    if !raw.len().is_multiple_of(block) {
         return Err(anyhow!(
             "tensor '{name}' is {} bytes, not a whole number of {block}-byte blocks",
             raw.len()

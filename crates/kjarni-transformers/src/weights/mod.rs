@@ -62,6 +62,11 @@ pub trait WeightLoader: Send + Sync {
     /// Returns `true` if a tensor with the given name exists.
     fn contains(&self, name: &str) -> bool;
 
+    /// The caller has copied `bytes`, from a view this loader returned, and
+    /// will not read them again soon. Loaders backed by a mapped file release
+    /// the pages; see [`mmap_cache::release_pages`].
+    fn release(&self, _bytes: &[u8]) {}
+
     /// Returns a string from metadata (GGUF only).
     fn get_string(&self, _key: &str) -> Option<&str> {
         None

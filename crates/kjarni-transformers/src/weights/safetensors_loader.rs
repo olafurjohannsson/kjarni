@@ -42,10 +42,6 @@ struct ShardInfo {
 
 #[derive(Debug)]
 enum BackingMemory {
-    #[expect(
-        dead_code,
-        reason = "not referenced yet; kept until the path that needs it lands"
-    )]
     #[cfg(not(target_arch = "wasm32"))]
     Mmap(Arc<Mmap>),
     #[expect(
@@ -217,6 +213,17 @@ impl SafeTensorsLoader {
 }
 
 impl WeightLoader for SafeTensorsLoader {
+    fn release(&self, bytes: &[u8]) {
+        #[cfg(not(target_arch = "wasm32"))]
+        for shard in &self.shards {
+            if let BackingMemory::Mmap(mmap) = &shard._backing {
+                crate::weights::mmap_cache::release_pages(mmap, bytes);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = bytes;
+    }
+
     fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let shard_idx = self
             .tensor_to_shard

@@ -2,19 +2,22 @@
   {
     "engine": "kjarni",
     "model": "qwen2.5-0.5b-instruct",
-    "load_ms": 758.2101349980803,
-    "threads": 8,
-    "peak_rss_mb": 1334.8515625,
-    "ttft_ms": 1085.8036940007878,
-    "prompt_tok_s": 471.5401161636023,
-    "gen_tok_s": 32.071223295907664,
+    "load_ms": 744.4842780023464,
+    "threads": [
+      16,
+      8
+    ],
+    "peak_rss_mb": 1157.0078125,
+    "ttft_ms": 832.6049850002164,
+    "prompt_tok_s": 614.9374664143609,
+    "gen_tok_s": 36.13023545639985,
     "generated": 128
   },
   {
     "engine": "llama.cpp",
     "model": "qwen2.5-0.5b-instruct",
-    "prompt_tok_s": 606.979618,
-    "gen_tok_s": 41.824779,
+    "prompt_tok_s": 610.690246,
+    "gen_tok_s": 45.912659,
     "threads": [
       8,
       8
@@ -24,19 +27,22 @@
   {
     "engine": "kjarni",
     "model": "llama3.2-1b-instruct",
-    "load_ms": 1717.6341020021937,
-    "threads": 8,
-    "peak_rss_mb": 2889.4296875,
-    "ttft_ms": 2153.437891996873,
-    "prompt_tok_s": 237.7593530339641,
-    "gen_tok_s": 18.022643645781052,
+    "load_ms": 1347.3895300012373,
+    "threads": [
+      16,
+      8
+    ],
+    "peak_rss_mb": 2189.703125,
+    "ttft_ms": 1816.0004399978789,
+    "prompt_tok_s": 281.93825768048714,
+    "gen_tok_s": 19.031231083983176,
     "generated": 128
   },
   {
     "engine": "llama.cpp",
     "model": "llama3.2-1b-instruct",
-    "prompt_tok_s": 426.383256,
-    "gen_tok_s": 22.318528,
+    "prompt_tok_s": 424.082243,
+    "gen_tok_s": 27.170666,
     "threads": [
       16,
       8

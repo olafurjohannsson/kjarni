@@ -20,7 +20,7 @@ pub fn matmul_2d_faer(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
         faer::MatRef::from_row_major_slice(a_sl, m, k),
         faer::MatRef::from_row_major_slice(b_sl, k, n),
         1.0,
-        faer::Par::rayon(0),
+        crate::utils::faer_par(),
     );
     c
 }
