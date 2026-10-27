@@ -2219,7 +2219,11 @@ mod classifier_tests {
 
         #[tokio::test]
         async fn single_label() {
-            let c = Classifier::builder("distilbert-sentiment").quiet(true).build().await.expect("load");
+            let c = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .expect("load");
             assert_batch_matches_single(&c).await;
         }
 
@@ -2244,7 +2248,10 @@ mod classifier_tests {
                 .expect("load");
             assert_batch_matches_single(&c).await;
             let batch = c.classify_batch(TEXTS).await.expect("batch");
-            assert!(batch.iter().all(|r| r.score > 0.5), "custom labels scored {batch:?}");
+            assert!(
+                batch.iter().all(|r| r.score > 0.5),
+                "custom labels scored {batch:?}"
+            );
         }
 
         /// A text with nothing above the threshold fails the batch, as it fails

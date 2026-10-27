@@ -9,7 +9,6 @@ use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::model_weights::AttentionLayout;
 
-
 /// Safely casts bytes to a typed vector, handling alignment.
 pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     if let Ok(slice) = bytemuck::try_cast_slice(bytes) {
@@ -154,7 +153,9 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
             // permuted must not be un-permuted. And by the real head size, not
             // a fixed 64: 128-dim heads were reordered as two 64-row tiles.
             let blocks = match attn {
-                Some(attn) if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) => {
+                Some(attn)
+                    if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) =>
+                {
                     log::debug!(
                         "reordering Q8_0 blocks for '{}' [{}, {}] with head_dim={}",
                         raw.name,
@@ -230,7 +231,6 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_get_gguf_src_row_head64() {

@@ -818,12 +818,19 @@ mod buffer_reuse_tests {
     }
 
     fn max_diff(a: &[f32], b: &[f32]) -> f32 {
-        a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max)
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f32::max)
     }
 
     #[tokio::test]
     async fn batches_of_changing_shape_match_fresh_single_encodes() {
-        let reused = Embedder::builder("minilm-l6-v2").quiet(true).build().await.unwrap();
+        let reused = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
 
         // Large and long, then small and short, then large and short: each call
         // reshapes the buffers the previous one left behind.
@@ -834,10 +841,17 @@ mod buffer_reuse_tests {
             assert_eq!(got.len(), n);
 
             for (i, t) in [0, n / 2, n - 1].into_iter().map(|i| (i, &batch[i])) {
-                let fresh = Embedder::builder("minilm-l6-v2").quiet(true).build().await.unwrap();
+                let fresh = Embedder::builder("minilm-l6-v2")
+                    .quiet(true)
+                    .build()
+                    .await
+                    .unwrap();
                 let alone = fresh.embed(t).await.unwrap();
                 let d = max_diff(&got[i], &alone);
-                assert!(d < 1e-5, "batch {n}x{words}, text {i}: differs from a fresh encode by {d}");
+                assert!(
+                    d < 1e-5,
+                    "batch {n}x{words}, text {i}: differs from a fresh encode by {d}"
+                );
             }
         }
     }
@@ -858,7 +872,10 @@ mod buffer_reuse_tests {
             let alone = emb.embed(t).await.unwrap();
             assert!(max_diff(v, &alone) < 1e-5);
             let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-            assert!((norm - 1.0).abs() > 0.1, "batch vector was normalised: |v| = {norm}");
+            assert!(
+                (norm - 1.0).abs() > 0.1,
+                "batch vector was normalised: |v| = {norm}"
+            );
         }
     }
 }

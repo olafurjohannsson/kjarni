@@ -380,7 +380,10 @@ mod batch_consistency_tests {
         let ptrs = [text.as_ptr()];
         unsafe {
             let mut single = KjarniFloatArray::empty();
-            assert_eq!(kjarni_embedder_encode(handle, text.as_ptr(), &mut single), KjarniErrorCode::Ok);
+            assert_eq!(
+                kjarni_embedder_encode(handle, text.as_ptr(), &mut single),
+                KjarniErrorCode::Ok
+            );
             let mut batch = KjarniFloat2DArray::empty();
             assert_eq!(
                 kjarni_embedder_encode_batch(handle, ptrs.as_ptr(), 1, &mut batch),
@@ -388,10 +391,17 @@ mod batch_consistency_tests {
             );
             let s = std::slice::from_raw_parts(single.data, single.len);
             let b = std::slice::from_raw_parts(batch.data, batch.rows * batch.cols);
-            let diff = s.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max);
+            let diff = s
+                .iter()
+                .zip(b)
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0, f32::max);
             assert!(diff < 1e-5, "batch differs from single by {diff}");
             let norm = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-            assert!((norm - 1.0).abs() > 0.1, "batch was normalised despite normalize = 0");
+            assert!(
+                (norm - 1.0).abs() > 0.1,
+                "batch was normalised despite normalize = 0"
+            );
             crate::kjarni_float_array_free(single);
             crate::kjarni_float_2d_array_free(batch);
             kjarni_embedder_free(handle);

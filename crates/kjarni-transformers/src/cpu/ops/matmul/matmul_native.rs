@@ -2049,7 +2049,8 @@ where
             .for_each(|(i, row)| dequant_row(start + i, row));
 
         let c_slice = c.as_slice_mut().expect("standard layout");
-        let dst = faer::MatMut::from_row_major_slice_mut(c_slice, m, n).submatrix_mut(0, start, m, rows);
+        let dst =
+            faer::MatMut::from_row_major_slice_mut(c_slice, m, n).submatrix_mut(0, start, m, rows);
         faer::linalg::matmul::matmul(
             dst,
             faer::Accum::Replace,
@@ -2099,12 +2100,23 @@ mod dequant_tiled_tests {
     }
 
     fn input(m: usize, k: usize) -> Array2<f32> {
-        Array2::from_shape_fn((m, k), |(i, j)| ((i * 31 + j * 17) % 101) as f32 / 50.0 - 1.0)
+        Array2::from_shape_fn((m, k), |(i, j)| {
+            ((i * 31 + j * 17) % 101) as f32 / 50.0 - 1.0
+        })
     }
 
     /// The reference: dequantize the whole weight, then a plain f32 product.
-    fn reference<B: crate::tensor::Dequantizable>(a: &Array2<f32>, blocks: Vec<B>, n: usize) -> Array2<f32> {
-        let w = QuantizedMatrix { blocks, shape: [n, a.ncols()] }.dequantize().unwrap();
+    fn reference<B: crate::tensor::Dequantizable>(
+        a: &Array2<f32>,
+        blocks: Vec<B>,
+        n: usize,
+    ) -> Array2<f32> {
+        let w = QuantizedMatrix {
+            blocks,
+            shape: [n, a.ncols()],
+        }
+        .dequantize()
+        .unwrap();
         a.dot(&w.t())
     }
 

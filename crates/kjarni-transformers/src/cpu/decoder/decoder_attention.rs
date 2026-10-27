@@ -117,11 +117,9 @@ impl DecoderAttention {
         // requiring an all-ones mask here sent every prefill down the
         // materialised path: 330ms per layer on a 500-token prompt instead of a
         // few, and 8 of the 10 seconds Qwen 0.5B took before its first token.
-        let mask_is_causal = attention_mask.is_some_and(|m| is_plain_causal(m, seq_len, start_write));
-        if !is_decode
-            && seq_len >= 128
-            && (mask_is_noop || mask_is_causal)
-            && !streaming_disabled()
+        let mask_is_causal =
+            attention_mask.is_some_and(|m| is_plain_causal(m, seq_len, start_write));
+        if !is_decode && seq_len >= 128 && (mask_is_noop || mask_is_causal) && !streaming_disabled()
         {
             let context = super::streaming_attention::streaming_causal_attention(
                 &q_heads,
@@ -263,12 +261,12 @@ fn is_plain_causal(mask: &Array2<f32>, seq_len: usize, past: usize) -> bool {
     let (rows, cols) = mask.dim();
     rows == seq_len
         && cols == past + seq_len
-        && mask
-            .outer_iter()
-            .enumerate()
-            .all(|(i, row)| row.iter().enumerate().all(|(j, &x)| (x == 1.0) == (j <= past + i)))
+        && mask.outer_iter().enumerate().all(|(i, row)| {
+            row.iter()
+                .enumerate()
+                .all(|(j, &x)| (x == 1.0) == (j <= past + i))
+        })
 }
-
 
 /// Escape hatch for the streaming path.
 ///
@@ -763,8 +761,15 @@ mod decoder_attention_test {
             let mut k = Array3::zeros((1, seq, kv_dim));
             let mut v = Array3::zeros((1, seq, kv_dim));
             let mask = crate::utils::create_causal_mask(seq, seq);
-            attn.forward(&hidden, Some(&mask), k.view_mut(), v.view_mut(), 0, Some(&rope))
-                .unwrap()
+            attn.forward(
+                &hidden,
+                Some(&mask),
+                k.view_mut(),
+                v.view_mut(),
+                0,
+                Some(&rope),
+            )
+            .unwrap()
         };
         let long = run(200);
         let short = run(100);
@@ -774,6 +779,9 @@ mod decoder_attention_test {
             .zip(short.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        assert!(diff < 1e-4, "streaming and materialised prefill differ by {diff}");
+        assert!(
+            diff < 1e-4,
+            "streaming and materialised prefill differ by {diff}"
+        );
     }
 }

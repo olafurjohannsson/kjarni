@@ -174,7 +174,10 @@ impl CpuDecoderBackend {
             0, // Position offset is 0 for prefill
             Some(cache),
         )?;
-        debug!("CPU prefill layers: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
+        debug!(
+            "CPU prefill layers: {:.2}ms",
+            t.elapsed().as_secs_f64() * 1000.0
+        );
 
         // Only the last position's logits are used, so only it is projected. The
         // whole prompt was: on Qwen's 152k vocabulary and a 500-token prompt,
@@ -183,7 +186,10 @@ impl CpuDecoderBackend {
         let t = Instant::now();
         let last = decoder_output.slice(s![.., -1.., ..]).to_owned();
         let logits_3d = ops.project_to_logits(&last)?;
-        debug!("CPU prefill logits: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
+        debug!(
+            "CPU prefill logits: {:.2}ms",
+            t.elapsed().as_secs_f64() * 1000.0
+        );
 
         // [1, 1, vocab] -> [vocab]
         Ok(logits_3d.slice(s![0, -1, ..]).to_owned())

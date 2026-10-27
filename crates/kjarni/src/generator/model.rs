@@ -122,7 +122,6 @@ impl Generator {
             None
         };
 
-
         let model: Arc<dyn DecoderLanguageModel> =
             Self::load_model(model_type, &cache_dir, device, context.clone(), load_config)
                 .await

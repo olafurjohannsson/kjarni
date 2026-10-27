@@ -1053,7 +1053,11 @@ mod quantized_tests {
         let code = unsafe { kjarni_chat_new(&config, &mut chat) };
         let msg = unsafe {
             let p = crate::error::kjarni_last_error_message();
-            if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+            if p.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(p).to_string_lossy().into_owned()
+            }
         };
         assert_eq!(code, KjarniErrorCode::Ok, "{msg}");
         let mut gen_config = kjarni_generation_config_default();
@@ -1063,7 +1067,10 @@ mod quantized_tests {
         let msg = CString::new("What is the capital of France? Answer in one word.").unwrap();
         let mut reply = ptr::null_mut();
         unsafe {
-            assert_eq!(kjarni_chat_send(chat, msg.as_ptr(), &gen_config, &mut reply), KjarniErrorCode::Ok);
+            assert_eq!(
+                kjarni_chat_send(chat, msg.as_ptr(), &gen_config, &mut reply),
+                KjarniErrorCode::Ok
+            );
             let text = CStr::from_ptr(reply).to_string_lossy().to_lowercase();
             assert!(text.contains("paris"), "got {text:?}");
             crate::kjarni_string_free(reply);

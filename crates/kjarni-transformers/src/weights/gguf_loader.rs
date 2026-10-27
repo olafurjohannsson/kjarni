@@ -123,7 +123,12 @@ impl GgufLoader {
     }
 
     /// The bytes of one tensor, as the dtype [`Self::ggml_type_to_dtype`] reports.
-    fn view<'a>(&'a self, name: &str, gguf_name: &str, info: &GgufTensorInfo) -> Result<TensorView<'a>> {
+    fn view<'a>(
+        &'a self,
+        name: &str,
+        gguf_name: &str,
+        info: &GgufTensorInfo,
+    ) -> Result<TensorView<'a>> {
         let dtype = Self::ggml_type_to_dtype(info.kind)?;
 
         let start = (self.data_start_offset + info.offset) as usize;
@@ -465,8 +470,14 @@ mod tests {
         assert_eq!(GgufLoader::ggml_type_to_dtype(0).unwrap(), DType::F32);
         assert_eq!(GgufLoader::ggml_type_to_dtype(1).unwrap(), DType::F16);
         assert_eq!(GgufLoader::ggml_type_to_dtype(8).unwrap(), DType::Q8_0);
-        assert_eq!(GgufLoader::ggml_type_to_dtype(GGML_Q4_0).unwrap(), DType::Q8_0);
-        assert_eq!(GgufLoader::ggml_type_to_dtype(GGML_Q5_0).unwrap(), DType::Q8_0);
+        assert_eq!(
+            GgufLoader::ggml_type_to_dtype(GGML_Q4_0).unwrap(),
+            DType::Q8_0
+        );
+        assert_eq!(
+            GgufLoader::ggml_type_to_dtype(GGML_Q5_0).unwrap(),
+            DType::Q8_0
+        );
         assert_eq!(GgufLoader::ggml_type_to_dtype(12).unwrap(), DType::Q4_K);
         assert_eq!(GgufLoader::ggml_type_to_dtype(14).unwrap(), DType::Q6_K);
         assert_eq!(GgufLoader::ggml_type_to_dtype(30).unwrap(), DType::BF16);
@@ -566,7 +577,11 @@ mod tests {
         raw.extend(pack_q5_0(half::f16::from_f32(-2.5), &[15; 32]));
         let q8 = transcode_to_q8_0(&raw, Q5_0_BLOCK, decode_q5_0, "t").unwrap();
         assert_eq!(q8.len(), 2 * Q8_0_BLOCK);
-        assert_eq!(&q8[..2], &scale.to_le_bytes(), "the scale is carried over unchanged");
+        assert_eq!(
+            &q8[..2],
+            &scale.to_le_bytes(),
+            "the scale is carried over unchanged"
+        );
         let got: Vec<i8> = q8[2..34].iter().map(|&b| b as i8).collect();
         assert_eq!(got, v.to_vec());
         assert!(q8[36..68].iter().all(|&b| b as i8 == 15));
@@ -586,5 +601,4 @@ mod tests {
     fn a_partial_block_is_an_error() {
         assert!(transcode_to_q8_0(&[0u8; 23], Q5_0_BLOCK, decode_q5_0, "t").is_err());
     }
-
 }
