@@ -1,0 +1,22 @@
+[
+  {
+    "engine": "kjarni",
+    "photos": 64,
+    "load_ms": 328.7191459967289,
+    "images_ms": 1177.0248709981388,
+    "images_per_s": 54.37438203470316,
+    "query_ms": 26.83174200137728,
+    "top_hit": "red_car_2.png",
+    "peak_rss_mb": 2815.6875
+  },
+  {
+    "engine": "open_clip",
+    "photos": 64,
+    "load_ms": 3625.534835999133,
+    "images_ms": 1286.3615579990437,
+    "images_per_s": 49.7527305616572,
+    "query_ms": 17.5945139999385,
+    "top_hit": "red_car_0.png",
+    "peak_rss_mb": 1666.5078125
+  }
+]

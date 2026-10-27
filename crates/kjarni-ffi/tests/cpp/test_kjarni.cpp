@@ -220,6 +220,25 @@ void test_classifier() {
     for (const auto& l : *labels) total += l.score;
     ok_near(total, 1.0f, 0.01f, "softmax scores sum to one");
 
+    // A batch must give each text what classifying it alone gives.
+    const std::vector<std::string> texts{"This is absolutely wonderful.", "Worst purchase of my life.",
+                                         "It is fine I guess.",
+                                         "Quick delivery, but the colour is not what the photos showed and setup took ages."};
+    auto batch = classifier->classify(std::span<const std::string>{texts});
+    ok(batch.has_value() && batch->size() == texts.size(), "a batch returns one result per text");
+    if (batch) {
+        bool same = true;
+        for (std::size_t i = 0; i < texts.size() && i < batch->size(); ++i) {
+            auto single = classifier->classify(texts[i]);
+            same = same && single && single->size() == (*batch)[i].size() &&
+                   single->front().name == (*batch)[i].front().name &&
+                   std::fabs(single->front().score - (*batch)[i].front().score) < 1e-5f;
+        }
+        ok(same, "each batch result matches classifying that text alone");
+    }
+    auto none = classifier->classify(std::span<const std::string>{});
+    ok(none.has_value() && none->empty(), "an empty batch returns nothing");
+
     auto top = classifier->top("Worst purchase of my life.");
     ok(top.has_value() && top->has_value(), "top returns a label");
     if (top && *top) ok((*top)->name == "NEGATIVE", "negative text classifies as NEGATIVE");
@@ -521,6 +540,19 @@ void test_image_index() {
     ok(!idx->add("/no/such/photo.jpg").has_value(), "a missing photo is an error");
 }
 
+// ─── Chat ────────────────────────────────────────────────────────
+
+void test_quantized_chat() {
+    section("chat (quantized)");
+
+    auto chat = kjarni::Chat::create({.model = "qwen2.5-0.5b-instruct", .quantized = true});
+    if (!chat) { ok(false, "quantized qwen loads"); return; }
+
+    auto reply = chat->send("What is the capital of France? Answer in one word.", kjarni::Generation::greedy(16));
+    ok(reply.has_value(), "a quantized model replies");
+    if (reply) ok(contains(*reply, "paris"), "and the reply is right");
+}
+
 // ─── Version ─────────────────────────────────────────────────────
 
 void test_version() {
@@ -543,6 +575,7 @@ int main() {
     test_summarizer();
     test_translator();
     test_image_index();
+    test_quantized_chat();
     test_version();
 
     std::fprintf(stderr, "\n%d checks, %d failed\n", checks, failures);

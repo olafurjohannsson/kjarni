@@ -145,6 +145,10 @@ var (
 	// Indexer additions
 	_indexerAddSym uintptr
 
+	// Batch classification
+	_classifierClassifyBatchSym uintptr
+	_classBatchFreeSym          uintptr
+
 	// Transcriber
 	_transcriberNewSym            uintptr
 	_transcriberFree              func(handle uintptr)
@@ -348,6 +352,12 @@ func initFFI() error {
 		return err
 	}
 	if _indexerAddSym, err = purego.Dlsym(handle, "kjarni_indexer_add"); err != nil {
+		return err
+	}
+	if _classifierClassifyBatchSym, err = purego.Dlsym(handle, "kjarni_classifier_classify_batch"); err != nil {
+		return err
+	}
+	if _classBatchFreeSym, err = purego.Dlsym(handle, "kjarni_class_batch_free"); err != nil {
 		return err
 	}
 

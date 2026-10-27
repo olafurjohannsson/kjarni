@@ -75,6 +75,8 @@ type ffiChatConfig struct {
 	SystemPrompt uintptr
 	Mode         int32
 	Quiet        int32
+	Quantized    int32
+	_2           int32 // padding
 }
 
 type ffiGenerationConfig struct {
@@ -94,11 +96,20 @@ type chatOptions struct {
 	device       string
 	systemPrompt string
 	mode         ChatMode
+	quantized    bool
 }
 
 func WithSystemPrompt(prompt string) ChatOption {
 	return func(o *chatOptions) {
 		o.systemPrompt = prompt
+	}
+}
+
+// WithQuantized loads the model's 4-bit GGUF weights instead of full precision:
+// a fraction of the memory and several times faster to generate on a CPU.
+func WithQuantized(quantized bool) ChatOption {
+	return func(o *chatOptions) {
+		o.quantized = quantized
 	}
 }
 
@@ -147,6 +158,7 @@ func NewChat(model string, opts ...interface{}) (*Chat, error) {
 	config.ModelName = modelStr
 	config.Mode = int32(co.mode)
 	config.Quiet = boolToInt(co.quiet)
+	config.Quantized = boolToInt(co.quantized)
 
 	if co.systemPrompt != "" {
 		sp, keepSP := cString(co.systemPrompt)

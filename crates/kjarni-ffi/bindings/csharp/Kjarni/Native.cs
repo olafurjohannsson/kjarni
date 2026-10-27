@@ -225,6 +225,13 @@ namespace Kjarni
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniClassBatch
+        {
+            public IntPtr Items;
+            public UIntPtr Len;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         public struct KjarniClassifierConfig
         {
             public KjarniDevice Device;
@@ -477,6 +484,16 @@ namespace Kjarni
         public static extern UIntPtr kjarni_classifier_num_labels(IntPtr handle);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_classifier_classify_batch(
+            IntPtr handle,
+            IntPtr[] texts,
+            UIntPtr numTexts,
+            out KjarniClassBatch result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_class_batch_free(KjarniClassBatch batch);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniRerankerConfig kjarni_reranker_config_default();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
@@ -652,6 +669,7 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
             public IntPtr SystemPrompt;
             public int Mode;
             public int Quiet;
+            public int Quantized;
         }
 
         [StructLayout(LayoutKind.Sequential)]

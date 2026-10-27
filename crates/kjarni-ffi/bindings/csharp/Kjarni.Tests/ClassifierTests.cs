@@ -18,6 +18,33 @@ namespace Kjarni.Tests
 
         public void Dispose() => _classifier.Dispose();
 
+        private static readonly string[] BatchTexts =
+        {
+            "I love this product, it's absolutely amazing!",
+            "Worst purchase of my life.",
+            "It is fine I guess.",
+            "The delivery was quick but the colour is not what the photos showed, and setup took far longer than it should have.",
+        };
+
+        [Fact]
+        public void ClassifyBatch_MatchesClassifyingEachTextAlone()
+        {
+            var batch = _classifier.ClassifyBatch(BatchTexts);
+            Assert.Equal(BatchTexts.Length, batch.Length);
+            for (int i = 0; i < BatchTexts.Length; i++)
+            {
+                var single = _classifier.Classify(BatchTexts[i]);
+                Assert.Equal(single.Label, batch[i].Label);
+                Assert.Equal(single.Score, batch[i].Score, 5);
+            }
+        }
+
+        [Fact]
+        public void ClassifyBatch_EmptyInputGivesEmptyOutput()
+        {
+            Assert.Empty(_classifier.ClassifyBatch(Array.Empty<string>()));
+        }
+
         [Fact]
         public void NumLabels_Is2()
         {

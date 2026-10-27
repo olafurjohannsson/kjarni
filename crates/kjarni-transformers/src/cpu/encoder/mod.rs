@@ -1,3 +1,4 @@
+pub mod batching;
 pub mod buffers;
 pub mod classifier;
 pub mod config;

@@ -23,6 +23,7 @@ use kjarni_transformers::{
     WgpuContext,
     cpu::encoder::{
         CpuTransformerEncoder,
+        batching::{MAX_ROWS_PER_BATCH, PaddedBatch, TOKENS_PER_BATCH, map_bucketed, pad},
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder},
@@ -254,25 +255,38 @@ impl CrossEncoder {
             .encode_batch(pairs.to_vec(), true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-        let batch_size = encodings.len();
-        let max_len = encodings.iter().map(|e| e.len()).max().unwrap_or(0);
+        let head = self
+            .pipeline
+            .cpu_head()
+            .ok_or_else(|| anyhow!("No classification head available"))?;
 
-        let mut input_ids = ndarray::Array2::<u32>::zeros((batch_size, max_len));
-        let mut attention_mask = ndarray::Array2::<f32>::zeros((batch_size, max_len));
-        let mut token_type_ids = ndarray::Array2::<u32>::zeros((batch_size, max_len));
-
-        for (i, encoding) in encodings.iter().enumerate() {
-            for (j, &id) in encoding.get_ids().iter().enumerate() {
-                input_ids[[i, j]] = id;
-                attention_mask[[i, j]] = encoding.get_attention_mask()[j] as f32;
-                token_type_ids[[i, j]] = encoding.get_type_ids()[j];
-            }
+        // On the CPU, pairs of similar length go through together, with reused
+        // buffers, as embeddings do. Scoring 64 pairs as one padded block took
+        // twice as long as PyTorch.
+        if let Some(ops) = self.encoder_cpu_ops() {
+            let encoder = ops.encoder();
+            let rows = map_bucketed(&encodings, TOKENS_PER_BATCH, MAX_ROWS_PER_BATCH, |b| {
+                let hidden = ops.embed_tokens(&b.input_ids, Some(&b.token_type_ids), 0)?;
+                let normalized = encoder.embed_norm(&hidden)?;
+                let (rows, width) = b.input_ids.dim();
+                let mut buffers = encoder.create_buffers(rows, width);
+                let hidden = encoder
+                    .forward_with_buffers(&normalized, &b.attention_mask, &mut buffers)?
+                    .last_hidden_state;
+                encoder.recycle_buffers(buffers);
+                head.forward(&hidden, Some(&b.attention_mask))
+            })?;
+            // First column: the relevance logit.
+            return Ok(rows.into_iter().map(|r| r[0]).collect());
         }
 
-        let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
-            ops.forward_tokens(&input_ids, Some(&attention_mask), Some(&token_type_ids), 0)?
-                .last_hidden_state
-        } else if let Some(hidden) = self
+        let PaddedBatch {
+            input_ids,
+            attention_mask,
+            token_type_ids,
+        } = pad(&encodings.iter().collect::<Vec<_>>());
+
+        let hidden_states = if let Some(hidden) = self
             .forward_gpu(&input_ids, &attention_mask, &token_type_ids)
             .await?
         {
@@ -284,11 +298,7 @@ impl CrossEncoder {
         };
 
         // Forward through head // TODO: lm head on GPU
-        let logits = self
-            .pipeline
-            .cpu_head()
-            .ok_or_else(|| anyhow!("No classification head available"))?
-            .forward(&hidden_states, Some(&attention_mask))?;
+        let logits = head.forward(&hidden_states, Some(&attention_mask))?;
 
         // Extract scores (first column for regression)
         Ok(logits.column(0).to_vec())

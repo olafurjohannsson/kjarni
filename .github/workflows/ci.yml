@@ -236,7 +236,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-cpp-v4
+          key: kjarni-models-cpp-v5
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
@@ -275,7 +275,7 @@ jobs:
         run: cargo build --release --package kjarni-cli
 
       # The C++ job is the one that runs every capability against a real model,
-      # about 3.5GB in all. The other binding jobs set KJARNI_SKIP_HEAVY, since
+      # about 4GB in all. The other binding jobs set KJARNI_SKIP_HEAVY, since
       # each would otherwise cache its own copy and together overrun the
       # repository's 10GB cache.
       - name: Download models used by the C++ tests
@@ -288,6 +288,7 @@ jobs:
           $CLI model download distilbart-cnn
           $CLI model download flan-t5-base
           $CLI model download clip-vit-base-32
+          $CLI model download qwen2.5-0.5b-instruct --gguf
 
       - name: Build C++ tests
         working-directory: crates/kjarni-ffi/tests/cpp
@@ -371,7 +372,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-go-v1
+          key: kjarni-models-go-v2
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
@@ -380,7 +381,9 @@ jobs:
         run: cargo build --release --package kjarni-cli
 
       - name: Download models used by the Go tests
-        run: ./target/release/kjarni model download minilm-l6-v2
+        run: |
+          ./target/release/kjarni model download minilm-l6-v2
+          ./target/release/kjarni model download distilbert-sentiment
 
       # The repo keeps a checked-in copy of the library so the module builds from
       # a plain clone. Tests run against a freshly built one instead, which is
@@ -436,7 +439,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-python-v1
+          key: kjarni-models-python-v2
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
@@ -445,7 +448,9 @@ jobs:
         run: cargo build --release --package kjarni-cli
 
       - name: Download models used by the Python tests
-        run: ./target/release/kjarni model download minilm-l6-v2
+        run: |
+          ./target/release/kjarni model download minilm-l6-v2
+          ./target/release/kjarni model download distilbert-sentiment
 
       - name: Run Python tests
         working-directory: crates/kjarni-ffi/bindings/python
@@ -753,6 +758,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance: a signed record that this workflow, at this commit,
+      # produced each binary. See "Attest build provenance" below.
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v4
@@ -797,6 +806,24 @@ jobs:
           (cd kjarni-x86_64-windows && zip -qr ../kjarni-x86_64-windows.zip .)
           tar -czf kjarni-wasm.tar.gz \
             -C kjarni-wasm .
+          sha256sum kjarni-*.tar.gz kjarni-*.zip > SHA256SUMS
+
+      # The Go module and the NuGet and PyPI packages ship these prebuilt
+      # libraries, and "a binary committed to a repo" was the first objection
+      # Go users raised. Attesting each one lets anyone check that a library was
+      # built by this workflow from this commit, not uploaded by hand:
+      #
+      #   gh attestation verify libkjarni_ffi.so --repo olafurjohannsson/kjarni
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/kjarni-*.tar.gz
+            artifacts/kjarni-*.zip
+            artifacts/kjarni-x86_64-linux/libkjarni_ffi.so
+            artifacts/kjarni-aarch64-linux/libkjarni_ffi.so
+            artifacts/kjarni-aarch64-macos/libkjarni_ffi.dylib
+            artifacts/kjarni-x86_64-windows/kjarni_ffi.dll
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -811,6 +838,7 @@ jobs:
             artifacts/kjarni-aarch64-macos.tar.gz
             artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz
+            artifacts/SHA256SUMS
 
   # ─── Publish to npm ─────────────────────────────────────────────
   #

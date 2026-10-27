@@ -19,7 +19,8 @@ pub struct KjarniChatConfig {
     pub cache_dir: *const c_char,
     /// Model name (required) - e.g. "llama3.2-1b-instruct"
     pub model_name: *const c_char,
-    /// Model path (NULL = use registry)
+    /// Reserved; must be NULL. Loading from a local path is not supported
+    /// through the C API yet, and a value here is rejected rather than ignored.
     pub model_path: *const c_char,
     /// System prompt (NULL = use model default)
     pub system_prompt: *const c_char,
@@ -27,6 +28,11 @@ pub struct KjarniChatConfig {
     pub mode: i32,
     /// Suppress output
     pub quiet: i32,
+    /// Non-zero loads the model's 4-bit GGUF weights (Q4_K_M) where the
+    /// registry has them, instead of the full-precision ones: a fraction of the
+    /// memory, and several times faster to generate on a CPU, since decoding
+    /// reads every weight once per token.
+    pub quantized: i32,
 }
 
 /// Generation parameters. Use -1 sentinel values to keep model defaults.
@@ -63,6 +69,7 @@ pub extern "C" fn kjarni_chat_config_default() -> KjarniChatConfig {
         system_prompt: ptr::null(),
         mode: 0,
         quiet: 0,
+        quantized: 0,
     }
 }
 
@@ -225,6 +232,15 @@ pub unsafe extern "C" fn kjarni_chat_new_with_draft(
                     &*config
                 };
 
+                if !config.model_path.is_null() {
+                    set_last_error(
+                        "model_path is not supported by the C API yet; pass model_name, \
+                         and quantized = 1 for the GGUF weights"
+                            .to_string(),
+                    );
+                    return KjarniErrorCode::InvalidConfig;
+                }
+
                 // Model name is required
                 if config.model_name.is_null() {
                     set_last_error("model_name is required".to_string());
@@ -281,6 +297,10 @@ pub unsafe extern "C" fn kjarni_chat_new_with_draft(
                     // Quiet
                     if config.quiet != 0 {
                         builder = builder.quiet();
+                    }
+
+                    if config.quantized != 0 {
+                        builder = builder.with_load_config(|b| b.prefer_gguf(true));
                     }
 
                     builder.build().await.map_err(|e| {
@@ -989,4 +1009,65 @@ pub unsafe extern "C" fn kjarni_chat_context_size(chat: *const KjarniChat) -> us
             (*chat).inner.context_size()
         }
     })
+}
+
+#[cfg(test)]
+mod quantized_tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn model_path_is_rejected_not_ignored() {
+        let mut config = kjarni_chat_config_default();
+        let name = CString::new("qwen2.5-0.5b-instruct").unwrap();
+        let path = CString::new("/some/model.gguf").unwrap();
+        config.model_name = name.as_ptr();
+        config.model_path = path.as_ptr();
+        let mut out = ptr::null_mut();
+        let code = unsafe { kjarni_chat_new(&config, &mut out) };
+        assert_eq!(code, KjarniErrorCode::InvalidConfig);
+        assert!(out.is_null());
+    }
+
+    #[test]
+    fn default_config_is_not_quantized() {
+        assert_eq!(kjarni_chat_config_default().quantized, 0);
+    }
+
+    /// Real model: the GGUF weights load and generate.
+    #[test]
+    fn quantized_chat_generates() {
+        let mut config = kjarni_chat_config_default();
+        let name = CString::new("qwen2.5-0.5b-instruct").unwrap();
+        config.model_name = name.as_ptr();
+        config.quantized = 1;
+        config.quiet = 1;
+        // Skip only when the file is absent. Skipping on any load error hid
+        // that these GGUFs could not be loaded at all (their Q5_0 tensors).
+        let cached = kjarni::common::default_cache_dir().join("qwen_qwen2.5-0.5b-instruct-gguf");
+        if !cached.exists() {
+            eprintln!("skipping: run `kjarni model download qwen2.5-0.5b-instruct --gguf`");
+            return;
+        }
+        let mut chat = ptr::null_mut();
+        let code = unsafe { kjarni_chat_new(&config, &mut chat) };
+        let msg = unsafe {
+            let p = crate::error::kjarni_last_error_message();
+            if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+        };
+        assert_eq!(code, KjarniErrorCode::Ok, "{msg}");
+        let mut gen_config = kjarni_generation_config_default();
+        gen_config.temperature = 0.0;
+        gen_config.do_sample = 0;
+        gen_config.max_new_tokens = 16;
+        let msg = CString::new("What is the capital of France? Answer in one word.").unwrap();
+        let mut reply = ptr::null_mut();
+        unsafe {
+            assert_eq!(kjarni_chat_send(chat, msg.as_ptr(), &gen_config, &mut reply), KjarniErrorCode::Ok);
+            let text = CStr::from_ptr(reply).to_string_lossy().to_lowercase();
+            assert!(text.contains("paris"), "got {text:?}");
+            crate::kjarni_string_free(reply);
+            kjarni_chat_free(chat);
+        }
+    }
 }

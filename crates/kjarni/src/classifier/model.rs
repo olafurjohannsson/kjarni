@@ -307,38 +307,103 @@ impl Classifier {
         text: &str,
         overrides: &ClassificationOverrides,
     ) -> ClassifierResult<ClassificationResult> {
+        self.classify_batch_with_config(&[text], overrides)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ClassifierError::ClassificationFailed(anyhow::anyhow!("No results")))
+    }
+
+    /// Classify multiple texts.
+    pub async fn classify_batch(
+        &self,
+        texts: &[&str],
+    ) -> ClassifierResult<Vec<ClassificationResult>> {
+        self.classify_batch_with_config(texts, &ClassificationOverrides::default())
+            .await
+    }
+
+    /// Classify multiple texts with custom overrides. Returns one result per
+    /// text, in order, each the same as classifying that text alone.
+    ///
+    /// The texts go through the model together. This used to post-process the
+    /// batch differently from a single text: multi-label scores had sigmoid
+    /// applied to probabilities rather than logits, custom labels were matched
+    /// by name and scored zero, and a text with nothing above the threshold was
+    /// dropped, shifting every later result onto the wrong text. Both paths now
+    /// share one.
+    pub async fn classify_batch_with_config(
+        &self,
+        texts: &[&str],
+        overrides: &ClassificationOverrides,
+    ) -> ClassifierResult<Vec<ClassificationResult>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
         let merged = self.merge_overrides(overrides);
-        let top_k = merged.top_k.unwrap_or(usize::MAX);
-
-        let scores = match self.mode {
-            ClassificationMode::SingleLabel => self
-                .inner
-                .classify_scores(text)
-                .await
-                .map_err(ClassifierError::ClassificationFailed)?,
-            ClassificationMode::MultiLabel => {
-                // Get raw logits, apply sigmoid
-                let logits = self
-                    .inner
-                    .predict_logits(&[text])
-                    .await
-                    .map_err(ClassifierError::ClassificationFailed)?;
-                let raw = logits.into_iter().next().ok_or_else(|| {
-                    ClassifierError::ClassificationFailed(anyhow::anyhow!("No results"))
-                })?;
-
-                raw.iter().map(|&x| sigmoid(x)).collect()
-            }
-        };
-
-        // Get labels
         let labels = self.get_labels()?;
 
-        // Build result with labels
-        let result = ClassificationResult::from_scores_with_labels(&scores, &labels)
+        let logits = self
+            .inner
+            .predict_logits(texts)
+            .await
+            .map_err(ClassifierError::ClassificationFailed)?;
+        if logits.len() != texts.len() {
+            return Err(ClassifierError::ClassificationFailed(anyhow::anyhow!(
+                "model returned {} results for {} texts",
+                logits.len(),
+                texts.len()
+            )));
+        }
+
+        logits
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| {
+                self.finish(self.scores_from_logits(row), &labels, &merged)
+                    .map_err(|e| match e {
+                        ClassifierError::ClassificationFailed(inner) if texts.len() > 1 => {
+                            ClassifierError::ClassificationFailed(
+                                inner.context(format!("text {i}")),
+                            )
+                        }
+                        other => other,
+                    })
+            })
+            .collect()
+    }
+
+    /// Probabilities from one row of logits: softmax across labels for
+    /// single-label models, an independent sigmoid per label for multi-label.
+    fn scores_from_logits(&self, mut logits: Vec<f32>) -> Vec<f32> {
+        match self.mode {
+            ClassificationMode::SingleLabel => {
+                let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let mut sum = 0.0;
+                for x in logits.iter_mut() {
+                    *x = (*x - max).exp();
+                    sum += *x;
+                }
+                for x in logits.iter_mut() {
+                    *x /= sum;
+                }
+                logits
+            }
+            ClassificationMode::MultiLabel => logits.iter().map(|&x| sigmoid(x)).collect(),
+        }
+    }
+
+    /// Labels the scores, then applies the threshold and top-k.
+    fn finish(
+        &self,
+        scores: Vec<f32>,
+        labels: &[String],
+        merged: &ClassificationOverrides,
+    ) -> ClassifierResult<ClassificationResult> {
+        let top_k = merged.top_k.unwrap_or(usize::MAX);
+        let result = ClassificationResult::from_scores_with_labels(&scores, labels)
             .ok_or_else(|| ClassifierError::ClassificationFailed(anyhow::anyhow!("No results")))?;
 
-        // Apply threshold filter and top_k
         let filtered_scores: Vec<(String, f32)> = result
             .all_scores
             .iter()
@@ -366,70 +431,6 @@ impl Classifier {
             all_scores: filtered_scores,
             label_index,
         })
-    }
-
-    /// Classify multiple texts.
-    pub async fn classify_batch(
-        &self,
-        texts: &[&str],
-    ) -> ClassifierResult<Vec<ClassificationResult>> {
-        self.classify_batch_with_config(texts, &ClassificationOverrides::default())
-            .await
-    }
-
-    /// Classify multiple texts with custom overrides.
-    pub async fn classify_batch_with_config(
-        &self,
-        texts: &[&str],
-        overrides: &ClassificationOverrides,
-    ) -> ClassifierResult<Vec<ClassificationResult>> {
-        let merged = self.merge_overrides(overrides);
-        let top_k = merged.top_k.unwrap_or(usize::MAX);
-        let labels = self.get_labels()?;
-
-        let all_scores = self
-            .inner
-            .classify_batch(texts, usize::MAX)
-            .await
-            .map_err(ClassifierError::ClassificationFailed)?;
-
-        let results: Vec<ClassificationResult> = all_scores
-            .into_iter()
-            .filter_map(|label_scores| {
-                // Convert from (label, score) to just scores in label order
-                let scores: Vec<f32> = labels
-                    .iter()
-                    .map(|l| {
-                        label_scores
-                            .iter()
-                            .find(|(name, _)| name == l)
-                            .map(|(_, s)| *s)
-                            .unwrap_or(0.0)
-                    })
-                    .collect();
-
-                // Apply mode
-                let final_scores = match self.mode {
-                    ClassificationMode::SingleLabel => scores,
-                    ClassificationMode::MultiLabel => scores.iter().map(|&x| sigmoid(x)).collect(),
-                };
-
-                let result = ClassificationResult::from_scores_with_labels(&final_scores, &labels)?;
-
-                // Apply threshold and top_k
-                let filtered: Vec<(String, f32)> = result
-                    .all_scores
-                    .iter()
-                    .filter(|(_, score)| merged.threshold.map(|t| *score >= t).unwrap_or(true))
-                    .take(top_k)
-                    .cloned()
-                    .collect();
-
-                ClassificationResult::from_scores(filtered)
-            })
-            .collect();
-
-        Ok(results)
     }
 
     /// Get raw classification scores without labels.

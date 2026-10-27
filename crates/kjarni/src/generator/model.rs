@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
+use kjarni_transformers::tensor::DType;
 use kjarni_transformers::traits::Device;
 
 use crate::common::DownloadPolicy;
@@ -61,7 +62,25 @@ impl Generator {
             .clone()
             .unwrap_or_else(get_default_cache_dir);
 
-        let is_downloaded = model_type.is_downloaded(&cache_dir);
+        let mut load_config = builder
+            .load_config
+            .clone()
+            .map(|c| c.into_inner())
+            .unwrap_or_default();
+        // The builder's `quiet` has to reach the loader, which downloads GGUF
+        // weights itself and prints progress unless its own config says not to.
+        // A caller's load config started from defaults, so `quiet` was dropped.
+        load_config.quiet |= builder.quiet;
+
+        // A quantized request is served from the GGUF, which the loader fetches;
+        // downloading the safetensors here first cost a model's full-precision
+        // size (2.5GB for Llama 3.2 1B) for weights that were never read.
+        let wants_gguf = load_config.use_gguf
+            || matches!(
+                load_config.target_dtype,
+                Some(DType::Q4_K) | Some(DType::Q6_K) | Some(DType::Q8_0)
+            );
+        let is_downloaded = wants_gguf || model_type.is_downloaded(&cache_dir);
 
         if !is_downloaded {
             match builder.download_policy {
@@ -103,10 +122,6 @@ impl Generator {
             None
         };
 
-        let load_config = builder
-            .load_config
-            .map(|c| c.into_inner())
-            .unwrap_or_default();
 
         let model: Arc<dyn DecoderLanguageModel> =
             Self::load_model(model_type, &cache_dir, device, context.clone(), load_config)

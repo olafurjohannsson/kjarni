@@ -256,15 +256,17 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
 
                 let text_refs: Vec<&str> = text_vec.iter().map(|s| s.as_str()).collect();
 
-                let result = get_runtime().block_on(async {
-                    embedder_ref.embed_batch_flat(&text_refs).await
-                    // embedder_ref.embed_batch(&text_refs).await
-                });
+                // `embed_batch`, not `embed_batch_flat`: the flat path always
+                // mean-pooled and normalised, so a batch ignored the embedder's
+                // pooling and `normalize` settings and disagreed with encoding
+                // the same texts one at a time. It also padded the whole batch
+                // to its longest text instead of grouping texts by length.
+                let result =
+                    get_runtime().block_on(async { embedder_ref.embed_batch(&text_refs).await });
 
                 match result {
-                    Ok((embeddings, rows, cols)) => {
-                        // *out = KjarniFloat2DArray::from_vecs(embeddings);
-                        *out = KjarniFloat2DArray::from_flat(embeddings, rows, cols);
+                    Ok(embeddings) => {
+                        *out = KjarniFloat2DArray::from_vecs(embeddings);
                         KjarniErrorCode::Ok
                     }
                     Err(e) => {
@@ -354,4 +356,45 @@ pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) ->
             get_runtime().block_on(async { embedder_ref.dimension() })
         }
     })
+}
+
+#[cfg(test)]
+mod batch_consistency_tests {
+    use super::*;
+    use std::ffi::CString;
+
+    /// The C batch call must honour `normalize = 0`, as the single call does.
+    #[test]
+    fn batch_respects_normalize_setting() {
+        let mut config = kjarni_embedder_config_default();
+        let name = CString::new("minilm-l6-v2").unwrap();
+        config.model_name = name.as_ptr();
+        config.normalize = 0;
+        config.quiet = 1;
+        let mut handle = std::ptr::null_mut();
+        if unsafe { kjarni_embedder_new(&config, &mut handle) } != KjarniErrorCode::Ok {
+            eprintln!("skipping: minilm-l6-v2 is not available");
+            return;
+        }
+        let text = CString::new("refunds take thirty days").unwrap();
+        let ptrs = [text.as_ptr()];
+        unsafe {
+            let mut single = KjarniFloatArray::empty();
+            assert_eq!(kjarni_embedder_encode(handle, text.as_ptr(), &mut single), KjarniErrorCode::Ok);
+            let mut batch = KjarniFloat2DArray::empty();
+            assert_eq!(
+                kjarni_embedder_encode_batch(handle, ptrs.as_ptr(), 1, &mut batch),
+                KjarniErrorCode::Ok
+            );
+            let s = std::slice::from_raw_parts(single.data, single.len);
+            let b = std::slice::from_raw_parts(batch.data, batch.rows * batch.cols);
+            let diff = s.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max);
+            assert!(diff < 1e-5, "batch differs from single by {diff}");
+            let norm = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!((norm - 1.0).abs() > 0.1, "batch was normalised despite normalize = 0");
+            crate::kjarni_float_array_free(single);
+            crate::kjarni_float_2d_array_free(batch);
+            kjarni_embedder_free(handle);
+        }
+    }
 }

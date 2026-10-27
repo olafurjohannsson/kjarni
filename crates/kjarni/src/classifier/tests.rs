@@ -2187,4 +2187,79 @@ mod classifier_tests {
             }
         }
     }
+
+    /// A batch must give each text exactly what classifying it alone gives.
+    /// The batch path once post-processed differently: sigmoid over
+    /// probabilities in multi-label mode, zero scores under custom labels, and
+    /// texts silently dropped by the threshold, shifting later results.
+    mod batch_matches_single {
+        use super::super::*;
+
+        const TEXTS: &[&str] = &[
+            "I absolutely love this, best purchase all year.",
+            "Terrible. It broke on the first day and support never answered.",
+            "It's okay.",
+            "The delivery was quick but the colour is not what the photos showed, \
+             and the instructions were only in German, which made setup slower than it should be.",
+        ];
+
+        async fn assert_batch_matches_single(classifier: &Classifier) {
+            let batch = classifier.classify_batch(TEXTS).await.expect("batch");
+            assert_eq!(batch.len(), TEXTS.len());
+            for (text, b) in TEXTS.iter().zip(&batch) {
+                let single = classifier.classify(text).await.expect("single");
+                assert_eq!(b.label, single.label, "{text}");
+                assert_eq!(b.all_scores.len(), single.all_scores.len(), "{text}");
+                for ((bl, bs), (sl, ss)) in b.all_scores.iter().zip(&single.all_scores) {
+                    assert_eq!(bl, sl, "{text}");
+                    assert!((bs - ss).abs() < 1e-5, "{text}: batch {bs} vs single {ss}");
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn single_label() {
+            let c = Classifier::builder("distilbert-sentiment").quiet(true).build().await.expect("load");
+            assert_batch_matches_single(&c).await;
+        }
+
+        #[tokio::test]
+        async fn multi_label() {
+            let c = Classifier::builder("distilbert-sentiment")
+                .multi_label()
+                .quiet(true)
+                .build()
+                .await
+                .expect("load");
+            assert_batch_matches_single(&c).await;
+        }
+
+        #[tokio::test]
+        async fn custom_labels() {
+            let c = Classifier::builder("distilbert-sentiment")
+                .labels(vec!["neikvætt", "jákvætt"])
+                .quiet(true)
+                .build()
+                .await
+                .expect("load");
+            assert_batch_matches_single(&c).await;
+            let batch = c.classify_batch(TEXTS).await.expect("batch");
+            assert!(batch.iter().all(|r| r.score > 0.5), "custom labels scored {batch:?}");
+        }
+
+        /// A text with nothing above the threshold fails the batch, as it fails
+        /// alone, rather than vanishing and misaligning the rest.
+        #[tokio::test]
+        async fn threshold_does_not_drop_texts() {
+            let c = Classifier::builder("distilbert-sentiment")
+                .threshold(0.999_999)
+                .quiet(true)
+                .build()
+                .await
+                .expect("load");
+            if let Ok(results) = c.classify_batch(TEXTS).await {
+                assert_eq!(results.len(), TEXTS.len(), "a result was dropped");
+            }
+        }
+    }
 }

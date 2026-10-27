@@ -364,6 +364,16 @@ func TestChat(t *testing.T) {
 		t.Errorf("StreamWithHistory = %q, %v", withHistory.String(), err)
 	}
 
+	q, err := NewChat("qwen2.5-0.5b-instruct", WithQuiet(true), WithQuantized(true))
+	if err != nil {
+		t.Fatalf("NewChat quantized: %v", err)
+	}
+	defer q.Close()
+	if out, err := q.SendWithConfig("What is the capital of France? Answer in one word.", &greedy); err != nil ||
+		!strings.Contains(strings.ToLower(out), "paris") {
+		t.Errorf("quantized Send = %q, %v", out, err)
+	}
+
 	convo, err := c.Conversation()
 	if err != nil {
 		t.Fatalf("Conversation: %v", err)

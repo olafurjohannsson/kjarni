@@ -247,13 +247,14 @@ pub unsafe extern "C" fn kjarni_string_free(s: *mut std::ffi::c_char) {
 pub unsafe extern "C" fn kjarni_string_array_free(arr: KjarniStringArray) {
     crate::panic::guard("kjarni_string_array_free", (), || unsafe {
         if !arr.strings.is_null() && arr.len > 0 {
-            let strings = std::slice::from_raw_parts_mut(arr.strings, arr.len);
-            for s in strings.iter() {
+            let strings = std::ptr::slice_from_raw_parts_mut(arr.strings, arr.len);
+            for s in (*strings).iter() {
                 if !s.is_null() {
                     let _ = std::ffi::CString::from_raw(*s);
                 }
             }
-            let _ = Box::from_raw(strings.as_mut_ptr());
+            // The whole slice, not a Box of its first element.
+            let _ = Box::from_raw(strings);
         }
     })
 }

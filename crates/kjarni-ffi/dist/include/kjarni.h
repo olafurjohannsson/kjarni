@@ -210,7 +210,8 @@ typedef struct KjarniChatConfig {
    */
   const char *model_name;
   /**
-   * Model path (NULL = use registry)
+   * Reserved; must be NULL. Loading from a local path is not supported
+   * through the C API yet, and a value here is rejected rather than ignored.
    */
   const char *model_path;
   /**
@@ -225,6 +226,13 @@ typedef struct KjarniChatConfig {
    * Suppress output
    */
   int32_t quiet;
+  /**
+   * Non-zero loads the model's 4-bit GGUF weights (Q4_K_M) where the
+   * registry has them, instead of the full-precision ones: a fraction of the
+   * memory, and several times faster to generate on a CPU, since decoding
+   * reads every weight once per token.
+   */
+  int32_t quantized;
 } KjarniChatConfig;
 
 /**
@@ -313,6 +321,14 @@ typedef struct KjarniClassifierConfig {
    */
   int32_t quiet;
 } KjarniClassifierConfig;
+
+/**
+ * One [`KjarniClassResults`] per input text, in input order.
+ */
+typedef struct KjarniClassBatch {
+  struct KjarniClassResults *items;
+  uintptr_t len;
+} KjarniClassBatch;
 
 /**
  * Configuration for creating an Embedder.
@@ -1002,6 +1018,36 @@ void kjarni_classifier_free(struct KjarniClassifier *classifier);
 enum KjarniErrorCode kjarni_classifier_classify(struct KjarniClassifier *classifier,
                                                 const char *text,
                                                 struct KjarniClassResults *out);
+
+/**
+ * Classify several texts in one call.
+ *
+ * The texts go through the model together, grouped by length, which on a CPU
+ * is several times faster than classifying them one at a time. Each result is
+ * the same as `kjarni_classifier_classify` gives for that text alone.
+ *
+ * # Safety
+ *
+ * - `classifier` must be null, or a live handle returned by `kjarni_classifier_new`.
+ * - `texts` must point to `num_texts` valid, nul-terminated C strings, or be null
+ *   when `num_texts` is 0.
+ * - `out` must be a valid, writable pointer. On `KJARNI_OK` it receives a value the
+ *   caller owns and must release with `kjarni_class_batch_free`.
+ */
+enum KjarniErrorCode kjarni_classifier_classify_batch(struct KjarniClassifier *classifier,
+                                                      const char *const *texts,
+                                                      uintptr_t num_texts,
+                                                      struct KjarniClassBatch *out);
+
+/**
+ * Frees a batch from `kjarni_classifier_classify_batch` and every result in it.
+ *
+ * # Safety
+ *
+ * `batch` must be a value returned by `kjarni_classifier_classify_batch`, passed
+ * here exactly once.
+ */
+void kjarni_class_batch_free(struct KjarniClassBatch batch);
 
 /**
  * Get the classifier's labels.

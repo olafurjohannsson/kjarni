@@ -112,7 +112,17 @@ impl DecoderAttention {
         // apply causality, and on seq_len being large enough for the block
         // machinery to pay for itself.
         let mask_is_noop = attention_mask.is_none_or(|m| m.iter().all(|&x| x == 1.0));
-        if !is_decode && seq_len >= 128 && mask_is_noop && !streaming_disabled() {
+        // A plain causal mask asks for exactly what the streaming path already
+        // does. It is what every Llama-family model passes for a prompt, and
+        // requiring an all-ones mask here sent every prefill down the
+        // materialised path: 330ms per layer on a 500-token prompt instead of a
+        // few, and 8 of the 10 seconds Qwen 0.5B took before its first token.
+        let mask_is_causal = attention_mask.is_some_and(|m| is_plain_causal(m, seq_len, start_write));
+        if !is_decode
+            && seq_len >= 128
+            && (mask_is_noop || mask_is_causal)
+            && !streaming_disabled()
+        {
             let context = super::streaming_attention::streaming_causal_attention(
                 &q_heads,
                 &k_cache.view(),
@@ -244,6 +254,21 @@ impl DecoderAttention {
         }
     }
 }
+
+/// True when `mask` is exactly a causal mask for `seq_len` queries following
+/// `past` cached positions: shape `[seq_len, past + seq_len]`, and query `i`
+/// sees keys `0..=past + i` and nothing after. That is the visibility
+/// `streaming_causal_attention` applies itself, so such a mask adds nothing to it.
+fn is_plain_causal(mask: &Array2<f32>, seq_len: usize, past: usize) -> bool {
+    let (rows, cols) = mask.dim();
+    rows == seq_len
+        && cols == past + seq_len
+        && mask
+            .outer_iter()
+            .enumerate()
+            .all(|(i, row)| row.iter().enumerate().all(|(j, &x)| (x == 1.0) == (j <= past + i)))
+}
+
 
 /// Escape hatch for the streaming path.
 ///
@@ -697,5 +722,58 @@ mod decoder_attention_test {
             .expect("forward should succeed");
 
         assert_eq!(output.shape(), &[batch, seq_len, hidden_size]);
+    }
+
+    #[test]
+    fn plain_causal_masks_are_recognised() {
+        let m = crate::utils::create_causal_mask(5, 5);
+        assert!(is_plain_causal(&m, 5, 0));
+        let warm = crate::utils::create_causal_mask(3, 10);
+        assert!(is_plain_causal(&warm, 3, 7));
+        assert!(!is_plain_causal(&warm, 3, 6), "wrong cache length");
+        let mut padded = crate::utils::create_causal_mask(5, 5);
+        padded[[4, 0]] = 0.0; // hides a real key: a padding mask, not plain causal
+        assert!(!is_plain_causal(&padded, 5, 0));
+        assert!(!is_plain_causal(&Array2::ones((5, 5)), 5, 0));
+    }
+
+    /// The first 100 positions of a 200-token prompt, which takes the streaming
+    /// path, must equal a 100-token prompt on its own, which is under the
+    /// streaming threshold and materialises the scores. Causal attention at
+    /// position i never sees what comes after it, so the two must agree.
+    #[test]
+    fn streaming_prefill_with_a_causal_mask_matches_the_materialised_path() {
+        let (hidden_size, num_heads, num_kv_heads) = (128, 4, 2);
+        let head_dim = hidden_size / num_heads;
+        let kv_dim = num_kv_heads * head_dim;
+        let attn = DecoderAttention::new(
+            hidden_size,
+            num_heads,
+            create_test_layer(hidden_size, hidden_size, 1),
+            create_test_layer(kv_dim, hidden_size, 2),
+            create_test_layer(kv_dim, hidden_size, 3),
+            create_test_layer(hidden_size, hidden_size, 4),
+            Some(num_kv_heads),
+        );
+        let rope = crate::rope::RoPE::new(head_dim, 512, 10000.0);
+        let run = |seq: usize| {
+            let hidden = Array3::from_shape_fn((1, seq, hidden_size), |(_, s, h)| {
+                ((s * 31 + h * 7) % 97) as f32 * 0.02 - 1.0
+            });
+            let mut k = Array3::zeros((1, seq, kv_dim));
+            let mut v = Array3::zeros((1, seq, kv_dim));
+            let mask = crate::utils::create_causal_mask(seq, seq);
+            attn.forward(&hidden, Some(&mask), k.view_mut(), v.view_mut(), 0, Some(&rope))
+                .unwrap()
+        };
+        let long = run(200);
+        let short = run(100);
+        let diff = long
+            .slice(s![.., ..100, ..])
+            .iter()
+            .zip(short.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(diff < 1e-4, "streaming and materialised prefill differ by {diff}");
     }
 }

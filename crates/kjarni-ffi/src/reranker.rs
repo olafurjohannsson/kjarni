@@ -55,16 +55,16 @@ impl KjarniRerankResults {
             return Self::empty();
         }
 
-        let len = results.len();
-        let mut c_results: Vec<KjarniRerankResult> = results
+        let c_results: Box<[KjarniRerankResult]> = results
             .into_iter()
             .map(|(index, score)| KjarniRerankResult { index, score })
             .collect();
+        let len = c_results.len();
 
-        let ptr = c_results.as_mut_ptr();
-        std::mem::forget(c_results);
-
-        Self { results: ptr, len }
+        Self {
+            results: Box::into_raw(c_results) as *mut KjarniRerankResult,
+            len,
+        }
     }
 }
 
@@ -78,7 +78,10 @@ impl KjarniRerankResults {
 pub unsafe extern "C" fn kjarni_rerank_results_free(results: KjarniRerankResults) {
     crate::panic::guard("kjarni_rerank_results_free", (), || unsafe {
         if !results.results.is_null() && results.len > 0 {
-            let _ = Vec::from_raw_parts(results.results, results.len, results.len);
+            let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                results.results,
+                results.len,
+            ));
         }
     })
 }

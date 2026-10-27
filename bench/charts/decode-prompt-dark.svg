@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="206" viewBox="0 0 760 206" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Prompt processing (higher is better)">
+<rect width="760" height="206" rx="8" fill="#1a1a19"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#f0efec">Prompt processing (higher is better)</text>
+<text x="20" y="54" font-size="13" fill="#c3c2b7">512-token prompt, same GGUF file in both, CPU · tokens per second</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#3987e5"/>
+<text x="36" y="76" font-size="12.5" fill="#c3c2b7">Kjarni</text>
+<rect x="102.4" y="66" width="11" height="11" rx="3" fill="#199e70"/>
+<text x="118.4" y="76" font-size="12.5" fill="#c3c2b7">llama.cpp</text>
+<text x="176" y="113.5" text-anchor="end" font-size="13" fill="#f0efec">Qwen2.5 0.5B Q4_K_M</text>
+<line x1="190" y1="89" x2="190" y2="129" stroke="#383835" stroke-width="1"/>
+<path d="M191,92 h368.8943263438034 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-368.8943263438034 z" fill="#3987e5"><title>Kjarni: 472 tok/s</title></path>
+<text x="569.8943263438034" y="104.5" font-size="12" fill="#c3c2b7" font-weight="600">472 tok/s</text>
+<path d="M191,110 h476.00000000000006 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.00000000000006 z" fill="#199e70"><title>llama.cpp: 607 tok/s</title></path>
+<text x="677.0" y="122.5" font-size="12" fill="#c3c2b7">607 tok/s</text>
+<text x="176" y="165.5" text-anchor="end" font-size="13" fill="#f0efec">Llama 3.2 1B Q4_K_M</text>
+<line x1="190" y1="141" x2="190" y2="181" stroke="#383835" stroke-width="1"/>
+<path d="M191,144 h184.02029931802878 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-184.02029931802878 z" fill="#3987e5"><title>Kjarni: 238 tok/s</title></path>
+<text x="385.0202993180288" y="156.5" font-size="12" fill="#c3c2b7" font-weight="600">238 tok/s</text>
+<path d="M191,162 h333.18424278292656 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-333.18424278292656 z" fill="#199e70"><title>llama.cpp: 426 tok/s</title></path>
+<text x="534.1842427829265" y="174.5" font-size="12" fill="#c3c2b7">426 tok/s</text>
+</svg>

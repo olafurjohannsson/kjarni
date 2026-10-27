@@ -186,8 +186,6 @@ pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> 
     c
 }
 
-use faer::Parallelism;
-
 pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim();
@@ -200,17 +198,17 @@ pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) 
     let c_slice = c.as_slice_mut().expect("C must be contiguous");
 
     // Remove ::<f32>. Rust infers the types automatically.
-    let mat_a = faer::mat::from_row_major_slice(a_slice, m, k);
-    let mat_b = faer::mat::from_row_major_slice(b_slice, n, k);
-    let mat_c = faer::mat::from_row_major_slice_mut(c_slice, m, n);
+    let mat_a = faer::MatRef::from_row_major_slice(a_slice, m, k);
+    let mat_b = faer::MatRef::from_row_major_slice(b_slice, n, k);
+    let mat_c = faer::MatMut::from_row_major_slice_mut(c_slice, m, n);
 
     faer::linalg::matmul::matmul(
-        mat_c,
+        mat_c, // This results in Contiguous x Contiguous dot products
+        faer::Accum::Replace,
         mat_a,
-        mat_b.transpose(), // This results in Contiguous x Contiguous dot products
-        None,
+        mat_b.transpose(),
         1.0,
-        Parallelism::Rayon(0),
+        faer::Par::rayon(0),
     );
 
     c
@@ -918,16 +916,16 @@ pub fn matmul_2d_f32_faer_noalloc(
     let out_slice = &mut output.as_slice_mut().expect("output must be contiguous")[..m * n];
 
     {
-        let a_f = faer::mat::from_row_major_slice(a_slice, m, k);
-        let b_f = faer::mat::from_row_major_slice(w_slice, n, k);
-        let c_f = faer::mat::from_row_major_slice_mut(out_slice, m, n);
+        let a_f = faer::MatRef::from_row_major_slice(a_slice, m, k);
+        let b_f = faer::MatRef::from_row_major_slice(w_slice, n, k);
+        let c_f = faer::MatMut::from_row_major_slice_mut(out_slice, m, n);
         faer::linalg::matmul::matmul(
             c_f,
+            faer::Accum::Replace,
             a_f,
             b_f.transpose(),
-            None,
             1.0f32,
-            faer::Parallelism::Rayon(0),
+            faer::Par::rayon(0),
         );
     }
 
@@ -2003,6 +2001,179 @@ mod par_n_tests {
                     .map(|(x, y)| (x - y).abs())
                     .fold(0.0f32, f32::max);
                 assert!(d < 1e-5, "m={m} k={k} n={n} bias={} diff {d}", b.is_some());
+            }
+        }
+    }
+}
+
+/// Rows of input at and above which a quantized or BF16 matmul dequantizes the
+/// weights into f32 tiles and runs them through faer, instead of one
+/// matrix-vector product per row.
+///
+/// The per-row kernels are right for decoding, where there is one row. For a
+/// prompt they read and dequantize every weight once per token: 497 tokens of
+/// Qwen 0.5B spent 100ms per layer in the feed-forward alone. A tile is
+/// dequantized once and reused by every row, so the work becomes a real matrix
+/// multiply.
+pub const DEQUANT_GEMM_MIN_ROWS: usize = 16;
+
+/// Floats per dequantized tile: 8MB, enough output rows for faer to block well
+/// while keeping the scratch small even for a 14336 x 4096 weight.
+const DEQUANT_TILE_FLOATS: usize = 2 << 20;
+
+/// Computes `C = A @ W^T` for an `n x k` weight stored in some compressed form,
+/// by dequantizing `W` a tile of output rows at a time. `dequant_row(r, out)`
+/// writes row `r` of `W` as `k` floats into `out`.
+pub fn matmul_2d_dequant_tiled<F>(
+    a: &ArrayView2<f32>,
+    n: usize,
+    bias: Option<&[f32]>,
+    dequant_row: F,
+) -> Array2<f32>
+where
+    F: Fn(usize, &mut [f32]) + Sync,
+{
+    let (m, k) = a.dim();
+    let a_s = a.as_standard_layout();
+    let a_slice = a_s.as_slice().expect("standard layout");
+    let mut c = Array2::<f32>::zeros((m, n));
+    let tile_rows = (DEQUANT_TILE_FLOATS / k.max(1)).clamp(64, n.max(64)).min(n);
+    let mut tile = vec![0f32; tile_rows * k];
+
+    let mut start = 0;
+    while start < n {
+        let rows = tile_rows.min(n - start);
+        let buf = &mut tile[..rows * k];
+        buf.par_chunks_mut(k)
+            .enumerate()
+            .for_each(|(i, row)| dequant_row(start + i, row));
+
+        let c_slice = c.as_slice_mut().expect("standard layout");
+        let dst = faer::MatMut::from_row_major_slice_mut(c_slice, m, n).submatrix_mut(0, start, m, rows);
+        faer::linalg::matmul::matmul(
+            dst,
+            faer::Accum::Replace,
+            faer::MatRef::from_row_major_slice(a_slice, m, k),
+            faer::MatRef::from_row_major_slice(buf, rows, k).transpose(),
+            1.0,
+            faer::Par::rayon(0),
+        );
+        start += rows;
+    }
+
+    if let Some(b) = bias {
+        c.as_slice_mut()
+            .expect("standard layout")
+            .par_chunks_mut(n)
+            .for_each(|row| row.iter_mut().zip(b).for_each(|(x, y)| *x += y));
+    }
+    c
+}
+
+/// [`matmul_2d_dequant_tiled`] for block-quantized weights.
+pub fn matmul_2d_dequant_blocks<B: crate::tensor::Dequantizable + Sync>(
+    a: &ArrayView2<f32>,
+    blocks: &[B],
+    n: usize,
+    bias: Option<&[f32]>,
+) -> Array2<f32> {
+    let k = a.ncols();
+    let per_row = k / B::BLOCK_SIZE;
+    matmul_2d_dequant_tiled(a, n, bias, |r, out| {
+        for (j, block) in blocks[r * per_row..(r + 1) * per_row].iter().enumerate() {
+            B::dequantize_block(block, &mut out[j * B::BLOCK_SIZE..(j + 1) * B::BLOCK_SIZE]);
+        }
+    })
+}
+
+#[cfg(test)]
+mod dequant_tiled_tests {
+    use super::*;
+    use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K};
+    use crate::tensor::QuantizedMatrix;
+    use half::f16;
+
+    /// Deterministic bytes, so the blocks are random-looking but reproducible.
+    fn byte(i: usize) -> u8 {
+        ((i.wrapping_mul(2654435761) >> 7) & 0xFF) as u8
+    }
+
+    fn input(m: usize, k: usize) -> Array2<f32> {
+        Array2::from_shape_fn((m, k), |(i, j)| ((i * 31 + j * 17) % 101) as f32 / 50.0 - 1.0)
+    }
+
+    /// The reference: dequantize the whole weight, then a plain f32 product.
+    fn reference<B: crate::tensor::Dequantizable>(a: &Array2<f32>, blocks: Vec<B>, n: usize) -> Array2<f32> {
+        let w = QuantizedMatrix { blocks, shape: [n, a.ncols()] }.dequantize().unwrap();
+        a.dot(&w.t())
+    }
+
+    fn max_rel(x: &Array2<f32>, y: &Array2<f32>) -> f32 {
+        let scale = y.iter().fold(0f32, |m, v| m.max(v.abs())).max(1e-6);
+        x.iter().zip(y).fold(0f32, |m, (a, b)| m.max((a - b).abs())) / scale
+    }
+
+    // n is not a multiple of the tile height, so the last tile is partial.
+    const M: usize = 40;
+    const N: usize = 300;
+    const K: usize = 512;
+
+    #[test]
+    fn q8_0_matches_dequantize_then_multiply() {
+        let w = Array2::from_shape_fn((N, K), |(i, j)| ((i * 7 + j * 3) % 41) as f32 / 20.0 - 1.0);
+        let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w).unwrap();
+        let a = input(M, K);
+        let tiled = matmul_2d_dequant_blocks(&a.view(), &blocks, N, None);
+        assert!(max_rel(&tiled, &reference(&a, blocks.clone(), N)) < 1e-4);
+        // And with the per-row kernel it replaces for prompts.
+        assert!(max_rel(&tiled, &matmul_2d_cpu_q8_0(&a.view(), &blocks)) < 1e-3);
+    }
+
+    #[test]
+    fn q4_k_matches_dequantize_then_multiply() {
+        let blocks: Vec<BlockQ4_K> = (0..N * K / 256)
+            .map(|b| BlockQ4_K {
+                d: f16::from_f32(0.01 + (b % 7) as f32 * 0.002),
+                dmin: f16::from_f32(0.005 + (b % 5) as f32 * 0.001),
+                scales: std::array::from_fn(|i| byte(b * 12 + i)),
+                qs: std::array::from_fn(|i| byte(b * 1000 + i)),
+            })
+            .collect();
+        let a = input(M, K);
+        let tiled = matmul_2d_dequant_blocks(&a.view(), &blocks, N, None);
+        assert!(max_rel(&tiled, &reference(&a, blocks.clone(), N)) < 1e-4);
+        // The per-row kernel quantizes activations to 8 bits, so it is close
+        // rather than equal.
+        assert!(max_rel(&tiled, &matmul_2d_cpu_q4_k(&a.view(), &blocks)) < 2e-2);
+    }
+
+    #[test]
+    fn q6_k_matches_dequantize_then_multiply() {
+        let blocks: Vec<BlockQ6_K> = (0..N * K / 256)
+            .map(|b| BlockQ6_K {
+                ql: std::array::from_fn(|i| byte(b * 300 + i)),
+                qh: std::array::from_fn(|i| byte(b * 300 + 128 + i)),
+                scales: std::array::from_fn(|i| (byte(b * 16 + i) % 64) as i8 - 32),
+                d: f16::from_f32(0.002 + (b % 3) as f32 * 0.001),
+            })
+            .collect();
+        let a = input(M, K);
+        let tiled = matmul_2d_dequant_blocks(&a.view(), &blocks, N, None);
+        assert!(max_rel(&tiled, &reference(&a, blocks.clone(), N)) < 1e-4);
+        assert!(max_rel(&tiled, &matmul_2d_cpu_q6_k(&a.view(), &blocks)) < 2e-2);
+    }
+
+    #[test]
+    fn bias_is_added_to_every_row() {
+        let w = Array2::from_shape_fn((N, K), |(i, j)| ((i + j) % 9) as f32 / 9.0);
+        let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w).unwrap();
+        let a = input(M, K);
+        let bias: Vec<f32> = (0..N).map(|i| i as f32).collect();
+        let with = matmul_2d_dequant_blocks(&a.view(), &blocks, N, Some(&bias));
+        let without = matmul_2d_dequant_blocks(&a.view(), &blocks, N, None);
+        for r in 0..M {
+            for c in 0..N {
+                assert!((with[[r, c]] - without[[r, c]] - bias[c]).abs() < 1e-3);
             }
         }
     }
