@@ -1,0 +1,46 @@
+[
+  {
+    "engine": "kjarni",
+    "model": "qwen2.5-0.5b-instruct",
+    "load_ms": 758.2101349980803,
+    "threads": 8,
+    "peak_rss_mb": 1334.8515625,
+    "ttft_ms": 1085.8036940007878,
+    "prompt_tok_s": 471.5401161636023,
+    "gen_tok_s": 32.071223295907664,
+    "generated": 128
+  },
+  {
+    "engine": "llama.cpp",
+    "model": "qwen2.5-0.5b-instruct",
+    "prompt_tok_s": 606.979618,
+    "gen_tok_s": 41.824779,
+    "threads": [
+      8,
+      8
+    ],
+    "build": "5320c87ff"
+  },
+  {
+    "engine": "kjarni",
+    "model": "llama3.2-1b-instruct",
+    "load_ms": 1717.6341020021937,
+    "threads": 8,
+    "peak_rss_mb": 2889.4296875,
+    "ttft_ms": 2153.437891996873,
+    "prompt_tok_s": 237.7593530339641,
+    "gen_tok_s": 18.022643645781052,
+    "generated": 128
+  },
+  {
+    "engine": "llama.cpp",
+    "model": "llama3.2-1b-instruct",
+    "prompt_tok_s": 426.383256,
+    "gen_tok_s": 22.318528,
+    "threads": [
+      16,
+      8
+    ],
+    "build": "5320c87ff"
+  }
+]

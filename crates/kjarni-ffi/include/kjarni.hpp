@@ -363,6 +363,29 @@ public:
         return labels;
     }
 
+    /// Every label with its score for each text, in order. One call for many
+    /// texts is much faster than calling `classify` for each.
+    [[nodiscard]] Result<std::vector<std::vector<Label>>> classify(std::span<const std::string> texts) const {
+        if (texts.empty()) return std::vector<std::vector<Label>>{};
+        detail::CStrings ptrs{texts};
+        detail::Owning<KjarniClassBatch, kjarni_class_batch_free> out;
+        if (auto e = detail::check(kjarni_classifier_classify_batch(handle_.get(), ptrs.data(), ptrs.size(), out.out()));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        std::vector<std::vector<Label>> all;
+        all.reserve(out.raw().len);
+        for (std::size_t i = 0; i < out.raw().len; ++i) {
+            const auto& r = out.raw().items[i];
+            auto& labels = all.emplace_back();
+            labels.reserve(r.len);
+            for (std::size_t j = 0; j < r.len; ++j) {
+                labels.push_back({r.results[j].label ? r.results[j].label : "", r.results[j].score});
+            }
+        }
+        return all;
+    }
+
     /// The highest-scoring label, or `std::nullopt` if the model returned nothing.
     [[nodiscard]] Result<std::optional<Label>> top(std::string_view text) const {
         auto labels = classify(text);
@@ -510,6 +533,9 @@ struct ChatOptions {
     std::string system_prompt;
     bool gpu = false;
     bool quiet = true;
+    /// Load the 4-bit GGUF weights instead of full precision: a fraction of the
+    /// memory and several times faster to generate on a CPU.
+    bool quantized = false;
 };
 
 class Chat {
@@ -522,6 +548,7 @@ public:
         cfg.system_prompt = opts.system_prompt.empty() ? nullptr : opts.system_prompt.c_str();
         cfg.device = opts.gpu ? KJARNI_DEVICE_GPU : KJARNI_DEVICE_CPU;
         cfg.quiet = opts.quiet ? 1 : 0;
+        cfg.quantized = opts.quantized ? 1 : 0;
 
         KjarniChat* raw = nullptr;
         if (auto e = detail::check(kjarni_chat_new(&cfg, &raw)); !e) {

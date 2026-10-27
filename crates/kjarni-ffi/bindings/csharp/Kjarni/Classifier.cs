@@ -136,6 +136,36 @@ namespace Kjarni
         /// <summary>
         /// Classify a single text.
         /// </summary>
+        /// <summary>
+        /// Classify several texts in one call, which is much faster than one at a time.
+        /// Returns one result per text, in order.
+        /// </summary>
+        public ClassificationResult[] ClassifyBatch(string[] texts)
+        {
+            ThrowIfDisposed();
+            if (texts.Length == 0) return Array.Empty<ClassificationResult>();
+
+            using var utf8 = new Utf8StringArray(texts);
+            Native.CheckError(Native.kjarni_classifier_classify_batch(
+                _handle, utf8.Pointers, (UIntPtr)utf8.Length, out var batch));
+            try
+            {
+                var len = (int)batch.Len;
+                var output = new ClassificationResult[len];
+                var size = Marshal.SizeOf<Native.KjarniClassResults>();
+                for (int i = 0; i < len; i++)
+                {
+                    var r = Marshal.PtrToStructure<Native.KjarniClassResults>(IntPtr.Add(batch.Items, i * size));
+                    output[i] = new ClassificationResult(r.ToArray());
+                }
+                return output;
+            }
+            finally
+            {
+                Native.kjarni_class_batch_free(batch);
+            }
+        }
+
         public ClassificationResult Classify(string text)
         {
             ThrowIfDisposed();

@@ -159,6 +159,12 @@ class KjarniClassResults(Structure):
     def free(self):
         _lib.kjarni_class_results_free(self)
 
+class KjarniClassBatch(Structure):
+    _fields_ = [
+        ("items", POINTER(KjarniClassResults)),
+        ("len", c_size_t),
+    ]
+
 class KjarniClassifierConfig(Structure):
     _fields_ = [
         ("device", c_int),
@@ -365,6 +371,10 @@ _lib.kjarni_classifier_free.restype = None
 _lib.kjarni_classifier_free.argtypes = [c_void_p]
 _lib.kjarni_classifier_classify.restype = c_int
 _lib.kjarni_classifier_classify.argtypes = [c_void_p, c_char_p, POINTER(KjarniClassResults)]
+_lib.kjarni_classifier_classify_batch.restype = c_int
+_lib.kjarni_classifier_classify_batch.argtypes = [c_void_p, POINTER(c_char_p), c_size_t, POINTER(KjarniClassBatch)]
+_lib.kjarni_class_batch_free.restype = None
+_lib.kjarni_class_batch_free.argtypes = [KjarniClassBatch]
 _lib.kjarni_classifier_num_labels.restype = c_size_t
 _lib.kjarni_classifier_num_labels.argtypes = [c_void_p]
 

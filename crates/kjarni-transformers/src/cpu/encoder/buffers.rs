@@ -102,6 +102,60 @@ impl EncoderBuffers {
         }
     }
 
+    /// These buffers resized to `max_batch` x `max_seq`, keeping their
+    /// allocations wherever they are already big enough.
+    ///
+    /// A fresh set at batch 64 is a couple of hundred megabytes, and allocating
+    /// and zeroing it took 40ms of a 260ms MiniLM batch: the kernel faults in
+    /// every page again on each call. Reusing the storage avoids that. Each array
+    /// is rebuilt at exactly the requested shape, so views stay contiguous.
+    ///
+    /// Contents are left as they were, not zeroed. That is the contract the
+    /// layers already rely on, since one forward pass reuses these buffers across
+    /// every layer: each kernel writes the region it then reads.
+    pub fn reshaped(self, max_batch: usize, max_seq: usize) -> Self {
+        fn take2(a: Array2<f32>, rows: usize, cols: usize) -> Array2<f32> {
+            Array2::from_shape_vec(
+                (rows, cols),
+                resize(a.into_raw_vec_and_offset().0, rows * cols),
+            )
+            .expect("length matches shape")
+        }
+        fn take4(a: Array4<f32>, shape: (usize, usize, usize, usize)) -> Array4<f32> {
+            let n = shape.0 * shape.1 * shape.2 * shape.3;
+            Array4::from_shape_vec(shape, resize(a.into_raw_vec_and_offset().0, n))
+                .expect("length matches shape")
+        }
+        /// Truncates in place, or grows with zeros (reallocating only then).
+        fn resize(mut v: Vec<f32>, n: usize) -> Vec<f32> {
+            v.resize(n, 0.0);
+            v
+        }
+
+        let tokens = max_batch * max_seq;
+        let (h, nh, hd) = (self.hidden, self.num_heads, self.head_dim);
+        Self {
+            q: take2(self.q, tokens, h),
+            k: take2(self.k, tokens, h),
+            v: take2(self.v, tokens, h),
+            qkv_scratch: self.qkv_scratch.map(|s| take2(s, tokens, 3 * h)),
+            // Grown on demand by `ensure_scores`, which slices what it needs.
+            attn_scores: self.attn_scores,
+            attn_context: take4(self.attn_context, (max_batch, nh, max_seq, hd)),
+            attn_output: take2(self.attn_output, tokens, h),
+            ffn_intermediate: take2(self.ffn_intermediate, tokens, self.intermediate_dim),
+            ffn_output: take2(self.ffn_output, tokens, h),
+            norm_scratch: take2(self.norm_scratch, tokens, h),
+            merge_scratch: take2(self.merge_scratch, tokens, h),
+            q_heads: take4(self.q_heads, (max_batch, nh, max_seq, hd)),
+            k_heads_t: take4(self.k_heads_t, (max_batch, nh, hd, max_seq)),
+            v_heads: take4(self.v_heads, (max_batch, nh, max_seq, hd)),
+            max_batch,
+            max_seq,
+            ..self
+        }
+    }
+
     pub fn new_auto(
         max_batch: usize,
         max_seq: usize,

@@ -29,6 +29,7 @@ use kjarni_transformers::{
     activations::softmax_inplace,
     cpu::encoder::{
         CpuTransformerEncoder,
+        batching::{MAX_ROWS_PER_BATCH, PaddedBatch, TOKENS_PER_BATCH, map_bucketed, pad},
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder},
@@ -359,53 +360,46 @@ impl SequenceClassifier {
             .encode_batch(texts.to_vec(), true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-        let batch_size = encodings.len();
-        let max_len = encodings.iter().map(|e| e.len()).max().unwrap_or(0);
+        let head = self
+            .pipeline
+            .cpu_head()
+            .ok_or_else(|| anyhow!("No classification head available"))?;
 
-        let mut input_ids = ndarray::Array2::<u32>::zeros((batch_size, max_len));
-        let mut attention_mask = ndarray::Array2::<f32>::zeros((batch_size, max_len));
-        let mut token_type_ids = ndarray::Array2::<u32>::zeros((batch_size, max_len));
+        let PaddedBatch {
+            input_ids,
+            attention_mask,
+            token_type_ids,
+        } = pad(&encodings.iter().collect::<Vec<_>>());
 
-        for (i, encoding) in encodings.iter().enumerate() {
-            for (j, &id) in encoding.get_ids().iter().enumerate() {
-                input_ids[[i, j]] = id;
-                attention_mask[[i, j]] = encoding.get_attention_mask()[j] as f32;
-                token_type_ids[[i, j]] = encoding.get_type_ids()[j];
-            }
-        }
-
-        let hidden_states = if let Some(hidden) = self
+        if let Some(hidden) = self
             .forward_gpu(&input_ids, &attention_mask, &token_type_ids)
             .await?
         {
-            hidden
-        } else {
-            let cpu_ops = self
-                .encoder_cpu_ops()
-                .ok_or_else(|| anyhow!("No CPU encoder available"))?;
-            let cpu_encoder = self
-                .pipeline
-                .cpu_encoder()
-                .ok_or_else(|| anyhow!("No CPU encoder available"))?;
+            let logits = head.forward(&hidden, Some(&attention_mask))?;
+            return Ok(logits.outer_iter().map(|row| row.to_vec()).collect());
+        }
 
-            let hidden_states = cpu_ops.embed_tokens(&input_ids, Some(&token_type_ids), 2)?;
-
-            let normalized = cpu_encoder.embed_norm(&hidden_states)?;
-
-            // Forward through CPU encoder
-            cpu_encoder
-                .forward(&normalized, &attention_mask)?
-                .last_hidden_state
-        };
-
-        // Forward through head
-        let logits = self
+        // On the CPU, texts of similar length go through together, with reused
+        // buffers, as embeddings do. Classifying 64 texts as one padded block
+        // took three times as long as PyTorch.
+        let cpu_ops = self
+            .encoder_cpu_ops()
+            .ok_or_else(|| anyhow!("No CPU encoder available"))?;
+        let cpu_encoder = self
             .pipeline
-            .cpu_head()
-            .ok_or_else(|| anyhow!("No classification head available"))?
-            .forward(&hidden_states, Some(&attention_mask))?;
-
-        Ok(logits.outer_iter().map(|row| row.to_vec()).collect())
+            .cpu_encoder()
+            .ok_or_else(|| anyhow!("No CPU encoder available"))?;
+        map_bucketed(&encodings, TOKENS_PER_BATCH, MAX_ROWS_PER_BATCH, |b| {
+            let hidden = cpu_ops.embed_tokens(&b.input_ids, Some(&b.token_type_ids), 2)?;
+            let normalized = cpu_encoder.embed_norm(&hidden)?;
+            let (rows, width) = b.input_ids.dim();
+            let mut buffers = cpu_encoder.create_buffers(rows, width);
+            let hidden = cpu_encoder
+                .forward_with_buffers(&normalized, &b.attention_mask, &mut buffers)?
+                .last_hidden_state;
+            cpu_encoder.recycle_buffers(buffers);
+            head.forward(&hidden, Some(&b.attention_mask))
+        })
     }
 
     #[expect(

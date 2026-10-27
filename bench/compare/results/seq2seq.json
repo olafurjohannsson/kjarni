@@ -1,0 +1,34 @@
+[
+  {
+    "engine": "kjarni",
+    "task": "summarize",
+    "load_ms": 893.2452209992334,
+    "ms": 3510.5134260011255,
+    "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . The project will be funded through a combination of municipal bonds and private donations . Several residents spoke in favour of the plan, citing the lack of quiet study spaces in the area .",
+    "peak_rss_mb": 3463.59765625
+  },
+  {
+    "engine": "torch",
+    "task": "summarize",
+    "load_ms": 2422.9816290026065,
+    "ms": 2135.419661000924,
+    "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
+    "peak_rss_mb": 1728.390625
+  },
+  {
+    "engine": "kjarni",
+    "task": "translate",
+    "load_ms": 679.0738000017882,
+    "ms": 1089.9539800011553,
+    "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
+    "peak_rss_mb": 2343.9375
+  },
+  {
+    "engine": "torch",
+    "task": "translate",
+    "load_ms": 2406.150898998021,
+    "ms": 699.7910640020564,
+    "output": "Das Haus ist klein, aber das Garten hinter sie ist gro\u00df und voller alten Apple-Trees.",
+    "peak_rss_mb": 1373.60546875
+  }
+]

@@ -34,6 +34,9 @@ pub struct CpuTransformerEncoder {
     /// not match the reference, which is how this went unnoticed. The bucketing
     /// is the same scheme T5 uses, so the table is shared with that loader.
     pub position_bias: Option<Arc<T5RelativePositionBias>>,
+    /// Buffers from the last forward pass, reused by the next. See
+    /// [`EncoderBuffers::reshaped`].
+    buffer_pool: std::sync::Mutex<Option<EncoderBuffers>>,
 }
 
 impl CpuTransformerEncoder {
@@ -254,6 +257,7 @@ impl CpuTransformerEncoder {
             metadata: meta,
             rope,
             position_bias,
+            buffer_pool: std::sync::Mutex::new(None),
         })
     }
 }
@@ -355,13 +359,30 @@ impl CpuTransformerCore for CpuTransformerEncoder {
 
 impl CpuEncoder for CpuTransformerEncoder {
     fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
-        EncoderBuffers::new_auto(
-            max_batch,
-            max_seq,
-            self.metadata.hidden_size,
-            self.metadata.num_attention_heads,
-            self.metadata.intermediate_size,
-        )
+        let pooled = self.buffer_pool.lock().ok().and_then(|mut p| p.take());
+        match pooled {
+            Some(b) => b.reshaped(max_batch, max_seq),
+            None => EncoderBuffers::new_auto(
+                max_batch,
+                max_seq,
+                self.metadata.hidden_size,
+                self.metadata.num_attention_heads,
+                self.metadata.intermediate_size,
+            ),
+        }
+    }
+
+    fn recycle_buffers(&self, buffers: EncoderBuffers) {
+        // One set is kept: concurrent callers each get their own, and the
+        // larger of two returned at once is the one worth keeping.
+        if let Ok(mut slot) = self.buffer_pool.lock() {
+            let keep_new = slot.as_ref().is_none_or(|old| {
+                buffers.max_batch() * buffers.max_seq() >= old.max_batch() * old.max_seq()
+            });
+            if keep_new {
+                *slot = Some(buffers);
+            }
+        }
     }
 
     fn forward_with_buffers(

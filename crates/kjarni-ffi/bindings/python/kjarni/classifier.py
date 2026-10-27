@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from ._ffi import (
     _lib, check_error, KjarniDevice,
-    KjarniClassifierConfig, KjarniClassResults
+    KjarniClassifierConfig, KjarniClassResults, KjarniClassBatch
 )
 
 
@@ -135,16 +135,29 @@ class Classifier:
         )
 
     def classify_batch(self, texts: List[str]) -> List[ClassificationResult]:
-        """Classify multiple texts.
-        
+        """Classify several texts in one call, which is much faster than one at a time.
+
         Args:
-            texts: List of input texts
-            
+            texts: Input texts
+
         Returns:
-            List of ClassificationResult objects
+            One ClassificationResult per text, in order
         """
-        # TODO: Add batch FFI call for better performance
-        return [self.classify(text) for text in texts]
+        if not texts:
+            return []
+        c_texts = (c_char_p * len(texts))(*[t.encode("utf-8") for t in texts])
+        batch = KjarniClassBatch()
+        check_error(_lib.kjarni_classifier_classify_batch(self._handle, c_texts, len(texts), byref(batch)))
+        try:
+            out = []
+            for i in range(batch.len):
+                scores = batch.items[i].to_list()
+                if not scores:
+                    raise RuntimeError("Classification returned no results")
+                out.append(ClassificationResult(label=scores[0][0], score=scores[0][1], all_scores=scores))
+            return out
+        finally:
+            _lib.kjarni_class_batch_free(batch)
 
     @property
     def model_id(self) -> str:

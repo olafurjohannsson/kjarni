@@ -9,9 +9,6 @@ use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::model_weights::AttentionLayout;
 
-const SUPER_TILE_SIZE: usize = 64;
-const HALF_TILE: usize = 32;
-
 /// Safely casts bytes to a typed vector, handling alignment.
 pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     if let Ok(slice) = bytemuck::try_cast_slice(bytes) {
@@ -20,19 +17,6 @@ pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<
         let mut aligned = vec![0u8; bytes.len()];
         aligned.copy_from_slice(bytes);
         bytemuck::cast_slice(&aligned).to_vec()
-    }
-}
-
-/// Computes the GGUF block group index for a given logical row.
-#[inline]
-pub fn gguf_block_group_for_row(logical_row: usize) -> usize {
-    let super_tile = logical_row / SUPER_TILE_SIZE;
-    let within_tile = logical_row % SUPER_TILE_SIZE;
-
-    if within_tile < HALF_TILE {
-        super_tile * SUPER_TILE_SIZE + within_tile * 2
-    } else {
-        super_tile * SUPER_TILE_SIZE + 1 + (within_tile - HALF_TILE) * 2
     }
 }
 
@@ -51,24 +35,21 @@ fn get_gguf_src_row(logical_row: usize, head_dim: usize) -> usize {
 }
 
 /// Reorders Q8_0 blocks from GGUF interleaved layout to row-major.
-fn reorder_q8_0_blocks(blocks: Vec<BlockQ8_0>, rows: usize, cols: usize) -> Vec<BlockQ8_0> {
+fn reorder_q8_0_blocks(
+    blocks: Vec<BlockQ8_0>,
+    rows: usize,
+    cols: usize,
+    head_dim: usize,
+) -> Vec<BlockQ8_0> {
     let blocks_per_row = cols / 32;
-
-    if rows <= HALF_TILE || rows > 8192 {
-        return blocks;
-    }
+    debug_assert_eq!(blocks.len(), rows * blocks_per_row, "block count mismatch");
+    debug_assert_eq!(rows % head_dim, 0, "rows must align with head dimension");
 
     let mut reordered = Vec::with_capacity(blocks.len());
-
-    for logical_row in 0..rows {
-        let gguf_block_group = gguf_block_group_for_row(logical_row);
-
-        for b in 0..blocks_per_row {
-            let src_idx = gguf_block_group * blocks_per_row + b;
-            reordered.push(blocks[src_idx]);
-        }
+    for r in 0..rows {
+        let src = get_gguf_src_row(r, head_dim) * blocks_per_row;
+        reordered.extend_from_slice(&blocks[src..src + blocks_per_row]);
     }
-
     reordered
 }
 
@@ -168,16 +149,23 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
             let blocks: Vec<BlockQ8_0> = cast_or_copy(&raw.bytes);
             let shape = [raw.shape[0], raw.shape[1]];
 
-            let blocks = if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) {
-                log::debug!(
-                    "reordering Q8_0 blocks for '{}' [{}, {}]",
-                    raw.name,
-                    shape[0],
-                    shape[1]
-                );
-                reorder_q8_0_blocks(blocks, shape[0], shape[1])
-            } else {
-                blocks
+            // Gated on `attn` like the K-quants: a file whose Q/K rows were not
+            // permuted must not be un-permuted. And by the real head size, not
+            // a fixed 64: 128-dim heads were reordered as two 64-row tiles.
+            let blocks = match attn {
+                Some(attn)
+                    if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) =>
+                {
+                    log::debug!(
+                        "reordering Q8_0 blocks for '{}' [{}, {}] with head_dim={}",
+                        raw.name,
+                        shape[0],
+                        shape[1],
+                        attn.head_dim
+                    );
+                    reorder_q8_0_blocks(blocks, shape[0], shape[1], attn.head_dim)
+                }
+                _ => blocks,
             };
 
             Ok(CpuTensor::Q8_0(QuantizedMatrix { blocks, shape }))
@@ -243,20 +231,6 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_gguf_block_group_mapping() {
-        assert_eq!(gguf_block_group_for_row(0), 0);
-        assert_eq!(gguf_block_group_for_row(1), 2);
-        assert_eq!(gguf_block_group_for_row(31), 62);
-
-        assert_eq!(gguf_block_group_for_row(32), 1);
-        assert_eq!(gguf_block_group_for_row(33), 3);
-        assert_eq!(gguf_block_group_for_row(63), 63);
-
-        assert_eq!(gguf_block_group_for_row(64), 64);
-        assert_eq!(gguf_block_group_for_row(96), 65);
-    }
 
     #[test]
     fn test_get_gguf_src_row_head64() {

@@ -119,6 +119,16 @@ impl GgufLoader {
             .get(gguf_name)
             .ok_or_else(|| anyhow!("tensor '{}' not found in GGUF file", gguf_name))?;
 
+        self.view(gguf_name, gguf_name, info)
+    }
+
+    /// The bytes of one tensor, as the dtype [`Self::ggml_type_to_dtype`] reports.
+    fn view<'a>(
+        &'a self,
+        name: &str,
+        gguf_name: &str,
+        info: &GgufTensorInfo,
+    ) -> Result<TensorView<'a>> {
         let dtype = Self::ggml_type_to_dtype(info.kind)?;
 
         let start = (self.data_start_offset + info.offset) as usize;
@@ -127,10 +137,17 @@ impl GgufLoader {
         if end > self.mmap.len() {
             return Err(anyhow!("tensor '{}' points outside file bounds", gguf_name));
         }
+        let raw = &self.mmap[start..end];
+
+        let bytes = match info.kind {
+            GGML_Q4_0 => Cow::Owned(transcode_to_q8_0(raw, Q4_0_BLOCK, decode_q4_0, gguf_name)?),
+            GGML_Q5_0 => Cow::Owned(transcode_to_q8_0(raw, Q5_0_BLOCK, decode_q5_0, gguf_name)?),
+            _ => Cow::Borrowed(raw),
+        };
 
         Ok(TensorView {
-            name: gguf_name.to_string(),
-            bytes: Cow::Borrowed(&self.mmap[start..end]),
+            name: name.to_string(),
+            bytes,
             shape: info.shape.clone(),
             dtype,
         })
@@ -140,6 +157,8 @@ impl GgufLoader {
         match kind {
             0 => Ok(DType::F32),
             1 => Ok(DType::F16),
+            // Converted to Q8_0 as they are read; see `transcode_to_q8_0`.
+            GGML_Q4_0 | GGML_Q5_0 => Ok(DType::Q8_0),
             8 => Ok(DType::Q8_0),
             12 => Ok(DType::Q4_K),
             14 => Ok(DType::Q6_K),
@@ -171,6 +190,13 @@ impl GgufLoader {
                     "self_attn.k_proj.weight" => "attn_k.weight",
                     "self_attn.v_proj.weight" => "attn_v.weight",
                     "self_attn.o_proj.weight" => "attn_output.weight",
+                    // Qwen2 has Q/K/V biases. Without these four the lookup
+                    // missed, the loader took the biases to be absent, and
+                    // Qwen GGUFs ran without them and generated noise.
+                    "self_attn.q_proj.bias" => "attn_q.bias",
+                    "self_attn.k_proj.bias" => "attn_k.bias",
+                    "self_attn.v_proj.bias" => "attn_v.bias",
+                    "self_attn.o_proj.bias" => "attn_output.bias",
                     "post_attention_layernorm.weight" => "ffn_norm.weight",
                     "mlp.gate_proj.weight" => "ffn_gate.weight",
                     "mlp.up_proj.weight" => "ffn_up.weight",
@@ -186,8 +212,19 @@ impl GgufLoader {
     }
 
     /// Returns attention layout from GGUF metadata.
+    /// The attention layout to undo llama.cpp's Q/K row permutation with, or
+    /// `None` when the file has none to undo.
+    ///
+    /// llama.cpp's converter permutes the query and key rows (to suit its RoPE
+    /// layout) only for the `llama` architecture, which Mistral files also use.
+    /// Qwen2, Phi-3 and the rest are stored as Hugging Face has them. Un-permuting
+    /// those anyway scrambled every attention head: Qwen2.5 GGUFs loaded and
+    /// generated noise.
     pub fn attention_layout(&self) -> Option<AttentionLayout> {
         let arch = &self.architecture;
+        if arch != "llama" {
+            return None;
+        }
 
         let n_heads = self.get_u32(&format!("{}.attention.head_count", arch))? as usize;
         let n_kv_heads = self.get_u32(&format!("{}.attention.head_count_kv", arch))? as usize;
@@ -291,6 +328,10 @@ impl GgufHfMapper for GgufLoader {
                     "attn_k.weight" => "self_attn.k_proj.weight",
                     "attn_v.weight" => "self_attn.v_proj.weight",
                     "attn_output.weight" => "self_attn.o_proj.weight",
+                    "attn_q.bias" => "self_attn.q_proj.bias",
+                    "attn_k.bias" => "self_attn.k_proj.bias",
+                    "attn_v.bias" => "self_attn.v_proj.bias",
+                    "attn_output.bias" => "self_attn.o_proj.bias",
                     "ffn_norm.weight" => "post_attention_layernorm.weight",
                     "ffn_gate.weight" => "mlp.gate_proj.weight",
                     "ffn_up.weight" => "mlp.up_proj.weight",
@@ -326,21 +367,7 @@ impl WeightLoader for GgufLoader {
             )
         })?;
 
-        let dtype = Self::ggml_type_to_dtype(info.kind)?;
-
-        let start = (self.data_start_offset + info.offset) as usize;
-        let end = start + info.size as usize;
-
-        if end > self.mmap.len() {
-            return Err(anyhow!("tensor '{}' points outside file bounds", name));
-        }
-
-        Ok(TensorView {
-            name: name.to_string(),
-            bytes: Cow::Borrowed(&self.mmap[start..end]),
-            shape: info.shape.clone(),
-            dtype,
-        })
+        self.view(name, &gguf_name, info)
     }
 
     fn get_string(&self, key: &str) -> Option<&str> {
@@ -375,6 +402,65 @@ impl WeightLoader for GgufLoader {
     }
 }
 
+const GGML_Q4_0: u32 = 2;
+const GGML_Q5_0: u32 = 6;
+/// Bytes per 32-weight block: an f16 scale, then the packed weights.
+const Q4_0_BLOCK: usize = 2 + 16;
+const Q5_0_BLOCK: usize = 2 + 4 + 16;
+const Q8_0_BLOCK: usize = 2 + 32;
+
+/// Rewrites Q4_0 or Q5_0 blocks as Q8_0, without loss.
+///
+/// Both store 32 small integers per block and one f16 scale: Q4_0 in [-8, 7],
+/// Q5_0 in [-16, 15]. Q8_0 stores 32 int8s and one f16 scale, so the same scale
+/// and the same integers are an exact Q8_0 block, and every Q8_0 kernel then
+/// applies unchanged. Q4_K_M files use Q5_0 for tensors whose rows are not a
+/// multiple of 256, which on Qwen2.5 0.5B (hidden size 896) is most of them;
+/// without this, no such file could be loaded at all.
+fn transcode_to_q8_0(
+    raw: &[u8],
+    block: usize,
+    decode: fn(&[u8], &mut [i8; 32]),
+    name: &str,
+) -> Result<Vec<u8>> {
+    if raw.len() % block != 0 {
+        return Err(anyhow!(
+            "tensor '{name}' is {} bytes, not a whole number of {block}-byte blocks",
+            raw.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(raw.len() / block * Q8_0_BLOCK);
+    let mut qs = [0i8; 32];
+    for b in raw.chunks_exact(block) {
+        decode(b, &mut qs);
+        out.extend_from_slice(&b[..2]); // the f16 scale, unchanged
+        out.extend(qs.iter().map(|&q| q as u8));
+    }
+    Ok(out)
+}
+
+/// ggml's Q4_0: 16 bytes of nibbles, low nibbles first, offset by 8.
+fn decode_q4_0(b: &[u8], out: &mut [i8; 32]) {
+    let qs = &b[2..18];
+    for j in 0..16 {
+        out[j] = (qs[j] & 0x0F) as i8 - 8;
+        out[j + 16] = (qs[j] >> 4) as i8 - 8;
+    }
+}
+
+/// ggml's Q5_0: as Q4_0 plus a fifth bit per weight in a little-endian u32,
+/// offset by 16.
+fn decode_q5_0(b: &[u8], out: &mut [i8; 32]) {
+    let qh = u32::from_le_bytes([b[2], b[3], b[4], b[5]]);
+    let qs = &b[6..22];
+    for j in 0..16 {
+        let hi0 = (((qh >> j) << 4) & 0x10) as u8;
+        let hi1 = ((qh >> (j + 12)) & 0x10) as u8;
+        out[j] = ((qs[j] & 0x0F) | hi0) as i8 - 16;
+        out[j + 16] = ((qs[j] >> 4) | hi1) as i8 - 16;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +470,14 @@ mod tests {
         assert_eq!(GgufLoader::ggml_type_to_dtype(0).unwrap(), DType::F32);
         assert_eq!(GgufLoader::ggml_type_to_dtype(1).unwrap(), DType::F16);
         assert_eq!(GgufLoader::ggml_type_to_dtype(8).unwrap(), DType::Q8_0);
+        assert_eq!(
+            GgufLoader::ggml_type_to_dtype(GGML_Q4_0).unwrap(),
+            DType::Q8_0
+        );
+        assert_eq!(
+            GgufLoader::ggml_type_to_dtype(GGML_Q5_0).unwrap(),
+            DType::Q8_0
+        );
         assert_eq!(GgufLoader::ggml_type_to_dtype(12).unwrap(), DType::Q4_K);
         assert_eq!(GgufLoader::ggml_type_to_dtype(14).unwrap(), DType::Q6_K);
         assert_eq!(GgufLoader::ggml_type_to_dtype(30).unwrap(), DType::BF16);
@@ -447,5 +541,64 @@ mod tests {
             loader.translate_name("model.layers.15.mlp.down_proj.weight"),
             "blk.15.ffn_down.weight"
         );
+
+        // Qwen2's attention biases, both ways.
+        for (hf, gguf) in [
+            ("model.layers.3.self_attn.q_proj.bias", "blk.3.attn_q.bias"),
+            ("model.layers.3.self_attn.k_proj.bias", "blk.3.attn_k.bias"),
+            ("model.layers.3.self_attn.v_proj.bias", "blk.3.attn_v.bias"),
+        ] {
+            assert_eq!(loader.translate_name(hf), gguf);
+            assert_eq!(loader.gguf_to_hf_name(gguf).as_deref(), Some(hf));
+        }
+    }
+
+    /// Packs 32 integers the way ggml's quantize_row_q5_0 does.
+    fn pack_q5_0(scale: half::f16, v: &[i8; 32]) -> Vec<u8> {
+        let mut qh = 0u32;
+        let mut qs = [0u8; 16];
+        for j in 0..16 {
+            let (x0, x1) = ((v[j] + 16) as u8, (v[j + 16] + 16) as u8);
+            qs[j] = (x0 & 0x0F) | ((x1 & 0x0F) << 4);
+            qh |= u32::from((x0 & 0x10) >> 4) << j;
+            qh |= u32::from((x1 & 0x10) >> 4) << (j + 16);
+        }
+        let mut b = scale.to_le_bytes().to_vec();
+        b.extend_from_slice(&qh.to_le_bytes());
+        b.extend_from_slice(&qs);
+        b
+    }
+
+    #[test]
+    fn q5_0_transcodes_to_the_same_q8_0_values() {
+        let v: [i8; 32] = std::array::from_fn(|i| ((i as i32 * 7) % 32 - 16) as i8);
+        let scale = half::f16::from_f32(0.0123);
+        let mut raw = pack_q5_0(scale, &v);
+        raw.extend(pack_q5_0(half::f16::from_f32(-2.5), &[15; 32]));
+        let q8 = transcode_to_q8_0(&raw, Q5_0_BLOCK, decode_q5_0, "t").unwrap();
+        assert_eq!(q8.len(), 2 * Q8_0_BLOCK);
+        assert_eq!(
+            &q8[..2],
+            &scale.to_le_bytes(),
+            "the scale is carried over unchanged"
+        );
+        let got: Vec<i8> = q8[2..34].iter().map(|&b| b as i8).collect();
+        assert_eq!(got, v.to_vec());
+        assert!(q8[36..68].iter().all(|&b| b as i8 == 15));
+    }
+
+    #[test]
+    fn q4_0_transcodes_to_the_same_q8_0_values() {
+        let v: [i8; 32] = std::array::from_fn(|i| (i as i32 % 16 - 8) as i8);
+        let mut raw = half::f16::from_f32(0.5).to_le_bytes().to_vec();
+        raw.extend((0..16).map(|j| ((v[j] + 8) as u8) | (((v[j + 16] + 8) as u8) << 4)));
+        let q8 = transcode_to_q8_0(&raw, Q4_0_BLOCK, decode_q4_0, "t").unwrap();
+        let got: Vec<i8> = q8[2..34].iter().map(|&b| b as i8).collect();
+        assert_eq!(got, v.to_vec());
+    }
+
+    #[test]
+    fn a_partial_block_is_an_error() {
+        assert!(transcode_to_q8_0(&[0u8; 23], Q5_0_BLOCK, decode_q5_0, "t").is_err());
     }
 }

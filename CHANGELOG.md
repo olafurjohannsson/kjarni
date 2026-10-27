@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+### Faster batches for reranking, classification and embeddings
+
+Measured on a batch of 64 texts against PyTorch and ONNX Runtime; the full method
+and results are in [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
+
+- **Reranking and classification group inputs by length.** Both padded a whole batch
+  to its longest member and used the encoder's allocating forward pass. They now
+  use the same length-bucketed, buffered path as embeddings: reranking 64 documents
+  went from 561 ms to 260 ms, faster than PyTorch's 301 ms.
+- **Batch classification in the C API.** `kjarni_classifier_classify_batch` runs many
+  texts through the model together, and every binding uses it: `classify_batch` in
+  Python, `ClassifyBatch` in C# and Go, `classify(span)` in C++. 64 texts went from
+  681 ms, one at a time, to 162 ms, against PyTorch's 218 ms.
+- **Encoder buffers are reused across calls.** Each forward pass allocated and zeroed
+  a couple of hundred megabytes of scratch space, 40 ms of a 260 ms MiniLM batch.
+  Whisper and the BART and T5 encoders reuse them too.
+- **faer 0.24.** Matrix multiplies on encoder shapes are 1.1 to 1.7 times faster.
+- The embedding layer norm and the position and token-type additions run in
+  parallel instead of on one thread.
+
+### Prompts are processed up to twelve times faster
+
+A 500-token prompt took Qwen2.5 0.5B ten seconds before the first token; it now
+takes about one. Prompt processing on the same GGUF files went from 41 to 472
+tokens a second (llama.cpp: 607) on Qwen2.5 0.5B and from 20 to 238 on Llama 3.2
+1B (llama.cpp: 426).
+
+- **Prompts use the streaming attention path.** It was reserved for an all-ones
+  mask, but Llama-family models pass a causal mask for a prompt, which asks for
+  exactly what that path does. Every prompt took the path that materialises the
+  full score tensor instead: 330 ms per layer on a 500-token prompt, against 14.
+- **Quantized and BF16 weights are multiplied as tiles for prompts.** The
+  per-row kernels, right for decoding one token, read and dequantized every
+  weight once per prompt token. From 16 rows up, tiles are dequantized once and
+  multiplied with faer.
+- **Only the last position's logits are computed for a prompt**, the only ones
+  used: on a 152k vocabulary, 70 GFLOP saved per 500-token prompt.
+
+### Quantized chat in every language, and Qwen from GGUF
+
+- **`quantized`** (C: `KjarniChatConfig.quantized`; `quantized=True` in Python and
+  C#, `WithQuantized` in Go, `.quantized` in C++) loads a model's 4-bit GGUF weights:
+  a fraction of the memory, and several times faster to generate on a CPU. Only the
+  CLI could reach them before.
+- **Qwen GGUF files load and generate correctly.** Three bugs stood in the way, each
+  enough on its own: Q5_0 tensors, which Q4_K_M files use wherever a row is not a
+  multiple of 256, were rejected; the Q/K row permutation llama.cpp applies only to
+  Llama files was undone for every architecture; and the attention biases were never
+  mapped to their GGUF names, so Qwen ran without them. Q5_0 and Q4_0 are now
+  converted to Q8_0 at load, which is exact.
+- `KjarniChatConfig.model_path` was ignored. It is now rejected with a message, until
+  loading from a path is supported.
+
+### Fixes
+
+- `kjarni_embedder_encode_batch` always mean-pooled and normalised, ignoring the
+  embedder's `normalize` setting, so a batch disagreed with encoding the same texts
+  one at a time. It now uses the same path.
+- `Classifier::classify_batch` applied sigmoid to probabilities instead of logits in
+  multi-label mode, scored custom labels as zero, and dropped any text with nothing
+  above the threshold, shifting every later result onto the wrong text. It now does
+  exactly what classifying each text alone does.
+- Four C API results freed their arrays with the wrong size: class results and string
+  arrays as a single element, and collections whose capacity could exceed their
+  length. All are boxed slices of exactly their length now.
+- Releases publish `SHA256SUMS` and a signed build-provenance attestation for every
+  shipped library (`gh attestation verify`).
+
+## 0.2.5
+
 ### Every capability in every language
 
 Speech to text, summarization, translation and image search were in the engine and

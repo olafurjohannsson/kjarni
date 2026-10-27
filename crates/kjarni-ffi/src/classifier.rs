@@ -33,8 +33,10 @@ impl KjarniClassResults {
             return Self::empty();
         }
 
-        let len = scores.len();
-        let mut results: Vec<KjarniClassResult> = scores
+        // A boxed slice has exactly `len` elements, which is the layout
+        // `kjarni_class_results_free` frees. A collected Vec need not: collecting
+        // in place from the larger (String, f32) items can leave spare capacity.
+        let results: Box<[KjarniClassResult]> = scores
             .into_iter()
             .map(|(label, score)| {
                 let label_cstr = CString::new(label).unwrap_or_default();
@@ -44,11 +46,12 @@ impl KjarniClassResults {
                 }
             })
             .collect();
+        let len = results.len();
 
-        let ptr = results.as_mut_ptr();
-        std::mem::forget(results);
-
-        Self { results: ptr, len }
+        Self {
+            results: Box::into_raw(results) as *mut KjarniClassResult,
+            len,
+        }
     }
 }
 
@@ -60,13 +63,15 @@ impl KjarniClassResults {
 pub unsafe extern "C" fn kjarni_class_results_free(results: KjarniClassResults) {
     crate::panic::guard("kjarni_class_results_free", (), || unsafe {
         if !results.results.is_null() && results.len > 0 {
-            let slice = std::slice::from_raw_parts_mut(results.results, results.len);
-            for result in slice.iter_mut() {
+            let slice = std::ptr::slice_from_raw_parts_mut(results.results, results.len);
+            for result in (*slice).iter_mut() {
                 if !result.label.is_null() {
                     let _ = CString::from_raw(result.label);
                 }
             }
-            let _ = Box::from_raw(slice.as_mut_ptr());
+            // The whole slice: freeing `as_mut_ptr()` as a Box<KjarniClassResult>
+            // deallocated it with the size of one element.
+            let _ = Box::from_raw(slice);
         }
     })
 }
@@ -286,6 +291,109 @@ pub unsafe extern "C" fn kjarni_classifier_classify(
     )
 }
 
+/// One [`KjarniClassResults`] per input text, in input order.
+#[repr(C)]
+pub struct KjarniClassBatch {
+    pub items: *mut KjarniClassResults,
+    pub len: usize,
+}
+
+impl KjarniClassBatch {
+    fn empty() -> Self {
+        Self {
+            items: ptr::null_mut(),
+            len: 0,
+        }
+    }
+}
+
+/// Classify several texts in one call.
+///
+/// The texts go through the model together, grouped by length, which on a CPU
+/// is several times faster than classifying them one at a time. Each result is
+/// the same as `kjarni_classifier_classify` gives for that text alone.
+///
+/// # Safety
+///
+/// - `classifier` must be null, or a live handle returned by `kjarni_classifier_new`.
+/// - `texts` must point to `num_texts` valid, nul-terminated C strings, or be null
+///   when `num_texts` is 0.
+/// - `out` must be a valid, writable pointer. On `KJARNI_OK` it receives a value the
+///   caller owns and must release with `kjarni_class_batch_free`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kjarni_classifier_classify_batch(
+    classifier: *mut KjarniClassifier,
+    texts: *const *const c_char,
+    num_texts: usize,
+    out: *mut KjarniClassBatch,
+) -> KjarniErrorCode {
+    crate::panic::guard(
+        "kjarni_classifier_classify_batch",
+        KjarniErrorCode::Panic,
+        || -> KjarniErrorCode {
+            unsafe {
+                if classifier.is_null() || out.is_null() || (texts.is_null() && num_texts > 0) {
+                    return KjarniErrorCode::NullPointer;
+                }
+                *out = KjarniClassBatch::empty();
+                if num_texts == 0 {
+                    return KjarniErrorCode::Ok;
+                }
+
+                let mut strs = Vec::with_capacity(num_texts);
+                for &p in std::slice::from_raw_parts(texts, num_texts) {
+                    if p.is_null() {
+                        return KjarniErrorCode::NullPointer;
+                    }
+                    match CStr::from_ptr(p).to_str() {
+                        Ok(s) => strs.push(s),
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    }
+                }
+
+                let classifier_ref = &(*classifier).inner;
+                match get_runtime().block_on(classifier_ref.classify_batch(&strs)) {
+                    Ok(results) => {
+                        let items: Box<[KjarniClassResults]> = results
+                            .into_iter()
+                            .map(|r| KjarniClassResults::from_scores(r.all_scores))
+                            .collect();
+                        let len = items.len();
+                        *out = KjarniClassBatch {
+                            items: Box::into_raw(items) as *mut KjarniClassResults,
+                            len,
+                        };
+                        KjarniErrorCode::Ok
+                    }
+                    Err(e) => {
+                        set_last_error(e.to_string());
+                        KjarniErrorCode::InferenceFailed
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Frees a batch from `kjarni_classifier_classify_batch` and every result in it.
+///
+/// # Safety
+///
+/// `batch` must be a value returned by `kjarni_classifier_classify_batch`, passed
+/// here exactly once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kjarni_class_batch_free(batch: KjarniClassBatch) {
+    crate::panic::guard("kjarni_class_batch_free", (), || unsafe {
+        if batch.items.is_null() {
+            return;
+        }
+        let items = Box::from_raw(std::ptr::slice_from_raw_parts_mut(batch.items, batch.len));
+        for r in items.into_vec() {
+            kjarni_class_results_free(r);
+        }
+    })
+}
+
 /// Get the classifier's labels.
 ///
 /// # Safety
@@ -313,17 +421,20 @@ pub unsafe extern "C" fn kjarni_classifier_labels(
 
                 match classifier_ref.labels() {
                     Some(labels) => {
-                        let len = labels.len();
-                        let mut c_strings: Vec<*mut c_char> = labels
+                        // `len` is counted after the filter: a label containing a
+                        // nul is skipped, and counting before it made the free
+                        // read past the end of the array.
+                        let c_strings: Box<[*mut c_char]> = labels
                             .into_iter()
                             .filter_map(|s| CString::new(s).ok())
                             .map(|cs| cs.into_raw())
                             .collect();
+                        let len = c_strings.len();
 
-                        let ptr = c_strings.as_mut_ptr();
-                        std::mem::forget(c_strings);
-
-                        *out = KjarniStringArray { strings: ptr, len };
+                        *out = KjarniStringArray {
+                            strings: Box::into_raw(c_strings) as *mut *mut c_char,
+                            len,
+                        };
                         KjarniErrorCode::Ok
                     }
                     None => {
@@ -357,4 +468,102 @@ pub unsafe extern "C" fn kjarni_classifier_num_labels(
             (*classifier).inner.num_labels()
         }
     })
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn batch_rejects_null_pointers() {
+        let mut out = KjarniClassBatch::empty();
+        unsafe {
+            assert_eq!(
+                kjarni_classifier_classify_batch(ptr::null_mut(), ptr::null(), 0, &mut out),
+                KjarniErrorCode::NullPointer
+            );
+        }
+    }
+
+    #[test]
+    fn results_round_trip_through_free() {
+        // Several labels, so a free that sized the allocation as one element
+        // would be caught by Miri or a sanitizer.
+        let r = KjarniClassResults::from_scores(vec![
+            ("a".into(), 0.5),
+            ("b".into(), 0.3),
+            ("c".into(), 0.2),
+        ]);
+        assert_eq!(r.len, 3);
+        unsafe { kjarni_class_results_free(r) };
+
+        let items: Box<[KjarniClassResults]> = (0..3)
+            .map(|i| KjarniClassResults::from_scores(vec![(format!("l{i}"), 1.0)]))
+            .collect();
+        let len = items.len();
+        unsafe {
+            kjarni_class_batch_free(KjarniClassBatch {
+                items: Box::into_raw(items) as *mut KjarniClassResults,
+                len,
+            });
+            kjarni_class_batch_free(KjarniClassBatch::empty());
+        }
+    }
+
+    /// Real model: the batch must equal classifying each text alone.
+    #[test]
+    fn batch_matches_single_calls() {
+        let mut config = kjarni_classifier_config_default();
+        let name = CString::new("distilbert-sentiment").unwrap();
+        config.model_name = name.as_ptr();
+        config.quiet = 1;
+        let mut handle = ptr::null_mut();
+        if unsafe { kjarni_classifier_new(&config, &mut handle) } != KjarniErrorCode::Ok {
+            eprintln!("skipping: distilbert-sentiment is not available");
+            return;
+        }
+        let texts: Vec<CString> = [
+            "Great product!",
+            "Awful, broke at once.",
+            "It is fine I guess.",
+        ]
+        .iter()
+        .map(|t| CString::new(*t).unwrap())
+        .collect();
+        let ptrs: Vec<*const c_char> = texts.iter().map(|t| t.as_ptr()).collect();
+        let mut batch = KjarniClassBatch::empty();
+        unsafe {
+            assert_eq!(
+                kjarni_classifier_classify_batch(handle, ptrs.as_ptr(), ptrs.len(), &mut batch),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(batch.len, 3);
+            let items = std::slice::from_raw_parts(batch.items, batch.len);
+            for (p, b) in ptrs.iter().zip(items) {
+                let mut single = KjarniClassResults::empty();
+                assert_eq!(
+                    kjarni_classifier_classify(handle, *p, &mut single),
+                    KjarniErrorCode::Ok
+                );
+                assert_eq!(single.len, b.len);
+                let s = std::slice::from_raw_parts(single.results, single.len);
+                let bb = std::slice::from_raw_parts(b.results, b.len);
+                for (x, y) in s.iter().zip(bb) {
+                    assert_eq!(CStr::from_ptr(x.label), CStr::from_ptr(y.label));
+                    assert!((x.score - y.score).abs() < 1e-5);
+                }
+                kjarni_class_results_free(single);
+            }
+            kjarni_class_batch_free(batch);
+
+            let mut empty = KjarniClassBatch::empty();
+            assert_eq!(
+                kjarni_classifier_classify_batch(handle, ptr::null(), 0, &mut empty),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(empty.len, 0);
+            kjarni_classifier_free(handle);
+        }
+    }
 }

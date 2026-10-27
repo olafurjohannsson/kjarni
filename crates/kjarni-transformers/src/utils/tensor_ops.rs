@@ -1,4 +1,3 @@
-use faer::Parallelism;
 use ndarray::{Array2, ArrayView2};
 
 /// Computes matrix multiplication `C = A @ B`
@@ -16,12 +15,12 @@ pub fn matmul_2d_faer(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
     let c_sl = c.as_slice_mut().unwrap();
 
     faer::linalg::matmul::matmul(
-        faer::mat::from_row_major_slice_mut(c_sl, m, n),
-        faer::mat::from_row_major_slice(a_sl, m, k),
-        faer::mat::from_row_major_slice(b_sl, k, n),
-        None,
+        faer::MatMut::from_row_major_slice_mut(c_sl, m, n),
+        faer::Accum::Replace,
+        faer::MatRef::from_row_major_slice(a_sl, m, k),
+        faer::MatRef::from_row_major_slice(b_sl, k, n),
         1.0,
-        Parallelism::Rayon(0),
+        faer::Par::rayon(0),
     );
     c
 }

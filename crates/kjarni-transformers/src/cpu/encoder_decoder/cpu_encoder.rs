@@ -46,6 +46,10 @@ pub struct Seq2SeqCPUEncoder {
     pub meta: ModelMetadata,
     sinusoidal_cache: Option<Array2<f32>>, // cpu cache
     pub layout: ModelLayout,
+    /// Buffers from the last forward pass, reused by the next. Whisper's
+    /// encoder runs 1500 positions per 30-second window, so a fresh set per
+    /// window was a large allocation every time.
+    buffer_pool: std::sync::Mutex<Option<EncoderBuffers>>,
 }
 
 impl Seq2SeqCPUEncoder {
@@ -176,6 +180,7 @@ impl Seq2SeqCPUEncoder {
             pre_norm: meta.is_prenorm,
             meta,
             layout,
+            buffer_pool: std::sync::Mutex::new(None),
         })
     }
     pub fn get_layers(&self) -> &Vec<EncoderLayer> {
@@ -450,13 +455,29 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
             .map(|l| l.feedforward.out_features())
             .max()
             .unwrap_or(self.meta.intermediate_size);
-        EncoderBuffers::new_auto(
-            max_batch,
-            max_seq,
-            self.meta.hidden_size,
-            self.meta.num_attention_heads,
-            intermediate,
-        )
+        let pooled = self.buffer_pool.lock().ok().and_then(|mut p| p.take());
+        match pooled {
+            // Same model, so only the batch and length can differ.
+            Some(b) => b.reshaped(max_batch, max_seq),
+            None => EncoderBuffers::new_auto(
+                max_batch,
+                max_seq,
+                self.meta.hidden_size,
+                self.meta.num_attention_heads,
+                intermediate,
+            ),
+        }
+    }
+
+    fn recycle_buffers(&self, buffers: EncoderBuffers) {
+        if let Ok(mut slot) = self.buffer_pool.lock() {
+            let keep_new = slot.as_ref().is_none_or(|old| {
+                buffers.max_batch() * buffers.max_seq() >= old.max_batch() * old.max_seq()
+            });
+            if keep_new {
+                *slot = Some(buffers);
+            }
+        }
     }
     fn forward_layers(
         &self,
@@ -486,6 +507,7 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
                     &mut buffers,
                 )?;
             }
+            self.recycle_buffers(buffers);
             return Ok(hidden);
         }
         for layer in layers {

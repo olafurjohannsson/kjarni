@@ -18,6 +18,7 @@ class KjarniChatConfig(Structure):
         ("system_prompt", c_char_p),
         ("mode", c_int32),
         ("quiet", c_int32),
+        ("quantized", c_int32),
     ]
 
 
@@ -187,6 +188,7 @@ class Chat:
         device: str = "cpu",
         cache_dir: Optional[str] = None,
         quiet: bool = False,
+        quantized: bool = False,
     ):
         """Load a chat model, downloading it on first use.
 
@@ -197,6 +199,8 @@ class Chat:
             device: "cpu" or "gpu"
             cache_dir: Directory to cache models
             quiet: Suppress progress output
+            quantized: Load the 4-bit GGUF weights instead of full precision: a
+                fraction of the memory and several times faster to generate on a CPU
         """
         if mode not in _MODES:
             raise ValueError(f"unknown mode {mode!r}; expected default, creative or reasoning")
@@ -207,6 +211,7 @@ class Chat:
         config.cache_dir = encode_or_none(cache_dir)
         config.mode = _MODES[mode]
         config.quiet = 1 if quiet else 0
+        config.quantized = 1 if quantized else 0
 
         self._handle = c_void_p()
         check_error(_lib.kjarni_chat_new(byref(config), byref(self._handle)))

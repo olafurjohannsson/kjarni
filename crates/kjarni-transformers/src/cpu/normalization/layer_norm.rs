@@ -4,7 +4,7 @@
 use std::arch::x86_64::*;
 
 use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
+use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Ix1};
 use rayon::prelude::*;
 
 use crate::tensor::CpuTensor;
@@ -280,17 +280,14 @@ impl LayerNorm {
     /// Apply layer norm to a 3D tensor of activations.
     #[inline]
     pub fn forward(&self, hidden_states: &ArrayView3<f32>) -> Array3<f32> {
-        let mean = hidden_states.mean_axis(Axis(2)).unwrap();
-        let variance = hidden_states.var_axis(Axis(2), 0.0);
-
-        let mean_expanded = mean.insert_axis(Axis(2));
-        let var_expanded = variance.insert_axis(Axis(2));
-
-        let inv_std = (&var_expanded + self.eps).mapv(|x| 1.0 / x.sqrt());
-        let normalized_hidden = (hidden_states.to_owned() - &mean_expanded) * &inv_std;
-
-        // Simple, fast F32 math. No matching, no on-the-fly conversion.
-        normalized_hidden * &self.weight + &self.bias
+        // The row kernel the layers use: parallel, AVX2, one pass to read and
+        // one to write. The ndarray expression this replaced built four
+        // full-size temporaries on one thread, and as the embedding norm it
+        // cost 10ms of a 200ms MiniLM batch. `forward_3d_reference` keeps the
+        // plain form for tests to compare against.
+        let mut out = hidden_states.as_standard_layout().into_owned();
+        self.add_and_norm_rows(out.as_slice_mut().expect("standard layout"), None);
+        out
     }
 
     pub fn forward_3d(&self, hidden: &Array3<f32>) -> Array3<f32> {

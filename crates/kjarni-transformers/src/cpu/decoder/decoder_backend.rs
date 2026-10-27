@@ -167,17 +167,31 @@ impl CpuDecoderBackend {
         let hidden_states = ops.embed(tokens, 0)?;
 
         // Single forward pass through all layers (includes final_norm)
+        let t = Instant::now();
         let decoder_output = ops.decoder().forward(
             &hidden_states,
             &attention_mask,
             0, // Position offset is 0 for prefill
             Some(cache),
         )?;
+        debug!(
+            "CPU prefill layers: {:.2}ms",
+            t.elapsed().as_secs_f64() * 1000.0
+        );
 
-        // Project to logits
-        let logits_3d = ops.project_to_logits(&decoder_output)?;
+        // Only the last position's logits are used, so only it is projected. The
+        // whole prompt was: on Qwen's 152k vocabulary and a 500-token prompt,
+        // 70 GFLOP and 300MB of logits thrown away, a second before the first
+        // token. The final norm has already run inside the decoder, per position.
+        let t = Instant::now();
+        let last = decoder_output.slice(s![.., -1.., ..]).to_owned();
+        let logits_3d = ops.project_to_logits(&last)?;
+        debug!(
+            "CPU prefill logits: {:.2}ms",
+            t.elapsed().as_secs_f64() * 1000.0
+        );
 
-        // Extract last position: [1, seq, vocab] -> [vocab]
+        // [1, 1, vocab] -> [vocab]
         Ok(logits_3d.slice(s![0, -1, ..]).to_owned())
     }
 
@@ -203,7 +217,9 @@ impl CpuDecoderBackend {
             ops.decoder()
                 .forward(&hidden_states, &attention_mask, start_pos, Some(cache))?;
 
-        let logits_3d = ops.project_to_logits(&decoder_output)?;
+        // Last position only, as in `prefill_pipelined`.
+        let last = decoder_output.slice(s![.., -1.., ..]).to_owned();
+        let logits_3d = ops.project_to_logits(&last)?;
         Ok(logits_3d.slice(s![0, -1, ..]).to_owned())
     }
 

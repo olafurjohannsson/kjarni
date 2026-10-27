@@ -148,8 +148,10 @@ namespace Kjarni
         /// <param name="mode">Chat mode (Default, Creative, Reasoning)</param>
         /// <param name="quiet">Suppress loading output</param>
         /// <param name="device">Device: "cpu" or "gpu"</param>
+        /// <param name="quantized">Load the 4-bit GGUF weights instead of full precision:
+        /// a fraction of the memory and several times faster to generate on a CPU.</param>
         public Chat(string model, string? systemPrompt = null, ChatMode mode = ChatMode.Default,
-                     bool quiet = false, string? device = null)
+                     bool quiet = false, string? device = null, bool quantized = false)
         {
             var config = Native.kjarni_chat_config_default();
 
@@ -159,6 +161,7 @@ namespace Kjarni
             config.Device = device == "gpu" ? KjarniDevice.Gpu : KjarniDevice.Cpu;
             config.Mode = (int)mode;
             config.Quiet = quiet ? 1 : 0;
+            config.Quantized = quantized ? 1 : 0;
 
             GCHandle systemPin = default;
             if (systemPrompt != null)

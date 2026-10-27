@@ -65,7 +65,7 @@ impl KjarniSearchResults {
         }
 
         let len = results.len();
-        let mut c_results: Vec<KjarniSearchResult> = results
+        let c_results: Box<[KjarniSearchResult]> = results
             .into_iter()
             .map(|r| {
                 let text = CString::new(r.text).unwrap_or_default().into_raw();
@@ -84,12 +84,10 @@ impl KjarniSearchResults {
             })
             .collect();
 
-        c_results.shrink_to_fit();
-
-        let ptr = c_results.as_mut_ptr();
-        std::mem::forget(c_results);
-
-        Self { results: ptr, len }
+        Self {
+            results: Box::into_raw(c_results) as *mut KjarniSearchResult,
+            len,
+        }
     }
 }
 
@@ -109,7 +107,10 @@ pub unsafe extern "C" fn kjarni_search_results_free(results: KjarniSearchResults
                         let _ = CString::from_raw(result.metadata_json);
                     }
                 }
-                let _ = Vec::from_raw_parts(results.results, results.len, results.len);
+                let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                    results.results,
+                    results.len,
+                ));
             }
         }
     })

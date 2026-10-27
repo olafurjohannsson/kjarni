@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="382" viewBox="0 0 760 382" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Single-text latency (lower is better)">
+<rect width="760" height="382" rx="8" fill="#1a1a19"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#f0efec">Single-text latency (lower is better)</text>
+<text x="20" y="54" font-size="13" fill="#c3c2b7">One short query per call, CPU, fp32 · milliseconds, each model on its own scale</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#3987e5"/>
+<text x="36" y="76" font-size="12.5" fill="#c3c2b7">Kjarni</text>
+<rect x="102.4" y="66" width="11" height="11" rx="3" fill="#d95926"/>
+<text x="118.4" y="76" font-size="12.5" fill="#c3c2b7">PyTorch</text>
+<rect x="192.20000000000002" y="66" width="11" height="11" rx="3" fill="#199e70"/>
+<text x="208.20000000000002" y="76" font-size="12.5" fill="#c3c2b7">ONNX Runtime</text>
+<text x="176" y="122.5" text-anchor="end" font-size="13" fill="#f0efec">Embed · MiniLM-L6</text>
+<line x1="190" y1="89" x2="190" y2="147" stroke="#383835" stroke-width="1"/>
+<path d="M191,92 h203.12573163067376 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-203.12573163067376 z" fill="#3987e5"><title>Kjarni: 2.4 ms</title></path>
+<text x="404.1257316306737" y="104.5" font-size="12" fill="#c3c2b7" font-weight="600">2.4 ms</text>
+<path d="M191,110 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#d95926"><title>PyTorch: 5.5 ms</title></path>
+<text x="677.0" y="122.5" font-size="12" fill="#c3c2b7">5.5 ms</text>
+<path d="M191,128 h118.18390001253756 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-118.18390001253756 z" fill="#199e70"><title>ONNX Runtime: 1.4 ms</title></path>
+<text x="319.18390001253755" y="140.5" font-size="12" fill="#c3c2b7">1.4 ms</text>
+<line x1="20" y1="152.0" x2="740" y2="152.0" stroke="#383835" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="192.5" text-anchor="end" font-size="13" fill="#f0efec">Embed · MPNet-base</text>
+<line x1="190" y1="159" x2="190" y2="217" stroke="#383835" stroke-width="1"/>
+<path d="M191,162 h412.0962868438879 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-412.0962868438879 z" fill="#3987e5"><title>Kjarni: 25.8 ms</title></path>
+<text x="613.0962868438879" y="174.5" font-size="12" fill="#c3c2b7" font-weight="600">25.8 ms</text>
+<path d="M191,180 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#d95926"><title>PyTorch: 29.8 ms</title></path>
+<text x="677.0" y="192.5" font-size="12" fill="#c3c2b7">29.8 ms</text>
+<path d="M191,198 h328.69670223803905 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-328.69670223803905 z" fill="#199e70"><title>ONNX Runtime: 20.7 ms</title></path>
+<text x="529.696702238039" y="210.5" font-size="12" fill="#c3c2b7">20.7 ms</text>
+<line x1="20" y1="222.0" x2="740" y2="222.0" stroke="#383835" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="262.5" text-anchor="end" font-size="13" fill="#f0efec">Rerank · MiniLM CE</text>
+<line x1="190" y1="229" x2="190" y2="287" stroke="#383835" stroke-width="1"/>
+<path d="M191,232 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#3987e5"><title>Kjarni: 9.2 ms</title></path>
+<text x="677.0" y="244.5" font-size="12" fill="#c3c2b7" font-weight="600">9.2 ms</text>
+<path d="M191,250 h475.8670127674122 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-475.8670127674122 z" fill="#d95926"><title>PyTorch: 9.2 ms</title></path>
+<text x="676.8670127674122" y="262.5" font-size="12" fill="#c3c2b7">9.2 ms</text>
+<path d="M191,268 h196.33556651922305 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-196.33556651922305 z" fill="#199e70"><title>ONNX Runtime: 3.8 ms</title></path>
+<text x="397.33556651922305" y="280.5" font-size="12" fill="#c3c2b7">3.8 ms</text>
+<line x1="20" y1="292.0" x2="740" y2="292.0" stroke="#383835" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="332.5" text-anchor="end" font-size="13" fill="#f0efec">Classify · DistilBERT</text>
+<line x1="190" y1="299" x2="190" y2="357" stroke="#383835" stroke-width="1"/>
+<path d="M191,302 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#3987e5"><title>Kjarni: 13.2 ms</title></path>
+<text x="677.0" y="314.5" font-size="12" fill="#c3c2b7" font-weight="600">13.2 ms</text>
+<path d="M191,320 h330.0844101053593 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-330.0844101053593 z" fill="#d95926"><title>PyTorch: 9.2 ms</title></path>
+<text x="531.0844101053593" y="332.5" font-size="12" fill="#c3c2b7">9.2 ms</text>
+<path d="M191,338 h386.9958451812006 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-386.9958451812006 z" fill="#199e70"><title>ONNX Runtime: 10.7 ms</title></path>
+<text x="587.9958451812006" y="350.5" font-size="12" fill="#c3c2b7">10.7 ms</text>
+</svg>

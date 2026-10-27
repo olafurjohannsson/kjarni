@@ -1,6 +1,5 @@
 //! Linear algebra operations for transformers
 
-use faer::Parallelism;
 use ndarray::{Array2, Array3, Array4, ArrayView2, ArrayView4, Axis, Zip};
 use rayon::prelude::*;
 const MASK_VALUE: f32 = -1e9;
@@ -643,12 +642,12 @@ pub fn matmul_2d(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
     let c_sl = c.as_slice_mut().unwrap();
 
     faer::linalg::matmul::matmul(
-        faer::mat::from_row_major_slice_mut(c_sl, m, n),
-        faer::mat::from_row_major_slice(a_sl, m, k),
-        faer::mat::from_row_major_slice(b_sl, k, n),
-        None,
+        faer::MatMut::from_row_major_slice_mut(c_sl, m, n),
+        faer::Accum::Replace,
+        faer::MatRef::from_row_major_slice(a_sl, m, k),
+        faer::MatRef::from_row_major_slice(b_sl, k, n),
         1.0,
-        Parallelism::Rayon(0),
+        faer::Par::rayon(0),
     );
     c
 }
@@ -667,12 +666,12 @@ pub fn matmul_2d_transposed(a: &ArrayView2<f32>, b_transposed: &ArrayView2<f32>)
     let c_sl = c.as_slice_mut().unwrap();
 
     faer::linalg::matmul::matmul(
-        faer::mat::from_row_major_slice_mut(c_sl, m, n),
-        faer::mat::from_row_major_slice(a_sl, m, k),
-        faer::mat::from_row_major_slice(b_sl, n, k).transpose(),
-        None,
+        faer::MatMut::from_row_major_slice_mut(c_sl, m, n),
+        faer::Accum::Replace,
+        faer::MatRef::from_row_major_slice(a_sl, m, k),
+        faer::MatRef::from_row_major_slice(b_sl, n, k).transpose(),
         1.0,
-        Parallelism::Rayon(0),
+        faer::Par::rayon(0),
     );
     c
 }
@@ -723,12 +722,12 @@ pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
                         .expect("Output buffer must be contiguous");
 
                     faer::linalg::matmul::matmul(
-                        faer::mat::from_row_major_slice_mut(o_s, seq1, seq2),
-                        faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
-                        faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
-                        None,
+                        faer::MatMut::from_row_major_slice_mut(o_s, seq1, seq2),
+                        faer::Accum::Replace,
+                        faer::MatRef::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
+                        faer::MatRef::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
                         1.0,
-                        Parallelism::None, // No internal threads; we are already parallel
+                        faer::Par::Seq, // No internal threads; we are already parallel
                     );
                 });
         });
@@ -762,12 +761,12 @@ pub fn matmul_4d_noalloc(a: &Array4<f32>, b: &Array4<f32>, out: &mut Array4<f32>
                         .expect("Output buffer must be contiguous");
 
                     faer::linalg::matmul::matmul(
-                        faer::mat::from_row_major_slice_mut(o_s, seq1, seq2),
-                        faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
-                        faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
-                        None,
+                        faer::MatMut::from_row_major_slice_mut(o_s, seq1, seq2),
+                        faer::Accum::Replace,
+                        faer::MatRef::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
+                        faer::MatRef::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
                         1.0,
-                        Parallelism::None,
+                        faer::Par::Seq,
                     );
                 });
         });

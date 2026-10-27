@@ -110,6 +110,11 @@ class ChatTest(unittest.TestCase):
         self.assertTrue(self.chat.model_name)
         self.assertGreater(self.chat.context_size, 0)
 
+    def test_quantized_weights(self):
+        q = Chat("qwen2.5-0.5b-instruct", quantized=True, quiet=True)
+        reply = q.send("What is the capital of France? Answer in one word.", do_sample=False, max_new_tokens=16)
+        self.assertIn("paris", reply.lower())
+
     def test_bad_mode(self):
         with self.assertRaises(ValueError):
             Chat("qwen2.5-0.5b-instruct", mode="sleepy")

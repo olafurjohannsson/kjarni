@@ -1,2 +1,3 @@
-# The throwaway venv for the torch reference scripts.
-.venv/
+# Raw outputs kept only for the agreement checks in run_encoders.py.
+compare/results/*.npy
+__pycache__/

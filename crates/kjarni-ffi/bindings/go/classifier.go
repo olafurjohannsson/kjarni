@@ -182,3 +182,38 @@ func freeClassResults(results ffiClassResults) {
         callWithStruct(_classResultsFreeSymGlobal, unsafe.Pointer(&results), unsafe.Sizeof(results))
     }
 }
+type ffiClassBatch struct {
+	Items uintptr
+	Len   uintptr
+}
+
+// ClassifyBatch classifies several texts in one call, which is much faster than
+// one at a time. It returns one result per text, in order.
+func (c *Classifier) ClassifyBatch(texts []string) ([]*ClassifyResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errors.New("classifier is closed")
+	}
+	if len(texts) == 0 {
+		return []*ClassifyResult{}, nil
+	}
+
+	textsPtr, keep := cStringArray(texts)
+	defer keep()
+	var batch ffiClassBatch
+	r1, _, _ := purego.SyscallN(_classifierClassifyBatchSym, c.handle, textsPtr, uintptr(len(texts)),
+		uintptr(unsafe.Pointer(&batch)))
+	if code := int32(r1); code != 0 {
+		return nil, lastError(code)
+	}
+	defer callWithStruct(_classBatchFreeSym, unsafe.Pointer(&batch), unsafe.Sizeof(batch))
+
+	out := make([]*ClassifyResult, batch.Len)
+	if batch.Len > 0 {
+		for i, r := range unsafe.Slice((*ffiClassResults)(unsafe.Pointer(batch.Items)), batch.Len) {
+			out[i] = parseClassResults(r)
+		}
+	}
+	return out, nil
+}

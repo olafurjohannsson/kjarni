@@ -799,3 +799,83 @@ mod integration_tests {
         assert!(result.is_err());
     }
 }
+
+/// Forward passes reuse one set of buffers, resized between calls. A batch of
+/// any shape must give each text what encoding it alone in a fresh embedder
+/// gives, whatever ran before it.
+mod buffer_reuse_tests {
+    use super::*;
+
+    fn texts(n: usize, words: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| {
+                (0..words)
+                    .map(|w| ["refund", "delivery", "account", "warranty", "order"][(i + w) % 5])
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    }
+
+    fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f32::max)
+    }
+
+    #[tokio::test]
+    async fn batches_of_changing_shape_match_fresh_single_encodes() {
+        let reused = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+
+        // Large and long, then small and short, then large and short: each call
+        // reshapes the buffers the previous one left behind.
+        for (n, words) in [(48, 120), (3, 4), (40, 8), (1, 200), (20, 60)] {
+            let batch = texts(n, words);
+            let refs: Vec<&str> = batch.iter().map(String::as_str).collect();
+            let got = reused.embed_batch(&refs).await.unwrap();
+            assert_eq!(got.len(), n);
+
+            for (i, t) in [0, n / 2, n - 1].into_iter().map(|i| (i, &batch[i])) {
+                let fresh = Embedder::builder("minilm-l6-v2")
+                    .quiet(true)
+                    .build()
+                    .await
+                    .unwrap();
+                let alone = fresh.embed(t).await.unwrap();
+                let d = max_diff(&got[i], &alone);
+                assert!(
+                    d < 1e-5,
+                    "batch {n}x{words}, text {i}: differs from a fresh encode by {d}"
+                );
+            }
+        }
+    }
+
+    /// `normalize(false)` must hold for batches as well as single texts. The C
+    /// API's batch call once normalised regardless.
+    #[tokio::test]
+    async fn unnormalized_batches_stay_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .normalize(false)
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let batch = texts(4, 12);
+        let refs: Vec<&str> = batch.iter().map(String::as_str).collect();
+        for (v, t) in emb.embed_batch(&refs).await.unwrap().iter().zip(&refs) {
+            let alone = emb.embed(t).await.unwrap();
+            assert!(max_diff(v, &alone) < 1e-5);
+            let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!(
+                (norm - 1.0).abs() > 0.1,
+                "batch vector was normalised: |v| = {norm}"
+            );
+        }
+    }
+}

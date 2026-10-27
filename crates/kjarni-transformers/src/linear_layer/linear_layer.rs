@@ -278,6 +278,46 @@ impl LinearLayer {
                     result
                 }
             },
+            // Prompt-sized inputs: dequantize tiles once and multiply them, rather
+            // than re-reading every weight for every row. See DEQUANT_GEMM_MIN_ROWS.
+            LinearData::BF16(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
+                let k = w.ncols();
+                let ws = w.as_slice().expect("contiguous BF16 weight");
+                ops::matmul::matmul_2d_dequant_tiled(
+                    input,
+                    w.nrows(),
+                    self.bias_slice(),
+                    |r, out| {
+                        for (o, x) in out.iter_mut().zip(&ws[r * k..(r + 1) * k]) {
+                            *o = x.to_f32();
+                        }
+                    },
+                )
+            }
+            LinearData::Q8_0(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
+                ops::matmul::matmul_2d_dequant_blocks(
+                    input,
+                    &w.blocks,
+                    w.shape[0],
+                    self.bias_slice(),
+                )
+            }
+            LinearData::Q6_K(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
+                ops::matmul::matmul_2d_dequant_blocks(
+                    input,
+                    &w.blocks,
+                    w.shape[0],
+                    self.bias_slice(),
+                )
+            }
+            LinearData::Q4_K(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
+                ops::matmul::matmul_2d_dequant_blocks(
+                    input,
+                    &w.blocks,
+                    w.shape[0],
+                    self.bias_slice(),
+                )
+            }
             LinearData::BF16(w) => {
                 let mut result = ops::matmul::matmul_2d_cpu_bf16(input, &w.view());
                 if let Some(b) = &self.bias {

@@ -491,21 +491,20 @@ fn tiled_attention(
                                 let rows = dst.len_of(Axis(0));
 
                                 faer::linalg::matmul::matmul(
-                                    faer::mat::from_row_major_slice_mut(
+                                    faer::MatMut::from_row_major_slice_mut(
                                         &mut tile[..rows * seq_k],
                                         rows,
                                         seq_k,
                                     ),
-                                    faer::mat::from_row_major_slice(
+                                    faer::Accum::Replace,
+                                    faer::MatRef::from_row_major_slice(
                                         &q_sl[q0 * head_dim..(q0 + rows) * head_dim],
                                         rows,
                                         head_dim,
                                     ),
-                                    faer::mat::from_row_major_slice(kt_sl, head_dim, seq_k),
-                                    None,
+                                    faer::MatRef::from_row_major_slice(kt_sl, head_dim, seq_k),
                                     1.0,
-                                    faer::Parallelism::None,
-                                );
+                                    faer::Par::Seq);
 
                                 for r in 0..rows {
                                     let row = &mut tile[r * seq_k..(r + 1) * seq_k];
@@ -546,21 +545,20 @@ fn tiled_attention(
                                 }
 
                                 faer::linalg::matmul::matmul(
-                                    faer::mat::from_row_major_slice_mut(
+                                    faer::MatMut::from_row_major_slice_mut(
                                         &mut out_block[..rows * head_dim],
                                         rows,
                                         head_dim,
                                     ),
-                                    faer::mat::from_row_major_slice(
+                                    faer::Accum::Replace,
+                                    faer::MatRef::from_row_major_slice(
                                         &tile[..rows * seq_k],
                                         rows,
                                         seq_k,
                                     ),
-                                    faer::mat::from_row_major_slice(v_sl, seq_k, head_dim),
-                                    None,
+                                    faer::MatRef::from_row_major_slice(v_sl, seq_k, head_dim),
                                     1.0,
-                                    faer::Parallelism::None,
-                                );
+                                    faer::Par::Seq);
 
                                 if let Some(d) = dst.as_slice_mut() {
                                     d.copy_from_slice(&out_block[..rows * head_dim]);
@@ -628,26 +626,26 @@ pub fn matmul_4d_into(
                     if let Some(o_s) = out_h.as_slice_mut() {
                         // Fast path: write directly
                         faer::linalg::matmul::matmul(
-                            faer::mat::from_row_major_slice_mut(o_s, m, n),
-                            faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), m, k),
-                            faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), k, n),
-                            None,
+                            faer::MatMut::from_row_major_slice_mut(o_s, m, n),
+                            faer::Accum::Replace,
+                            faer::MatRef::from_row_major_slice(a_s.as_slice().unwrap(), m, k),
+                            faer::MatRef::from_row_major_slice(b_s.as_slice().unwrap(), k, n),
                             1.0,
-                            faer::Parallelism::None,
+                            faer::Par::Seq,
                         );
                     } else {
                         // Strided output: use scratch and copy
                         faer::linalg::matmul::matmul(
-                            faer::mat::from_row_major_slice_mut(
+                            faer::MatMut::from_row_major_slice_mut(
                                 scratch.as_slice_mut().unwrap(),
                                 m,
                                 n,
                             ),
-                            faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), m, k),
-                            faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), k, n),
-                            None,
+                            faer::Accum::Replace,
+                            faer::MatRef::from_row_major_slice(a_s.as_slice().unwrap(), m, k),
+                            faer::MatRef::from_row_major_slice(b_s.as_slice().unwrap(), k, n),
                             1.0,
-                            faer::Parallelism::None,
+                            faer::Par::Seq,
                         );
                         out_h.assign(&scratch);
                     }

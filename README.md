@@ -279,6 +279,29 @@ Kjarni is a single `.so`/`.dll`/`.dylib` that runs inside your process, with pre
 
 ONNX Runtime is a general-purpose tensor executor and does that job well. Kjarni is task-level: you ask for an embedding or a ranking, not for a graph execution. That is the difference the table is describing.
 
+### Speed, start-up and memory
+
+Measured against the same models in PyTorch, ONNX Runtime, faster-whisper and
+llama.cpp, on one CPU, with each engine in its own process. Outputs are checked
+against PyTorch's: embeddings agree to within 3e-7.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/encoders-throughput-dark.svg">
+  <img alt="Batch throughput for embeddings, reranking and classification" src="bench/charts/encoders-throughput-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/encoders-load-dark.svg">
+  <img alt="Time to load a model" src="bench/charts/encoders-load-light.svg">
+</picture>
+
+- **Embeddings, reranking, classification:** faster than PyTorch on every task, within about 10% of ONNX Runtime either way, and loads 10 to 40 times faster than PyTorch.
+- **Speech to text:** whisper-small transcribes a minute of audio at 10× real time, ahead of openai-whisper and of faster-whisper at full precision; faster-whisper's int8 mode is faster still.
+- **Image search:** CLIP indexing on par with open_clip.
+- **Where it is behind:** text generation reaches 56 to 78% of llama.cpp's prompt speed and 77 to 81% of its generation speed on the same GGUF files; summarization and translation take about 1.6× PyTorch's time; and the larger models use more memory than PyTorch does.
+
+Method, every number and how to reproduce them: [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
+
 ## Verified against PyTorch
 
 Kjarni's outputs are tested for numerical parity against PyTorch/HuggingFace golden values, and its GPU path is tested for parity against its own CPU path — encoders, cross-encoders, decoders, RoPE, RMSNorm, and full generation traces:
@@ -423,6 +446,19 @@ No. Every capability runs on CPU with hand-tuned SIMD kernels (AVX2/FMA on x86, 
 
 ONNX Runtime executes a computation graph; you supply the tokenization, the pooling, the normalization, and an exported `.onnx` file for every model. Kjarni is task-level: `Encode(text)` returns a finished, normalized embedding, and models are referenced by name with no export step. Kjarni also includes indexing, BM25, hybrid fusion, and cross-encoder reranking, which ONNX Runtime leaves to you. If you need to run arbitrary models from arbitrary frameworks, use ONNX Runtime. If you need embeddings and search in a .NET or Go application, Kjarni is considerably less work.
 
+### Can I trust the prebuilt libraries?
+
+The NuGet package, the Go module and the Python wheels ship a native library built by
+this repository's CI from the tagged commit, never uploaded by hand. From 0.2.6 on,
+every release also carries a `SHA256SUMS` file and a signed build-provenance
+attestation for each library, so you can check where a binary came from:
+
+```bash
+gh attestation verify libkjarni_ffi.so --repo olafurjohannsson/kjarni
+```
+
+Or build it yourself: `cargo build --release -p kjarni-ffi` produces the same library.
+
 ### Can I use it as a vector database?
 
 For small to medium corpora, yes — the built-in index handles storage, BM25, vector search, and hybrid fusion with no separate service. It is designed as the SQLite of local semantic search, not as a replacement for a distributed vector store at hundreds of millions of vectors.
@@ -453,9 +489,9 @@ Kjarni does not wrap ONNX, LibTorch, or any external inference engine. The runti
 
 - Hand-tuned SIMD kernels (AVX2/FMA, NEON)
 - Custom WGSL compute shaders for GPU inference
-- Zero-copy model loading via mmap
+- Memory-mapped model files, read straight from the safetensors or GGUF on disk
 - BF16 compute path
-- Quantization: Q4, Q6, Q8
+- Quantized weights from GGUF files: Q4_K, Q6_K, Q8_0, and Q4_0/Q5_0 converted to Q8_0 without loss
 - Single shared library, no runtime linkage beyond libc
 
 ## Project structure

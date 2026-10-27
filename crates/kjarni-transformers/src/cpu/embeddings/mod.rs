@@ -1,4 +1,3 @@
-use std::ops::AddAssign;
 use std::sync::Arc;
 
 use crate::cpu::kernels::dequantize::dequantize_q8_0_block;
@@ -191,33 +190,49 @@ impl Embeddings {
 
         if scale_embeddings {
             let scale_factor = (hidden_size as f32).sqrt();
-            hidden.mapv_inplace(|x| x * scale_factor);
+            hidden.par_mapv_inplace(|x| x * scale_factor);
         }
 
-        if let Some(ref pos_emb) = self.position_embeddings {
-            let start_idx = position_offset;
-            let end_idx = position_offset + seq_len;
-            let max_position = pos_emb.shape()[0];
+        // Position and token type terms, added in one parallel pass. They were
+        // two whole-tensor ndarray operations on one thread, a few milliseconds
+        // each on a batch of 64. The additions happen in the same order as
+        // before (word, then position, then type), so the result is the same
+        // to the bit.
+        let positions = self.position_embeddings.as_ref().and_then(|pos_emb| {
+            let effective_end = (position_offset + seq_len).min(pos_emb.shape()[0]);
+            let len = effective_end.saturating_sub(position_offset);
+            (len > 0).then(|| pos_emb.slice(s![position_offset..position_offset + len, ..]))
+        });
+        let types = self
+            .token_type_embeddings
+            .as_ref()
+            .filter(|t| t.shape()[0] > 0);
 
-            // Safe slice logic
-            let effective_end = end_idx.min(max_position);
-            let len = effective_end.saturating_sub(start_idx);
-            if len > 0 {
-                let pos_slice = pos_emb.slice(s![start_idx..start_idx + len, ..]);
-                let pos_broadcast = pos_slice.insert_axis(Axis(0)); // shape [1, len, hidden_size]
-                hidden
-                    .slice_mut(s![.., 0..len, ..])
-                    .add_assign(&pos_broadcast);
-            }
-        }
-
-        if let Some(ref token_type_emb) = self.token_type_embeddings {
-            if let Some(type_ids) = token_type_ids {
-                self.add_token_type_embeddings(&mut hidden, type_ids, token_type_emb);
-            } else {
-                let type_embeddings = token_type_emb.row(0);
-                hidden += &type_embeddings;
-            }
+        if positions.is_some() || types.is_some() {
+            hidden
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut rows)| {
+                    for j in 0..seq_len {
+                        let mut row = rows.row_mut(j);
+                        if let Some(pos) = &positions
+                            && j < pos.nrows()
+                        {
+                            row += &pos.row(j);
+                        }
+                        if let Some(type_emb) = types {
+                            let type_id = token_type_ids.map_or(0, |ids| ids[[b, j]] as usize);
+                            assert!(
+                                type_id < type_emb.nrows(),
+                                "Token type ID {} is out of range [0, {})",
+                                type_id,
+                                type_emb.nrows()
+                            );
+                            row += &type_emb.row(type_id);
+                        }
+                    }
+                });
         }
         hidden
     }
@@ -289,37 +304,5 @@ impl Embeddings {
                     });
             }
         }
-    }
-
-    /// add token type embeddings.
-    fn add_token_type_embeddings(
-        &self,
-        hidden: &mut Array3<f32>,
-        type_ids: &Array2<u32>,
-        token_type_emb: &Array2<f32>,
-    ) {
-        let type_vocab_size = token_type_emb.shape()[0];
-        if type_vocab_size == 0 {
-            return;
-        }
-
-        hidden
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .zip(type_ids.axis_iter(Axis(0)))
-            .for_each(|(mut hidden_slice, type_ids_row)| {
-                for (j, &type_id) in type_ids_row.iter().enumerate() {
-                    let type_id = type_id as usize;
-                    if type_id >= type_vocab_size {
-                        panic!(
-                            "Token type ID {} is out of range [0, {})",
-                            type_id, type_vocab_size
-                        );
-                    }
-                    let type_emb = token_type_emb.row(type_id);
-                    let mut slice = hidden_slice.slice_mut(s![j, ..]);
-                    slice += &type_emb;
-                }
-            });
     }
 }

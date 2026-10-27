@@ -103,9 +103,11 @@ pub trait EncoderLanguageModel: LanguageModel {
                         batch_size, seq_len, buf_desc
                     );
                 }
-                encoder
+                let out = encoder
                     .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
-                    .last_hidden_state
+                    .last_hidden_state;
+                encoder.recycle_buffers(buffers);
+                out
             }
         } else if let Some(ops) = self.encoder_gpu_ops() {
             let context = self
@@ -167,9 +169,11 @@ pub trait EncoderLanguageModel: LanguageModel {
 
         let hidden_states = {
             let mut buffers = encoder.create_buffers(batch_size, seq_len);
-            encoder
+            let out = encoder
                 .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
-                .last_hidden_state
+                .last_hidden_state;
+            encoder.recycle_buffers(buffers);
+            out
         };
 
         Ok((hidden_states, attention_mask_f32))
@@ -345,6 +349,10 @@ pub trait CpuEncoder: CpuTransformerCore {
     ) -> Result<Array3<f32>>;
 
     fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers;
+
+    /// Hands buffers back once a forward pass is done with them, so the next
+    /// `create_buffers` can reuse their memory. Dropping them is also fine.
+    fn recycle_buffers(&self, _buffers: EncoderBuffers) {}
 
     fn forward_with_buffers(
         &self,
