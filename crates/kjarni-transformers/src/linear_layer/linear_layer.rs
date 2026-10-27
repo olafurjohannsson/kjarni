@@ -280,6 +280,8 @@ impl LinearLayer {
             },
             // Prompt-sized inputs: dequantize tiles once and multiply them, rather
             // than re-reading every weight for every row. See DEQUANT_GEMM_MIN_ROWS.
+            // Native only: wasm32 keeps the per-row kernels (matmul_wasm).
+            #[cfg(not(target_arch = "wasm32"))]
             LinearData::BF16(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
                 let k = w.ncols();
                 let ws = w.as_slice().expect("contiguous BF16 weight");
@@ -294,6 +296,7 @@ impl LinearLayer {
                     },
                 )
             }
+            #[cfg(not(target_arch = "wasm32"))]
             LinearData::Q8_0(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
                 ops::matmul::matmul_2d_dequant_blocks(
                     input,
@@ -302,6 +305,7 @@ impl LinearLayer {
                     self.bias_slice(),
                 )
             }
+            #[cfg(not(target_arch = "wasm32"))]
             LinearData::Q6_K(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
                 ops::matmul::matmul_2d_dequant_blocks(
                     input,
@@ -310,6 +314,7 @@ impl LinearLayer {
                     self.bias_slice(),
                 )
             }
+            #[cfg(not(target_arch = "wasm32"))]
             LinearData::Q4_K(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
                 ops::matmul::matmul_2d_dequant_blocks(
                     input,

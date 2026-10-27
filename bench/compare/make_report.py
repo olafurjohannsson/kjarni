@@ -12,6 +12,11 @@ def load(name):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def mem(r):
+    """Resident memory after the work, which older result files lack."""
+    return f'{r["rss_mb"]:,.0f} MB' if "rss_mb" in r else "–"
+
+
 def picture(name, alt):
     return (f'<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="charts/{name}-dark.svg">\n'
             f'  <img alt="{alt}" src="charts/{name}-light.svg">\n</picture>\n')
@@ -42,8 +47,9 @@ w("Reproduce with `bench/compare/run_encoders.py` and `bench/compare/run_rest.py
 w("## Method\n")
 w("- **Machine:** Intel Core i7-13700 (8 performance and 8 efficiency cores, 24 threads), 64 GB, Linux. Idle: each run waits for a load average under 1.")
 w("- **Isolation:** every engine runs in its own fresh process, so load time and memory are its own.")
+w("- **Memory:** *memory after* is what the process holds once the work is done; *peak* is the most it held at any point, usually while loading.")
 w("- **Timing:** minimum of repeated calls after warm-up, the least noisy estimate of what each engine can do. Medians are in the raw JSON.")
-w("- **Threads:** each engine's default. Kjarni uses rayon's pool; PyTorch and ONNX Runtime use the physical core count. For the LLMs, both engines get the better of 8 and 16 threads.")
+w("- **Threads:** each engine's default. Kjarni uses rayon's pool; PyTorch and ONNX Runtime use the physical core count. For the LLMs, both engines get the better of 8 and 16 threads for each of prompt processing and generation.")
 w("- **Agreement:** encoder outputs are compared with PyTorch's; the largest difference is listed with each row. Generated text is recorded so the engines can be checked to have done the same work.")
 v = versions()
 if v:
@@ -52,17 +58,17 @@ if v:
 enc = load("encoders")
 if enc:
     w("## Embeddings, reranking and classification\n")
-    for c, alt in [("encoders-throughput", "Batch throughput"), ("encoders-load", "Load time"), ("encoders-memory", "Peak memory")]:
+    for c, alt in [("encoders-throughput", "Batch throughput"), ("encoders-load", "Load time"), ("encoders-memory", "Memory after")]:
         w(picture(c, alt))
     name = {"kjarni": "**Kjarni**", "torch": "PyTorch", "onnx": "ONNX Runtime"}
     task = {"embed-minilm": "Embed · all-MiniLM-L6-v2", "embed-mpnet": "Embed · all-mpnet-base-v2",
             "rerank": "Rerank · ms-marco-MiniLM-L6", "classify": "Classify · DistilBERT SST-2"}
-    w("| Task | Engine | Batch of 64 | One text | Load | Peak memory | Max diff vs PyTorch |")
-    w("|---|---|--:|--:|--:|--:|--:|")
+    w("| Task | Engine | Batch of 64 | One text | Load | Memory after | Peak memory | Max diff vs PyTorch |")
+    w("|---|---|--:|--:|--:|--:|--:|--:|")
     for r in enc["rows"]:
         diff = "reference" if r["engine"] == "torch" else f'{r.get("max_abs_diff_vs_torch", float("nan")):.0e}'
         w(f'| {task[r["task"]]} | {name[r["engine"]]} | {r["batch_ms"]["min"]:.0f} ms ({r["batch_per_s"]:.0f}/s) | '
-          f'{r["single_ms"]["min"]:.1f} ms | {r["load_ms"]:,.0f} ms | {r["peak_rss_mb"]:,.0f} MB | {diff} |')
+          f'{r["single_ms"]["min"]:.1f} ms | {r["load_ms"]:,.0f} ms | {mem(r)} | {r["peak_rss_mb"]:,.0f} MB | {diff} |')
     w("")
 
 wh = load("whisper")
@@ -70,35 +76,35 @@ if wh:
     w("## Speech to text\n")
     w(picture("whisper", "Whisper speed"))
     w("whisper-small, English, greedy decoding, CPU.\n")
-    w("| Audio | Engine | Time | Faster than real time | Load | Peak memory |")
-    w("|---|---|--:|--:|--:|--:|")
+    w("| Audio | Engine | Time | Faster than real time | Load | Memory after | Peak memory |")
+    w("|---|---|--:|--:|--:|--:|--:|")
     for r in wh:
         e = "**Kjarni**" if r["engine"] == "kjarni" else r["engine"]
-        w(f'| {r["audio_secs"]:.0f} s | {e} | {r["secs"]:.2f} s | {r["realtime_x"]:.1f}× | {r["load_ms"]:,.0f} ms | {r["peak_rss_mb"]:,.0f} MB |')
+        w(f'| {r["audio_secs"]:.0f} s | {e} | {r["secs"]:.2f} s | {r["realtime_x"]:.1f}× | {r["load_ms"]:,.0f} ms | {mem(r)} | {r["peak_rss_mb"]:,.0f} MB |')
     w("")
 
 s2 = load("seq2seq")
 if s2:
     w("## Summarization and translation\n")
     w("distilbart-cnn-12-6 and flan-t5-base, each with its checkpoint's own generation settings.\n")
-    w("| Task | Engine | Time | Load | Peak memory | Output |")
-    w("|---|---|--:|--:|--:|---|")
+    w("| Task | Engine | Time | Load | Memory after | Peak memory | Output |")
+    w("|---|---|--:|--:|--:|--:|---|")
     for r in s2:
         e = "**Kjarni**" if r["engine"] == "kjarni" else "PyTorch"
         out = r["output"].replace("|", "\\|")
         out = out if len(out) < 90 else out[:87] + "…"
-        w(f'| {r["task"]} | {e} | {r["ms"]:,.0f} ms | {r["load_ms"]:,.0f} ms | {r["peak_rss_mb"]:,.0f} MB | {out} |')
+        w(f'| {r["task"]} | {e} | {r["ms"]:,.0f} ms | {r["load_ms"]:,.0f} ms | {mem(r)} | {r["peak_rss_mb"]:,.0f} MB | {out} |')
     w("")
 
 cl = load("clip")
 if cl:
     w("## Image search (CLIP)\n")
     w("ViT-B/32 with the LAION-2B weights, indexing 64 photos and running one text query.\n")
-    w("| Engine | Images per second | Query | Load | Peak memory |")
-    w("|---|--:|--:|--:|--:|")
+    w("| Engine | Images per second | Query | Load | Memory after | Peak memory |")
+    w("|---|--:|--:|--:|--:|--:|")
     for r in cl:
         e = "**Kjarni**" if r["engine"] == "kjarni" else r["engine"]
-        w(f'| {e} | {r["images_per_s"]:.1f} | {r["query_ms"]:.1f} ms | {r["load_ms"]:,.0f} ms | {r["peak_rss_mb"]:,.0f} MB |')
+        w(f'| {e} | {r["images_per_s"]:.1f} | {r["query_ms"]:.1f} ms | {r["load_ms"]:,.0f} ms | {mem(r)} | {r["peak_rss_mb"]:,.0f} MB |')
     w("")
 
 dec = load("decoders")

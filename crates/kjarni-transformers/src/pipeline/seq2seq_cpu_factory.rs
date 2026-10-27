@@ -1,7 +1,5 @@
 //! Factory for building Seq2Seq components from weights + layout.
 
-use std::sync::Arc;
-
 use anyhow::{Result, anyhow};
 use ndarray::Array1;
 
@@ -454,13 +452,15 @@ impl<'a> Seq2SeqFactory<'a> {
         token_embedding_name: &str,
         position_embedding_name: Option<&str>,
     ) -> Result<Embeddings> {
-        let word_emb = self.weights.get_array2(token_embedding_name)?;
+        // Shared: the encoder, the decoder and the pipeline each build
+        // embeddings from the same table.
+        let word_emb = self.weights.get_shared_array2(token_embedding_name)?;
         let pos_emb = position_embedding_name
             .map(|name| self.weights.get_array2(name))
             .transpose()?;
 
         Ok(Embeddings::new(
-            EmbeddingData::F32(Arc::new(word_emb)),
+            EmbeddingData::F32(word_emb),
             pos_emb,
             None, // token_type_embeddings
         ))

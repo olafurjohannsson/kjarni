@@ -7,13 +7,12 @@ use anyhow::Result;
 use ndarray::{Array1, Array2, Array3, ArrayView2, s};
 
 pub struct StdFeedForward {
-    fc1: LinearLayer,
+    // The weights live in these layers only. A second copy of both matrices was
+    // kept in public fields beside them, unused except for a shape lookup: the
+    // whole feed-forward held twice, 226MB of Whisper-small's 1.7GB.
+    pub(crate) fc1: LinearLayer,
     fc2: LinearLayer,
     activation: Activation,
-    pub dense1_weight: Array2<f32>,
-    pub dense1_bias: Array1<f32>,
-    pub dense2_weight: Array2<f32>,
-    pub dense2_bias: Array1<f32>,
 }
 
 impl StdFeedForward {
@@ -30,13 +29,9 @@ impl StdFeedForward {
         assert_eq!(dense1_weight.shape()[0], dense2_weight.shape()[1]);
 
         Self {
-            fc1: LinearLayer::new_f32(dense1_weight.clone(), Some(dense1_bias.clone())),
-            fc2: LinearLayer::new_f32(dense2_weight.clone(), Some(dense2_bias.clone())),
+            fc1: LinearLayer::new_f32(dense1_weight, Some(dense1_bias)),
+            fc2: LinearLayer::new_f32(dense2_weight, Some(dense2_bias)),
             activation,
-            dense1_weight,
-            dense1_bias,
-            dense2_weight,
-            dense2_bias,
         }
     }
 

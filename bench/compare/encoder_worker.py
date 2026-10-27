@@ -12,6 +12,14 @@ the least noisy estimate of what the engine can do, the median what a caller see
 import json, os, sys, time, resource
 import numpy as np
 
+def rss_now_mb():
+    """Resident memory now, after the work: what the process keeps."""
+    for line in open("/proc/self/status"):
+        if line.startswith("VmRSS:"):
+            return int(line.split()[1]) / 1024
+    return float("nan")
+
+
 sys.path.insert(0, os.path.dirname(__file__))
 from corpus import QUERY, documents, reviews
 
@@ -157,6 +165,7 @@ res = dict(engine=ENGINE, task=TASK, load_ms=load_ms, first_call_ms=first_ms,
            batch_size=len(DOCS), threads=threads())
 res["batch_per_s"] = res["batch_size"] / (res["batch_ms"]["min"] / 1000)
 res["peak_rss_mb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+res["rss_mb"] = rss_now_mb()
 if OUT:
     np.save(OUT, output())
 print(json.dumps(res))

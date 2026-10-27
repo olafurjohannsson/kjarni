@@ -48,7 +48,10 @@ half = { version = "2.2.1", features = ["bytemuck", "num-traits"] }
 safetensors = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
 once_cell = "1.19"
-faer = "0.24"
+# No default features: Kjarni uses faer's matmul only. Its `rayon` feature pulls
+# in `spindle` and `atomic-wait`, which do not build for wasm32, so rayon is
+# enabled per target in the crates that use faer.
+faer = { version = "0.24", default-features = false, features = ["std"] }
 ndarray = { version = "0.16.1", features = ["rayon", "matrixmultiply-threading"] }
 wgpu = "27.0.1"
 pollster = "0.3"

@@ -10,11 +10,11 @@ and results are in [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
 - **Reranking and classification group inputs by length.** Both padded a whole batch
   to its longest member and used the encoder's allocating forward pass. They now
   use the same length-bucketed, buffered path as embeddings: reranking 64 documents
-  went from 561 ms to 260 ms, faster than PyTorch's 301 ms.
+  went from 561 ms to 246 ms, faster than PyTorch's 273 ms.
 - **Batch classification in the C API.** `kjarni_classifier_classify_batch` runs many
   texts through the model together, and every binding uses it: `classify_batch` in
   Python, `ClassifyBatch` in C# and Go, `classify(span)` in C++. 64 texts went from
-  681 ms, one at a time, to 162 ms, against PyTorch's 218 ms.
+  681 ms, one at a time, to 157 ms, against PyTorch's 223 ms.
 - **Encoder buffers are reused across calls.** Each forward pass allocated and zeroed
   a couple of hundred megabytes of scratch space, 40 ms of a 260 ms MiniLM batch.
   Whisper and the BART and T5 encoders reuse them too.
@@ -22,12 +22,12 @@ and results are in [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
 - The embedding layer norm and the position and token-type additions run in
   parallel instead of on one thread.
 
-### Prompts are processed up to twelve times faster
+### Prompts are processed more than ten times faster
 
 A 500-token prompt took Qwen2.5 0.5B ten seconds before the first token; it now
-takes about one. Prompt processing on the same GGUF files went from 41 to 472
-tokens a second (llama.cpp: 607) on Qwen2.5 0.5B and from 20 to 238 on Llama 3.2
-1B (llama.cpp: 426).
+takes about one. Prompt processing on the same GGUF files went from 41 to 615
+tokens a second (llama.cpp: 611) on Qwen2.5 0.5B and from 20 to 282 on Llama 3.2
+1B (llama.cpp: 424).
 
 - **Prompts use the streaming attention path.** It was reserved for an all-ones
   mask, but Llama-family models pass a causal mask for a prompt, which asks for
@@ -39,6 +39,28 @@ tokens a second (llama.cpp: 607) on Qwen2.5 0.5B and from 20 to 238 on Llama 3.2
   multiplied with faer.
 - **Only the last position's logits are computed for a prompt**, the only ones
   used: on a 152k vocabulary, 70 GFLOP saved per 500-token prompt.
+
+### Models hold one copy of their weights
+
+Whisper-small went from 2.8 GB to 1.1 GB once loaded, distilbart-cnn from 3.5 GB
+to 1.3 GB and CLIP from 1.3 GB to 0.65 GB: about the size of their weight files,
+and less than the same models take in PyTorch. Three things held extra copies:
+
+- **The mmap cache never let go.** It held every weight file mapped for the life
+  of the process, after its weights had been copied out and even after the model
+  was dropped. It holds weak references now.
+- **`StdFeedForward` stored its matrices twice**, in public fields beside the
+  layers that use them. In Whisper and BART the feed-forward is most of the model.
+- **The token embedding table was loaded three times** for encoder-decoder
+  models, by the encoder, the decoder and the pipeline. `ModelWeights` now hands
+  out one shared copy (`get_shared_array2`).
+- **Loading peaked at twice the model.** The mapped file stayed resident while
+  its weights were copied out of it. Each tensor's pages are now released as soon
+  as it is copied, so Whisper-small peaks at 1.28 GB instead of 2.97 GB.
+
+A test loads Whisper-small and distilbart-cnn and checks each holds under 1.3
+times its weight file once loaded, and peaks under 1.5 times while loading; they
+are at 1.03 and 1.05.
 
 ### Quantized chat in every language, and Qwen from GGUF
 

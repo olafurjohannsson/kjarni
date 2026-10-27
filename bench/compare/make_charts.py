@@ -113,9 +113,9 @@ if enc:
     both("encoders-load", "Time to load a model (lower is better)",
          "From constructor call to ready, model already on disk · milliseconds", labels, engines,
          grid(lambda r: r["load_ms"]), lambda v: f"{v:,.0f} ms")
-    both("encoders-memory", "Peak memory (lower is better)",
-         "Resident set size of the whole process after load and a batch · MB", labels, engines,
-         grid(lambda r: r["peak_rss_mb"]), lambda v: f"{v:,.0f} MB")
+    both("encoders-memory", "Memory in use (lower is better)",
+         "Resident memory of the whole process once loaded and after a batch · MB", labels, engines,
+         grid(lambda r: r.get("rss_mb", r["peak_rss_mb"])), lambda v: f"{v:,.0f} MB")
 
 wh = load("whisper")
 if wh:

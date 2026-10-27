@@ -5,8 +5,7 @@ use futures::Stream;
 
 use kjarni_models::models::whisper::WhisperModel;
 use kjarni_models::models::whisper::{
-    WHISPER_CHUNK_LENGTH_SECS, WHISPER_SAMPLE_RATE, WhisperChunkResult, WhisperTask,
-    WhisperTranscriberConfig,
+    WHISPER_SAMPLE_RATE, WhisperChunkResult, WhisperSegment, WhisperTask, WhisperTranscriberConfig,
 };
 use kjarni_transformers::audio::{AudioLoaderConfig, compute_mel_spectrogram, load_audio};
 use kjarni_transformers::{Device, ModelType};
@@ -119,6 +118,11 @@ impl Transcriber {
         duration_secs: f32,
     ) -> TranscriberResult<TranscriptionResult> {
         let mut config = self.build_config();
+        // Decoded with timestamps either way: they mark where Whisper's text
+        // runs past the audio in a window, which is how invented text is told
+        // from speech. Without timestamps asked for, each window becomes one
+        // segment again below.
+        config.timestamps = true;
         let mel_config = self.model.expected_mel_config();
 
         let chunks = WhisperModel::chunk_audio(samples, WHISPER_SAMPLE_RATE);
@@ -139,7 +143,7 @@ impl Transcriber {
                     total_chunks,
                     Some(&format!("Chunk {}/{}", first + j + 1, total_chunks)),
                 );
-                let mel = compute_mel_spectrogram(chunk, &mel_config)
+                let mel = compute_mel_spectrogram(&chunk.samples, &mel_config)
                     .map_err(TranscriberError::TranscriptionFailed)?;
                 encoded.push(
                     self.model
@@ -169,14 +173,32 @@ impl Transcriber {
                     total_chunks
                 )),
             );
-            let offsets: Vec<f32> = (first..first + batch.len())
-                .map(|i| i as f32 * WHISPER_CHUNK_LENGTH_SECS)
-                .collect();
-            chunk_results.extend(
-                self.model
-                    .decode_chunks(&encoded, &config, &offsets)
-                    .map_err(TranscriberError::TranscriptionFailed)?,
-            );
+            let results = self
+                .model
+                .decode_chunks(&encoded, &config, batch)
+                .map_err(TranscriberError::TranscriptionFailed)?;
+            // A window is padded to 30 seconds of audio. Whisper can carry on
+            // into the silence, continuing a phrase it expects; a segment that
+            // starts there is invented and dropped, and none runs past the end.
+            for (mut result, chunk) in results.into_iter().zip(batch) {
+                let end = chunk.start_secs + chunk.duration_secs;
+                // Whisper writes [BLANK_AUDIO] for a stretch of silence.
+                result
+                    .segments
+                    .retain(|s| s.start < end && s.text.trim() != "[BLANK_AUDIO]");
+                for segment in &mut result.segments {
+                    segment.end = segment.end.min(end);
+                }
+                result.text = result.segments.iter().map(|s| s.text.as_str()).collect();
+                if !self.timestamps && !result.segments.is_empty() {
+                    result.segments = vec![WhisperSegment {
+                        start: chunk.start_secs,
+                        end,
+                        text: result.text.clone(),
+                    }];
+                }
+                chunk_results.push(result);
+            }
         }
 
         // Stitch
@@ -241,11 +263,9 @@ impl Transcriber {
         tokio::task::spawn_blocking(move || {
             let chunks = WhisperModel::chunk_audio(&samples, WHISPER_SAMPLE_RATE);
 
-            for (i, chunk) in chunks.iter().enumerate() {
-                let offset = i as f32 * WHISPER_CHUNK_LENGTH_SECS;
-
+            for chunk in &chunks {
                 // Mel spectrogram
-                let mel = match compute_mel_spectrogram(chunk, &mel_config) {
+                let mel = match compute_mel_spectrogram(&chunk.samples, &mel_config) {
                     Ok(m) => m,
                     Err(e) => {
                         let _ = tx.blocking_send(Err(TranscriberError::TranscriptionFailed(e)));
@@ -285,7 +305,7 @@ impl Transcriber {
                 };
 
                 if let Err(e) =
-                    model.decode_chunk(&encoder_out, &config, offset, Some(&mut on_token))
+                    model.decode_chunk(&encoder_out, &config, chunk, Some(&mut on_token))
                 {
                     let _ = tx.blocking_send(Err(TranscriberError::TranscriptionFailed(e)));
                     return;

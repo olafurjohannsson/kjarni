@@ -29,6 +29,10 @@ struct ModelWeightsInner {
     loader: Box<dyn WeightLoader + Send + Sync>,
     config_json: String,
     is_gguf: bool,
+    /// Tensors handed out by [`ModelWeights::get_shared_array2`], so a matrix
+    /// several components need is loaded once. Weak, so they are freed with the
+    /// last component holding them.
+    shared: std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<Array2<f32>>>>,
 }
 
 /// High-level interface for loading model weights.
@@ -66,6 +70,7 @@ impl ModelWeights {
                         loader,
                         config_json,
                         is_gguf: false,
+                        shared: Default::default(),
                     }),
                 });
             }
@@ -90,6 +95,7 @@ impl ModelWeights {
                 loader: Box::new(loader),
                 config_json: config_json.to_string(),
                 is_gguf: false,
+                shared: Default::default(),
             }),
         })
     }
@@ -113,6 +119,7 @@ impl ModelWeights {
                 loader,
                 config_json: unpacked.config_json.clone(),
                 is_gguf: false,
+                shared: Default::default(),
             }),
         })
     }
@@ -136,6 +143,7 @@ impl ModelWeights {
                     loader,
                     config_json: "{}".to_string(),
                     is_gguf: false,
+                    shared: Default::default(),
                 }),
             });
         }
@@ -158,6 +166,7 @@ impl ModelWeights {
                 loader: Box::new(loader) as Box<dyn WeightLoader + Send + Sync>,
                 config_json,
                 is_gguf: true,
+                shared: Default::default(),
             }),
         })
     }
@@ -259,7 +268,20 @@ impl ModelWeights {
         F: FnOnce(TensorView<'_>) -> Result<R>,
     {
         let view = self.inner.loader.get_raw(name)?;
-        f(view)
+        // Where the bytes sit in the mapped file, if they are borrowed from it.
+        // Read before `f` takes the view, used after it has copied them out.
+        let borrowed = match &view.bytes {
+            std::borrow::Cow::Borrowed(b) => Some((b.as_ptr(), b.len())),
+            std::borrow::Cow::Owned(_) => None,
+        };
+        let result = f(view);
+        if let Some((ptr, len)) = borrowed {
+            // SAFETY: the bytes belong to the loader's mapping, which `self`
+            // keeps alive; the range is only compared and advised, never read.
+            let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+            self.inner.loader.release(bytes);
+        }
+        result
     }
 
     /// Resolves the dtype of a tensor, optionally overriding.
@@ -300,6 +322,23 @@ impl ModelWeights {
         self.get_typed_tensor(name)?
             .to_array1_f32()
             .map_err(|e| anyhow!("failed to load '{}': {}", name, e))
+    }
+
+    /// Like [`Self::get_array2`], but returns the same `Arc` to every caller
+    /// while any of them still holds it.
+    ///
+    /// For matrices more than one component keeps. A seq2seq model's token
+    /// embedding was loaded separately by the encoder, the decoder and the
+    /// pipeline: 160MB three times over for Whisper-small, whose encoder does not
+    /// even read it.
+    pub fn get_shared_array2(&self, name: &str) -> Result<Arc<Array2<f32>>> {
+        let mut shared = self.inner.shared.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(arr) = shared.get(name).and_then(std::sync::Weak::upgrade) {
+            return Ok(arr);
+        }
+        let arr = Arc::new(self.get_array2(name)?);
+        shared.insert(name.to_string(), Arc::downgrade(&arr));
+        Ok(arr)
     }
 
     /// Returns a 2D f32 array. Prefer `with_raw_tensor` for large matrices.
@@ -434,6 +473,33 @@ mod tests {
         assert!(!weights.is_gguf());
         assert!(weights.contains("test.weight"));
         assert!(!weights.contains("nonexistent"));
+    }
+
+    /// Callers of `get_shared_array2` get one allocation while any of them
+    /// holds it, and a fresh load once all of them have let go.
+    #[test]
+    fn shared_arrays_are_loaded_once_and_released() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(
+            &dir,
+            &[("emb.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])],
+        )
+        .unwrap();
+        let weights = ModelWeights::new(dir.path()).unwrap();
+
+        let a = weights.get_shared_array2("emb.weight").unwrap();
+        let b = weights.get_shared_array2("emb.weight").unwrap();
+        assert!(Arc::ptr_eq(&a, &b), "a second caller loaded its own copy");
+        assert_eq!(a.as_slice().unwrap(), &[1.0, 2.0, 3.0, 4.0]);
+
+        let weak = Arc::downgrade(&a);
+        drop((a, b));
+        assert!(weak.upgrade().is_none(), "the memo kept the tensor alive");
+        assert_eq!(
+            weights.get_shared_array2("emb.weight").unwrap()[[1, 1]],
+            4.0
+        );
+        assert!(weights.get_shared_array2("missing").is_err());
     }
 
     #[test]

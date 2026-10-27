@@ -121,11 +121,8 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         }
         // TODO: missing increment_len ?
         let logits = ops.project_to_logits(&decoder_output.last_hidden_state)?;
-
-        let last_logits = logits.slice(ndarray::s![0, -1, ..]);
-        let mut indexed: Vec<(usize, f32)> = last_logits.iter().cloned().enumerate().collect();
-        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
+        // A debugging leftover sorted the whole vocabulary here on every step and
+        // discarded the result.
         Ok(logits)
     }
 

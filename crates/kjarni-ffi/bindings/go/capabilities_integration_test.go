@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -61,11 +63,18 @@ func rssKB() int {
 // Results are structs passed to their free functions by value, which purego can
 // only do by laying out the words itself. Getting that wrong does not crash: the
 // free reads a zero length and does nothing, so every result leaks. 300 batches
-// of 64 vectors is 28MB; a correct binding grows by none of it.
+// of 64 vectors is 28MB; a correct binding stops growing once the allocator has
+// settled.
 func TestResultsAreFreed(t *testing.T) {
 	if rssKB() < 0 {
 		t.Skip("needs /proc/self/status")
 	}
+	// One OS thread for every call. Go moves goroutines between threads, and
+	// glibc gives each thread its own malloc arena; memory freed in one is not
+	// reused by another, so resident memory creeps up until the arenas fill.
+	// That is the allocator, not a leak, and it would hide one.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	e, err := NewEmbedder(testModel, WithQuiet(true))
 	if err != nil {
 		t.Fatalf("NewEmbedder: %v", err)
@@ -81,17 +90,34 @@ func TestResultsAreFreed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before := rssKB()
-	for i := 0; i < 300; i++ {
-		if _, err := e.EncodeBatch(texts); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := e.Encode(texts[i%len(texts)]); err != nil {
-			t.Fatal(err)
-		}
+	// Go's collector frees the returned slices on its own schedule and hands
+	// memory back to the OS lazily, which made this test measure GC timing.
+	// Collecting and releasing first leaves only native memory in the reading.
+	settledRSS := func() int {
+		runtime.GC()
+		debug.FreeOSMemory()
+		return rssKB()
 	}
-	if grown := rssKB() - before; grown > 10*1024 {
-		t.Errorf("RSS grew %d KB over 300 batches; results are not being freed", grown)
+	round := func() int {
+		before := settledRSS()
+		for i := 0; i < 300; i++ {
+			if _, err := e.EncodeBatch(texts); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.Encode(texts[i%len(texts)]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return settledRSS() - before
+	}
+	// The allocator settles in the first round, growing a few MB as it
+	// arranges its arenas for this mix of sizes. A leak keeps growing in the
+	// second round too, by about the 28MB the results come to.
+	first := round()
+	second := round()
+	t.Logf("RSS grew %d KB, then %d KB, over two rounds of 300 batches", first, second)
+	if second > 8*1024 {
+		t.Errorf("RSS grew %d KB in the second round; results are not being freed", second)
 	}
 }
 

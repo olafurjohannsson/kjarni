@@ -196,18 +196,58 @@ pub fn sample_from_probs(probs: &Array1<f32>) -> Result<u32> {
     Ok((probs.len() - 1) as u32)
 }
 
+/// The `k` highest log-probabilities, best first; ties go to the lower token id.
+///
+/// Beam search calls this for every beam at every step, on the whole
+/// vocabulary. It sorted all 50k entries to keep eight; selecting the top `k`
+/// first and sorting only those is linear. The order is the same total order
+/// the stable sort produced (score descending, then id ascending), so results
+/// are identical.
 pub fn get_top_k_from_log_probs(log_probs: &Array1<f32>, k: usize) -> Vec<(u32, f32)> {
-    let mut indexed_log_probs: Vec<(usize, f32)> = log_probs
-        .iter()
-        .enumerate()
-        .map(|(i, &lp)| (i, lp))
-        .collect();
-    indexed_log_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    indexed_log_probs.truncate(k);
-    indexed_log_probs
-        .into_iter()
-        .map(|(i, lp)| (i as u32, lp))
-        .collect()
+    let k = k.min(log_probs.len());
+    if k == 0 {
+        return Vec::new();
+    }
+    let mut indexed: Vec<(usize, f32)> = log_probs.iter().copied().enumerate().collect();
+    let order = |a: &(usize, f32), b: &(usize, f32)| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0));
+    if k < indexed.len() {
+        indexed.select_nth_unstable_by(k - 1, order);
+        indexed.truncate(k);
+    }
+    indexed.sort_unstable_by(order);
+    indexed.into_iter().map(|(i, lp)| (i as u32, lp)).collect()
+}
+
+#[cfg(test)]
+mod top_k_tests {
+    use super::*;
+
+    /// The full stable sort this replaced, as the reference.
+    fn reference(log_probs: &Array1<f32>, k: usize) -> Vec<(u32, f32)> {
+        let mut v: Vec<(usize, f32)> = log_probs.iter().copied().enumerate().collect();
+        v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        v.truncate(k);
+        v.into_iter().map(|(i, lp)| (i as u32, lp)).collect()
+    }
+
+    #[test]
+    fn matches_a_full_sort_including_ties() {
+        // Few distinct values, so ties at the cut-off are common.
+        let lp = Array1::from_iter((0..5000).map(|i| -(((i * 7919) % 37) as f32) / 4.0));
+        for k in [1, 2, 8, 37, 100, 4999, 5000, 6000] {
+            assert_eq!(
+                get_top_k_from_log_probs(&lp, k),
+                reference(&lp, k.min(5000)),
+                "k = {k}"
+            );
+        }
+        let with_inf = Array1::from_vec(vec![f32::NEG_INFINITY, -1.0, f32::NEG_INFINITY, -0.5]);
+        assert_eq!(
+            get_top_k_from_log_probs(&with_inf, 3),
+            reference(&with_inf, 3)
+        );
+        assert!(get_top_k_from_log_probs(&lp, 0).is_empty());
+    }
 }
 
 pub fn log_softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
