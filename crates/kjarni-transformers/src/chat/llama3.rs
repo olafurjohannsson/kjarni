@@ -157,9 +157,8 @@ impl ChatTemplate for Llama3ChatTemplate {
         if let Some(date) = self.date {
             // Llama 3.1 and 3.2 always open with a system turn that carries the
             // knowledge cutoff and today's date, with any system prompt after
-            // it, and trim every message. The model was tuned on exactly this;
-            // without the date block the same question got a different answer
-            // from the one transformers gives.
+            // it, and trim every message. The model was tuned on exactly this,
+            // and without the date block it answers differently.
             let messages = conversation.messages();
             let (system, rest) = match messages.first() {
                 Some(first) if first.role == Role::System => (first.content.trim(), &messages[1..]),

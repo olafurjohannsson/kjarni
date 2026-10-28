@@ -346,8 +346,7 @@ pub async fn run_generation_loop(
 /// As `run_generation_loop`, but able to continue from a cache that already holds
 /// part of the prompt.
 ///
-/// With `None` a fresh cache is built and dropped, which is what every caller did
-/// before this existed. With `Some`, the leading tokens the cache already holds are
+/// With `None` a fresh cache is built and dropped. With `Some`, the leading tokens the cache already holds are
 /// skipped: on Qwen2.5-0.5B a 2048 token prompt costs 15.96s cold and 0.49s when
 /// 1984 of those tokens are already cached, for identical logits. That is the whole
 /// value of keeping a conversation's history, or a RAG query's retrieved passages,

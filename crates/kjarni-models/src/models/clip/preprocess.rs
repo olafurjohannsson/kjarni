@@ -186,8 +186,8 @@ const PRECISION_BITS: u32 = 32 - 8 - 2;
 ///
 /// The arithmetic is PIL's for 8-bit images, not floating point: each weight
 /// rounded to a 22-bit fixed-point integer, the sum started at half a unit and
-/// shifted back down. Summed in floats, a few pixels in every image landed one
-/// level away from PIL's, which moved CLIP scores by up to 2.5e-5.
+/// shifted back down. Summed in floats instead, a few pixels per image land one
+/// level away from PIL's.
 fn resample_axis(src: &[f32], w: usize, h: usize, out_len: usize, horizontal: bool) -> Vec<f32> {
     let (in_len, other) = if horizontal { (w, h) } else { (h, w) };
     let coeffs: Vec<(usize, Vec<i64>)> = precompute_coeffs(in_len, out_len)
@@ -380,8 +380,8 @@ mod tests {
     fn bicubic_resize_matches_pil_byte_for_byte() {
         // 17x11 to 9x13: narrowed (antialiased, widened support) and stretched in
         // the same call. The expected bytes are PIL's `Image.resize(.., BICUBIC)`
-        // on the same pixels. A float accumulator put a few pixels in every image
-        // one level off PIL's fixed-point result.
+        // on the same pixels. A float accumulator puts a few pixels one level off
+        // PIL's fixed-point result.
         let (w, h, dw, dh) = (17, 11, 9, 13);
         let mut src = Vec::with_capacity(w * h * 3);
         for y in 0..h {

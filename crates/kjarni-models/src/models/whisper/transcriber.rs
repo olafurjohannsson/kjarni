@@ -144,7 +144,7 @@ impl WhisperModel {
     ///
     /// A window cut mid-word loses the word: Whisper drops an unfinished phrase
     /// at the end of one window and guesses at the fragment that opens the
-    /// next, so a sentence spanning a fixed 30-second cut went missing. Each
+    /// next, so a sentence spanning a fixed 30-second cut goes missing. Each
     /// cut is made at the quietest point of the window's last five seconds.
     pub fn chunk_audio(samples: &[f32], sample_rate: u32) -> Vec<AudioChunk> {
         let chunk_size = (WHISPER_CHUNK_LENGTH_SECS * sample_rate as f32) as usize;

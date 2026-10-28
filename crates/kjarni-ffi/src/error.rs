@@ -46,8 +46,8 @@ pub enum KjarniErrorCode {
 pub fn set_last_error(msg: impl Into<String>) {
     let msg = msg.into();
     // A C string cannot carry an interior nul. Truncating at the first one keeps the
-    // leading, most specific part of the message; `CString::new(..).ok()` used to
-    // drop the whole thing and leave the caller reading NULL instead.
+    // leading, most specific part of the message, where `CString::new(..).ok()`
+    // would drop the whole thing and leave the caller reading NULL.
     let msg = match msg.find('\0') {
         Some(i) => msg[..i].to_string(),
         None => msg,

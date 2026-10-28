@@ -1,10 +1,8 @@
 //! Global memory-map cache for weight files
 //!
 //! Holds `Weak` references: a file mapped twice at once shares one mapping, but
-//! a mapping nothing uses any more is released. It held `Arc`s, which kept every
-//! weight file mapped for the life of the process, after its weights had been
-//! copied out and even after the model was dropped. Whisper-small kept 960MB of
-//! its file resident next to its own copy of the weights.
+//! a mapping nothing uses any more is released, rather than staying resident for
+//! the life of the process next to the model's own copy of the weights.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};

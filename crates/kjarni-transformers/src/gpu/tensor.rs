@@ -259,9 +259,8 @@ impl GpuTensor {
         // A quantised target means "leave already-quantised weights packed", not
         // "quantise everything". A `.kjq` decoder asks for Q8_0 globally, yet 121 of
         // Qwen2.5-0.5B's 290 tensors are stored unquantised -- every layer norm and
-        // attention bias -- and there is no path from f32 to a Q8_0 block here. Those
-        // used to reach the conversion below and fail the whole load with
-        // "unsupported target dtype Q8_0", which read like the kernel was missing.
+        // attention bias -- and there is no path from f32 to a Q8_0 block here, so
+        // those stay as they are.
         if target.is_quantized() && source_dt != Some(target) {
             target = if source_was_quantised {
                 DType::BF16

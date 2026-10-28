@@ -258,9 +258,8 @@ impl ModelConfig for BertConfig {
                 },
                 ffn: FeedForwardLayout {
                     // Nomic's gated MLP is `fc11(x) * silu(fc12(x))`: fc12 is
-                    // the gate. Read the other way round, the activation went on
-                    // the wrong projection in every layer, and the embeddings
-                    // were at a cosine of 0.14 from the model's own.
+                    // the gate and fc11 the up projection, the reverse of what
+                    // the numbering suggests.
                     gate_weight: Some(format!("{}.mlp.fc12.weight", prefix)),
                     up_weight: format!("{}.mlp.fc11.weight", prefix),
                     down_weight: format!("{}.mlp.fc2.weight", prefix),
@@ -741,11 +740,10 @@ impl ModelConfig for DistilBertConfig {
 mod activation_tests {
     use super::*;
 
-    // The activation is read from `hidden_act` rather than assumed. It was hardcoded to
-    // the tanh approximation once, which made mpnet's embeddings differ from
-    // sentence-transformers by about 5e-4: small enough to look like rounding, large
-    // enough to change retrieval. These pin the mapping so it cannot regress to a
-    // constant.
+    // The activation is read from `hidden_act` rather than assumed. The tanh
+    // approximation in place of exact GELU moves mpnet's embeddings about 5e-4 from
+    // sentence-transformers: small enough to look like rounding, large enough to
+    // change retrieval. These pin the mapping.
 
     fn mpnet_json(act: &str) -> String {
         format!(
@@ -809,8 +807,8 @@ mod activation_tests {
 mod parity_tests {
     use super::*;
 
-    // Each of these was found by comparing against sentence-transformers on the same
-    // weights, and each ran without complaint while wrong.
+    // Each of these runs without error when wrong and only shows up as embeddings
+    // that disagree with sentence-transformers on the same weights.
 
     fn bert_json(model_type: &str, positions: usize) -> String {
         format!(
@@ -830,7 +828,7 @@ mod parity_tests {
 
     #[test]
     fn nomic_gates_on_fc12_not_fc11() {
-        // Nomic's MLP is `fc11(x) * silu(fc12(x))`. Swapped, the embeddings were at
+        // Nomic's MLP is `fc11(x) * silu(fc12(x))`. Swapped, the embeddings land at
         // cosine 0.14 from the reference.
         let json = r#"{
             "model_type": "nomic_bert",

@@ -228,8 +228,7 @@ impl SentenceEncoder {
     pub async fn encode_batch_flat(&self, texts: &[&str]) -> Result<(Vec<f32>, usize, usize)> {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
-        // The model's own pooling: this was mean pooling whatever the model
-        // was trained with, so bge-m3's flat batches came out wrong.
+        // The pooling the model was trained with: mean for most, CLS for bge-m3.
         let mut pooled = StandardCpuPooler.pool(
             &hidden_states,
             &attention_mask,

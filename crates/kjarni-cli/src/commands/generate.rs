@@ -203,13 +203,10 @@ pub async fn run(
     Ok(())
 }
 
-/// Check if the architecture is a supported decoder for generation
 /// Whether an architecture can generate text.
 ///
-/// This asks the registry rather than keeping a second list. The hardcoded copy that
-/// used to live here had drifted: it omitted Phi3, so `generate --model phi3.5-mini`
-/// refused a model the engine implements and the registry already classifies as a
-/// decoder. Any list maintained in parallel with the registry will drift again.
+/// This asks the registry rather than keeping a second list, which would drift
+/// from it.
 fn is_supported_decoder_architecture(arch: ModelArchitecture) -> bool {
     arch.category() == "decoder"
 }

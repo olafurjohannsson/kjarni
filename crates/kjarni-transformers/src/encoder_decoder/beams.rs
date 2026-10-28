@@ -1,5 +1,4 @@
-//! Beam search, based on HF implementation, thanks HF guys this was extremely complicated to port
-//!
+//! Beam search, ported from transformers' implementation.
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures::stream::Stream;
@@ -255,8 +254,7 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
 
     // The sequence length before this step's token, the decoder start token
     // included: what transformers' min-length and forced-EOS processors compare
-    // against. It was one more, so the end token was allowed, and forced, a
-    // step early.
+    // against. One more lets the end token in, and forces it, a step early.
     let current_len = step + 1;
 
     logits_2d
@@ -270,9 +268,8 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
             // Log-probabilities first, then the processors, as transformers'
             // beam search does: a banned token's probability is dropped, not
             // shared out among the rest. Masking the logits and normalizing
-            // after raised every surviving token whenever a repeated n-gram or
-            // an early end was banned, so beams accumulated different scores
-            // and distilbart ended on another summary.
+            // after would raise every surviving token whenever a repeated n-gram
+            // or an early end is banned, and beams would rank differently.
             let log_probs = log_softmax_1d(&logits_row.to_owned());
             logits_row.assign(&log_probs);
 

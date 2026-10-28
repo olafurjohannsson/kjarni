@@ -33,10 +33,10 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
         let mut n = k;
 
         // Three weight vectors stay live and the four input rows stream through
-        // one at a time. Holding all four inputs as well, which is how this was
-        // written, needs 12 accumulators plus 4 plus 1: seventeen values for
-        // sixteen registers, and the disassembly showed one accumulator spilled
-        // to the stack and reloaded on every iteration. This ordering is exactly
+        // one at a time. Holding all four inputs as well would need 12
+        // accumulators plus 4 plus 1: seventeen values for sixteen registers,
+        // and one accumulator spilled to the stack on every iteration. This
+        // ordering is exactly
         // 12 + 3 + 1. Consecutive FMAs also write different accumulators, so
         // nothing waits on the four-cycle latency of the one before it.
         while n >= 8 {

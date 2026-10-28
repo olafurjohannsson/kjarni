@@ -185,8 +185,8 @@ pub struct RobertaConfig {
     pub num_labels: Option<usize>,
 
     /// "multi_label_classification" for a model whose labels are independent,
-    /// such as GoEmotions. Not read before, so those models were scored with a
-    /// softmax across labels instead of a sigmoid each.
+    /// such as GoEmotions. Those are scored with a sigmoid per label instead of a
+    /// softmax across labels.
     #[serde(default)]
     pub problem_type: Option<String>,
 
@@ -353,8 +353,8 @@ mod roberta_tests {
 
     #[test]
     fn multi_label_models_are_scored_with_a_sigmoid() {
-        // GoEmotions says so in `problem_type`. Dropped, its labels were softmaxed
-        // against each other and scores were off by up to 0.42.
+        // GoEmotions says so in `problem_type`. Softmaxed against each other
+        // instead, its scores are off by up to 0.42.
         let cfg =
             RobertaConfig::from_json(&roberta_json(Some("multi_label_classification"))).unwrap();
         assert!(cfg.is_multi_label());

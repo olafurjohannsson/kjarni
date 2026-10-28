@@ -261,8 +261,7 @@ mod tests {
         assert_eq!(truncate("hello", 4), "h...");
     }
 
-    // These moved onto the shared helper in `util` when the copy that used to live
-    // in this file was deleted. Same coverage, one implementation.
+    // These exercise the shared helper in `util`.
 
     #[test]
     fn test_model_not_found_error_basic() {

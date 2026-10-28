@@ -23,8 +23,7 @@ use crate::error::set_last_error;
 
 // The barrier only exists if unwinding does. Under `panic = "abort"` every
 // `catch_unwind` below is dead code and the first panic in the engine takes the
-// host process with it -- silently, which is how the workspace release profile
-// carried that setting for as long as it did. Refuse to build instead.
+// host process with it, silently. Refuse to build instead.
 #[cfg(panic = "abort")]
 compile_error!(
     "kjarni-ffi must be built with panic=unwind. It is a cdylib loaded into a host \
@@ -185,8 +184,7 @@ mod panic_guard_tests {
         );
     }
 
-    /// The unwrap that started all this: the real shape of the bug the barrier is
-    /// here to contain.
+    /// An unwrap on `None`: the shape of panic the barrier is here to contain.
     #[test]
     fn contains_an_unwrap_on_none() {
         let dim = without_panic_output(|| {

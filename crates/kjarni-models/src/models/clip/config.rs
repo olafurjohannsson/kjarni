@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(c.num_channels(), 3, "defaults to RGB when unstated");
     }
 
-    /// The distinction that silently degraded the vision tower until it was found:
+    /// A distinction that degrades the vision tower silently if lost:
     /// HuggingFace's "gelu" is the exact erf form, "gelu_new" the tanh
     /// approximation. Collapsing them looks fine and moves every embedding.
     #[test]

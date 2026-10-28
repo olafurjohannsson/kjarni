@@ -1,8 +1,5 @@
-// This crate used to be `#![cfg(target_arch = "wasm32")]`, compiling to nothing on
-// the host. Combined with being excluded from the workspace, that meant no
-// `cargo test` invocation could reach it — which is how it accumulated a second copy
-// of the encoder stack that silently drifted from the engine. The bindings are still
-// wasm-only, but the crate now builds natively so its behaviour can be tested.
+// The bindings are wasm-only, but the crate builds natively so its behaviour can be
+// tested with `cargo test`.
 
 use anyhow::Result;
 use serde::Serialize;
@@ -18,8 +15,7 @@ use web_sys::{Response, Window, WorkerGlobalScope};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-// The shared engine. Everything below that used to run on this crate's own copy of
-// the encoder stack is being moved onto these.
+// The shared engine, which every binding below runs on.
 use kjarni_models::{CrossEncoder, SentenceEncoder, SequenceClassifier};
 use kjarni_transformers::Conversation;
 use kjarni_transformers::decoder::generator::DecoderGenerator;
@@ -58,12 +54,6 @@ fn now_ms() -> f64 {
 fn now_ms() -> f64 {
     0.0
 }
-
-// The encoder stack that used to live here — Model, BertLayer, MultiHeadAttention,
-// FeedForward, LayerNorm, Config and their matmul/softmax/pooling helpers — was a
-// second implementation of what kjarni-transformers already does. It existed only
-// because the engine did not build for wasm32. It does now, so the bindings below
-// call the engine and this copy is gone.
 
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
@@ -535,10 +525,6 @@ pub struct ClassifyResult {
 }
 
 /// Sequence classification: sentiment, emotion, toxicity.
-///
-/// New to the browser. Classification was always in the engine but never had a
-/// binding here, because this crate previously carried its own encoder and nobody
-/// wrote a second classifier head for it.
 #[wasm_bindgen]
 pub struct WasmClassifier {
     inner: SequenceClassifier,
@@ -943,18 +929,12 @@ impl WasmChat {
 
     /// Generates, calling `on_token` with each piece as it is produced.
     ///
-    /// The engine has always streamed: `run_generation_loop` sends every token
-    /// into a channel the moment it is decoded. The earlier version of this
-    /// method threw that away, blocking on the whole loop and only then draining
-    /// the channel, which is why it needed one large enough to hold the entire
-    /// response.
-    ///
-    /// Joining the loop with its own drain fixes that on a single thread. There
+    /// `run_generation_loop` sends every token into a channel the moment it is
+    /// decoded, and the loop is joined with its own drain on a single thread. There
     /// is no second thread to spare in wasm, but there does not need to be: the
     /// loop awaits on `send`, and at that point `block_on` polls the drain, which
     /// hands the token out before the loop resumes. Tokens surface as they are
-    /// decoded, and the channel goes back to being a small buffer that applies
-    /// real back-pressure.
+    /// decoded, and the channel is a small buffer that applies real back-pressure.
     pub fn generate_stream_core(
         &self,
         prompt: &str,
@@ -1209,8 +1189,7 @@ impl WasmReranker {
     #[wasm_bindgen]
     /// Load a cross-encoder from a `.kjq` container.
     ///
-    /// The classifier head used to be pulled out of the weights by hand here; the
-    /// engine's `CrossEncoder` loads it as part of the model.
+    /// The engine's `CrossEncoder` loads the classifier head as part of the model.
     pub fn load(data: &[u8]) -> Result<WasmReranker, JsValue> {
         let t0 = now_ms();
         let unpacked = kjq::unpack(data).map_err(|e| JsValue::from_str(&e.to_string()))?;

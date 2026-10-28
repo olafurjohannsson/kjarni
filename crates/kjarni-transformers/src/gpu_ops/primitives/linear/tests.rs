@@ -283,8 +283,8 @@ async fn q4k_gemv_bandwidth() -> Result<()> {
 ///
 /// Both comparisons matter. The CPU one checks the unpacking arithmetic; the
 /// expanded one is an independent route into the same weights and is what would
-/// catch a layout or reordering disagreement, which is exactly the bug the Q4_K
-/// path shipped with until it was compared this way.
+/// catch a layout or reordering disagreement, which the CPU comparison alone
+/// can miss.
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q6k_packed_matches_cpu_and_expanded() -> Result<()> {

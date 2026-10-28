@@ -378,8 +378,8 @@ mod sentence_encoder_loading_tests {
     #[tokio::test]
     #[ignore = "loads bge-m3 (2.2 GB) from the local cache"]
     async fn flat_batches_use_the_models_own_pooling() -> Result<()> {
-        // bge-m3 is CLS-pooled. `encode_batch_flat` mean-pooled every model, so its
-        // rows disagreed with `encode_batch` on the same texts.
+        // bge-m3 is CLS-pooled, so a batch path that assumes mean pooling gives
+        // rows that disagree with `encode_batch` on the same texts.
         let encoder =
             SentenceEncoder::from_registry(ModelType::BgeM3, None, Device::Cpu, None, None).await?;
         let texts = ["The cat sat on the mat.", "Une phrase en français."];

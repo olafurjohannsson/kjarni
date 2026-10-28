@@ -1,10 +1,7 @@
 //! Behaviour tests for the browser bindings.
 //!
-//! This crate had no tests at all until now: it was `#![cfg(target_arch = "wasm32")]`
-//! *and* excluded from the workspace, so nothing could reach it. That is how it came
-//! to carry 1,250 lines of duplicate encoder code that quietly drifted from the
-//! engine. The bindings still only export to JavaScript on wasm32, but the crate
-//! builds natively, so what they do can be checked here on every `cargo test`.
+//! The bindings only export to JavaScript on wasm32, but the crate builds natively,
+//! so what they do is checked here on every `cargo test`.
 //!
 //! Tests skip when the model files are absent so a checkout without the website
 //! repo alongside it still runs green.
@@ -29,10 +26,8 @@ const CLASSIFY_KJQ: &str = "../../../web.kjarni.ai/src/static/models/distilbert-
 /// directory is a broken CI step, not an absent optional file, so it fails loudly
 /// instead of skipping.
 ///
-/// The fallback path below is the sibling website checkout, which no longer holds
-/// these files: they moved to Hugging Face once `qwen05b-q8.kjq` outgrew GitHub's
-/// 100MB per-file limit. In practice fixtures now arrive one of two ways, and both
-/// are cheap:
+/// The files live on Hugging Face, since `qwen05b-q8.kjq` is over GitHub's 100MB
+/// per-file limit. Fixtures arrive one of two ways, and both are cheap:
 ///
 /// ```text
 /// python crates/kjarni-wasm/scripts/quantize_model.py \
@@ -347,9 +342,9 @@ const CHAT_KJQ: &str = "../../../web.kjarni.ai/src/static/models/qwen05b-q8.kjq"
 
 /// The chat model, loaded once for the whole binary.
 ///
-/// Each test used to load its own. That means reading 500MB from disk and
-/// dequantising half a billion int8 weights to f32 per test, several times over in
-/// parallel, which is a few gigabytes of resident memory and most of the runtime.
+/// Loading it per test would mean reading 500MB from disk and dequantising half a
+/// billion int8 weights to f32 each time, several times over in parallel: a few
+/// gigabytes of resident memory and most of the runtime.
 /// Generation is not re-entrant either, so the mutex is doing real work rather than
 /// just satisfying `Sync`.
 fn chat() -> Option<std::sync::MutexGuard<'static, kjarni_wasm::WasmChat>> {
@@ -443,12 +438,9 @@ fn chat_rejects_an_encoder_model() {
 
 /// Generation must hand tokens out as they are decoded, not in one lump.
 ///
-/// It used to do the latter: `generate_core` blocked on the whole loop and only
-/// then drained the channel, so a caller could not show anything until the reply
-/// was finished. The engine had been streaming into that channel the entire time.
-///
-/// Counting callbacks is what pins the fix. Asserting only on the returned text
-/// would pass just as happily against the batched version.
+/// Counting callbacks is what checks this. Asserting only on the returned text
+/// would pass just as happily if `generate_core` drained the channel after the
+/// whole loop, when a caller could show nothing until the reply was finished.
 #[test]
 #[cfg_attr(
     debug_assertions,

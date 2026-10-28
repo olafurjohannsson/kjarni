@@ -257,8 +257,8 @@ impl ModelType {
     }
     /// The pooling an embedding model was trained with, where it is not mean
     /// pooling: what its sentence-transformers `1_Pooling/config.json` says.
-    /// bge-m3 takes the CLS token; pooled by the mean, its vectors were a
-    /// different embedding, at a cosine of 0.65 from the model's own.
+    /// bge-m3 takes the CLS token; mean-pooled, its vectors land at a cosine of
+    /// 0.65 from the model's own.
     pub fn pooling(&self) -> Option<crate::cpu::encoder::config::PoolingStrategy> {
         match self {
             Self::BgeM3 => Some(crate::cpu::encoder::config::PoolingStrategy::Cls),
@@ -1259,8 +1259,8 @@ async fn download_file_with(
         match download_to_part(&client, url, filename, &part_path, quiet).await {
             Ok(()) => break,
             // A 4xx is the server's final answer. Retrying it cannot change the
-            // outcome and costs 20 seconds of backoff to learn nothing: a missing
-            // optional file used to spend exactly that on every single load.
+            // outcome and costs 20 seconds of backoff to learn nothing, on every
+            // load that asks for a missing optional file.
             Err(e) if is_permanent(&e) => return Err(e),
             Err(e) if attempt < retry.attempts => {
                 if !quiet {
@@ -1500,7 +1500,7 @@ mod tests {
     #[test]
     fn bge_m3_pools_the_cls_token() {
         // Its sentence-transformers pooling config says CLS. Mean-pooled, its
-        // vectors were at cosine 0.65 from the reference.
+        // vectors land at cosine 0.65 from the reference.
         use crate::cpu::encoder::config::PoolingStrategy;
         assert!(matches!(
             ModelType::BgeM3.pooling(),
@@ -1511,11 +1511,10 @@ mod tests {
         assert!(ModelType::NomicEmbedText.pooling().is_none());
     }
 
-    /// The whole of the download fix. A 4xx is the server's final answer, so
-    /// retrying it cannot change the outcome and costs 20 seconds of backoff to
-    /// learn nothing: a missing optional file used to spend exactly that on every
-    /// single load. A 5xx or a dropped connection is worth retrying, which is what
-    /// the backoff was written for, so misclassifying either way is expensive.
+    /// A 4xx is the server's final answer, so retrying it cannot change the
+    /// outcome and costs 20 seconds of backoff to learn nothing, on every load
+    /// that asks for a missing optional file. A 5xx or a dropped connection is
+    /// worth retrying, so misclassifying either way is expensive.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn only_client_errors_are_treated_as_permanent() {
@@ -1935,9 +1934,8 @@ mod tests {
             assert!(!ok);
         }
 
-        /// Rate limiting is a 4xx that means "later", not "no". This is the case
-        /// that was wrong when the fix first landed: treating it as final would
-        /// abandon a download that was about to succeed.
+        /// Rate limiting is a 4xx that means "later", not "no": treating it as
+        /// final would abandon a download that was about to succeed.
         #[tokio::test]
         async fn rate_limiting_is_retried_despite_being_a_4xx() {
             let (hits, _) = fetch("429 Too Many Requests", &FAST).await;
@@ -1973,8 +1971,7 @@ mod tests {
         fn backoff_grows_with_each_attempt() {
             assert_eq!(RETRY.backoff(1), std::time::Duration::from_secs(2));
             assert_eq!(RETRY.backoff(4), std::time::Duration::from_secs(8));
-            // 2+4+6+8: the twenty seconds a missing optional file used to cost on
-            // every single load.
+            // 2+4+6+8: twenty seconds, what retrying a permanent error would cost.
             let total: std::time::Duration = (1..RETRY.attempts).map(|a| RETRY.backoff(a)).sum();
             assert_eq!(total, std::time::Duration::from_secs(20));
         }

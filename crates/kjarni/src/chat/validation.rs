@@ -166,12 +166,9 @@ pub fn is_instruct_model(model_type: ModelType) -> bool {
 /// returns, since the point is to give someone a starting point rather than a
 /// catalogue.
 ///
-/// Written as [`ModelType`] variants, not string literals, on purpose. This list
-/// used to be hardcoded names and four of its seven entries had gone stale —
-/// `llama3.2-1b`, `llama3.2-3b`, `llama3.1-8b` and `qwen2.5-0.5b` all lost out to
-/// an `-instruct` suffix at some point, so following a suggestion produced a
-/// second "unknown model" error. Naming variants makes the compiler reject a
-/// rename, and `cli_name()` keeps the strings in sync by construction.
+/// Written as [`ModelType`] variants, not string literals, on purpose: the
+/// compiler rejects a rename, and `cli_name()` keeps the strings in sync by
+/// construction, so a suggestion never leads to a second "unknown model" error.
 pub fn suggest_chat_models() -> Vec<&'static str> {
     [
         ModelType::Qwen2_5_0_5B_Instruct,

@@ -32,10 +32,8 @@ const F32_CACHE: &str = "sentence-transformers_all-MiniLM-L6-v2";
 /// directory is a broken CI step, not an absent optional file, so it fails loudly
 /// instead of skipping.
 ///
-/// The fallback path below is the sibling website checkout, which no longer holds
-/// these files: they moved to Hugging Face once `qwen05b-q8.kjq` outgrew GitHub's
-/// 100MB per-file limit. In practice fixtures now arrive one of two ways, and both
-/// are cheap:
+/// The files live on Hugging Face, since `qwen05b-q8.kjq` is over GitHub's 100MB
+/// per-file limit. Fixtures arrive one of two ways, and both are cheap:
 ///
 /// ```text
 /// python crates/kjarni-wasm/scripts/quantize_model.py \

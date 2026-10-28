@@ -159,10 +159,9 @@ impl LayerNorm {
     /// `rows = layer_norm(rows + residual)` in place, one row per token,
     /// across threads. Without a residual it is a plain in-place norm.
     ///
-    /// This is the post-norm encoder's add-and-norm in one pass. It used to be
-    /// a serial add, a serial norm into scratch and a copy back: on a batch of
-    /// 64 documents through multilingual-e5-small that was 12% of the forward
-    /// pass, done on one core of 24.
+    /// This is the post-norm encoder's add-and-norm in one pass. Done serially,
+    /// on a batch of 64 documents through multilingual-e5-small, it is 12% of
+    /// the forward pass on one core of 24.
     pub fn add_and_norm_rows(&self, rows: &mut [f32], residual: Option<&[f32]>) {
         let hidden = self.weight.len();
         assert!(

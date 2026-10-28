@@ -502,8 +502,7 @@ async fn split_prefill_matches_whole_prefill() {
 
     // The invariant prefix caching rests on: prefilling a prompt in two passes
     // must land on the same next token as prefilling it whole. Without this the
-    // whole feature is silently wrong, and the name of this test claimed to check
-    // it long before anything here actually did.
+    // whole feature is silently wrong.
     assert_eq!(
         tok_whole, tok_split,
         "split prefill chose a different next token ({tok_whole} vs {tok_split}); \

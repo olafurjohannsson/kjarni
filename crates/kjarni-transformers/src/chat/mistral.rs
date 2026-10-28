@@ -43,9 +43,7 @@ impl ChatTemplate for MistralChatTemplate {
         };
 
         // Mistral v0.3's template puts the system prompt in the last user turn,
-        // and closes each with `[/INST]` straight after the text. This had a
-        // space before `[/INST]` and the system prompt in the first turn, so
-        // every prompt tokenized differently from the model's own template.
+        // and closes each with `[/INST]` straight after the text, with no space.
         // Only when that turn is the conversation's last message, as upstream's
         // `loop.last`; a conversation ending on a reply carries no system prompt.
         let last_user = messages

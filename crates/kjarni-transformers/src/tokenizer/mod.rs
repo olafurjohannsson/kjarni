@@ -13,9 +13,8 @@ use tokenizers::pre_tokenizers::whitespace::WhitespaceSplit;
 ///
 /// The `tokenizer.json` those models publish has `Metaspace` alone, which turns
 /// trailing whitespace into a token of its own, `▁`. SentencePiece drops it, and
-/// so does transformers, so a text ending in a space or a newline embedded
-/// differently from the reference: bge-m3 and multilingual-e5 were 0.01 to 0.03
-/// off on it, and T5 read an extra token. BPE tokenizers that use `Metaspace`,
+/// so does transformers; kept, a text ending in a space or a newline embeds 0.01
+/// to 0.03 away from the reference on bge-m3. BPE tokenizers that use `Metaspace`,
 /// such as Mistral's, keep their whitespace in transformers too, and are left alone.
 pub fn match_sentencepiece_whitespace(tokenizer: &mut tokenizers::Tokenizer) {
     if !matches!(tokenizer.get_model(), ModelWrapper::Unigram(_)) {

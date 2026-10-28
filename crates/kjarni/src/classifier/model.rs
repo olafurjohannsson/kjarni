@@ -326,12 +326,9 @@ impl Classifier {
     /// Classify multiple texts with custom overrides. Returns one result per
     /// text, in order, each the same as classifying that text alone.
     ///
-    /// The texts go through the model together. This used to post-process the
-    /// batch differently from a single text: multi-label scores had sigmoid
-    /// applied to probabilities rather than logits, custom labels were matched
-    /// by name and scored zero, and a text with nothing above the threshold was
-    /// dropped, shifting every later result onto the wrong text. Both paths now
-    /// share one.
+    /// The texts go through the model together, and the scores go through the
+    /// same post-processing as a single text's, so a text with nothing above the
+    /// threshold still keeps its place in the results.
     pub async fn classify_batch_with_config(
         &self,
         texts: &[&str],

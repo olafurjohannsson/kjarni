@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn test_search_matches_full_sort_on_the_parallel_path() {
         // 4096 crosses PARALLEL_THRESHOLD, so this exercises the rayon branch and
-        // pins it to the exact answer the old full sort produced.
+        // pins it to the exact answer a full sort produces.
         let store = large_store(4096, 64);
         let query: Vec<f32> = store.embeddings[1234].clone();
 

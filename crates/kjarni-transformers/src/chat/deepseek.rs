@@ -6,8 +6,8 @@
 //! `<｜Assistant｜>` before each reply, and a model turn opened with `<think>`.
 //! A reply already in the history keeps only what follows its `</think>`.
 //!
-//! The distilled R1 models are Llama underneath, and picking the template by
-//! architecture gave them Llama 3's headers, a format they were never tuned on.
+//! The distilled R1 models are Llama underneath but were tuned on this format,
+//! not Llama 3's, so the template is chosen by model rather than architecture.
 
 use crate::{ChatTemplate, Conversation, Role};
 

@@ -216,8 +216,8 @@ impl PhiConfig {
 impl PhiConfig {
     /// LongRoPE scales cos and sin by `sqrt(1 + ln(s) / ln(trained))`, where `s` is
     /// how far the context was stretched: 131072 / 4096 for Phi-3.5, about 1.19.
-    /// The checkpoint leaves the factor out, and without it every attention logit is
-    /// 1.42 times too small, which changed Phi-3.5's replies from the first token.
+    /// The checkpoint leaves the factor out for the loader to derive; it scales every
+    /// attention logit by its square, 1.42.
     fn rope_scaling_with_attention_factor(&self) -> Option<RopeScalingConfig> {
         let mut scaling = self.rope_scaling.clone()?;
         if scaling.rope_type == "longrope" && scaling.attention_factor.is_none() {
@@ -417,8 +417,8 @@ mod tests {
 
     #[test]
     fn reports_itself_as_phi_not_qwen() {
-        // This file began as a copy of the Qwen config and reported "qwen2" for a while,
-        // which is the kind of thing nothing downstream complains about.
+        // The Phi config is shaped like Qwen's, and reporting "qwen2" is the kind of
+        // thing nothing downstream complains about.
         let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
         assert_eq!(cfg.model_type(), "phi3");
     }

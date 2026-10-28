@@ -1,9 +1,7 @@
 //! `Embedder::from_path` loads from a directory.
 //!
-//! It used to be unusable: `from_path` sets the model name to "custom" and
-//! `from_builder` resolved that name against the registry without ever looking
-//! at `model_path`, so every call failed with UnknownModel("custom"). Classifier
-//! and Reranker check the path first; the Embedder now does too.
+//! `from_path` sets the model name to "custom", so the path has to be checked
+//! before the registry, or every call fails with UnknownModel("custom").
 
 use kjarni::Embedder;
 

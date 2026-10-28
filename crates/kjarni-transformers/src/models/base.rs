@@ -181,10 +181,9 @@ pub struct ModelLoadConfig {
     pub use_gguf: bool,
     /// Suppress download progress output.
     ///
-    /// Defaults to false, so a load that has to fetch weights says so. The three
-    /// pipeline loaders used to hardcode this to quiet, which meant a first call
-    /// on an uncached model downloaded hundreds of megabytes in total silence and
-    /// looked to the caller like a hang.
+    /// Defaults to false, so a load that has to fetch weights says so. A silent
+    /// first call on an uncached model downloads hundreds of megabytes and looks
+    /// to the caller like a hang.
     pub quiet: bool,
 }
 
@@ -437,11 +436,8 @@ mod rope_scaling_config_tests {
 mod load_config_tests {
     use super::*;
 
-    /// Silence has to be opt-in. All three pipeline loaders used to hardcode
-    /// `quiet: true`, so a first call on an uncached model downloaded hundreds of
-    /// megabytes with no output and read as a hang. A `..Default::default()`
-    /// somewhere flipping this back would restore that in silence, which is
-    /// exactly the failure it caused the first time.
+    /// Silence has to be opt-in: a first call on an uncached model downloads
+    /// hundreds of megabytes, and with no output that reads as a hang.
     #[test]
     fn downloads_are_visible_unless_asked_otherwise() {
         assert!(

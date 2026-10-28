@@ -479,13 +479,10 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         let total_len = position_offset + seq_len;
 
         // Only a padding mask over every key, `[batch, total_len]`, goes to
-        // self-attention, which applies the causal mask itself. The causal mask
-        // used to be multiplied in here, making a `[seq, total]` array that
-        // attention reads as `[batch, key]`: whenever the batch size equalled
-        // the prompt length, each sequence was masked by a row of the causal
-        // mask, and the first could see only its first token. Whisper with
-        // timestamps has a three-token prompt, so batches of three chunks
-        // decoded the first one to nothing.
+        // self-attention, which applies the causal mask itself. Combining the
+        // causal mask in here would make a `[seq, total]` array that attention
+        // reads as `[batch, key]`, which goes unnoticed until the batch size
+        // equals the prompt length.
         let self_attn_mask = decoder_padding_mask
             .filter(|pad| pad.dim() == (hidden_states.dim().0, total_len))
             .cloned();

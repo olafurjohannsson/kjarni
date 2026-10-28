@@ -9,9 +9,7 @@ use super::{DownloadPolicy, KjarniError, KjarniResult};
 /// Get the default cache directory.
 ///
 /// Delegates rather than re-deriving the path, so `KJARNI_CACHE_DIR` is honoured
-/// here too. This used to inline the platform default, which meant
-/// `kjarni model download` (which does read the variable) wrote to one directory
-/// while inference looked in another.
+/// here too, and `kjarni model download` and inference agree on one directory.
 pub fn default_cache_dir() -> PathBuf {
     kjarni_transformers::models::get_default_cache_dir()
 }

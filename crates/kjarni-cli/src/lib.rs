@@ -2,11 +2,9 @@ use clap::{Parser, Subcommand};
 
 /// Default model for `kjarni chat`.
 ///
-/// Must be a CLI name that `ModelType::from_cli_name` resolves. Both this and
-/// [`DEFAULT_GENERATE_MODEL`] previously named models that do not exist
-/// (`llama-3.2-8b-instruct`, `llama-3.2-1b`), so the bare `kjarni chat` and
-/// `kjarni generate` commands failed for everyone. `tests::default_models_exist`
-/// now fails the build if either drifts from the registry again.
+/// Must be a CLI name that `ModelType::from_cli_name` resolves, or the bare
+/// `kjarni chat` command fails for everyone. `tests::default_models_exist` checks
+/// this and [`DEFAULT_GENERATE_MODEL`] against the registry.
 pub const DEFAULT_CHAT_MODEL: &str = "llama3.2-3b-instruct";
 
 /// Default model for `kjarni generate`.
@@ -621,9 +619,9 @@ pub enum IndexCommands {
         /// Chunk size in characters
         ///
         /// The default fits inside the encoder's window. minilm-l6-v2 reads 256
-        /// tokens, roughly 900 characters, so the previous default of 1000 left
-        /// about nine chunks in ten longer than the model reads, with the tail
-        /// dropped silently. The C# Indexer has always used 512; this matches it.
+        /// tokens, roughly 900 characters, so at 1000 about nine chunks in ten
+        /// would be longer than the model reads, with the tail dropped silently.
+        /// The C# Indexer uses 512 too.
         #[arg(long, default_value_t = 512)]
         chunk_size: usize,
 

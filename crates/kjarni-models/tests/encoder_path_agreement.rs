@@ -2,12 +2,9 @@
 //!
 //! Both exist: `forward` allocates as it goes, `forward_with_buffers` reuses
 //! scratch. Which one runs is a performance decision, so they have to be
-//! interchangeable, and nothing checked that they were.
-//!
-//! They were not. RoBERTa's `metadata()` reported `intermediate_size: 0`, so the
-//! buffered path allocated a zero-width FFN buffer and sliced past the end of it,
-//! while the allocating path was fine. A threshold on token count decided which
-//! ran, so the crash only appeared on large batches of a few model families.
+//! interchangeable. A config detail one path reads and the other ignores, such
+//! as `intermediate_size`, would otherwise only show up on whichever batch sizes
+//! pick the buffered path.
 //!
 //! `#[ignore]`d: needs models from the local cache, and `test-everything.sh`
 //! passes `--include-ignored`.
@@ -31,7 +28,8 @@ async fn paths_agree(model: &str, expect_dim: usize) {
         .expect("cpu encoder ops for a model loaded on Device::Cpu");
     let cpu = ops.encoder();
 
-    // Long enough that the old rule would have chosen the buffered path.
+    // Long enough to be past 1000 tokens, where a size rule would pick the
+    // buffered path.
     let docs: Vec<String> = (0..8)
         .map(|i| {
             "The history of Iceland begins with settlement in the ninth century. ".repeat(12)
