@@ -376,6 +376,28 @@ mod sentence_encoder_loading_tests {
         Ok(())
     }
     #[tokio::test]
+    #[ignore = "loads bge-m3 (2.2 GB) from the local cache"]
+    async fn flat_batches_use_the_models_own_pooling() -> Result<()> {
+        // bge-m3 is CLS-pooled. `encode_batch_flat` mean-pooled every model, so its
+        // rows disagreed with `encode_batch` on the same texts.
+        let encoder =
+            SentenceEncoder::from_registry(ModelType::BgeM3, None, Device::Cpu, None, None).await?;
+        let texts = ["The cat sat on the mat.", "Une phrase en français."];
+        let rows = encoder.encode_batch(&texts).await?;
+        let (flat, n, dim) = encoder.encode_batch_flat(&texts).await?;
+        assert_eq!((n, dim), (rows.len(), rows[0].len()));
+        for (i, row) in rows.iter().enumerate() {
+            let diff = row
+                .iter()
+                .zip(&flat[i * dim..(i + 1) * dim])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(diff < 1e-5, "row {i} differs by {diff}");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_encode_with_custom_pooling() -> Result<()> {
         let encoder =
             SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None)

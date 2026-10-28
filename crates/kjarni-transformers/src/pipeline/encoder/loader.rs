@@ -215,6 +215,7 @@ impl EncoderLoader {
         }
         let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
 
         // Configure truncation and padding
         let max_seq_len = resolve_max_seq_len(
@@ -250,7 +251,11 @@ impl EncoderLoader {
             .with_load_config(load_config)
             .with_backends(cpu_encoder, gpu_encoder)
             .with_head(cpu_head)
-            .with_pooling_strategy(M::pooling_strategy())
+            .with_pooling_strategy(
+                model_type
+                    .and_then(|m| m.pooling())
+                    .unwrap_or_else(M::pooling_strategy),
+            )
             .with_context(context)
             .build()?;
 
@@ -302,6 +307,7 @@ impl EncoderLoader {
 
         let mut tokenizer = Tokenizer::from_bytes(tokenizer_json)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
 
         // No filesystem here, so the tuned length has to arrive inside the packed
         // config rather than beside it. See `packed_max_seq_len`.
@@ -342,7 +348,11 @@ impl EncoderLoader {
             .with_load_config(load_config)
             .with_backends(cpu_encoder, gpu_encoder)
             .with_head(cpu_head)
-            .with_pooling_strategy(M::pooling_strategy())
+            .with_pooling_strategy(
+                model_type
+                    .and_then(|m| m.pooling())
+                    .unwrap_or_else(M::pooling_strategy),
+            )
             .with_context(context)
             .build()?;
 

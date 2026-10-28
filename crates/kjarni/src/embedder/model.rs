@@ -238,15 +238,12 @@ impl Embedder {
         overrides: &EmbeddingOverrides,
     ) -> EmbedderResult<Vec<f32>> {
         let merged = self.merge_overrides(overrides);
-        let pooling = merged
-            .pooling
-            .as_ref()
-            .map(|p| p.as_str())
-            .unwrap_or("mean");
+        // None leaves the model's own pooling, which is not always the mean.
+        let pooling = merged.pooling.as_ref().map(|p| p.as_str());
         let normalize = merged.normalize.unwrap_or(true);
 
         self.inner
-            .encode_with(text, Some(pooling), normalize)
+            .encode_with(text, pooling, normalize)
             .await
             .map_err(EmbedderError::EmbeddingFailed)
     }
@@ -274,15 +271,12 @@ impl Embedder {
         overrides: &EmbeddingOverrides,
     ) -> EmbedderResult<Vec<Vec<f32>>> {
         let merged = self.merge_overrides(overrides);
-        let pooling = merged
-            .pooling
-            .as_ref()
-            .map(|p| p.as_str())
-            .unwrap_or("mean");
+        // None leaves the model's own pooling, which is not always the mean.
+        let pooling = merged.pooling.as_ref().map(|p| p.as_str());
         let normalize = merged.normalize.unwrap_or(true);
 
         self.inner
-            .encode_batch_with(texts, Some(pooling), normalize)
+            .encode_batch_with(texts, pooling, normalize)
             .await
             .map_err(EmbedderError::EmbeddingFailed)
     }

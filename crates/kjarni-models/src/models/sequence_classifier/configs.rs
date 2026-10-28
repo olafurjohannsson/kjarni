@@ -184,6 +184,12 @@ pub struct RobertaConfig {
     #[serde(default)]
     pub num_labels: Option<usize>,
 
+    /// "multi_label_classification" for a model whose labels are independent,
+    /// such as GoEmotions. Not read before, so those models were scored with a
+    /// softmax across labels instead of a sigmoid each.
+    #[serde(default)]
+    pub problem_type: Option<String>,
+
     // Computed field (not from JSON)
     #[serde(skip)]
     pub labels_vec: Option<Vec<String>>,
@@ -240,7 +246,10 @@ impl ModelConfig for RobertaConfig {
             num_kv_heads: self.num_attention_heads, // RoBERTa uses standard MHA
             head_dim: self.hidden_size / self.num_attention_heads,
             vocab_size: self.vocab_size,
-            max_seq_len: self.max_position_embeddings,
+            // Positions start at 2, so the table serves two fewer tokens than
+            // it has rows: 512 of 514. Truncating at 514 gave the last two
+            // tokens positions past the table, which PyTorch refuses outright.
+            max_seq_len: self.max_position_embeddings.saturating_sub(2),
             norm_eps: self.layer_norm_eps,
             activation: match self.hidden_act.as_str() {
                 "gelu" => Activation::Gelu,
@@ -265,7 +274,7 @@ impl ModelConfig for RobertaConfig {
             is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
-            problem_type: None,
+            problem_type: self.problem_type.clone(),
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
         }
@@ -318,5 +327,44 @@ impl ModelConfig for RobertaConfig {
             }),
             decoder: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod roberta_tests {
+    use super::*;
+    use kjarni_transformers::traits::ModelConfig;
+
+    fn roberta_json(problem_type: Option<&str>) -> String {
+        let problem = problem_type
+            .map(|p| format!(r#""problem_type": "{p}","#))
+            .unwrap_or_default();
+        format!(
+            r#"{{
+                {problem}
+                "hidden_size": 768, "num_hidden_layers": 12, "num_attention_heads": 12,
+                "intermediate_size": 3072, "hidden_act": "gelu",
+                "max_position_embeddings": 514, "vocab_size": 50265,
+                "layer_norm_eps": 1e-5, "type_vocab_size": 1,
+                "id2label": {{"0": "admiration", "1": "amusement"}}
+            }}"#
+        )
+    }
+
+    #[test]
+    fn multi_label_models_are_scored_with_a_sigmoid() {
+        // GoEmotions says so in `problem_type`. Dropped, its labels were softmaxed
+        // against each other and scores were off by up to 0.42.
+        let cfg =
+            RobertaConfig::from_json(&roberta_json(Some("multi_label_classification"))).unwrap();
+        assert!(cfg.is_multi_label());
+        let cfg = RobertaConfig::from_json(&roberta_json(None)).unwrap();
+        assert!(!cfg.is_multi_label());
+    }
+
+    #[test]
+    fn roberta_serves_two_fewer_tokens_than_its_position_table() {
+        let cfg = RobertaConfig::from_json(&roberta_json(None)).unwrap();
+        assert_eq!(cfg.metadata().max_seq_len, 512);
     }
 }

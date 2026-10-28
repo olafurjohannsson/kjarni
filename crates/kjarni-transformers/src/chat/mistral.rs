@@ -1,9 +1,9 @@
 use crate::{ChatTemplate, Conversation, Role};
 
-/// Mistral Instruct Template (v0.1, v0.2, v0.3)
+/// Mistral Instruct v0.3 template (v0.1 and v0.2 put a space before `[/INST]`)
 ///
 /// Format:
-/// <s>[INST] {system} {user} [/INST] {assistant} </s>[INST] {user} [/INST]
+/// <s>[INST] {user}[/INST] {assistant}</s>[INST] {system}\n\n{user}[/INST]
 #[derive(Clone, Debug, Default)]
 pub struct MistralChatTemplate {
     pub add_bos: bool,
@@ -42,30 +42,35 @@ impl ChatTemplate for MistralChatTemplate {
             None
         };
 
-        let mut is_first_user = true;
+        // Mistral v0.3's template puts the system prompt in the last user turn,
+        // and closes each with `[/INST]` straight after the text. This had a
+        // space before `[/INST]` and the system prompt in the first turn, so
+        // every prompt tokenized differently from the model's own template.
+        // Only when that turn is the conversation's last message, as upstream's
+        // `loop.last`; a conversation ending on a reply carries no system prompt.
+        let last_user = messages
+            .last()
+            .filter(|m| m.role == Role::User)
+            .map(|_| messages.len() - 1);
 
-        for msg in msg_iter {
+        for (i, msg) in msg_iter.enumerate() {
+            let i = i + usize::from(system_content.is_some());
             match msg.role {
                 Role::User => {
                     prompt.push_str("[INST] ");
-
-                    if is_first_user {
-                        if let Some(sys) = system_content {
-                            prompt.push_str(sys);
-                            prompt.push_str("\n\n");
-                        }
-                        is_first_user = false;
+                    if Some(i) == last_user
+                        && let Some(sys) = system_content
+                    {
+                        prompt.push_str(sys);
+                        prompt.push_str("\n\n");
                     }
-
                     prompt.push_str(&msg.content);
-                    prompt.push_str(" [/INST]");
+                    prompt.push_str("[/INST]");
                 }
                 Role::Assistant => {
                     prompt.push(' ');
                     prompt.push_str(&msg.content);
                     prompt.push_str("</s>");
-                    // If there is another user message coming, we usually don't add BOS again
-                    // in standard Mistral format, just straight to [INST].
                 }
                 Role::System => {
                     // System messages appearing later are usually ignored or concatenated
@@ -84,6 +89,25 @@ impl ChatTemplate for MistralChatTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matches_mistral_v0_3_chat_template() {
+        // transformers' rendering of the model's own template.
+        let template = MistralChatTemplate::new();
+        let mut conv = Conversation::new();
+        conv.push_user("Hi");
+        assert_eq!(template.apply(&conv), "<s>[INST] Hi[/INST]");
+
+        let mut conv = Conversation::with_system("Be brief.");
+        conv.push_user("Q1");
+        conv.push_assistant("A1");
+        conv.push_user("Q2");
+        assert_eq!(
+            template.apply(&conv),
+            "<s>[INST] Q1[/INST] A1</s>[INST] Be brief.\n\nQ2[/INST]"
+        );
+    }
+
     use crate::{Conversation, Message};
 
     #[test]
@@ -102,7 +126,7 @@ mod tests {
 
         let prompt = template.apply(&convo);
         // <s>[INST] {user} [/INST]
-        assert_eq!(prompt, "<s>[INST] Hello there [/INST]");
+        assert_eq!(prompt, "<s>[INST] Hello there[/INST]");
     }
 
     #[test]
@@ -114,7 +138,7 @@ mod tests {
 
         let prompt = template.apply(&convo);
         // System merged into first user message
-        let expected = "<s>[INST] You are a helpful assistant.\n\nWhat is 2 + 2? [/INST]";
+        let expected = "<s>[INST] You are a helpful assistant.\n\nWhat is 2 + 2?[/INST]";
         assert_eq!(prompt, expected);
     }
 
@@ -126,7 +150,7 @@ mod tests {
         convo.push_assistant("Why did the chicken cross the road?");
 
         let prompt = template.apply(&convo);
-        let expected = "<s>[INST] Tell me a joke. [/INST] Why did the chicken cross the road?</s>";
+        let expected = "<s>[INST] Tell me a joke.[/INST] Why did the chicken cross the road?</s>";
         assert_eq!(prompt, expected);
     }
 
@@ -141,7 +165,8 @@ mod tests {
         convo.push_assistant("I'm good, thank you!");
 
         let prompt = template.apply(&convo);
-        let expected = "<s>[INST] Assistant is friendly.\n\nHello! [/INST] Hi there!</s>[INST] How are you? [/INST] I'm good, thank you!</s>";
+        // Ending on a reply, the system prompt has no user turn to go in.
+        let expected = "<s>[INST] Hello![/INST] Hi there!</s>[INST] How are you?[/INST] I'm good, thank you!</s>";
         assert_eq!(prompt, expected);
     }
 
@@ -162,6 +187,6 @@ mod tests {
         let prompt = template.apply(&convo);
 
         // No <s> at beginning
-        assert_eq!(prompt, "[INST] Hello! [/INST]");
+        assert_eq!(prompt, "[INST] Hello![/INST]");
     }
 }

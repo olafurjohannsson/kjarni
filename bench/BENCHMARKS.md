@@ -6,7 +6,7 @@ Reproduce with `bench/compare/run_encoders.py` and `bench/compare/run_rest.py`; 
 
 ## Method
 
-- **Machine:** Intel Core i7-13700 (8 performance and 8 efficiency cores, 24 threads), 64 GB, Linux. Idle: each run waits for a load average under 1.
+- **Machine:** Intel Core i7-13700 (8 performance and 8 efficiency cores, 24 threads), 64 GB, Linux. Idle: each run waits for a load average under 1 over the last minute and under 1.5 over the last five.
 - **Isolation:** every engine runs in its own fresh process, so load time and memory are its own.
 - **Memory:** *memory after* is what the process holds once the work is done; *peak* is the most it held at any point, usually while loading.
 - **Timing:** minimum of repeated calls after warm-up, the least noisy estimate of what each engine can do. Medians are in the raw JSON.
@@ -57,14 +57,14 @@ whisper-small, English, greedy decoding, CPU.
 
 | Audio | Engine | Time | Faster than real time | Load | Memory after | Peak memory |
 |---|---|--:|--:|--:|--:|--:|
-| 11 s | **Kjarni** | 1.99 s | 5.5× | 441 ms | 1,082 MB | 1,246 MB |
-| 11 s | faster-whisper | 2.08 s | 5.3× | 1,482 ms | 1,676 MB | 2,120 MB |
-| 11 s | faster-whisper-int8 | 1.12 s | 9.9× | 1,109 ms | 724 MB | 825 MB |
-| 11 s | openai-whisper | 1.57 s | 7.0× | 2,083 ms | 1,393 MB | 1,665 MB |
-| 58 s | **Kjarni** | 4.99 s | 11.5× | 460 ms | 1,102 MB | 1,430 MB |
-| 58 s | faster-whisper | 8.28 s | 6.9× | 1,657 ms | 1,667 MB | 2,120 MB |
-| 58 s | faster-whisper-int8 | 4.20 s | 13.7× | 1,150 ms | 728 MB | 829 MB |
-| 58 s | openai-whisper | 6.98 s | 8.2× | 2,090 ms | 1,429 MB | 1,665 MB |
+| 11 s | **Kjarni** | 2.29 s | 4.8× | 505 ms | 1,083 MB | 1,246 MB |
+| 11 s | faster-whisper | 2.45 s | 4.5× | 1,605 ms | 1,676 MB | 2,120 MB |
+| 11 s | faster-whisper-int8 | 1.32 s | 8.3× | 1,331 ms | 724 MB | 825 MB |
+| 11 s | openai-whisper | 1.94 s | 5.7× | 2,209 ms | 1,353 MB | 1,665 MB |
+| 58 s | **Kjarni** | 7.32 s | 7.9× | 502 ms | 1,105 MB | 1,428 MB |
+| 58 s | faster-whisper | 10.40 s | 5.5× | 1,668 ms | 1,667 MB | 2,120 MB |
+| 58 s | faster-whisper-int8 | 5.00 s | 11.5× | 1,127 ms | 728 MB | 829 MB |
+| 58 s | openai-whisper | 9.34 s | 6.2× | 2,227 ms | 1,348 MB | 1,665 MB |
 
 ## Summarization and translation
 
@@ -72,10 +72,10 @@ distilbart-cnn-12-6 and flan-t5-base, each with its checkpoint's own generation 
 
 | Task | Engine | Time | Load | Memory after | Peak memory | Output |
 |---|---|--:|--:|--:|--:|---|
-| summarize | **Kjarni** | 2,787 ms | 569 ms | 1,280 MB | 1,329 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
-| summarize | PyTorch | 2,446 ms | 2,426 ms | 1,697 MB | 1,745 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
-| translate | **Kjarni** | 898 ms | 565 ms | 1,049 MB | 1,247 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
-| translate | PyTorch | 646 ms | 2,378 ms | 1,391 MB | 1,388 MB | Das Haus ist klein, aber das Garten hinter sie ist groß und voller alten Apple-Trees. |
+| summarize | **Kjarni** | 2,571 ms | 513 ms | 1,280 MB | 1,328 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
+| summarize | PyTorch | 2,707 ms | 2,308 ms | 1,724 MB | 1,745 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
+| translate | **Kjarni** | 989 ms | 531 ms | 1,048 MB | 1,246 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
+| translate | PyTorch | 947 ms | 2,321 ms | 1,410 MB | 1,407 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
 
 ## Image search (CLIP)
 

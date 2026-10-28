@@ -23,6 +23,7 @@ use kjarni_transformers::{
     cpu::encoder::{
         CpuTransformerEncoder,
         config::{EncodingConfig, PoolingStrategy},
+        pooler::{CpuPooler, StandardCpuPooler},
         traits::{
             CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, SentenceEncoderModel,
         },
@@ -198,7 +199,7 @@ impl SentenceEncoder {
         pooling_strategy: Option<&str>,
         normalize: bool,
     ) -> Result<Vec<f32>> {
-        let strategy = Self::parse_pooling_strategy(pooling_strategy)?;
+        let strategy = self.parse_pooling_strategy(pooling_strategy)?;
         let config = EncodingConfig {
             normalize,
             pooling_strategy: strategy,
@@ -227,12 +228,13 @@ impl SentenceEncoder {
     pub async fn encode_batch_flat(&self, texts: &[&str]) -> Result<(Vec<f32>, usize, usize)> {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
-        let mut pooled = kjarni_transformers::mean_pool(&hidden_states, &attention_mask)?;
-
-        let _config = EncodingConfig {
-            normalize: false,
-            pooling_strategy: self.pipeline.pooling_strategy(),
-        };
+        // The model's own pooling: this was mean pooling whatever the model
+        // was trained with, so bge-m3's flat batches came out wrong.
+        let mut pooled = StandardCpuPooler.pool(
+            &hidden_states,
+            &attention_mask,
+            &self.pipeline.pooling_strategy(),
+        )?;
 
         kjarni_transformers::cpu::encoder::traits::l2_normalize_inplace(&mut pooled);
 
@@ -261,7 +263,7 @@ impl SentenceEncoder {
         pooling_strategy: Option<&str>,
         normalize: bool,
     ) -> Result<Vec<Vec<f32>>> {
-        let strategy = Self::parse_pooling_strategy(pooling_strategy)?;
+        let strategy = self.parse_pooling_strategy(pooling_strategy)?;
         let config = EncodingConfig {
             normalize,
             pooling_strategy: strategy,
@@ -269,9 +271,13 @@ impl SentenceEncoder {
         <Self as SentenceEncoderModel>::encode_batch(self, texts, &config).await
     }
 
-    /// Parse a string pooling strategy into the enum.
-    fn parse_pooling_strategy(strategy: Option<&str>) -> Result<PoolingStrategy> {
-        match strategy.unwrap_or("mean") {
+    /// Parse a string pooling strategy into the enum; none given is the
+    /// model's own.
+    fn parse_pooling_strategy(&self, strategy: Option<&str>) -> Result<PoolingStrategy> {
+        let Some(strategy) = strategy else {
+            return Ok(self.pipeline.pooling_strategy());
+        };
+        match strategy {
             "mean" => Ok(PoolingStrategy::Mean),
             "cls" => Ok(PoolingStrategy::Cls),
             "max" => Ok(PoolingStrategy::Max),

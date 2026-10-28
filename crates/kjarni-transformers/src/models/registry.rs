@@ -255,6 +255,17 @@ impl ModelType {
     pub fn is_phi_model(&self) -> bool {
         matches!(self.architecture(), ModelArchitecture::Phi3)
     }
+    /// The pooling an embedding model was trained with, where it is not mean
+    /// pooling: what its sentence-transformers `1_Pooling/config.json` says.
+    /// bge-m3 takes the CLS token; pooled by the mean, its vectors were a
+    /// different embedding, at a cosine of 0.65 from the model's own.
+    pub fn pooling(&self) -> Option<crate::cpu::encoder::config::PoolingStrategy> {
+        match self {
+            Self::BgeM3 => Some(crate::cpu::encoder::config::PoolingStrategy::Cls),
+            _ => None,
+        }
+    }
+
     /// Get the CLI-friendly slug (e.g., "llama3.2-1b")
     pub fn cli_name(&self) -> &'static str {
         match self {
@@ -1485,6 +1496,20 @@ pub fn model_cache_dir(model_dir: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bge_m3_pools_the_cls_token() {
+        // Its sentence-transformers pooling config says CLS. Mean-pooled, its
+        // vectors were at cosine 0.65 from the reference.
+        use crate::cpu::encoder::config::PoolingStrategy;
+        assert!(matches!(
+            ModelType::BgeM3.pooling(),
+            Some(PoolingStrategy::Cls)
+        ));
+        // The rest are mean-pooled, the encoder default.
+        assert!(ModelType::MiniLML6V2.pooling().is_none());
+        assert!(ModelType::NomicEmbedText.pooling().is_none());
+    }
 
     /// The whole of the download fix. A 4xx is the server's final answer, so
     /// retrying it cannot change the outcome and costs 20 seconds of backoff to

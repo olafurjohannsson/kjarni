@@ -112,6 +112,7 @@ fn test_rope_scaling_serialization() {
         rope_type: "llama3".to_string(),
         long_factor: None,
         short_factor: None,
+        attention_factor: None,
     };
 
     let json = serde_json::to_string(&config).unwrap();

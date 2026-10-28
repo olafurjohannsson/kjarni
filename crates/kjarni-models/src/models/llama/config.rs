@@ -199,6 +199,7 @@ impl LlamaConfig {
                     .unwrap_or(8192),
                 long_factor: None,
                 short_factor: None,
+                attention_factor: None,
             });
 
             Ok(Arc::new(Self {

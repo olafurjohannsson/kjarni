@@ -43,6 +43,11 @@ pub struct RopeScalingConfig {
     /// LongRoPE per-dimension factors, used within the trained context.
     #[serde(default)]
     pub short_factor: Option<Vec<f32>>,
+    /// Multiplies the rotary cos and sin tables, which scales every query-key product
+    /// by its square. LongRoPE derives it from how far the context was stretched
+    /// when the checkpoint leaves it out, which Phi-3.5 does.
+    #[serde(default)]
+    pub attention_factor: Option<f32>,
 }
 
 pub enum PaddingSide {

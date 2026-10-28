@@ -2046,7 +2046,8 @@ mod classifier_tests {
             assert_eq!(classifier.model_name(), "distilroberta-emotion");
             assert_eq!(classifier.num_labels(), 7);
             assert_eq!(classifier.architecture(), "roberta");
-            assert_eq!(classifier.max_seq_length(), 514);
+            // 514 position rows, but RoBERTa's start at offset 2: 512 tokens fit.
+            assert_eq!(classifier.max_seq_length(), 512);
 
             let labels = classifier.labels().expect("Should have labels");
             assert_eq!(

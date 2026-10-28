@@ -722,6 +722,16 @@ fn a_factor_list_of_the_wrong_length_falls_back_instead_of_guessing() {
 }
 
 #[test]
+fn attention_factor_scales_cos_and_sin() {
+    let mut cfg = longrope(1.0, 1.0, 4096);
+    cfg.attention_factor = Some(1.5);
+    let scaled = RoPE::new_with_scaling(96, 64, 10000.0, Some(&cfg));
+    let base = RoPE::new(96, 64, 10000.0);
+    assert_eq!(scaled.cos_cache, &base.cos_cache * 1.5);
+    assert_eq!(scaled.sin_cache, &base.sin_cache * 1.5);
+}
+
+#[test]
 fn an_unknown_strategy_falls_back_to_plain_rope() {
     let head_dim = 96;
     let cfg = RopeScalingConfig {
@@ -731,4 +741,26 @@ fn an_unknown_strategy_falls_back_to_plain_rope() {
     let scaled = RoPE::new_with_scaling(head_dim, 64, 10000.0, Some(&cfg));
     let base = RoPE::new(head_dim, 64, 10000.0);
     assert_eq!(scaled.cos_cache, base.cos_cache);
+}
+
+// ── Llama 3 ─────────────────────────────────────────────────────
+
+#[test]
+fn llama3_inv_freq_matches_transformers() {
+    // Llama 3.2's scaling, and transformers' inverse frequencies for head_dim 64.
+    // Pairs 15 to 17 have wavelengths between 8192 / 4 and 8192, the band that is
+    // blended rather than kept or divided, which a short prompt barely exercises.
+    let inv = RoPE::calculate_inv_freq_llama3(64, 500000.0, 32.0, 1.0, 4.0, 8192);
+    let expected = [
+        (0, 1.0),
+        (14, 0.003_211_446_1),
+        (15, 0.001_290_548),
+        (16, 0.000_429_556_7),
+        (17, 9.708_286e-5),
+        (31, 9.418_306e-8),
+    ];
+    for (i, want) in expected {
+        let rel = (inv[i] - want).abs() / want;
+        assert!(rel < 1e-5, "pair {i}: {} vs {want}", inv[i]);
+    }
 }

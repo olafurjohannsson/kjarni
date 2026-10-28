@@ -301,11 +301,12 @@ against PyTorch's: embeddings agree to within 3e-7.
 </picture>
 
 - **Embeddings, reranking, classification:** faster than PyTorch on every task and level with ONNX Runtime on reranking and classification; ONNX Runtime is 11 to 17% faster on embeddings. Loads 10 to 25 times faster than PyTorch and 4 to 7 times faster than ONNX Runtime.
-- **Same answers as PyTorch:** embeddings, rerank scores and class probabilities agree with PyTorch's to within 4e-6, as closely as ONNX Runtime's do.
-- **Speech to text:** whisper-small transcribes a minute of audio at 11.5× real time, ahead of openai-whisper (8.2×) and faster-whisper at full precision (6.9×); faster-whisper's int8 mode is faster still (13.7×).
+- **Same answers as PyTorch:** embeddings, rerank scores, class probabilities and CLIP scores agree with PyTorch's to within 4e-6, as closely as ONNX Runtime's do. Summaries, translations and greedy chat replies come out word for word the same.
+- **Speech to text:** whisper-small transcribes a minute of audio at 7.9× real time, ahead of openai-whisper (6.2×) and faster-whisper at full precision (5.5×); faster-whisper's int8 mode is faster still (11.5×).
+- **Summarization and translation:** level with PyTorch, 0.95 and 1.04 times its time with the same beam search, and loads in 0.5 s against 2.3 s.
 - **Image search:** CLIP indexes 57 images a second against open_clip's 52, and loads in 0.3 s against 3.5 s.
-- **Memory:** a loaded model takes about the size of its weight file, less than the same model elsewhere: Whisper-small 1.1 GB against 1.4 GB in openai-whisper and 1.7 GB in faster-whisper, distilbart 1.3 GB against 1.7 GB, CLIP 0.8 GB against 1.2 GB.
-- **Where it is behind:** text generation runs at 70 to 79% of llama.cpp's speed on the same GGUF files; prompt processing is level with llama.cpp on Qwen2.5 0.5B and at 66% on Llama 3.2 1B. Summarization and translation take 1.1 to 1.4× PyTorch's time, and on short clips openai-whisper transcribes faster.
+- **Memory:** a loaded model takes about the size of its weight file, less than the same model elsewhere: Whisper-small 1.1 GB against 1.3 GB in openai-whisper and 1.7 GB in faster-whisper, distilbart 1.3 GB against 1.7 GB, CLIP 0.8 GB against 1.2 GB.
+- **Where it is behind:** text generation runs at 70 to 79% of llama.cpp's speed on the same GGUF files; prompt processing is level with llama.cpp on Qwen2.5 0.5B and at 66% on Llama 3.2 1B. On short clips openai-whisper transcribes faster.
 
 Method, every number and how to reproduce them: [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
 

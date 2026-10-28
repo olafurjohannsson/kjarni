@@ -2,37 +2,37 @@
   {
     "engine": "kjarni",
     "task": "summarize",
-    "load_ms": 569.0037819986173,
-    "ms": 2786.5862659964478,
-    "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . The project will be funded through a combination of municipal bonds and private donations . Several residents spoke in favour of the plan, citing the lack of quiet study spaces in the area .",
-    "peak_rss_mb": 1328.51953125,
-    "rss_mb": 1280.35546875
+    "load_ms": 513.4863120001683,
+    "ms": 2571.3628670000617,
+    "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
+    "peak_rss_mb": 1327.65234375,
+    "rss_mb": 1280.21875
   },
   {
     "engine": "torch",
     "task": "summarize",
-    "load_ms": 2425.8981889979623,
-    "ms": 2446.045390999643,
+    "load_ms": 2308.2518689998324,
+    "ms": 2706.5810840003905,
     "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
-    "peak_rss_mb": 1745.37109375,
-    "rss_mb": 1697.0234375
+    "peak_rss_mb": 1745.203125,
+    "rss_mb": 1724.0625
   },
   {
     "engine": "kjarni",
     "task": "translate",
-    "load_ms": 564.5508310008154,
-    "ms": 897.8262900018308,
+    "load_ms": 530.943187000048,
+    "ms": 989.0683819994592,
     "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
-    "peak_rss_mb": 1246.62890625,
-    "rss_mb": 1048.50390625
+    "peak_rss_mb": 1246.3515625,
+    "rss_mb": 1048.5
   },
   {
     "engine": "torch",
     "task": "translate",
-    "load_ms": 2377.924226999312,
-    "ms": 645.9152610004821,
-    "output": "Das Haus ist klein, aber das Garten hinter sie ist gro\u00df und voller alten Apple-Trees.",
-    "peak_rss_mb": 1387.77734375,
-    "rss_mb": 1390.96875
+    "load_ms": 2321.203974999662,
+    "ms": 946.7316939999364,
+    "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
+    "peak_rss_mb": 1407.37890625,
+    "rss_mb": 1410.296875
   }
 ]

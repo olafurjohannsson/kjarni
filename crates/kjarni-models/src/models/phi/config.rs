@@ -94,6 +94,10 @@ pub struct PhiConfig {
     pub intermediate_size: usize,
     pub vocab_size: usize,
     pub max_position_embeddings: usize,
+    /// The context Phi-3.5 was trained on before LongRoPE stretched it. It sits at the
+    /// top level of `config.json`, not inside `rope_scaling`.
+    #[serde(default)]
+    pub original_max_position_embeddings: Option<usize>,
 
     #[serde(default = "default_rms_norm_eps")]
     pub rms_norm_eps: f32,
@@ -168,6 +172,7 @@ impl PhiConfig {
                     .unwrap_or(32768),
                 long_factor: None,
                 short_factor: None,
+                attention_factor: None,
             });
 
             Ok(Arc::new(Self {
@@ -180,6 +185,7 @@ impl PhiConfig {
                     as usize,
                 vocab_size: loader.get_u32("general.vocabulary_size").unwrap_or(151936) as usize,
                 max_position_embeddings: get_val("context_length").unwrap_or(32768) as usize,
+                original_max_position_embeddings: None,
                 rms_norm_eps: get_f32_val("attention.layer_norm_rms_epsilon").unwrap_or(1e-6),
                 hidden_act: loader
                     .get_string(&format!("{}.feed_forward_activation", arch))
@@ -207,6 +213,33 @@ impl PhiConfig {
     }
 }
 
+impl PhiConfig {
+    /// LongRoPE scales cos and sin by `sqrt(1 + ln(s) / ln(trained))`, where `s` is
+    /// how far the context was stretched: 131072 / 4096 for Phi-3.5, about 1.19.
+    /// The checkpoint leaves the factor out, and without it every attention logit is
+    /// 1.42 times too small, which changed Phi-3.5's replies from the first token.
+    fn rope_scaling_with_attention_factor(&self) -> Option<RopeScalingConfig> {
+        let mut scaling = self.rope_scaling.clone()?;
+        if scaling.rope_type == "longrope" && scaling.attention_factor.is_none() {
+            let trained = self
+                .original_max_position_embeddings
+                .filter(|&n| n > 0)
+                .unwrap_or(self.max_position_embeddings) as f32;
+            let stretch = if scaling.factor > 0.0 {
+                scaling.factor
+            } else {
+                self.max_position_embeddings as f32 / trained
+            };
+            scaling.attention_factor = Some(if stretch <= 1.0 {
+                1.0
+            } else {
+                (1.0 + stretch.ln() / trained.ln()).sqrt()
+            });
+        }
+        Some(scaling)
+    }
+}
+
 impl ModelConfig for PhiConfig {
     fn model_type(&self) -> &str {
         "phi3"
@@ -228,7 +261,7 @@ impl ModelConfig for PhiConfig {
             norm_eps: self.rms_norm_eps,
             activation: Activation::SilU, // Phi-3 uses SwiGLU, like Llama and Qwen
             rope_theta: Some(self.rope_theta),
-            rope_scaling: self.rope_scaling.clone(),
+            rope_scaling: self.rope_scaling_with_attention_factor(),
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
@@ -367,6 +400,19 @@ mod tests {
         let scaling = cfg.rope_scaling.as_ref().expect("longrope scaling");
         assert_eq!(scaling.rope_type, "longrope");
         assert!(scaling.long_factor.is_some());
+    }
+
+    #[test]
+    fn longrope_attention_factor_matches_transformers() {
+        // transformers: sqrt(1 + ln(131072 / 4096) / ln(4096)).
+        let cfg = PhiConfig::from_json(&phi35_json()).unwrap();
+        let factor = cfg
+            .metadata()
+            .rope_scaling
+            .unwrap()
+            .attention_factor
+            .unwrap();
+        assert!((factor - 1.190_238_9).abs() < 1e-6, "{factor}");
     }
 
     #[test]

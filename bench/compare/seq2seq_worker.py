@@ -45,9 +45,14 @@ else:
     # The checkpoint's own settings, spelled out. distilbart-cnn keeps them in
     # config.json and leaves generation_config.json null, so a bare generate()
     # falls back to greedy and 20 tokens: a truncated summary, and a timing
-    # that looked several times faster than the real thing.
+    # that looked several times faster than the real thing. flan-t5 keeps its
+    # translation settings in config.json's task_specific_params, which Kjarni and
+    # the transformers translation pipeline apply but a bare generate() does not:
+    # PyTorch ran greedy while Kjarni ran four beams, so the two were not timed on
+    # the same work.
     gen = (dict(num_beams=4, min_length=56, max_length=142, length_penalty=2.0, no_repeat_ngram_size=3,
-                early_stopping=True) if TASK == "summarize" else dict(num_beams=1, do_sample=False, max_new_tokens=128))
+                early_stopping=True) if TASK == "summarize"
+           else dict(num_beams=4, max_length=300, early_stopping=True, length_penalty=1.0))
     def run():
         enc = tok(text, return_tensors="pt", truncation=True)
         out = model.generate(**enc, **gen)

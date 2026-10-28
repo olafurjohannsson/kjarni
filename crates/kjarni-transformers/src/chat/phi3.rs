@@ -58,9 +58,8 @@ impl ChatTemplate for Phi3ChatTemplate {
         vec!["<|end|>".to_string(), "<|endoftext|>".to_string()]
     }
 
-    fn default_system_prompt(&self) -> Option<&str> {
-        Some("You are a helpful assistant.")
-    }
+    // No default system prompt: the upstream template adds none, and one
+    // invented here made the model answer a different prompt.
 }
 
 #[cfg(test)]
