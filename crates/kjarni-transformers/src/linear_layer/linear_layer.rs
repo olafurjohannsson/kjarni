@@ -87,11 +87,10 @@ impl LinearLayer {
 
     /// Above this many rows faer beats the hand-written kernels.
     ///
-    /// Re-swept after the mid band moved to column-parallel 4x3 tiles. Against
-    /// the old row-parallel vector kernel every candidate landed within 2.4% and
-    /// 256 was as good as any; with the tile kernel, 512 is better in 19 of 60
-    /// rows and worse in 2, because the tile stays ahead of faer roughly twice as
-    /// far up. 1024 is a wash, 13 better and 11 worse.
+    /// Swept against the column-parallel 4x3 tile kernel: 512 is better than 256
+    /// in 19 of 60 rows and worse in 2, because the tile stays ahead of faer
+    /// roughly twice as far up as a row-parallel kernel. 1024 is a wash, 13 better
+    /// and 11 worse.
     const FAER_THRESHOLD: usize = 512;
 
     /// Creates a new zero-initialized `LinearLayer` with the specified dimensions and dtype.
@@ -194,17 +193,14 @@ impl LinearLayer {
                     } else if m < Self::FAER_THRESHOLD {
                         // Column-parallel bands worked in 4x3 register tiles.
                         //
-                        // Splitting by column rather than by row was worth 26 of
-                        // 60 rows on its own, because at m below the thread count
-                        // row-splitting starves threads and drags the whole
-                        // weight matrix through cache once per row: a short
-                        // MiniLM document went from 5.5ms to 2.8ms.
+                        // Splitting by column rather than by row, because at m
+                        // below the thread count row-splitting starves threads and
+                        // drags the whole weight matrix through cache once per
+                        // row: 2.8ms against 5.5ms on a short MiniLM document.
                         //
-                        // The 4x3 tile then replaced one output at a time, 12
-                        // FMAs per 7 loads against one per two, and took a 220
-                        // token document on bge-m3 from 560ms to 336ms and on
-                        // distilbert from 69ms to 45ms. Neither change lost a row
-                        // that was not on the faer path.
+                        // The 4x3 tile does 12 FMAs per 7 loads, against one per
+                        // two for one output at a time: 336ms against 560ms on a
+                        // 220 token bge-m3 document.
                         ops::matmul::matmul_2d_f32_tile43_par_n(input, &w.view(), bias, output);
                     } else {
                         ops::matmul::matmul_2d_f32_faer_noalloc(input, &w.view(), bias, output);

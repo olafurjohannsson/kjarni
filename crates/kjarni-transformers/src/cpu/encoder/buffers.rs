@@ -29,10 +29,9 @@ pub struct EncoderBuffers {
 
     /// Head-major Q, K^T and V [batch, heads, seq, head_dim].
     ///
-    /// The attention used to build these with `permuted_axes(..).to_owned()` on
-    /// every layer: three transposing copies of the whole activation, allocated
-    /// and dropped six times a forward pass. Holding them here makes the permute
-    /// a write into memory that is already warm.
+    /// Held here so the permute on every layer is a write into memory that is
+    /// already warm, rather than three transposing copies of the whole activation
+    /// allocated and dropped six times a forward pass.
     pub q_heads: Array4<f32>,
     pub k_heads_t: Array4<f32>,
     pub v_heads: Array4<f32>,
@@ -346,9 +345,7 @@ impl EncoderBuffers {
         let attn_context = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4;
 
         // q_heads, k_heads_t and v_heads are the same size as one another, and
-        // merge_scratch matches the 2D buffers. Both were missing here, so the
-        // figure this returns was well under the real allocation and the
-        // breakdown printed in debug builds under-reported with it.
+        // merge_scratch matches the 2D buffers.
         let head_bufs = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4 * 3;
         let merge = max_tokens * self.hidden * 4;
 

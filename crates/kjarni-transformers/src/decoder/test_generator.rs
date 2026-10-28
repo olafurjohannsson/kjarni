@@ -407,9 +407,9 @@ async fn test_generation_flow_control() {
     // Those differ, which is the whole point. This mock has no decoder configured, so
     // the tokenizer joins tokens with a space and `decode([2, 2])` is "hello hello";
     // the second token therefore contributes " hello", not "hello". Real SentencePiece
-    // tokenizers behave the same way, which is why Phi-3 and Mistral used to stream as
-    // "ThepopulationdensityintheUnitedStates". Asserting "hello" three times here would
-    // be asserting that the space is lost.
+    // tokenizers behave the same way: streaming tokens decoded one at a time, Phi-3 and
+    // Mistral read "ThepopulationdensityintheUnitedStates". Asserting "hello" three
+    // times here would be asserting that the space is lost.
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].text, "hello");
     assert_eq!(tokens[0].id, 2);

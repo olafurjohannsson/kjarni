@@ -9,7 +9,7 @@
 //!
 //! The corpus is deliberately long enough that a 16 document batch crosses the
 //! 1000 token mark, because that is where the encoder switches to the buffered
-//! path. RoBERTa used to crash there and nothing noticed.
+//! path, which RoBERTa's position offset makes easy to get wrong.
 
 use kjarni_models::SentenceEncoder;
 use kjarni_transformers::models::get_default_cache_dir;

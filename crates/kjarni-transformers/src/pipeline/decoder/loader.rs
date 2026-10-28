@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use crate::chat::chatml::ChatMLTemplate;
+use crate::chat::deepseek::DeepSeekR1ChatTemplate;
 use crate::chat::llama3::Llama3ChatTemplate;
 use crate::chat::mistral::MistralChatTemplate;
 use crate::chat::phi3::Phi3ChatTemplate;
@@ -138,6 +139,7 @@ impl DecoderLoader {
             return Err(anyhow!("Tokenizer not found at {:?}", tokenizer_path));
         }
         let mut tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
+        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams {
                 max_length: meta.max_seq_len,
@@ -169,29 +171,7 @@ impl DecoderLoader {
             .with_context_opt(context)
             .build()?;
         // Auto-detect template based on ModelType
-        let chat_template: Option<Box<dyn ChatTemplate>> = model_type.and_then(|mt| {
-            if !mt.is_instruct_model() {
-                return None;
-            }
-
-            match mt.architecture() {
-                ModelArchitecture::Llama => {
-                    Some(Box::new(Llama3ChatTemplate::for_generation()) as Box<dyn ChatTemplate>)
-                }
-                ModelArchitecture::Qwen2 => {
-                    Some(Box::new(ChatMLTemplate::new()) as Box<dyn ChatTemplate>)
-                }
-                ModelArchitecture::Mistral => {
-                    Some(Box::new(MistralChatTemplate::new()) as Box<dyn ChatTemplate>)
-                }
-                ModelArchitecture::Phi3 => {
-                    Some(Box::new(Phi3ChatTemplate::new()) as Box<dyn ChatTemplate>)
-                }
-
-                // Fallback
-                _ => None,
-            }
-        });
+        let chat_template = model_type.and_then(chat_template_for);
         Ok(M::new_from_pipeline(
             pipeline,
             tokenizer,
@@ -293,6 +273,7 @@ impl DecoderLoader {
 
         let mut tokenizer = Tokenizer::from_bytes(tokenizer_json)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
         let _ = tokenizer.with_truncation(Some(tokenizers::TruncationParams {
             max_length: meta.max_seq_len,
             ..Default::default()
@@ -328,26 +309,7 @@ impl DecoderLoader {
             .with_context_opt(context)
             .build()?;
 
-        let chat_template: Option<Box<dyn ChatTemplate>> = model_type.and_then(|mt| {
-            if !mt.is_instruct_model() {
-                return None;
-            }
-            match mt.architecture() {
-                ModelArchitecture::Llama => {
-                    Some(Box::new(Llama3ChatTemplate::for_generation()) as Box<dyn ChatTemplate>)
-                }
-                ModelArchitecture::Qwen2 => {
-                    Some(Box::new(ChatMLTemplate::new()) as Box<dyn ChatTemplate>)
-                }
-                ModelArchitecture::Mistral => {
-                    Some(Box::new(MistralChatTemplate::new()) as Box<dyn ChatTemplate>)
-                }
-                ModelArchitecture::Phi3 => {
-                    Some(Box::new(Phi3ChatTemplate::new()) as Box<dyn ChatTemplate>)
-                }
-                _ => None,
-            }
-        });
+        let chat_template = model_type.and_then(chat_template_for);
 
         Ok(M::new_from_pipeline(
             pipeline,
@@ -370,4 +332,32 @@ impl DecoderLoader {
         let json = std::fs::read_to_string(&gen_config_path).ok()?;
         HFGenerationDefaults::from_json(&json).ok()
     }
+}
+
+/// The chat template a model was tuned on, as its own `chat_template` renders
+/// it. Chosen per model, not per architecture: the R1 distills are Llama
+/// underneath with a format of their own, and Llama 3.1 and 3.2 date their
+/// system turn where 3.0 does not.
+fn chat_template_for(mt: ModelType) -> Option<Box<dyn ChatTemplate>> {
+    if !mt.is_instruct_model() {
+        return None;
+    }
+    let template: Box<dyn ChatTemplate> = match mt {
+        ModelType::DeepSeek_R1_Distill_Llama_8B => Box::new(DeepSeekR1ChatTemplate::new()),
+        ModelType::Llama3_2_1B_Instruct | ModelType::Llama3_2_3B_Instruct => {
+            Box::new(Llama3ChatTemplate::llama3_2())
+        }
+        ModelType::Llama3_1_8B_Instruct => Box::new(Llama3ChatTemplate::llama3_1()),
+        ModelType::Qwen2_5_0_5B_Instruct | ModelType::Qwen2_5_1_5B_Instruct => {
+            Box::new(ChatMLTemplate::qwen2_5())
+        }
+        _ => match mt.architecture() {
+            ModelArchitecture::Llama => Box::new(Llama3ChatTemplate::for_generation()),
+            ModelArchitecture::Qwen2 => Box::new(ChatMLTemplate::new()),
+            ModelArchitecture::Mistral => Box::new(MistralChatTemplate::new()),
+            ModelArchitecture::Phi3 => Box::new(Phi3ChatTemplate::new()),
+            _ => return None,
+        },
+    };
+    Some(template)
 }

@@ -22,6 +22,59 @@ pub struct Llama3ChatTemplate {
     pub add_bos: bool,
     /// Whether to add the assistant header at the end (for generation)
     pub add_generation_prompt: bool,
+    /// The date block Llama 3.1 and 3.2 open every system turn with. `None`
+    /// is Llama 3.0's plain format.
+    pub date: Option<KnowledgeDate>,
+}
+
+/// What `Today Date:` says in a Llama 3.1 or 3.2 system turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KnowledgeDate {
+    /// Llama 3.1's template: always "26 Jul 2024".
+    Fixed(&'static str),
+    /// Llama 3.2's template: the day the prompt is made, as transformers
+    /// renders it with `strftime_now("%d %b %Y")`.
+    Today,
+}
+
+impl KnowledgeDate {
+    fn render(self) -> String {
+        match self {
+            Self::Fixed(date) => date.to_string(),
+            Self::Today => today_dd_mon_yyyy(),
+        }
+    }
+}
+
+/// Today's date as "27 Oct 2026", in UTC. In the browser there is no clock to
+/// read here, so it falls back to the date Llama 3.2's template itself uses
+/// when it has none.
+fn today_dd_mon_yyyy() -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        return format_civil_date((now.as_secs() / 86_400) as i64);
+    }
+    "26 Jul 2024".to_string()
+}
+
+/// A day count since 1970-01-01 as "dd Mon yyyy" (Howard Hinnant's
+/// `civil_from_days`).
+// The browser build never reads the clock, so only the tests call this there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn format_civil_date(days: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{day:02} {} {year}", MONTHS[(month - 1) as usize])
 }
 
 impl Llama3ChatTemplate {
@@ -29,6 +82,7 @@ impl Llama3ChatTemplate {
         Self {
             add_bos: true,
             add_generation_prompt: true,
+            date: None,
         }
     }
 
@@ -37,6 +91,7 @@ impl Llama3ChatTemplate {
         Self {
             add_bos: true,
             add_generation_prompt: true,
+            date: None,
         }
     }
 
@@ -45,6 +100,23 @@ impl Llama3ChatTemplate {
         Self {
             add_bos: true,
             add_generation_prompt: false,
+            date: None,
+        }
+    }
+
+    /// Llama 3.1 Instruct, as its `chat_template` renders without tools.
+    pub fn llama3_1() -> Self {
+        Self {
+            date: Some(KnowledgeDate::Fixed("26 Jul 2024")),
+            ..Self::for_generation()
+        }
+    }
+
+    /// Llama 3.2 Instruct, as its `chat_template` renders without tools.
+    pub fn llama3_2() -> Self {
+        Self {
+            date: Some(KnowledgeDate::Today),
+            ..Self::for_generation()
         }
     }
 
@@ -82,9 +154,30 @@ impl ChatTemplate for Llama3ChatTemplate {
             prompt.push_str(Self::BEGIN_OF_TEXT);
         }
 
-        // Format each message
-        for message in conversation.messages() {
-            prompt.push_str(&self.format_message(&message.role, &message.content));
+        if let Some(date) = self.date {
+            // Llama 3.1 and 3.2 always open with a system turn that carries the
+            // knowledge cutoff and today's date, with any system prompt after
+            // it, and trim every message. The model was tuned on exactly this,
+            // and without the date block it answers differently.
+            let messages = conversation.messages();
+            let (system, rest) = match messages.first() {
+                Some(first) if first.role == Role::System => (first.content.trim(), &messages[1..]),
+                _ => ("", messages),
+            };
+            prompt.push_str(&self.format_message(
+                &Role::System,
+                &format!(
+                    "Cutting Knowledge Date: December 2023\nToday Date: {}\n\n{system}",
+                    date.render()
+                ),
+            ));
+            for message in rest {
+                prompt.push_str(&self.format_message(&message.role, message.content.trim()));
+            }
+        } else {
+            for message in conversation.messages() {
+                prompt.push_str(&self.format_message(&message.role, &message.content));
+            }
         }
 
         // Add assistant header for generation
@@ -103,6 +196,11 @@ impl ChatTemplate for Llama3ChatTemplate {
     }
 
     fn default_system_prompt(&self) -> Option<&str> {
+        // Llama 3.1 and 3.2 have no default; their system turn is the date
+        // block alone.
+        if self.date.is_some() {
+            return None;
+        }
         Some("You are a helpful, harmless, and honest assistant.")
     }
 
@@ -255,6 +353,40 @@ mod tests {
     use crate::Message;
 
     use super::*;
+
+    #[test]
+    fn llama3_2_matches_its_chat_template() {
+        let template = Llama3ChatTemplate {
+            date: Some(KnowledgeDate::Fixed("27 Oct 2026")),
+            ..Llama3ChatTemplate::for_generation()
+        };
+        let mut conv = Conversation::with_system("You are a helpful assistant.");
+        conv.push_user("Write a haiku about autumn leaves.");
+        // transformers' rendering of the model's own template.
+        assert_eq!(
+            template.apply(&conv),
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nCutting Knowledge Date: \
+             December 2023\nToday Date: 27 Oct 2026\n\nYou are a helpful assistant.<|eot_id|>\
+             <|start_header_id|>user<|end_header_id|>\n\nWrite a haiku about autumn leaves.<|eot_id|>\
+             <|start_header_id|>assistant<|end_header_id|>\n\n"
+        );
+        // No system prompt still opens with the date block, and none is invented.
+        assert_eq!(template.default_system_prompt(), None);
+        let mut bare = Conversation::new();
+        bare.push_user("Hi");
+        assert!(template.apply(&bare).starts_with(
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nCutting Knowledge Date: \
+             December 2023\nToday Date: 27 Oct 2026\n\n<|eot_id|>"
+        ));
+    }
+
+    #[test]
+    fn civil_dates_render_like_strftime() {
+        assert_eq!(format_civil_date(0), "01 Jan 1970");
+        assert_eq!(format_civil_date(19_930), "26 Jul 2024");
+        assert_eq!(format_civil_date(20_753), "27 Oct 2026");
+        assert_eq!(format_civil_date(11_016), "29 Feb 2000");
+    }
 
     #[test]
     fn test_llama3_simple_conversation() {

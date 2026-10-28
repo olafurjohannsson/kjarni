@@ -151,7 +151,7 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
 
             // Gated on `attn` like the K-quants: a file whose Q/K rows were not
             // permuted must not be un-permuted. And by the real head size, not
-            // a fixed 64: 128-dim heads were reordered as two 64-row tiles.
+            // a fixed 64, which would reorder 128-dim heads as two 64-row tiles.
             let blocks = match attn {
                 Some(attn)
                     if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) =>

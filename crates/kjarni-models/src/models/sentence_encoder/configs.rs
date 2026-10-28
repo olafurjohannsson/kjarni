@@ -153,11 +153,19 @@ impl BertConfig {
         )
     }
 
-    /// Helper to resolve the context length from conflicting fields
+    /// Helper to resolve the context length from conflicting fields. The
+    /// RoBERTa family's table includes the two positions before the first
+    /// token, so it serves two fewer tokens than it has rows.
     fn get_max_seq_len(&self) -> usize {
-        self.n_positions
+        let positions = self
+            .n_positions
             .or(self.max_position_embeddings)
-            .unwrap_or(512)
+            .unwrap_or(512);
+        if self.is_roberta_family() {
+            positions.saturating_sub(2)
+        } else {
+            positions
+        }
     }
 }
 
@@ -249,9 +257,11 @@ impl ModelConfig for BertConfig {
                     norm_bias: Some(format!("{}.norm1.bias", prefix)),
                 },
                 ffn: FeedForwardLayout {
-                    // SwiGLU: fc11 = Gate, fc12 = Up (Standard split)
-                    gate_weight: Some(format!("{}.mlp.fc11.weight", prefix)),
-                    up_weight: format!("{}.mlp.fc12.weight", prefix),
+                    // Nomic's gated MLP is `fc11(x) * silu(fc12(x))`: fc12 is
+                    // the gate and fc11 the up projection, the reverse of what
+                    // the numbering suggests.
+                    gate_weight: Some(format!("{}.mlp.fc12.weight", prefix)),
+                    up_weight: format!("{}.mlp.fc11.weight", prefix),
                     down_weight: format!("{}.mlp.fc2.weight", prefix),
 
                     up_bias: None,
@@ -425,7 +435,9 @@ impl ModelConfig for MpnetConfig {
             num_kv_heads: self.num_attention_heads,
             head_dim: self.hidden_size / self.num_attention_heads,
             vocab_size: self.vocab_size,
-            max_seq_len: self.max_position_embeddings,
+            // Positions start at 2, so the table serves two fewer tokens than
+            // it has rows: 512 of 514.
+            max_seq_len: self.max_position_embeddings.saturating_sub(2),
             norm_eps: self.layer_norm_eps,
             // mpnet's config.json says "gelu", the exact erf form, and this
             // hardcoded the tanh approximation while parsing `hidden_act` into a
@@ -728,11 +740,10 @@ impl ModelConfig for DistilBertConfig {
 mod activation_tests {
     use super::*;
 
-    // The activation is read from `hidden_act` rather than assumed. It was hardcoded to
-    // the tanh approximation once, which made mpnet's embeddings differ from
-    // sentence-transformers by about 5e-4: small enough to look like rounding, large
-    // enough to change retrieval. These pin the mapping so it cannot regress to a
-    // constant.
+    // The activation is read from `hidden_act` rather than assumed. The tanh
+    // approximation in place of exact GELU moves mpnet's embeddings about 5e-4 from
+    // sentence-transformers: small enough to look like rounding, large enough to
+    // change retrieval. These pin the mapping.
 
     fn mpnet_json(act: &str) -> String {
         format!(
@@ -789,5 +800,75 @@ mod activation_tests {
         }"#;
         let cfg = BertConfig::from_json(json).expect("bert config");
         assert_eq!(cfg.metadata().activation, Activation::Gelu);
+    }
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    // Each of these runs without error when wrong and only shows up as embeddings
+    // that disagree with sentence-transformers on the same weights.
+
+    fn bert_json(model_type: &str, positions: usize) -> String {
+        format!(
+            r#"{{
+                "model_type": "{model_type}",
+                "hidden_size": 384,
+                "num_hidden_layers": 6,
+                "num_attention_heads": 12,
+                "intermediate_size": 1536,
+                "vocab_size": 30522,
+                "max_position_embeddings": {positions},
+                "layer_norm_eps": 1e-12,
+                "hidden_act": "gelu"
+            }}"#
+        )
+    }
+
+    #[test]
+    fn nomic_gates_on_fc12_not_fc11() {
+        // Nomic's MLP is `fc11(x) * silu(fc12(x))`. Swapped, the embeddings land at
+        // cosine 0.14 from the reference.
+        let json = r#"{
+            "model_type": "nomic_bert",
+            "n_embd": 768, "n_layer": 12, "n_head": 12, "n_inner": 3072,
+            "vocab_size": 30528, "n_positions": 8192,
+            "layer_norm_epsilon": 1e-12, "activation_function": "swiglu"
+        }"#;
+        let cfg = BertConfig::from_json(json).expect("nomic config");
+        let ffn = cfg.layout().encoder.expect("encoder layout").layer.ffn;
+        assert_eq!(
+            ffn.gate_weight.as_deref(),
+            Some("encoder.layers.{}.mlp.fc12.weight")
+        );
+        assert_eq!(ffn.up_weight, "encoder.layers.{}.mlp.fc11.weight");
+    }
+
+    #[test]
+    fn roberta_family_serves_two_fewer_tokens_than_its_position_table() {
+        // A 514-row table starts at offset 2, so 512 tokens fit. Allowing 514 read
+        // past the end of the table, which PyTorch refuses outright.
+        for model_type in ["roberta", "xlm-roberta"] {
+            let cfg = BertConfig::from_json(&bert_json(model_type, 514)).unwrap();
+            assert_eq!(cfg.metadata().max_seq_len, 512, "{model_type}");
+        }
+    }
+
+    #[test]
+    fn plain_bert_keeps_its_whole_position_table() {
+        let cfg = BertConfig::from_json(&bert_json("bert", 512)).unwrap();
+        assert_eq!(cfg.metadata().max_seq_len, 512);
+    }
+
+    #[test]
+    fn mpnet_serves_two_fewer_tokens_than_its_position_table() {
+        let json = r#"{
+            "hidden_size": 768, "num_hidden_layers": 12, "num_attention_heads": 12,
+            "intermediate_size": 3072, "vocab_size": 30527,
+            "max_position_embeddings": 514, "layer_norm_eps": 1e-5, "hidden_act": "gelu"
+        }"#;
+        let cfg = MpnetConfig::from_json(json).unwrap();
+        assert_eq!(cfg.metadata().max_seq_len, 512);
     }
 }

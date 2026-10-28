@@ -83,9 +83,9 @@ pub fn compute_mel_spectrogram(audio: &[f32], config: &MelConfig) -> Result<Arra
     )?;
 
     // Compute STFT: every frame windowed into one row, then the DFT as two
-    // matrix products against cosine and sine tables. Per frame and bin this
-    // used to evaluate sin and cos afresh, 240 million of each for one
-    // 30-second chunk, and took longer than the encoder's first layers.
+    // matrix products against cosine and sine tables, rather than evaluating
+    // sin and cos afresh per frame and bin: 240 million of each for one
+    // 30-second chunk.
     let window = hann_window(config.n_fft);
     let n_bins = config.n_fft / 2 + 1;
     let valid = (0..n_frames)
@@ -371,9 +371,8 @@ fn conv1d(
     output
 }
 
-/// Whisper's exact, erf-based GELU, across threads. The tanh approximation
-/// this used to apply is a different function, and Whisper's checkpoints
-/// were trained with this one.
+/// Whisper's exact, erf-based GELU, across threads. The tanh approximation is
+/// a different function, and Whisper's checkpoints were trained with this one.
 fn gelu_inplace(x: &mut Array2<f32>) {
     crate::activations::apply_activation_2d_mut(
         &mut x.view_mut(),

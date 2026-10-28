@@ -178,10 +178,32 @@ fn resize_bicubic(src: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec
     resample_axis(&horizontal, dw, sh, dh, false)
 }
 
+/// PIL's fixed-point precision for 8-bit resampling: weights are scaled by
+/// 2^22 and summed as integers (`PRECISION_BITS` in Resample.c).
+const PRECISION_BITS: u32 = 32 - 8 - 2;
+
 /// One separable pass. `horizontal` selects which axis is being resampled.
+///
+/// The arithmetic is PIL's for 8-bit images, not floating point: each weight
+/// rounded to a 22-bit fixed-point integer, the sum started at half a unit and
+/// shifted back down. Summed in floats instead, a few pixels per image land one
+/// level away from PIL's.
 fn resample_axis(src: &[f32], w: usize, h: usize, out_len: usize, horizontal: bool) -> Vec<f32> {
     let (in_len, other) = if horizontal { (w, h) } else { (h, w) };
-    let coeffs = precompute_coeffs(in_len, out_len);
+    let coeffs: Vec<(usize, Vec<i64>)> = precompute_coeffs(in_len, out_len)
+        .into_iter()
+        .map(|(start, weights)| {
+            let fixed = weights
+                .iter()
+                .map(|&k| {
+                    // `normalize_coeffs_8bpc`: rounded half away from zero.
+                    let scaled = k * f64::from(1u32 << PRECISION_BITS);
+                    (if k < 0.0 { scaled - 0.5 } else { scaled + 0.5 }) as i64
+                })
+                .collect();
+            (start, fixed)
+        })
+        .collect();
 
     let mut out = vec![
         0.0f32;
@@ -194,7 +216,7 @@ fn resample_axis(src: &[f32], w: usize, h: usize, out_len: usize, horizontal: bo
     for o in 0..other {
         for (i, (start, weights)) in coeffs.iter().enumerate() {
             for c in 0..3 {
-                let mut acc = 0.0f32;
+                let mut acc: i64 = 1 << (PRECISION_BITS - 1);
                 for (k, &wt) in weights.iter().enumerate() {
                     let idx = (start + k).min(in_len - 1);
                     let src_i = if horizontal {
@@ -202,7 +224,7 @@ fn resample_axis(src: &[f32], w: usize, h: usize, out_len: usize, horizontal: bo
                     } else {
                         (idx * w + o) * 3 + c
                     };
-                    acc += wt * src[src_i];
+                    acc += wt * src[src_i] as i64;
                 }
                 let dst_i = if horizontal {
                     (o * out_len + i) * 3 + c
@@ -212,11 +234,10 @@ fn resample_axis(src: &[f32], w: usize, h: usize, out_len: usize, horizontal: bo
                 // PIL clamps to the pixel range after each pass, and the clamp is
                 // load-bearing: bicubic overshoots at edges and the second pass
                 // would otherwise carry values outside 0..255 into the result.
-                // Rounded to whole bytes, because PIL's resize returns an 8-bit
-                // image and normalization sees those quantized values, not the
-                // exact filter output. Keeping floats here is more accurate and
-                // less faithful, and drifts from every reference implementation.
-                out[dst_i] = acc.clamp(0.0, 255.0).round();
+                // Whole bytes, because PIL's resize returns an 8-bit image and
+                // normalization sees those quantized values, not the exact
+                // filter output (`clip8`).
+                out[dst_i] = (acc >> PRECISION_BITS).clamp(0, 255) as f32;
             }
         }
     }
@@ -224,23 +245,24 @@ fn resample_axis(src: &[f32], w: usize, h: usize, out_len: usize, horizontal: bo
 }
 
 /// PIL's `precompute_coeffs`: for each output position, the first source index
-/// and the normalized weights covering it.
-fn precompute_coeffs(in_len: usize, out_len: usize) -> Vec<(usize, Vec<f32>)> {
-    const SUPPORT: f32 = 2.0;
-    let scale = in_len as f32 / out_len as f32;
+/// and the normalized weights covering it. In doubles, as PIL computes them.
+fn precompute_coeffs(in_len: usize, out_len: usize) -> Vec<(usize, Vec<f64>)> {
+    const SUPPORT: f64 = 2.0;
+    let scale = in_len as f64 / out_len as f64;
     // Only reduction widens the filter; enlarging keeps the base support.
     let filter_scale = scale.max(1.0);
     let support = SUPPORT * filter_scale;
+    let inv_scale = 1.0 / filter_scale;
 
     (0..out_len)
         .map(|i| {
-            let center = (i as f32 + 0.5) * scale;
+            let center = (i as f64 + 0.5) * scale;
             let xmin = ((center - support + 0.5).floor() as isize).max(0) as usize;
             let xmax = ((center + support + 0.5).floor() as isize).min(in_len as isize) as usize;
             let mut weights = Vec::with_capacity(xmax.saturating_sub(xmin));
-            let mut total = 0.0f32;
+            let mut total = 0.0f64;
             for x in xmin..xmax {
-                let w = cubic_filter((x as f32 + 0.5 - center) / filter_scale);
+                let w = cubic_filter((x as f64 - center + 0.5) * inv_scale);
                 weights.push(w);
                 total += w;
             }
@@ -255,8 +277,8 @@ fn precompute_coeffs(in_len: usize, out_len: usize) -> Vec<(usize, Vec<f32>)> {
 }
 
 /// The cubic convolution kernel PIL uses, with `a = -0.5`.
-fn cubic_filter(x: f32) -> f32 {
-    const A: f32 = -0.5;
+fn cubic_filter(x: f64) -> f64 {
+    const A: f64 = -0.5;
     let x = x.abs();
     if x < 1.0 {
         ((A + 2.0) * x - (A + 3.0)) * x * x + 1.0
@@ -354,6 +376,42 @@ mod tests {
 
     /// Normalization is `(v/255 - mean) / std`, per channel. Checked on a flat
     /// image so resampling cannot obscure the arithmetic.
+    #[test]
+    fn bicubic_resize_matches_pil_byte_for_byte() {
+        // 17x11 to 9x13: narrowed (antialiased, widened support) and stretched in
+        // the same call. The expected bytes are PIL's `Image.resize(.., BICUBIC)`
+        // on the same pixels. A float accumulator puts a few pixels one level off
+        // PIL's fixed-point result.
+        let (w, h, dw, dh) = (17, 11, 9, 13);
+        let mut src = Vec::with_capacity(w * h * 3);
+        for y in 0..h {
+            for x in 0..w {
+                for c in 0..3 {
+                    src.push(((x * 7919 + y * 104729 + c * 31337 + x * y * 13) % 256) as u8);
+                }
+            }
+        }
+        #[rustfmt::skip]
+        let pil: [u8; 9 * 13 * 3] = [
+            123, 96, 201, 233, 64, 169, 190, 21, 135, 155, 74, 102, 115, 240, 70, 83, 197, 31, 50, 164, 41, 7, 130, 233, 117, 98, 204,
+            40, 120, 242, 54, 106, 228, 31, 90, 214, 87, 93, 200, 237, 117, 186, 217, 99, 170, 204, 98, 165, 187, 90, 194, 201, 76, 181,
+            36, 147, 87, 38, 155, 95, 42, 179, 103, 82, 186, 111, 171, 184, 117, 190, 200, 129, 198, 79, 150, 205, 17, 147, 207, 41, 155,
+            69, 175, 6, 95, 213, 33, 131, 133, 62, 168, 139, 102, 148, 174, 137, 73, 221, 137, 115, 139, 57, 150, 113, 97, 176, 76, 131,
+            95, 203, 50, 148, 187, 96, 175, 50, 155, 176, 77, 142, 176, 111, 180, 71, 98, 193, 72, 168, 77, 98, 237, 81, 151, 172, 101,
+            123, 204, 76, 188, 50, 143, 147, 104, 195, 51, 165, 60, 128, 164, 81, 197, 45, 138, 102, 101, 224, 60, 163, 135, 125, 239, 69,
+            160, 125, 103, 132, 75, 188, 59, 180, 62, 170, 59, 111, 193, 95, 217, 80, 205, 116, 191, 116, 128, 118, 110, 196, 90, 207, 65,
+            169, 158, 140, 66, 129, 151, 141, 173, 92, 69, 104, 145, 130, 166, 89, 183, 97, 147, 111, 165, 50, 185, 70, 186, 83, 181, 146,
+            201, 85, 152, 107, 183, 83, 148, 134, 165, 91, 136, 129, 179, 117, 119, 162, 167, 109, 105, 146, 162, 146, 98, 147, 53, 146, 137,
+            153, 78, 179, 137, 174, 102, 115, 137, 186, 131, 136, 154, 167, 136, 152, 124, 177, 66, 140, 135, 153, 118, 156, 96, 102, 131, 100,
+            122, 109, 156, 114, 119, 145, 107, 158, 158, 138, 110, 135, 96, 146, 150, 119, 132, 92, 150, 163, 132, 143, 171, 81, 135, 118, 125,
+            166, 121, 103, 97, 91, 135, 127, 145, 114, 115, 81, 75, 70, 116, 146, 144, 122, 148, 131, 175, 164, 162, 125, 123, 93, 89, 187,
+            189, 147, 143, 153, 130, 104, 123, 98, 66, 86, 70, 124, 132, 177, 155, 174, 144, 119, 137, 111, 80, 107, 83, 181, 71, 67, 174,
+        ];
+        let got = resize_bicubic(&src, w, h, dw, dh);
+        let expected: Vec<f32> = pil.iter().map(|&v| v as f32).collect();
+        assert_eq!(got, expected);
+    }
+
     #[test]
     fn channels_are_normalized_independently() {
         let c = clip_config();
@@ -453,7 +511,7 @@ mod tests {
     fn filter_weights_always_sum_to_one() {
         for (from, to) in [(100, 25), (25, 100), (240, 224), (7, 7), (1000, 3)] {
             for (i, (_, weights)) in precompute_coeffs(from, to).iter().enumerate() {
-                let sum: f32 = weights.iter().sum();
+                let sum: f64 = weights.iter().sum();
                 assert!(
                     (sum - 1.0).abs() < 1e-5,
                     "{from}->{to} position {i} sums to {sum}"

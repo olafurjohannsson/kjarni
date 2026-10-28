@@ -1,5 +1,4 @@
-//! Beam search, based on HF implementation, thanks HF guys this was extremely complicated to port
-//!
+//! Beam search, ported from transformers' implementation.
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures::stream::Stream;
@@ -165,8 +164,12 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
 
         let forced_bos_token_id = model.forced_bos_token_id();
 
-        // prompt_len: 1 for decoder_start, +1 if forced_bos
-        let prompt_len = if forced_bos_token_id.is_some() { 2 } else { 1 };
+        // Only the decoder start token is prompt. A forced BOS is generated, as
+        // transformers counts it: taking it as prompt shortened every
+        // hypothesis by one in the length penalty, which with BART's penalty of
+        // 2.0 ranked distilbart's finished summaries differently and chose
+        // another summary than transformers does from the same scores.
+        let prompt_len = 1;
 
         let finished = FinishedHypotheses::new(num_beams, length_penalty, prompt_len);
 
@@ -190,22 +193,22 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
 }
 
 fn find_best_beams_and_get_candidates(
-    logits_2d: Array2<f32>,
+    log_probs_2d: Array2<f32>,
     current_beams: &[BeamHypothesis],
     num_beams: usize,
 ) -> Vec<(BeamHypothesis, u32, usize, usize)> {
     let mut candidates: Vec<(f32, usize, u32, usize)> = Vec::with_capacity(num_beams * num_beams);
 
     for (beam_idx, (beam, logits_for_beam)) in
-        current_beams.iter().zip(logits_2d.rows()).enumerate()
+        current_beams.iter().zip(log_probs_2d.rows()).enumerate()
     {
         if beam.score == f32::NEG_INFINITY {
             continue;
         }
 
-        let log_probs = log_softmax_1d(&logits_for_beam.to_owned());
+        // Already log-probabilities, with the processors applied.
         let top_k_len = num_beams * 2;
-        let top_k = get_top_k_from_log_probs(&log_probs, top_k_len);
+        let top_k = get_top_k_from_log_probs(&logits_for_beam.to_owned(), top_k_len);
 
         for (rank, (token_id, token_log_prob)) in top_k.into_iter().enumerate() {
             candidates.push((beam.score + token_log_prob, beam_idx, token_id, rank));
@@ -249,8 +252,10 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
 
     let mut logits_2d = logits_3d.slice(s![.., -1, ..]).to_owned();
 
-    // step 0 generates token 2, so current_len = step + 2
-    let current_len = step + 2;
+    // The sequence length before this step's token, the decoder start token
+    // included: what transformers' min-length and forced-EOS processors compare
+    // against. One more lets the end token in, and forces it, a step early.
+    let current_len = step + 1;
 
     logits_2d
         .outer_iter_mut()
@@ -259,6 +264,14 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
             if ctx.beams[i].score == f32::NEG_INFINITY {
                 return;
             }
+
+            // Log-probabilities first, then the processors, as transformers'
+            // beam search does: a banned token's probability is dropped, not
+            // shared out among the rest. Masking the logits and normalizing
+            // after would raise every surviving token whenever a repeated n-gram
+            // or an early end is banned, and beams would rank differently.
+            let log_probs = log_softmax_1d(&logits_row.to_owned());
+            logits_row.assign(&log_probs);
 
             if step == 0
                 && let Some(forced_bos_id) = ctx.forced_bos_token_id
@@ -578,17 +591,18 @@ mod tests {
             },
         ];
 
+        // Log-probabilities: the beam step normalizes before this is called.
         let candidates = find_best_beams_and_get_candidates(logits, &beams, 2);
 
         let best = &candidates[0];
         assert_eq!(best.1, 0);
         assert_eq!(best.2, 1);
-        assert!((best.0.score - (-0.0405)).abs() < 0.001);
+        assert!((best.0.score - (-0.5)).abs() < 1e-6);
 
         let second = &candidates[1];
         assert_eq!(second.1, 0);
         assert_eq!(second.2, 0);
-        assert!((second.0.score - (-0.4076)).abs() < 0.001);
+        assert!((second.0.score - (-1.0)).abs() < 1e-6);
     }
 
     #[test]
@@ -1085,7 +1099,8 @@ mod tests {
 
     #[test]
     fn test_find_best_beams_score_accumulation() {
-        let logits = Array2::from_shape_vec((1, 3), vec![0.0, 0.0, 0.0]).unwrap();
+        let third = (1.0f32 / 3.0).ln();
+        let logits = Array2::from_shape_vec((1, 3), vec![third; 3]).unwrap();
         let beams = vec![BeamHypothesis {
             tokens: vec![0],
             score: -5.0,

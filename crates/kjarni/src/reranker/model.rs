@@ -594,9 +594,8 @@ mod scoring_tests {
     }
 
     /// A logit inside 0..1 is perfectly ordinary, so `probability` cannot detect
-    /// an already-normalized score and must not try. An earlier version returned
-    /// any score in that range unchanged, which silently mis-converted 0.972 — a
-    /// real ms-marco logit that appears in the C# binding's own test data.
+    /// an already-normalized score and must not try: 0.972 is a real ms-marco
+    /// logit, from the C# binding's own test data.
     #[test]
     fn a_logit_inside_zero_to_one_is_still_squashed() {
         use crate::reranker::types::RerankResult;

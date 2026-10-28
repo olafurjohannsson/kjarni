@@ -1,6 +1,7 @@
 """Runs the Whisper, seq2seq, CLIP and decoder comparisons, each engine in its
 own process, and writes results/*.json. Encoders are run_encoders.py."""
 import json, os, subprocess, sys
+from idle import wait_idle
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "results"); os.makedirs(OUT, exist_ok=True)
@@ -11,6 +12,7 @@ LLAMA_BENCH = os.path.join(BENCH, "llama/llama-b11901/llama-bench")
 
 
 def run(args, env=None):
+    wait_idle()
     p = subprocess.run(args, capture_output=True, text=True, env={**os.environ, **(env or {})})
     if p.returncode != 0:
         print("FAILED", " ".join(args[:4]), p.stderr[-1500:], file=sys.stderr, flush=True)
@@ -78,6 +80,7 @@ for name, gguf, tokjson in models:
                 "threads": [pp["threads"], tg["threads"]]}
         rows.append(best)
         print(f"decode {name:<40} kjarni     pp {pp['prompt_tok_s']:7.1f} tok/s  tg {tg['gen_tok_s']:6.1f} tok/s  threads {pp['threads']}/{tg['threads']}", flush=True)
+    wait_idle()
     p = subprocess.run([LLAMA_BENCH, "-m", gguf, "-p", "512", "-n", "128", "-t", "8,16", "-r", "3", "-o", "json"],
                        capture_output=True, text=True)
     if p.returncode == 0:

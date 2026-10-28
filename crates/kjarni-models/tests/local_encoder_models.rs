@@ -30,8 +30,7 @@ fn model_dir(name: &str) -> std::path::PathBuf {
     dir
 }
 
-/// Long enough to cross the old 1000-token threshold, which is where the
-/// buffered path starts and where the crash used to be.
+/// Long enough to cross 1000 tokens, where the buffered path starts.
 fn long_corpus(docs: usize) -> Vec<String> {
     (0..docs)
         .map(|i| {

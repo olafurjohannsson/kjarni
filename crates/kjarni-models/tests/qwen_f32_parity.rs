@@ -1,10 +1,10 @@
 //! Does Kjarni generate what PyTorch generates, given the same configuration?
 //!
-//! Getting this comparison right took three corrections, each of which silently
-//! compared two different computations:
+//! Three details each make the comparison silently compare two different
+//! computations:
 //!
 //!   1. Qwen ships bf16 weights. Loading with `target_dtype: None` means "detect
-//!      from file", so the engine ran bf16 while torch had been forced to f32.
+//!      from file", so the engine runs bf16 unless torch is too.
 //!   2. `generation_config.json` sets `repetition_penalty: 1.1`, and transformers
 //!      applies it even under `do_sample=False`, because a repetition penalty is
 //!      a logits processor rather than a sampling setting. Kjarni defaults to 1.0.

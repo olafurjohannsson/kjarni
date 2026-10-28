@@ -12,12 +12,26 @@ use crate::{ChatTemplate, Conversation, Role};
 #[derive(Clone, Debug, Default)]
 pub struct ChatMLTemplate {
     pub add_generation_prompt: bool,
+    /// The system turn the model's own template adds when none is given.
+    pub default_system: Option<&'static str>,
 }
 
 impl ChatMLTemplate {
     pub fn new() -> Self {
         Self {
             add_generation_prompt: true,
+            default_system: Some("You are a helpful assistant."),
+        }
+    }
+
+    /// Qwen 2.5, whose template introduces the model by name when there is no
+    /// system prompt.
+    pub fn qwen2_5() -> Self {
+        Self {
+            default_system: Some(
+                "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+            ),
+            ..Self::new()
         }
     }
 }
@@ -51,7 +65,7 @@ impl ChatTemplate for ChatMLTemplate {
     }
 
     fn default_system_prompt(&self) -> Option<&str> {
-        Some("You are a helpful assistant.")
+        self.default_system
     }
 }
 

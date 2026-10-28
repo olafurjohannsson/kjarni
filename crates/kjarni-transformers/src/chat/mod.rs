@@ -1,4 +1,5 @@
 pub mod chatml;
+pub mod deepseek;
 pub mod llama3;
 pub mod mistral;
 pub mod phi3;

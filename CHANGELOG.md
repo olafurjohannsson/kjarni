@@ -2,6 +2,52 @@
 
 ## 0.2.6
 
+### Outputs match PyTorch
+
+Every model was run against transformers on the same weight files. Embeddings,
+classifiers, the reranker and CLIP now agree to within 1e-6; summaries,
+translations and greedy chat replies are word for word the same. These were
+wrong, most of them silently:
+
+- **nomic-embed-text applied its activation to the wrong projection.** The gate
+  and up weights of its gated MLP were swapped in every layer, so its embeddings
+  were at a cosine of 0.14 from the model's own.
+- **Llama 3 positions drifted with length.** The Llama 3 RoPE scaling blended
+  the two divisors instead of the two frequencies across the middle band, so
+  the error grew with every token. Llama 3.1 and 3.2 and the DeepSeek-R1 distill
+  were affected; their logits were 100 times further from a float64 reference
+  than PyTorch's.
+- **Phi-3.5 attention was too flat.** LongRoPE scales cos and sin by
+  `sqrt(1 + ln(32) / ln(4096))`, about 1.19, which the checkpoint leaves to be
+  derived. Without it every attention logit was 1.42 times too small and replies
+  differed from the first token.
+- **bge-m3 is CLS-pooled**, as its sentence-transformers config says, not
+  mean-pooled (cosine 0.65 before). `Embedder::embed_batch_flat` in Rust
+  mean-pooled every model whatever its pooling.
+- **Multi-label classifiers use a sigmoid per label.** RoBERTa configs dropped
+  `problem_type`, so GoEmotions labels were softmaxed against each other and
+  scores were off by up to 0.42.
+- **RoBERTa, XLM-R and MPNet stop at 512 tokens**, not 514. Their position table
+  starts at offset 2, and the last two tokens read past its end.
+- **Trailing whitespace is no longer a token** for SentencePiece Unigram
+  tokenizers (XLM-R, T5), matching transformers.
+- **CLIP resizes with PIL's fixed-point arithmetic**, byte for byte, instead of
+  floats that left a few pixels per image one level off.
+- **Beam search scores the way transformers does**: log-softmax before the
+  logit processors, and lengths counted from the decoder start token. It changed
+  which distilbart summary won.
+- **Chat templates match each model's own.** Llama 3.1 and 3.2 get their date
+  header, DeepSeek-R1 its own format instead of Llama 3's, Mistral v0.3 no space
+  before `[/INST]` and its system prompt in the last user turn, and no template
+  invents a system prompt the model's does not.
+
+### Benchmarks
+
+- **The translation comparison now runs the same search on both sides.** PyTorch
+  was given greedy decoding while Kjarni ran flan-t5's own four-beam settings, so
+  the published "1.4 times PyTorch's time" compared different work. With the same
+  settings the two produce the same German and take 989 and 947 ms.
+
 ### Faster batches for reranking, classification and embeddings
 
 Measured on a batch of 64 texts against PyTorch and ONNX Runtime; the full method
@@ -78,7 +124,8 @@ window into a loop to the 448-token limit: a 54-second recording took 30 seconds
   that starts there, and `[BLANK_AUDIO]`, are discarded, and no segment opens in the
   window's last half-second.
 
-Transcribing long audio takes about a quarter longer, from the timestamp tokens.
+Transcribing long audio takes about a third longer, from the timestamp tokens; it
+is still faster than openai-whisper and than faster-whisper at full precision.
 
 ### Quantized chat in every language, and Qwen from GGUF
 

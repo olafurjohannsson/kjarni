@@ -3,8 +3,8 @@
 //! Three files disagree about this model's context length. For `all-MiniLM-L6-v2`
 //! the shipped `tokenizer.json` says 128, `sentence_bert_config.json` says 256, and
 //! `max_position_embeddings` in `config.json` says 512. sentence-transformers reads
-//! the second; Kjarni used to read the third, so on any input past 256 tokens it
-//! produced embeddings the reference implementation would never produce.
+//! the second. Reading the third, any input past 256 tokens embeds differently
+//! from the reference implementation.
 //!
 //! That is not a hypothetical range. The default RAG chunk is 1000 characters,
 //! which measures at a median of 286 tokens on ordinary prose, so most chunks
@@ -194,10 +194,9 @@ async fn report_retrieval_tradeoff_between_256_and_512() {
 
 /// Asking for more positions than the model has must fail at load.
 ///
-/// It used to succeed. `CpuEmbeddings::forward` clamps the position slice it adds,
-/// so a 513-token request on a 512-position model returned a normal-looking 384-dim
-/// vector in which the final token carried no positional information whatsoever.
-/// Silently wrong beats loudly broken for exactly nobody.
+/// `CpuEmbeddings::forward` clamps the position slice it adds, so a 513-token
+/// request on a 512-position model would return a normal-looking 384-dim vector in
+/// which the final token carries no positional information.
 #[tokio::test]
 async fn requesting_more_positions_than_the_model_has_is_refused() {
     let Some(dir) = model_dir() else {

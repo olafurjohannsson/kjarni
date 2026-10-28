@@ -801,14 +801,13 @@ pub fn matmul_4d_context(scores: &Array4<f32>, v: &Array4<f32>) -> Array4<f32> {
 /// One query row's attention scores per head: `Q=[B, H, 1, D]` against
 /// `K=[B, H / n_rep, D, S]`, query head `h` reading key head `h / n_rep`.
 ///
-/// One task per head, and the cache read a row at a time. This used to run
-/// only the batch in parallel, which in decoding is one, so every head went
-/// through a single thread; and it walked K down its columns, a stride of
-/// the whole cache length per read. For Whisper's cross-attention, 1500
-/// encoder positions in 12 layers, that was 40% of each decoded token.
+/// One task per head, and the cache read a row at a time. Parallel over the
+/// batch alone, which in decoding is one, every head would go through a single
+/// thread; and walking K down its columns strides the whole cache length per
+/// read. Whisper's cross-attention, 1500 encoder positions in 12 layers, makes
+/// both expensive.
 ///
-/// Each score sums its products in the same order as before, so results are
-/// bit for bit unchanged.
+/// Each score sums its products in index order.
 fn decode_scores(q: ArrayView4<f32>, k_transposed: ArrayView4<f32>, n_rep: usize) -> Array4<f32> {
     let (batch, heads, _, dim) = q.dim();
     let cache_len = k_transposed.shape()[3];
@@ -837,8 +836,8 @@ fn decode_scores(q: ArrayView4<f32>, k_transposed: ArrayView4<f32>, n_rep: usize
 }
 
 /// One query row's attention output per head: `scores=[B, H, 1, S]` against
-/// `V=[B, H / n_rep, S, D]`. The counterpart of `decode_scores`, and fixed
-/// the same way: a task per head, V read by rows, the same summation order.
+/// `V=[B, H / n_rep, S, D]`. The counterpart of `decode_scores`, built the
+/// same way: a task per head, V read by rows, products summed in index order.
 fn decode_context(scores: ArrayView4<f32>, v: ArrayView4<f32>, n_rep: usize) -> Array4<f32> {
     let (batch, heads, _, cache_len) = scores.dim();
     let dim = v.shape()[3];

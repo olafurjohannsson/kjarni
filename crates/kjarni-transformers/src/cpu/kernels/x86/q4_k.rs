@@ -7,10 +7,10 @@ use std::arch::x86_64::*;
 /// The exact f32 path for Q4_K: every 4-bit weight expanded and multiplied against
 /// unquantised activations.
 ///
-/// `matmul_2d_cpu_q4_k` no longer calls this. It quantises the activations to Q8_K and
-/// uses the integer kernel instead, which measured 1.95x faster. This is kept as the
-/// exact reference the GPU shader tests compare against, since those need a result
-/// with no int8 activation error in it.
+/// `matmul_2d_cpu_q4_k` does not call this: it quantises the activations to Q8_K and
+/// uses the integer kernel, which is 1.95x faster. This is the exact reference the
+/// GPU shader tests compare against, since those need a result with no int8
+/// activation error in it.
 #[allow(
     dead_code,
     reason = "exact f32 reference for the GPU Q4_K parity tests"

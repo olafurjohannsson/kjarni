@@ -15,10 +15,8 @@ mod tests {
     /// Absolute path to the spoken-word fixture used by the `#[ignore]`d
     /// integration tests.
     ///
-    /// Resolved from CARGO_MANIFEST_DIR rather than a relative path: the old
-    /// `../../crates/kjarni-models/examples/...` silently depended on the
-    /// directory cargo happened to run the test binary from, and pointed at a
-    /// file that was never committed.
+    /// Resolved from CARGO_MANIFEST_DIR rather than a relative path, which would
+    /// depend on the directory cargo happens to run the test binary from.
     fn speech_fixture() -> std::path::PathBuf {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speech.wav");

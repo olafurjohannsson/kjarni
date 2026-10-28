@@ -59,7 +59,11 @@ impl RoPE {
             _ => Self::calculate_inv_freq_base(head_dim, theta),
         };
 
-        let (cos_cache, sin_cache) = Self::build_cache(max_seq_len, &inv_freq);
+        let (mut cos_cache, mut sin_cache) = Self::build_cache(max_seq_len, &inv_freq);
+        if let Some(factor) = rope_scaling.and_then(|s| s.attention_factor) {
+            cos_cache *= factor;
+            sin_cache *= factor;
+        }
 
         Self {
             cos_cache,
@@ -112,9 +116,12 @@ impl RoPE {
             } else if wavelen > low_freq_wavelen {
                 base_freq / factor
             } else {
+                // Meta's reference blends the two frequencies, not the two divisors:
+                // `base / ((1 - smooth) * factor + smooth)` reads alike but is several
+                // times smaller across this band, an error that grows with position.
                 let smooth = (original_max_position_embeddings as f32 / wavelen - low_freq_factor)
                     / (high_freq_factor - low_freq_factor);
-                base_freq / ((1.0 - smooth) * factor + smooth)
+                (1.0 - smooth) * base_freq / factor + smooth * base_freq
             };
             inv_freq[i] = scaled_freq;
         }

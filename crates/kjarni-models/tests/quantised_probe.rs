@@ -187,9 +187,8 @@ fn kjq_rejects_an_unknown_magic() {
 ///
 /// This is the point of the whole encoding. Qwen2.5 0.5B is 494M parameters,
 /// which is 1.98GB as f32 while wasm32 caps a single allocation at 2GB, so the
-/// browser could load this model only if the weights stay in blocks. The engine
-/// could already run quantised decoders; what was missing was a container that
-/// did not undo it on the way in.
+/// browser can load this model only if the weights stay in blocks from the
+/// container all the way into the decoder.
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "generation is far too slow unoptimised")]
 async fn kjq8_decoder_loads_and_generates() {

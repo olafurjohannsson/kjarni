@@ -304,10 +304,10 @@ mod tests {
         Ok(())
     }
 
-    /// `ModelTokenizer::decode` used to call itself: there was no inherent `decode`
-    /// for `self.decode(..)` to resolve to, so every call recursed until the stack
-    /// ran out. A stack overflow aborts the process rather than unwinding, so no
-    /// error handling anywhere above it could have contained this.
+    /// `ModelTokenizer::decode` calls `self.decode(..)`, which recurses until the
+    /// stack runs out if there is no inherent `decode` for it to resolve to. A stack
+    /// overflow aborts the process rather than unwinding, so nothing above could
+    /// contain it.
     #[test]
     fn decode_returns_instead_of_recursing() -> Result<()> {
         let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;

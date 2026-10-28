@@ -1,10 +1,8 @@
 //! Do the GPU kernels agree with the CPU ones?
 //!
-//! Nothing in this repository compared the two until now. The GPU decoder once
-//! emitted pure garbage for Qwen because its QKV biases were never applied, and
-//! that was found by reading the code rather than by a failing test. A shader is
-//! the easiest place in this engine to be silently wrong: it compiles, it runs,
-//! it produces numbers, and only a comparison says whether they mean anything.
+//! A shader is the easiest place in this engine to be silently wrong: it
+//! compiles, it runs, it produces numbers, and only a comparison says whether they
+//! mean anything. A missing QKV bias, for one, turns Qwen's output to garbage.
 //!
 //! Skips when no adapter is available, so a headless CI box passes rather than
 //! failing on hardware it does not have.

@@ -309,8 +309,7 @@ fn filename_words(path: &Path) -> String {
         .collect();
     if words.is_empty() {
         // Fall back to the raw filename rather than indexing an image with no
-        // searchable text at all. `DocumentLoader` does the same, and the two
-        // used to disagree on exactly this case.
+        // searchable text at all, as `DocumentLoader` does.
         path.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default()

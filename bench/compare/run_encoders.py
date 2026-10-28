@@ -4,6 +4,7 @@ engine's output is from PyTorch's.
 """
 import json, os, subprocess, sys
 import numpy as np
+from idle import wait_idle
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "results"); os.makedirs(OUT, exist_ok=True)
@@ -22,6 +23,7 @@ for task in TASKS:
         best = None
         for r in range(REPEATS):
             npy = os.path.join(OUT, f"{task}.{engine}.npy")
+            wait_idle()
             p = subprocess.run([sys.executable, os.path.join(HERE, "encoder_worker.py"), engine, task, npy],
                                capture_output=True, text=True)
             if p.returncode != 0:

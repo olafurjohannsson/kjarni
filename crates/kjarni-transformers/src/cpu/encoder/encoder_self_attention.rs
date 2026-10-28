@@ -173,13 +173,10 @@ impl EncoderSelfAttention {
 
         //  Reshape to heads, into buffers that persist across layers.
         //
-        // This used to build three arrays per layer with
-        // `permuted_axes(..).as_standard_layout().to_owned()`. On MiniLM at batch
-        // 64 that is 1.4MB each, so a six-layer forward pass allocated and dropped
-        // about 25MB against a 30MB L3 and evicted the weights every layer. The
-        // transposes themselves were only part of the cost: the FFN's GEMMs, which
-        // touch none of this, were running at half speed because their weights had
-        // been pushed out of cache.
+        // Fresh arrays per layer, from `permuted_axes(..).as_standard_layout()
+        // .to_owned()`, would be 1.4MB each on MiniLM at batch 64: about 25MB
+        // allocated and dropped per forward pass against a 30MB L3, evicting the
+        // weights the FFN's GEMMs need next.
         if let Some(r) = rope {
             let q_3d = q_slice
                 .to_owned()
@@ -418,9 +415,8 @@ fn fused_scale_mask_softmax(
 const QUERY_BLOCK: usize = 64;
 
 /// Below this sequence length the score tensor is small enough to stay in cache,
-/// so materialising it costs nothing and tiling only adds per head setup. Every
-/// regression from tiling was at 18 token inputs, and every gain was at 220
-/// tokens and above.
+/// so materialising it costs nothing and tiling only adds per head setup. Tiling
+/// measures slower at 18 tokens and faster from 220 tokens up.
 const TILE_MIN_SEQ: usize = 64;
 
 /// Attention over blocks of queries, so the score tile never reaches memory.

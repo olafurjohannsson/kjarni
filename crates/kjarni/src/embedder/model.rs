@@ -49,11 +49,8 @@ impl Embedder {
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: EmbedderBuilder) -> EmbedderResult<Self> {
         // A local path is loaded from disk without consulting the registry.
-        //
-        // `from_path` sets the model name to "custom", so resolving that name
-        // first, as this did, failed every time with UnknownModel("custom") and
-        // made the whole `from_path` builder unusable. Classifier and Reranker
-        // both check `model_path` before the registry; this now matches them.
+        // `from_path` sets the model name to "custom", which the registry would
+        // reject. Classifier and Reranker check `model_path` first too.
         if let Some(model_path) = builder.model_path.clone() {
             return Self::from_local_path(model_path, builder).await;
         }
@@ -238,15 +235,12 @@ impl Embedder {
         overrides: &EmbeddingOverrides,
     ) -> EmbedderResult<Vec<f32>> {
         let merged = self.merge_overrides(overrides);
-        let pooling = merged
-            .pooling
-            .as_ref()
-            .map(|p| p.as_str())
-            .unwrap_or("mean");
+        // None leaves the model's own pooling, which is not always the mean.
+        let pooling = merged.pooling.as_ref().map(|p| p.as_str());
         let normalize = merged.normalize.unwrap_or(true);
 
         self.inner
-            .encode_with(text, Some(pooling), normalize)
+            .encode_with(text, pooling, normalize)
             .await
             .map_err(EmbedderError::EmbeddingFailed)
     }
@@ -274,15 +268,12 @@ impl Embedder {
         overrides: &EmbeddingOverrides,
     ) -> EmbedderResult<Vec<Vec<f32>>> {
         let merged = self.merge_overrides(overrides);
-        let pooling = merged
-            .pooling
-            .as_ref()
-            .map(|p| p.as_str())
-            .unwrap_or("mean");
+        // None leaves the model's own pooling, which is not always the mean.
+        let pooling = merged.pooling.as_ref().map(|p| p.as_str());
         let normalize = merged.normalize.unwrap_or(true);
 
         self.inner
-            .encode_batch_with(texts, Some(pooling), normalize)
+            .encode_batch_with(texts, pooling, normalize)
             .await
             .map_err(EmbedderError::EmbeddingFailed)
     }

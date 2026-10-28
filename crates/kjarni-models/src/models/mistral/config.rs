@@ -143,6 +143,7 @@ impl MistralConfig {
                     .unwrap_or(32768),
                 long_factor: None,
                 short_factor: None,
+                attention_factor: None,
             });
 
             Ok(Arc::new(Self {

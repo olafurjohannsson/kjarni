@@ -1,8 +1,7 @@
 //! Prefix reuse across generations.
 //!
-//! Every generation used to build a fresh KV cache and drop it, so a conversation
-//! re-processed its whole history each turn. These check that carrying the cache
-//! gives the same answer and skips the work.
+//! Carrying the KV cache from one turn to the next saves re-processing the whole
+//! conversation. These check that it gives the same answer and skips the work.
 
 use kjarni_models::models::qwen::QwenModel;
 use kjarni_transformers::cache::PrefixCache;

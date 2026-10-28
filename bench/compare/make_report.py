@@ -45,7 +45,7 @@ w("Kjarni against the usual ways of running the same models: PyTorch (through "
 w("Reproduce with `bench/compare/run_encoders.py` and `bench/compare/run_rest.py`; "
   "`make_charts.py` and `make_report.py` turn the results into this page.\n")
 w("## Method\n")
-w("- **Machine:** Intel Core i7-13700 (8 performance and 8 efficiency cores, 24 threads), 64 GB, Linux. Idle: each run waits for a load average under 1.")
+w("- **Machine:** Intel Core i7-13700 (8 performance and 8 efficiency cores, 24 threads), 64 GB, Linux. Idle: each run waits for a load average under 1 over the last minute and under 1.5 over the last five.")
 w("- **Isolation:** every engine runs in its own fresh process, so load time and memory are its own.")
 w("- **Memory:** *memory after* is what the process holds once the work is done; *peak* is the most it held at any point, usually while loading.")
 w("- **Timing:** minimum of repeated calls after warm-up, the least noisy estimate of what each engine can do. Medians are in the raw JSON.")

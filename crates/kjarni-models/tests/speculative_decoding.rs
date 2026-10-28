@@ -1,9 +1,8 @@
 //! Does the speculative decoding path work?
 //!
-//! `run_speculative_generation_loop` has been in the tree with no caller, no test
-//! and no way to reach it from the public API: nothing anywhere sets
-//! `speculation: Some(..)`. Qwen2.5-0.5B and 1.5B share a vocabulary (151,936),
-//! which is what a draft model needs, so the pair can actually be run.
+//! Nothing in the public API sets `speculation: Some(..)`, so these tests are what
+//! exercises `run_speculative_generation_loop`. Qwen2.5-0.5B and 1.5B share a
+//! vocabulary (151,936), which is what a draft model needs.
 
 use kjarni_models::models::qwen::QwenModel;
 use kjarni_transformers::common::stream::TokenType;
@@ -35,9 +34,9 @@ fn greedy(n: usize) -> GenerationConfig {
 
 /// Greedy with the repetition penalty the CLI actually defaults to.
 ///
-/// Speculation ignored `repetition_penalty` entirely, so `--draft` silently
-/// produced different, more repetitive text than the same command without it.
-/// The default config has penalty 1.0, which hid the bug.
+/// Speculation has to apply `repetition_penalty` too, or `--draft` produces
+/// different, more repetitive text than the same command without it. The default
+/// config has penalty 1.0, which would hide that.
 fn greedy_penalised(n: usize) -> GenerationConfig {
     GenerationConfig {
         max_new_tokens: Some(n),
