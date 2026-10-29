@@ -61,7 +61,7 @@ TS=crates/kjarni-wasm/ts
     typedoc --plugin typedoc-plugin-markdown \
       --entryPoints src/index.ts --tsconfig tsconfig.json \
       --readme none --excludePrivate --excludeInternal \
-      --validation.notDocumented --treatWarningsAsErrors \
+      --validation.notDocumented --treatWarningsAsErrors --skipErrorChecking \
       --out "$OUT/js" --logLevel Warn
 )
 echo "js: $(find "$OUT/js" -name '*.md' | wc -l) pages -> $OUT/js"

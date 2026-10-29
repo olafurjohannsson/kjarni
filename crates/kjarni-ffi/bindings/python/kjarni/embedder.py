@@ -77,14 +77,15 @@ class Embedder:
         result.free()
         return embedding
 
-    def encode_batch(self, texts: Sequence[str]):
+    def encode_batch(self, texts: Sequence[str]) -> "numpy.ndarray | list[list[float]]":
         """Encode multiple texts.
         
         Args:
             texts: List of input texts
             
         Returns:
-            List of embedding vectors
+            One vector per text: a (len(texts), dim) array when numpy is
+                installed, otherwise a list of lists.
         """
         if not texts:
             return []
