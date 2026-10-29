@@ -210,7 +210,11 @@ impl EncoderDecoderModelFactory for WhisperModel {
                 *load_config,
             )?) as Box<dyn CpuCrossDecoder>);
         } else if device.is_gpu() {
-            todo!("GPU Whisper not yet implemented")
+            // The audio frontend and the encoder-decoder have no GPU path yet.
+            // Refuse plainly rather than abort the caller.
+            anyhow::bail!(
+                "Whisper runs on the CPU only; GPU support for Whisper is not implemented yet"
+            );
         }
 
         Ok((cpu_enc, gpu_enc, cpu_dec, gpu_dec))
@@ -526,5 +530,27 @@ mod tests {
         assert_eq!(mel_config.n_fft, 400);
         assert_eq!(mel_config.hop_length, 160);
         assert_eq!(mel_config.n_mels, 80);
+    }
+
+    /// Asking for the GPU reached a todo!() and aborted the process, taking any
+    /// caller across the C ABI with it. It has to be an error.
+    #[tokio::test]
+    #[ignore = "needs a GPU and whisper-small in the local model cache"]
+    async fn whisper_on_the_gpu_is_an_error_not_a_panic() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let result = WhisperModel::from_registry(
+            ModelType::WhisperSmall,
+            None,
+            Device::Wgpu,
+            Some(context),
+            None,
+        )
+        .await;
+        let err = result.err().expect("Whisper on the GPU must be refused");
+        assert!(
+            format!("{err:#}").contains("CPU only"),
+            "unexpected error: {err:#}"
+        );
+        Ok(())
     }
 }

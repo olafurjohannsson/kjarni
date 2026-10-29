@@ -113,6 +113,7 @@ impl GpuDecoderSelfAttention {
             Some(attention_mask),
             true,      // is_causal = true for decoder
             cache_len, // position_offset for causal mask
+            None,
             pool,
         );
 

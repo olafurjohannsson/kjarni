@@ -38,8 +38,13 @@ fn unpack_bf16_high(packed: u32) -> f32 {
 }
 
 @compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let output_idx = global_id.x;
+fn main(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    // Launched over a 2D grid when one dimension would exceed 65535
+    // workgroups; see gpu_ops::utils::grid_1d.
+    let output_idx = global_id.y * grid.x * 256u + global_id.x;
 
     if (output_idx >= uniforms.output_size) {
         return;

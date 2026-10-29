@@ -210,3 +210,43 @@ async fn test_softmax_numerical_stability() -> Result<()> {
 
     Ok(())
 }
+
+/// One workgroup per row: 100k rows is past the 65535 workgroups WebGPU allows
+/// in one dimension, so the kernel runs on a 2D grid. Rows on the second grid
+/// row (index 65535 and up) are the ones a wrong index would miss or misplace.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn test_softmax_rows_beyond_dispatch_limit() -> Result<()> {
+    let context = get_test_context().await;
+    let softmax_kernel = GpuSoftmax::new(&context);
+
+    let rows = 100_000;
+    let cols = 4;
+    // Each row distinct, so a row written from the wrong input shows up.
+    let mut cpu_data =
+        Array2::from_shape_fn((rows, cols), |(r, c)| ((r % 97) as f32) * 0.01 + c as f32);
+
+    let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0);
+    context.queue.submit(std::iter::once(encoder.finish()));
+
+    for mut row in cpu_data.axis_iter_mut(Axis(0)) {
+        cpu_softmax(row.as_slice_mut().unwrap());
+    }
+    let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
+    let gpu_result = Array2::from_shape_vec((shape[0], shape[1]), gpu_vec)?;
+
+    // softmax([0, 1, 2, 3]) for row 0, which every row equals up to its offset.
+    let expected_row = [0.032058604, 0.087144315, 0.23688282, 0.6439142];
+    for r in [0, 65_534, 65_535, 65_536, rows - 1] {
+        for c in 0..cols {
+            assert!(
+                (gpu_result[[r, c]] - expected_row[c]).abs() < 1e-5,
+                "row {r} col {c}"
+            );
+        }
+    }
+    assert_all_close_2d(&gpu_result, &cpu_data, 1e-5);
+    Ok(())
+}

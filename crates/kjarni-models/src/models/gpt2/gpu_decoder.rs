@@ -310,6 +310,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     ) -> Result<GpuTensor> {
         let mut current_state = hidden_states.clone();
 
+        let checkpoint = pool.checkpoint();
         for i in start_layer..end_layer {
             if i >= self.layers.len() {
                 break;
@@ -331,6 +332,9 @@ impl GpuDecoder for Gpt2GpuDecoder {
                 None, // GPT-2 does not use RoPE
             )?;
             current_state = output;
+            // Only the hidden state carries into the next layer (the KV cache owns
+            // its own buffers); see GpuTensorPool::release_since.
+            pool.release_since(&checkpoint, &[&current_state]);
         }
 
         Ok(current_state)

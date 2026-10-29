@@ -2,6 +2,7 @@
 
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::{
     add_bias::GpuAddBias, apply_mask::GpuApplyMask, bmm::GpuBatchedMatMul,
     layout::permute::GpuPermute, layout::reshape::GpuReshape, layout::unreshape::GpuUnreshape,
@@ -15,6 +16,7 @@ pub struct AttentionOps {
     bmm: GpuBatchedMatMul,
     softmax: GpuSoftmax,
     apply_mask: GpuApplyMask,
+    add: GpuAdd,
 
     // Layout kernels
     reshape: GpuReshape,
@@ -44,6 +46,7 @@ impl AttentionOps {
             bmm: GpuBatchedMatMul::new(context),
             softmax: GpuSoftmax::new(context),
             apply_mask: GpuApplyMask::new(context),
+            add: GpuAdd::new(context),
             reshape: GpuReshape::new(context),
             unreshape: GpuUnreshape::new(context),
             permute: GpuPermute::new(context),
@@ -206,6 +209,12 @@ impl AttentionOps {
     }
 
     /// Computes attention output from Q, K, V tensors.
+    ///
+    /// `position_bias`, when given, is added to the scores before the mask and
+    /// softmax. It is `[heads * q_len, k_len]`, shared by every batch row, and
+    /// already divided by [`Self::scale_factor`]: the softmax kernel scales its
+    /// input, so `scores + bias / scale` comes out as `scores * scale + bias`,
+    /// which is where MPNet adds its relative position bias.
     pub fn attention(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -215,11 +224,27 @@ impl AttentionOps {
         mask: Option<&GpuTensor>,
         is_causal: bool,
         position_offset: usize,
+        position_bias: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         // Q @ K^T
         let k_transposed = k.permute(encoder, &self.permute, &[0, 1, 3, 2]);
-        let scores = self.bmm_4d(encoder, q, &k_transposed, pool);
+        let mut scores = self.bmm_4d(encoder, q, &k_transposed, pool);
+
+        if let Some(bias) = position_bias {
+            // [B, H, Q, K] seen as [B, H*Q, K]: each row of the bias table is
+            // one (head, query) pair, broadcast over the batch.
+            let (b, h, q_len, k_len) = scores.dims4();
+            let biased = pool.get(vec![b, h, q_len, k_len]);
+            self.add.encode_broadcast_offset(
+                encoder,
+                &scores.view(vec![b, h * q_len, k_len]),
+                bias,
+                0,
+                &biased.view(vec![b, h * q_len, k_len]),
+            );
+            scores = biased;
+        }
 
         // Mask and softmax
         self.apply_mask_and_softmax(encoder, &scores, mask, is_causal, position_offset);

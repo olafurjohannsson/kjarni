@@ -124,7 +124,7 @@ fn run_internal_add_bias(
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
         let workgroup_x = size.div_ceil(256);
-        compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroup_x);
     });
 }
 

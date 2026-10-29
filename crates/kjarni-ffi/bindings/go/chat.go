@@ -10,24 +10,38 @@ import (
 	"github.com/ebitengine/purego"
 )
 
+// ChatMode picks a chat's sampling defaults.
 type ChatMode int32
 
 const (
-	ChatDefault   ChatMode = 0
-	ChatCreative  ChatMode = 1
+	// ChatDefault samples at temperature 0.7, up to 512 new tokens.
+	ChatDefault ChatMode = 0
+	// ChatCreative samples at temperature 0.9, up to 1024 new tokens.
+	ChatCreative ChatMode = 1
+	// ChatReasoning samples at temperature 0.3, up to 2048 new tokens.
 	ChatReasoning ChatMode = 2
 )
 
+// GenerationConfig controls how a reply is generated. A negative value keeps
+// the model's default for that field.
 type GenerationConfig struct {
-	Temperature     float32
-	TopK            int32
-	TopP            float32
-	MinP            float32
+	// Temperature: higher is more random.
+	Temperature float32
+	// TopK samples only from the k most likely tokens.
+	TopK int32
+	// TopP samples from the smallest set of tokens whose probability sums to p.
+	TopP float32
+	// MinP drops tokens less likely than this fraction of the most likely one.
+	MinP float32
+	// RepetitionPenalty above 1 discourages repeating earlier tokens; 1 disables it.
 	RepetitionPenalty float32
-	MaxNewTokens    int32
-	DoSample        int32
+	// MaxNewTokens caps the length of the reply.
+	MaxNewTokens int32
+	// DoSample is 1 to sample, 0 to decode greedily, -1 for the default.
+	DoSample int32
 }
 
+// DefaultGenerationConfig keeps every model default.
 func DefaultGenerationConfig() GenerationConfig {
 	return GenerationConfig{
 		Temperature:     -1.0,
@@ -40,6 +54,8 @@ func DefaultGenerationConfig() GenerationConfig {
 	}
 }
 
+// GreedyGenerationConfig always picks the most likely token, so the same
+// prompt gives the same reply every time.
 func GreedyGenerationConfig() GenerationConfig {
 	return GenerationConfig{
 		Temperature:     0.0,
@@ -52,6 +68,8 @@ func GreedyGenerationConfig() GenerationConfig {
 	}
 }
 
+// CreativeGenerationConfig samples at temperature 0.9 with top-k 50 and
+// top-p 0.95.
 func CreativeGenerationConfig() GenerationConfig {
 	return GenerationConfig{
 		Temperature:     0.9,
@@ -89,6 +107,7 @@ type ffiGenerationConfig struct {
 	DoSample        int32
 }
 
+// ChatOption configures NewChat.
 type ChatOption func(*chatOptions)
 
 type chatOptions struct {
@@ -99,6 +118,7 @@ type chatOptions struct {
 	quantized    bool
 }
 
+// WithSystemPrompt sets the instructions the model sees before every message.
 func WithSystemPrompt(prompt string) ChatOption {
 	return func(o *chatOptions) {
 		o.systemPrompt = prompt
@@ -113,18 +133,26 @@ func WithQuantized(quantized bool) ChatOption {
 	}
 }
 
+// WithChatMode picks the sampling defaults; see ChatMode.
 func WithChatMode(mode ChatMode) ChatOption {
 	return func(o *chatOptions) {
 		o.mode = mode
 	}
 }
 
+// Chat runs a local language model in-process. It is safe for concurrent use;
+// calls are serialized. Close releases the model.
 type Chat struct {
 	handle uintptr
 	mu     sync.Mutex
 	closed bool
 }
 
+// NewChat loads a chat model by registry name, for example
+// "llama3.2-3b-instruct", downloading it on first use.
+//
+// opts takes ChatOption values (WithSystemPrompt, WithChatMode, WithQuantized)
+// and, of the shared options, WithQuiet and WithDevice.
 func NewChat(model string, opts ...interface{}) (*Chat, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })

@@ -369,9 +369,15 @@ impl GpuSwiGLUFFN {
         // NaN with no error, so those take the unfused route instead: two ordinary
         // linear projections through `GpuLinearLayer`, which dispatches on dtype
         // properly, then the elementwise activation.
+        //
+        // The fused kernels are tuned for one row, a decode step. With more
+        // rows (prefill, encoders) every dtype takes the unfused route, so both
+        // projections run as the tiled GEMM in GpuLinearLayer: several times
+        // faster than the fused batched kernels at prefill sizes.
         let dt = weights.gate_proj.dtype();
         let fused_reads = matches!(dt, DType::BF16 | DType::F32 | DType::Q4_K);
-        if fused_reads {
+        let fused = fused_reads && rows == 1;
+        if fused {
             self.encode_fused_gate_up(encoder, input, weights, &intermediate);
         } else {
             let gate = pool.get(vec![rows, intermediate_size]);
@@ -424,7 +430,7 @@ impl GpuSwiGLUFFN {
             |pass: &mut wgpu::ComputePass<'_>| {
                 pass.set_pipeline(&self.elementwise_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((elements as u32).div_ceil(256), 1, 1);
+                crate::gpu_ops::utils::dispatch_1d(pass, (elements as u32).div_ceil(256));
             }
         );
     }

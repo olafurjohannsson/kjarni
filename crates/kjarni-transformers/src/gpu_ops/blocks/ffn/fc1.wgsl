@@ -1,4 +1,5 @@
-//! First feedforward layer (FC1) with configurable activation function.
+//! First feedforward layer (FC1): bias and activation, applied in place after
+//! the matmul, which runs as a tiled GEMM in GpuLinearLayer.
 
 
 struct FfnUniforms {
@@ -72,50 +73,20 @@ fn silu(x: f32) -> f32 {
 }
 
 @compute @workgroup_size(512, 1, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn main(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    // Launched over a 2D grid when one dimension would exceed 65535
+    // workgroups; see gpu_ops::utils::grid_1d.
+    let idx = global_id.y * grid.x * 512u + global_id.x;
     let total_outputs = info.m * info.n;
     if (idx >= total_outputs) { return; }
 
-    let row = idx / info.n;
+    // `output` already holds input * fc1_weight^T, from the tiled GEMM in
+    // GpuLinearLayer. This pass adds the bias and applies the activation.
     let col = idx % info.n;
-
-    var sum: f32 = 0.0;
-
-    let input_offset = row * info.k;
-    let weight_offset = col * info.k;
-
-    let k_vec = info.k / 4u;
-    for (var t = 0u; t < k_vec; t = t + 1u) {
-        let base = t * 4u;
-        
-        let input_vec = vec4<f32>(
-            input[input_offset + base + 0u],
-            input[input_offset + base + 1u],
-            input[input_offset + base + 2u],
-            input[input_offset + base + 3u]
-        );
-        
-        let weight_vec = vec4<f32>(
-            fc1_weight[weight_offset + base + 0u],
-            fc1_weight[weight_offset + base + 1u],
-            fc1_weight[weight_offset + base + 2u],
-            fc1_weight[weight_offset + base + 3u]
-        );
-
-        sum = fma(input_vec.x, weight_vec.x, sum);
-        sum = fma(input_vec.y, weight_vec.y, sum);
-        sum = fma(input_vec.z, weight_vec.z, sum);
-        sum = fma(input_vec.w, weight_vec.w, sum);
-    }
-
-    // Remainder loop
-    let remainder_start = k_vec * 4u;
-    for (var kk = remainder_start; kk < info.k; kk = kk + 1u) {
-        sum = fma(input[input_offset + kk], fc1_weight[weight_offset + kk], sum);
-    }
-
-    sum = sum + fc1_bias[col];
+    let sum = output[idx] + fc1_bias[col];
 
     if (COMPUTE_ACT_TYPE == 0u) {
         output[idx] = gelu(sum);

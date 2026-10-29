@@ -142,7 +142,7 @@ impl GpuBroadcast {
         cpass.set_pipeline(&self.pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
         let dispatch_count = (dst.num_elements() as u32).div_ceil(256);
-        cpass.dispatch_workgroups(dispatch_count, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut cpass, dispatch_count);
     }
 }
 

@@ -73,4 +73,26 @@ mod t5_generation_test {
         assert_eq!(output, "Wie alte sind Sie?");
         Ok(())
     }
+
+    /// Asking for the GPU used to reach a todo!() and abort the process, which
+    /// across the C ABI took the caller down with it. It has to be an error.
+    #[tokio::test]
+    #[ignore = "needs a GPU and flan-t5-base in the local model cache"]
+    async fn t5_on_the_gpu_is_an_error_not_a_panic() -> Result<()> {
+        let context = kjarni_transformers::WgpuContext::new().await?;
+        let result = T5Model::from_registry(
+            ModelType::FlanT5Base,
+            None,
+            Device::Wgpu,
+            Some(context),
+            None,
+        )
+        .await;
+        let err = result.err().expect("T5 on the GPU must be refused");
+        assert!(
+            format!("{err:#}").contains("CPU only"),
+            "unexpected error: {err:#}"
+        );
+        Ok(())
+    }
 }

@@ -7,6 +7,7 @@ use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
+use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::traits::ModelMetadata;
 use anyhow::Result;
@@ -53,10 +54,17 @@ impl GpuEncoderLayer {
         let self_attn_layer_norm = create_norm(&self_attn_ln_weights);
         let ffn_layer_norm = create_norm(&ffn_ln_weights);
 
-        // Initialize FFN (Enum handles dispatch internally)
-        let feedforward = crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForwardStd::new(
-            context, activation,
-        )?);
+        // The kernel has to match the weights: nomic-bert's encoder is SwiGLU.
+        let feedforward = match &ff_weights {
+            crate::gpu_ops::blocks::GpuFeedForwardWeights::SwiGLU(_) => {
+                crate::gpu_ops::blocks::GpuFeedForward::SwiGLU(
+                    crate::gpu_ops::blocks::ffn_swiglu::GpuSwiGLUFFN::new(context)?,
+                )
+            }
+            _ => crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForwardStd::new(
+                context, activation,
+            )?),
+        };
 
         // Primitives
         let add = GpuAdd::new(context);
@@ -80,13 +88,29 @@ impl GpuEncoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
+        position_bias: Option<&GpuTensor>,
+        rope: Option<&GpuRoPE>,
         meta: &ModelMetadata,
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         if meta.is_prenorm {
-            self.forward_prenorm(encoder, hidden_states, attention_mask, pool)
+            self.forward_prenorm(
+                encoder,
+                hidden_states,
+                attention_mask,
+                position_bias,
+                rope,
+                pool,
+            )
         } else {
-            self.forward_postnorm(encoder, hidden_states, attention_mask, pool)
+            self.forward_postnorm(
+                encoder,
+                hidden_states,
+                attention_mask,
+                position_bias,
+                rope,
+                pool,
+            )
         }
     }
 
@@ -96,6 +120,8 @@ impl GpuEncoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
+        position_bias: Option<&GpuTensor>,
+        rope: Option<&GpuRoPE>,
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
@@ -111,6 +137,8 @@ impl GpuEncoderLayer {
             &ln1_out,
             &self.self_attn_weights,
             Some(attention_mask),
+            position_bias,
+            rope,
             pool,
         );
         let attn_block_output = pool.get(hidden_states.shape().to_vec());
@@ -136,6 +164,8 @@ impl GpuEncoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
+        position_bias: Option<&GpuTensor>,
+        rope: Option<&GpuRoPE>,
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
@@ -144,6 +174,8 @@ impl GpuEncoderLayer {
             hidden_states,
             &self.self_attn_weights,
             Some(attention_mask),
+            position_bias,
+            rope,
             pool,
         );
         let add_1_out = pool.get(hidden_states.shape().to_vec());
@@ -449,7 +481,7 @@ mod tests {
         let (encoder_cmd, pool_ref) = frame.resources();
 
         let gpu_output_tensor =
-            gpu_layer.forward_postnorm(encoder_cmd, &input_gpu, &mask_gpu, pool_ref)?;
+            gpu_layer.forward_postnorm(encoder_cmd, &input_gpu, &mask_gpu, None, None, pool_ref)?;
 
         frame.finish();
 

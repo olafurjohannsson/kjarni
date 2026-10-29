@@ -38,8 +38,12 @@ namespace Kjarni
         public IEnumerable<(string Label, float Score)> AboveThreshold(float threshold)
             => AllScores.Where(x => x.Score >= threshold);
 
+        /// <summary>The top label and its score as a percentage, for example "POSITIVE (99.9%)".</summary>
         public override string ToString()
             => $"{Label} ({Score * 100:F1}%)";
+
+        /// <summary>The top label, its score and every label's score, as JSON.</summary>
+        /// <param name="pretty">Indent the output across several lines.</param>
         public string ToJson(bool pretty = true)
         {
             var predictions = string.Join(",\n      ",
@@ -51,6 +55,7 @@ namespace Kjarni
             return pretty ? json : json.Replace("\n", "").Replace("  ", "");
         }
 
+        /// <summary>Every label with its score and a text bar chart, one per line.</summary>
         public string ToDetailedString()
         {
             var sb = new System.Text.StringBuilder();
@@ -166,6 +171,8 @@ namespace Kjarni
             }
         }
 
+        /// <summary>Classifies one text.</summary>
+        /// <returns>The top label and score, with every label's score in <see cref="ClassificationResult.AllScores"/>.</returns>
         public ClassificationResult Classify(string text)
         {
             ThrowIfDisposed();
@@ -195,6 +202,7 @@ namespace Kjarni
             }
         }
 
+        /// <summary>Releases the native model. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -209,6 +217,7 @@ namespace Kjarni
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>Releases the native model if <see cref="Dispose"/> was not called.</summary>
         ~Classifier()
         {
             Dispose();

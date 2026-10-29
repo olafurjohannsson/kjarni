@@ -357,15 +357,17 @@ impl Classifier {
             .into_iter()
             .enumerate()
             .map(|(i, row)| {
-                self.finish(self.scores_from_logits(row), &labels, &merged)
-                    .map_err(|e| match e {
-                        ClassifierError::ClassificationFailed(inner) if texts.len() > 1 => {
-                            ClassifierError::ClassificationFailed(
-                                inner.context(format!("text {i}")),
-                            )
-                        }
-                        other => other,
-                    })
+                let scores = if merged.return_logits {
+                    row
+                } else {
+                    self.scores_from_logits(row)
+                };
+                self.finish(scores, &labels, &merged).map_err(|e| match e {
+                    ClassifierError::ClassificationFailed(inner) if texts.len() > 1 => {
+                        ClassifierError::ClassificationFailed(inner.context(format!("text {i}")))
+                    }
+                    other => other,
+                })
             })
             .collect()
     }

@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.2.7
+
+### GPU results match PyTorch
+
+Every embedding model, classifier and the reranker now run against PyTorch on
+both CPU and GPU in one test, logit by logit, and agree to within 6e-6 on each.
+Several GPU paths were wrong before, some silently:
+
+- **GPU classification from the bindings ran on the CPU.** `kjarni_classifier_new`
+  started a fresh builder from the model name after setting the device and cache
+  directory, dropping both. Python, C#, Go and C++ classifiers asked for the GPU
+  and got the CPU, and ignored `cache_dir`.
+- **RoBERTa, DistilRoBERTa and XLM-R (bge-m3) were wrong on the GPU.** The GPU
+  encoder built its own embedding setup without the position offset, so position
+  embeddings were read from row 0 instead of row 2. bge-m3 embeddings were at a
+  cosine of 0.97 from the CPU's, and RoBERTa sentiment scores off by 0.05.
+- **MPNet was wrong on the GPU.** Its relative position bias was never loaded on
+  the GPU path (cosine 0.87).
+- **nomic-embed-text panicked on the GPU**, with "FFN type mismatch": the GPU
+  encoder always used the standard feed-forward kernel, and had no rotary
+  positions either.
+- **Large GPU batches panicked.** Kernels launched one workgroup per row or per
+  256 elements in a single dimension, and WebGPU allows 65535: MiniLM failed at
+  256 texts, bge-m3 at 128. Launches past the limit now spread over a 2D grid.
+- **GPU decode ran out of memory as it generated.** The tensor pool kept a buffer
+  for every size it had handed out, and attention's sizes change every token: a
+  3B model gained about 70 MB of VRAM per token until the driver started paging.
+- **`return_logits` did nothing.** The classifier accepted it and returned
+  probabilities.
+- **T5 and Whisper on the GPU abort no longer.** They have no GPU path yet and
+  reached a `todo!()`, which took a calling process down with it. They now return
+  an error saying they run on the CPU only.
+
+### The GPU is faster than the CPU
+
+Embedding, classification and prompt processing on the GPU were between 2 and 15
+times slower than the CPU. On an RTX A2000, with the model loaded:
+
+| | CPU | GPU in 0.2.6 | GPU now |
+|---|---|---|---|
+| MiniLM, 256 texts | 0.7 s | 2.4 s | 0.3 s |
+| bge-m3, 256 texts | 13.8 s | 44 s (and wrong) | 5.2 s |
+| Llama 3.2 1B, 1800-token prompt, first token with load, Q4_K_M | 7.7 s | 21.0 s | 6.0 s |
+| Llama 3.2 3B decode, Q4_K_M / BF16 | | 14.0 / 11.7 tok/s | 24.1 / 18.5 tok/s |
+
+- **Matrix multiplies are tiled.** Batched multiplies gave each thread one output
+  and read both operands from global memory for every product, at about 150
+  GFLOP/s. They now stage tiles in workgroup memory, 64x64 or 128x128 by row
+  count, and reach 2 to 2.7 TFLOP/s. F32, BF16, Q4_K and Q6_K weights all use them;
+  packed weights are dequantised as each tile loads.
+- **The encoder feed-forward and batched SwiGLU use them.** Both had their own
+  per-output kernels for batches.
+- **Each layer reuses the previous layer's scratch buffers.** A forward pass was
+  one allocation scope, so every layer's intermediates stayed allocated to the end:
+  8.3 GB for bge-m3 at a few thousand tokens, enough to push the weights out of
+  VRAM. It now holds 3.7 GB, and time grows linearly with the batch.
+- **GGUF files load faster.** The embedding table was dequantised and uploaded
+  twice, once by the decoder and once by the pipeline; it is now shared, and the
+  dequantisation runs in parallel. Llama 3.2 1B loads in 3.2 s instead of 5.6.
+
+### Documentation
+
+- **Every public API has a doc comment** in C#, Go, Python and TypeScript, 101
+  that had none.
+- **The NuGet package ships its XML documentation**, so IDEs show it. Only
+  `Kjarni.Extensions.AI` did.
+- **`scripts/gen-reference.sh` generates the Python, .NET and JavaScript API
+  references** as Markdown, and fails when a public item has no doc comment. CI
+  runs it on every push and attaches the result to each release as
+  `kjarni-reference.tar.gz`. Rust and Go are on docs.rs and pkg.go.dev.
+- **One license everywhere.** NuGet, npm and the `kjarni-wasm` crate said MIT;
+  every manifest now says MIT OR Apache-2.0, and `check-versions.sh` fails if one
+  disagrees.
+- Package descriptions on NuGet and PyPI list every task, the npm README's format
+  guide link works, and the `Capability` type is exported from `kjarni-wasm`.
+
 ## 0.2.6
 
 ### Outputs match PyTorch

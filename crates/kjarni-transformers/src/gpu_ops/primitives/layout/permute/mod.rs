@@ -110,7 +110,7 @@ impl GpuPermute {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
                 let workgroups = (output.num_elements() as u32).div_ceil(256);
-                pass.dispatch_workgroups(workgroups, 1, 1);
+                crate::gpu_ops::utils::dispatch_1d(pass, workgroups);
             }
         );
     }

@@ -16,8 +16,9 @@ import type {
   Response,
 } from "./protocol.js";
 
-export type { ClassifyResult, ModelSource, RankedDocument };
+export type { Capability, ClassifyResult, ModelSource, RankedDocument };
 
+/** Which models {@link Kjarni.load} loads. Name only the ones you need. */
 export interface LoadOptions {
   /** Embeddings and semantic similarity. A `.kjq` file. */
   encoder?: ModelSource;
@@ -33,9 +34,11 @@ export interface LoadOptions {
   onProgress?: (capability: Capability, loaded: number, total: number) => void;
 }
 
+/** How {@link Kjarni.chat} generates a reply. */
 export interface ChatOptions {
+  /** The most tokens to generate. Defaults to 256. */
   maxNewTokens?: number;
-  /** 0 selects greedy decoding, which is deterministic. */
+  /** Sampling temperature. Defaults to 0, greedy decoding, which is deterministic. */
   temperature?: number;
 }
 
@@ -91,6 +94,16 @@ type PendingRequest = Request extends infer R
     : never
   : never;
 
+/**
+ * Models running in a Web Worker. Create one with {@link Kjarni.load}; every
+ * method returns a promise, so the page stays responsive while a model works.
+ *
+ * ```ts
+ * const kjarni = await Kjarni.load({ encoder: "/models/minilm.kjq" });
+ * const [a, b] = await kjarni.encode(["doctor", "physician"]);
+ * console.log(Kjarni.cosine(a, b)); // 0.8598
+ * ```
+ */
 export class Kjarni {
   #worker: Worker;
   #next = 1;
@@ -179,7 +192,9 @@ export class Kjarni {
   /**
    * Generates a reply, yielding text as it arrives.
    *
-   *   for await (const piece of kjarni.chat("Explain RAG")) out.textContent += piece;
+   * ```ts
+   * for await (const piece of kjarni.chat("Explain RAG")) out.textContent += piece;
+   * ```
    */
   async *chat(prompt: string, options: ChatOptions = {}): AsyncGenerator<string, void, unknown> {
     const queue: string[] = [];

@@ -140,10 +140,60 @@ pub fn create_uniform_buffer<T: bytemuck::Pod>(
     })
 }
 
+/// WebGPU's limit on workgroups in any one dimension of a dispatch.
+pub const MAX_WORKGROUPS_PER_DIM: u32 = 65535;
+
+/// Spreads `workgroups` over an x-by-y grid that stays within
+/// [`MAX_WORKGROUPS_PER_DIM`] in each dimension.
+///
+/// Kernels launched this way recover their flat workgroup index as
+/// `wg_id.y * num_workgroups.x + wg_id.x`, or, for a thread index with a
+/// workgroup of `WG` threads, `global_id.y * num_workgroups.x * WG + global_id.x`.
+/// The grid can cover up to `x - 1` more workgroups than asked for, so those
+/// kernels bound-check the index.
+pub fn grid_1d(workgroups: u32) -> (u32, u32) {
+    if workgroups <= MAX_WORKGROUPS_PER_DIM {
+        (workgroups, 1)
+    } else {
+        (
+            MAX_WORKGROUPS_PER_DIM,
+            workgroups.div_ceil(MAX_WORKGROUPS_PER_DIM),
+        )
+    }
+}
+
+/// Dispatches `workgroups` through [`grid_1d`].
+pub fn dispatch_1d(pass: &mut wgpu::ComputePass<'_>, workgroups: u32) {
+    let (x, y) = grid_1d(workgroups);
+    pass.dispatch_workgroups(x, y, 1);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn grid_1d_keeps_small_counts_one_dimensional() {
+        assert_eq!(grid_1d(1), (1, 1));
+        assert_eq!(grid_1d(65535), (65535, 1));
+    }
+
+    #[test]
+    fn grid_1d_splits_past_the_limit_and_covers_every_workgroup() {
+        // 97920 is what MiniLM's FFN activation needed for 512 sentences.
+        assert_eq!(grid_1d(65536), (65535, 2));
+        assert_eq!(grid_1d(97920), (65535, 2));
+        for n in [65536u32, 97920, 130464, 1 << 24] {
+            let (x, y) = grid_1d(n);
+            assert!(x <= MAX_WORKGROUPS_PER_DIM && y <= MAX_WORKGROUPS_PER_DIM);
+            assert!(x * y >= n, "{n} workgroups, grid {x}x{y}");
+            assert!(
+                x * (y - 1) < n,
+                "{n} workgroups, grid {x}x{y} has a spare row"
+            );
+        }
+    }
 
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()

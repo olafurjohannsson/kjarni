@@ -8,6 +8,7 @@ namespace Kjarni
     /// </summary>
     public readonly struct RerankResult
     {
+        /// <summary>The document's position in the list passed to the reranker.</summary>
         public int Index { get; }
 
         /// <summary>
@@ -16,6 +17,7 @@ namespace Kjarni
         /// </summary>
         public float Score { get; }
 
+        /// <summary>The document text.</summary>
         public string Document { get; }
 
         /// <summary>
@@ -173,6 +175,7 @@ namespace Kjarni
             }
         }
 
+        /// <summary>Releases the native model. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -187,6 +190,7 @@ namespace Kjarni
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>Releases the native model if <see cref="Dispose"/> was not called.</summary>
         ~Reranker()
         {
             Dispose();

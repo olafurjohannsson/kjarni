@@ -1,4 +1,5 @@
-//! Second feedforward layer (FC2): projects back to hidden dimension.
+//! Second feedforward layer (FC2): bias, added in place after the matmul back
+//! to the hidden dimension, which runs as a tiled GEMM in GpuLinearLayer.
 
 
 
@@ -20,52 +21,21 @@ struct FfnUniforms {
 @group(0) @binding(4) var<storage, read_write> output: array<f32>;
 
 @compute @workgroup_size(512, 1, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn main(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    // Launched over a 2D grid when one dimension would exceed 65535
+    // workgroups; see gpu_ops::utils::grid_1d.
+    let idx = global_id.y * grid.x * 512u + global_id.x;
 
     let total_outputs = info.m * info.n;
     if (idx >= total_outputs) {
         return;
     }
 
-    let row = idx / info.n;
+    // `output` already holds input * fc2_weight^T, from the tiled GEMM in
+    // GpuLinearLayer. This pass adds the bias.
     let col = idx % info.n;
-
-    var sum: f32 = 0.0;
-
-    let input_offset = row * info.k;
-    let weight_offset = col * info.k;
-
-    // Vectorized FMA loop
-    let k_vec = info.k / 4u;
-    for (var t = 0u; t < k_vec; t = t + 1u) {
-        let base = t * 4u;
-
-        let input_vec = vec4<f32>(
-            input[input_offset + base + 0u],
-            input[input_offset + base + 1u],
-            input[input_offset + base + 2u],
-            input[input_offset + base + 3u]
-        );
-
-        let weight_vec = vec4<f32>(
-            fc2_weight[weight_offset + base + 0u],
-            fc2_weight[weight_offset + base + 1u],
-            fc2_weight[weight_offset + base + 2u],
-            fc2_weight[weight_offset + base + 3u]
-        );
-
-        sum = fma(input_vec.x, weight_vec.x, sum);
-        sum = fma(input_vec.y, weight_vec.y, sum);
-        sum = fma(input_vec.z, weight_vec.z, sum);
-        sum = fma(input_vec.w, weight_vec.w, sum);
-    }
-
-    // Remainder loop
-    let remainder_start = k_vec * 4u;
-    for (var kk = remainder_start; kk < info.k; kk = kk + 1u) {
-        sum = fma(input[input_offset + kk], fc2_weight[weight_offset + kk], sum);
-    }
-
-    output[idx] = sum + fc2_bias[col];
+    output[idx] = output[idx] + fc2_bias[col];
 }

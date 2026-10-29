@@ -1,5 +1,6 @@
 //! GPU-accelerated feed-forward network block.
 
+use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
@@ -129,6 +130,7 @@ impl GpuFeedForwardWeights {
 
 pub struct GpuFeedForwardStd {
     pipelines: FfnPipelines,
+    linear: GpuLinearLayer,
     context: Arc<WgpuContext>,
 }
 
@@ -151,6 +153,7 @@ impl GpuFeedForwardStd {
                 fc1: (Arc::new(fc1_pipeline), Arc::new(fc1_layout)),
                 fc2: (Arc::new(fc2_pipeline), Arc::new(fc2_layout)),
             },
+            linear: GpuLinearLayer::new(context),
             context: context.clone(),
         })
     }
@@ -215,6 +218,14 @@ impl GpuFeedForwardStd {
         let hidden_size = input_shape[2] as u32;
         let intermediate_size = output_shape[2] as u32;
 
+        // The matmul, as a tiled GEMM; the pass below adds bias and activation.
+        self.linear.encode(
+            encoder,
+            &input.view(vec![rows as usize, hidden_size as usize]),
+            &weights.fc1_weight,
+            &output.view(vec![rows as usize, intermediate_size as usize]),
+        );
+
         let uniforms = FfnUniforms {
             m: rows,
             k: hidden_size,
@@ -268,7 +279,7 @@ impl GpuFeedForwardStd {
             });
             compute_pass.set_pipeline(&self.pipelines.fc1.0);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            compute_pass.dispatch_workgroups(workgroups, 1, 1);
+            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
         }
     }
 
@@ -284,6 +295,14 @@ impl GpuFeedForwardStd {
         let intermediate_size = input_shape[2] as u32;
         let output_shape = output.shape();
         let hidden_size = output_shape[2] as u32;
+
+        // The matmul, as a tiled GEMM; the pass below adds the bias.
+        self.linear.encode(
+            encoder,
+            &input.view(vec![rows as usize, intermediate_size as usize]),
+            &weights.fc2_weight,
+            &output.view(vec![rows as usize, hidden_size as usize]),
+        );
 
         let uniforms = FfnUniforms {
             m: rows,
@@ -338,7 +357,7 @@ impl GpuFeedForwardStd {
             });
             compute_pass.set_pipeline(&self.pipelines.fc2.0);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            compute_pass.dispatch_workgroups(workgroups, 1, 1);
+            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
         }
     }
 }

@@ -276,3 +276,55 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "large batch");
     Ok(())
 }
+
+/// 512 sentences of about 40 tokens put 20k tokens through the encoder at
+/// once, and the FFN activation over them (20k x 1536) needs about 120k
+/// workgroups of 256, past the 65535 WebGPU allows in one dimension. Every
+/// kernel that launches one workgroup per row or per 256 elements has to
+/// spread that over a 2D grid, or wgpu rejects the dispatch and the encoder
+/// panics.
+#[ignore = "GPU required"]
+#[tokio::test]
+async fn test_cpu_gpu_parity_batch_beyond_dispatch_limit() -> Result<()> {
+    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
+    let cache_dir = get_model_cache_dir(model_repo);
+    ensure_model_files(model_repo, &cache_dir).await?;
+
+    let cpu_encoder = SentenceEncoder::from_pretrained(
+        &cache_dir,
+        Device::Cpu,
+        None,
+        None,
+        Some(ModelType::MiniLML6V2),
+    )?;
+    let gpu_context = WgpuContext::new().await?;
+    let gpu_encoder = SentenceEncoder::from_pretrained(
+        &cache_dir,
+        Device::Wgpu,
+        Some(gpu_context),
+        None,
+        Some(ModelType::MiniLML6V2),
+    )?;
+
+    let sentences: Vec<String> = (0..512)
+        .map(|i| {
+            format!(
+                "Sentence number {i} is about running transformer models for local \
+                 inference on a graphics card, inside the program that needs them, \
+                 without a server or a network connection."
+            )
+        })
+        .collect();
+    let refs: Vec<&str> = sentences.iter().map(|s| s.as_str()).collect();
+
+    let cpu_embeddings = cpu_encoder.encode_batch(&refs).await?;
+    let gpu_embeddings = gpu_encoder.encode_batch(&refs).await?;
+
+    assert_embeddings_close(
+        &cpu_embeddings,
+        &gpu_embeddings,
+        1e-3,
+        "beyond dispatch limit",
+    );
+    Ok(())
+}

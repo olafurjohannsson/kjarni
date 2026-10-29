@@ -56,7 +56,20 @@ impl GpuFeedForward {
                 ffn.encode_2(encoder, input, w, pool, output)
             }
             (Self::SwiGLU(swi), GpuFeedForwardWeights::SwiGLU(w)) => {
-                swi.encode(encoder, w, input, output, pool)
+                // The kernel works on rows; an encoder hands it [batch, seq, hidden].
+                if input.rank() == 3 {
+                    let (b, s, h) = input.dims3();
+                    let out_h = output.shape()[2];
+                    swi.encode(
+                        encoder,
+                        w,
+                        &input.view(vec![b * s, h]),
+                        &output.view(vec![b * s, out_h]),
+                        pool,
+                    )
+                } else {
+                    swi.encode(encoder, w, input, output, pool)
+                }
             }
             _ => panic!("FFN type mismatch"),
         }

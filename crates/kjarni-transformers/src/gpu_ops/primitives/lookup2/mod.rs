@@ -141,7 +141,7 @@ impl GpuLookup2 {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
                 let workgroups = uniforms.output_size.div_ceil(256);
-                pass.dispatch_workgroups(workgroups, 1, 1);
+                crate::gpu_ops::utils::dispatch_1d(pass, workgroups);
             }
         );
     }

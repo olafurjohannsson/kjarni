@@ -20,7 +20,7 @@ pub struct QuantizedMatrix<T> {
     pub shape: [usize; 2], // [out_features, in_features]
 }
 
-impl<B: Dequantizable> QuantizedMatrix<B> {
+impl<B: Dequantizable + Sync> QuantizedMatrix<B> {
     /// Dequantize the entire matrix to f32.
     pub fn dequantize(&self) -> Result<Array2<f32>> {
         let [rows, cols] = self.shape;
@@ -46,22 +46,25 @@ pub trait Dequantizable {
         cols: usize,
     ) -> Result<()>
     where
-        Self: Sized,
+        Self: Sized + Sync,
     {
+        use rayon::prelude::*;
+
         let blocks_per_row = cols / Self::BLOCK_SIZE;
+        let out = output
+            .as_slice_mut()
+            .ok_or_else(|| anyhow!("Non-contiguous output during dequantization"))?;
 
-        for (row_idx, mut row) in output.axis_iter_mut(ndarray::Axis(0)).enumerate() {
-            let row_blocks = &blocks[row_idx * blocks_per_row..(row_idx + 1) * blocks_per_row];
-            let row_slice = row
-                .as_slice_mut()
-                .ok_or_else(|| anyhow!("Non-contiguous row during dequantization"))?;
-
-            for (b_idx, block) in row_blocks.iter().enumerate() {
-                let start = b_idx * Self::BLOCK_SIZE;
-                let end = start + Self::BLOCK_SIZE;
-                Self::dequantize_block(block, &mut row_slice[start..end]);
-            }
-        }
+        // Rows are independent, and a vocab-sized embedding table is 128k of
+        // them: dequantising it on one thread took half a second of model load.
+        out.par_chunks_mut(cols)
+            .zip(blocks.par_chunks(blocks_per_row))
+            .for_each(|(row, row_blocks)| {
+                for (b_idx, block) in row_blocks.iter().enumerate() {
+                    let start = b_idx * Self::BLOCK_SIZE;
+                    Self::dequantize_block(block, &mut row[start..start + Self::BLOCK_SIZE]);
+                }
+            });
         Ok(())
     }
 }
@@ -289,6 +292,44 @@ impl CpuTensor {
 mod tests {
     use super::*;
     use ndarray::ArrayD;
+
+    /// dequantize() splits the rows across threads; every row must still
+    /// come from its own blocks, in order.
+    #[test]
+    fn parallel_dequantize_matches_block_by_block() {
+        let (rows, cols) = (37, 512);
+        let blocks: Vec<BlockQ6_K> = (0..rows * cols / 256)
+            .map(|i| {
+                let mut b = BlockQ6_K {
+                    ql: [0; 128],
+                    qh: [0; 64],
+                    scales: [0; 16],
+                    d: half::f16::from_f32(0.01 * (i % 7 + 1) as f32),
+                };
+                for (j, v) in b.ql.iter_mut().enumerate() {
+                    *v = ((i * 31 + j * 7) % 256) as u8;
+                }
+                for (j, v) in b.qh.iter_mut().enumerate() {
+                    *v = ((i * 13 + j * 5) % 256) as u8;
+                }
+                for (j, v) in b.scales.iter_mut().enumerate() {
+                    *v = ((i + j) % 32) as i8 - 16;
+                }
+                b
+            })
+            .collect();
+        let matrix = QuantizedMatrix {
+            blocks: blocks.clone(),
+            shape: [rows, cols],
+        };
+        let got = matrix.dequantize().unwrap();
+
+        let mut want = vec![0.0f32; rows * cols];
+        for (i, b) in blocks.iter().enumerate() {
+            BlockQ6_K::dequantize_block(b, &mut want[i * 256..(i + 1) * 256]);
+        }
+        assert_eq!(got.as_slice().unwrap(), want.as_slice());
+    }
 
     #[test]
     fn test_cpu_tensor_f32_metadata() {

@@ -338,6 +338,33 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./check-versions.sh
 
+  # ─── API reference ──────────────────────────────────────────────
+  #
+  # Builds the Python, .NET and JavaScript references as Markdown, and fails if
+  # any public item in those bindings lacks a doc comment, so the reference and
+  # the IDE tooltips cannot fall behind the API. On a tag the output ships with
+  # the release as kjarni-reference.tar.gz, which kjarni.ai imports.
+  reference:
+    name: API reference
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: ./scripts/gen-reference.sh target/reference
+      - run: tar -czf kjarni-reference.tar.gz -C target/reference .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-reference
+          path: kjarni-reference.tar.gz
+
 
   # ─── Go binding tests ───────────────────────────────────────────
   #
@@ -753,6 +780,7 @@ jobs:
         build-macos,
         build-windows,
         build-wasm,
+        reference,
       ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -838,6 +866,7 @@ jobs:
             artifacts/kjarni-aarch64-macos.tar.gz
             artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz
+            artifacts/kjarni-reference/kjarni-reference.tar.gz
             artifacts/SHA256SUMS
 
   # ─── Publish to npm ─────────────────────────────────────────────

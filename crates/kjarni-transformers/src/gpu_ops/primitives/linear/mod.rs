@@ -12,6 +12,11 @@ struct LinearInfo {
     n: u32,
 }
 
+/// Row count from which the GEMMs use 128x128 tiles instead of 64x64. Measured
+/// on an RTX A2000 at K=2048, N=8192: 64x64 is up to 1.5x faster at 16-100
+/// rows, the two meet near 128, and 128x128 is 1.5x faster by 255 rows.
+const GEMM_LARGE_TILE_MIN_ROWS: u32 = 128;
+
 pub struct GpuLinearLayer {
     context: Arc<WgpuContext>,
     bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -21,13 +26,17 @@ pub struct GpuLinearLayer {
     gemv_bf16: wgpu::ComputePipeline,
     gemv_bf16_wide: wgpu::ComputePipeline,
     gemv_q4k: wgpu::ComputePipeline,
-    bmm_q4k: wgpu::ComputePipeline,
+    gemm_q4k: wgpu::ComputePipeline,
     gemv_q6k: wgpu::ComputePipeline,
-    bmm_q6k: wgpu::ComputePipeline,
+    gemm_q6k: wgpu::ComputePipeline,
     gemv_q8: wgpu::ComputePipeline,
     bmm_q8: wgpu::ComputePipeline,
-    bmm_f32: wgpu::ComputePipeline,
-    bmm_bf16: wgpu::ComputePipeline,
+    gemm_f32: wgpu::ComputePipeline,
+    gemm64_f32: wgpu::ComputePipeline,
+    gemm64_bf16: wgpu::ComputePipeline,
+    gemm64_q4k: wgpu::ComputePipeline,
+    gemm64_q6k: wgpu::ComputePipeline,
+    gemm_bf16: wgpu::ComputePipeline,
 
     buffer: wgpu::Buffer,
 }
@@ -162,13 +171,17 @@ impl GpuLinearLayer {
             gemv_bf16: make_pipeline("gemv_bf16"),
             gemv_bf16_wide: make_pipeline("gemv_bf16_wide"),
             gemv_q4k: make_pipeline("gemv_q4k"),
-            bmm_q4k: make_pipeline("bmm_q4k"),
+            gemm_q4k: make_pipeline("gemm_q4k"),
             gemv_q6k: make_pipeline("gemv_q6k"),
-            bmm_q6k: make_pipeline("bmm_q6k"),
+            gemm_q6k: make_pipeline("gemm_q6k"),
             gemv_q8: make_pipeline("gemv_q8"),
             bmm_q8: make_pipeline("bmm_q8"),
-            bmm_f32: make_pipeline("bmm_f32"),
-            bmm_bf16: make_pipeline("bmm_bf16"),
+            gemm_f32: make_pipeline("gemm_f32"),
+            gemm64_f32: make_pipeline("gemm64_f32"),
+            gemm64_bf16: make_pipeline("gemm64_bf16"),
+            gemm64_q4k: make_pipeline("gemm64_q4k"),
+            gemm64_q6k: make_pipeline("gemm64_q6k"),
+            gemm_bf16: make_pipeline("gemm_bf16"),
             buffer,
         }
     }
@@ -187,9 +200,8 @@ impl GpuLinearLayer {
         let is_bf16 = weights.dtype() == DType::BF16;
         let is_gemv = m == 1;
 
-        // Q4_K stays packed. Only the GEMV shape has a kernel for it; a batched
-        // prefill still needs the weights expanded, which is why the loader only
-        // keeps them packed when it can guarantee decode.
+        // Q4_K stays packed: decode reads it in gemv_q4k, prefill dequantises it
+        // tile by tile in gemm_q4k.
         let is_q4k = weights.dtype() == DType::Q4_K;
         let is_q6k = weights.dtype() == DType::Q6_K;
         let is_q8 = weights.dtype() == DType::Q8_0;
@@ -198,14 +210,26 @@ impl GpuLinearLayer {
         let use_q8_kernel = is_gemv && is_q8;
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
 
+        // Below this many rows the 128x128 GEMM tile is mostly empty and the
+        // 64x64 one is faster; above it the larger tile reuses more.
+        let small_tile = m < GEMM_LARGE_TILE_MIN_ROWS;
+
         let pipeline = if use_q4k_kernel {
             &self.gemv_q4k
         } else if is_q4k {
-            &self.bmm_q4k
+            if small_tile {
+                &self.gemm64_q4k
+            } else {
+                &self.gemm_q4k
+            }
         } else if use_q6k_kernel {
             &self.gemv_q6k
         } else if is_q6k {
-            &self.bmm_q6k
+            if small_tile {
+                &self.gemm64_q6k
+            } else {
+                &self.gemm_q6k
+            }
         } else if use_q8_kernel {
             &self.gemv_q8
         } else if is_q8 {
@@ -216,8 +240,10 @@ impl GpuLinearLayer {
             match (is_gemv, is_bf16) {
                 (true, true) => &self.gemv_bf16,
                 (true, false) => &self.gemv_f32,
-                (false, true) => &self.bmm_bf16,
-                (false, false) => &self.bmm_f32,
+                (false, true) if small_tile => &self.gemm64_bf16,
+                (false, true) => &self.gemm_bf16,
+                (false, false) if small_tile => &self.gemm64_f32,
+                (false, false) => &self.gemm_f32,
             }
         };
 
@@ -323,14 +349,13 @@ impl GpuLinearLayer {
                     // Standard GEMV: 1 Thread per Output Neuron
                     let groups = n.div_ceil(256);
                     pass.dispatch_workgroups(groups, 1, 1);
-                } else if is_q4k || is_q6k || is_q8 {
+                } else if is_q8 {
                     // One workgroup reduces one output element.
                     pass.dispatch_workgroups(n, m, 1);
                 } else {
-                    // BMM: 2D Tiles
-                    let groups_x = n.div_ceil(16);
-                    let groups_y = m.div_ceil(16);
-                    pass.dispatch_workgroups(groups_x, groups_y, 1);
+                    // The GEMMs: one 64x64 or 128x128 tile of outputs per workgroup.
+                    let tile = if small_tile { 64 } else { 128 };
+                    pass.dispatch_workgroups(n.div_ceil(tile), m.div_ceil(tile), 1);
                 }
             }
         );

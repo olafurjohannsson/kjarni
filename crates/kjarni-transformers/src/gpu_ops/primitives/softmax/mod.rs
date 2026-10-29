@@ -123,7 +123,7 @@ fn run_internal_softmax(
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
         // let workgroup_x = (rows + 255) / 256;
-        compute_pass.dispatch_workgroups(rows, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(compute_pass, rows);
     });
 }
 

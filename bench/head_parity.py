@@ -30,6 +30,12 @@ out = {"texts": TEXTS, "query": QUERY, "docs": DOCS, "classifiers": {}, "cross_e
 for name in [
     "distilbert_distilbert-base-uncased-finetuned-sst-2-english",
     "SamLowe_roberta-base-go_emotions",
+    # The registry's other classifiers, in the copies it downloads. RoBERTa and
+    # DistilRoBERTa offset their position ids; toxic-bert is multi-label.
+    "olafuraron_twitter-roberta-base-sentiment-latest-safetensors",
+    "olafuraron_emotion-english-distilroberta-base-safetensors",
+    "olafuraron_toxic-bert-safetensors",
+    "olafuraron_bert-base-multilingual-uncased-sentiment-safetensors",
 ]:
     path = f"{cache}/{name}"
     if not os.path.exists(f"{path}/model.safetensors"):

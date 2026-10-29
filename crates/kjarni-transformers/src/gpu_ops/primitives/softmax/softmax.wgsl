@@ -21,9 +21,12 @@ var<workgroup> s_sum: array<f32, 256>;  // For sum reduction
 @compute @workgroup_size(256)
 fn main(
     @builtin(workgroup_id) group_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
 ) {
-    let row_idx = group_id.x;  // One workgroup per row
+    // One workgroup per row, over a 2D grid when there are more than 65535
+    // rows; see gpu_ops::utils::grid_1d.
+    let row_idx = group_id.y * grid.x + group_id.x;
     let tid = local_id.x;      // Thread ID within workgroup (0-255)
 
     if (row_idx >= uniforms.rows) { return; }
