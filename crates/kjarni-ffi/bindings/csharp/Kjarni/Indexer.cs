@@ -47,6 +47,7 @@ namespace Kjarni
         internal IntPtr Handle { get; private set; }
         private bool _disposed;
 
+        /// <summary>Creates a token that has not been cancelled.</summary>
         public CancelToken()
         {
             Handle = Native.kjarni_cancel_token_new();
@@ -86,6 +87,7 @@ namespace Kjarni
             }
         }
 
+        /// <summary>Releases the native token. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -100,6 +102,7 @@ namespace Kjarni
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>Releases the native token if <see cref="Dispose"/> was not called.</summary>
         ~CancelToken()
         {
             Dispose();
@@ -448,6 +451,7 @@ namespace Kjarni
         /// </summary>
         public int ChunkSize => (int)Native.kjarni_indexer_chunk_size(_handle);
 
+        /// <summary>Releases the native model. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -462,6 +466,7 @@ namespace Kjarni
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>Releases the native model if <see cref="Dispose"/> was not called.</summary>
         ~Indexer()
         {
             Dispose();

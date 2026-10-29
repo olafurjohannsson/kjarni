@@ -5,8 +5,11 @@ use std::sync::Arc;
 use crate::EmbeddingConfig;
 use crate::LoadedEmbeddings;
 use crate::cpu::encoder::traits::GpuEncoder;
+use crate::cpu::relative_position_bias::T5RelativePositionBias;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
+use crate::gpu_ops::blocks::rope::GpuRoPE;
+use crate::rope::RoPE;
 
 use crate::gpu::normalization::{
     GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
@@ -27,6 +30,11 @@ pub struct GpuTransformerEncoder {
     embedding_layer_norm: GpuNormalization,
     embedding_ln_weights: GpuNormalizationWeights,
     layers: Vec<GpuEncoderLayer>,
+    /// MPNet's relative attention bias table, one for the whole encoder.
+    /// Absent for encoders without one.
+    position_bias: Option<T5RelativePositionBias>,
+    /// Rotary positions for encoders that use them (nomic-bert).
+    rope: Option<GpuRoPE>,
     context: Arc<WgpuContext>,
     pub metadata: ModelMetadata,
 }
@@ -49,9 +57,14 @@ impl GpuTransformerEncoder {
         let embeddings = LoadedEmbeddings::new(
             Some(&context),
             weights,
-            EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size)
-                .with_position_embedding(encoder_layout.position_embedding.clone())
-                .with_type_embedding(encoder_layout.token_type_embedding.clone()),
+            EmbeddingConfig {
+                // RoBERTa, XLM-R and MPNet number positions from padding_idx + 1,
+                // so their position embeddings start at row 2, as on the CPU path.
+                position_offset: meta.extra_pos_embeddings,
+                ..EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size)
+                    .with_position_embedding(encoder_layout.position_embedding.clone())
+                    .with_type_embedding(encoder_layout.token_type_embedding.clone())
+            },
             load_cfg.offload_embeddings,
             true, // Load to GPU
             target_dt,
@@ -284,11 +297,25 @@ impl GpuTransformerEncoder {
             )?);
         }
 
+        // The same table, buckets and span as the CPU encoder loads.
+        let position_bias = T5RelativePositionBias::new(weights, "encoder", true, 32, 128).ok();
+
+        // Built from the same caches as the CPU encoder's RoPE.
+        let rope = match meta.rope_theta {
+            Some(theta) => Some(GpuRoPE::from_cpu_rope(
+                &context,
+                &RoPE::new(meta.head_dim, meta.max_seq_len, theta),
+            )?),
+            None => None,
+        };
+
         Ok(Self {
             embeddings,
             embedding_layer_norm,
             embedding_ln_weights,
             layers,
+            position_bias,
+            rope,
             metadata: meta,
             context,
         })
@@ -358,15 +385,39 @@ impl GpuEncoder for GpuTransformerEncoder {
         start_layer: usize,
         end_layer: usize,
     ) -> Result<GpuTensor> {
+        // Computed once per call and shared by every layer, as on the CPU.
+        // Divided by the attention scale because the softmax kernel multiplies
+        // its whole input by it; see AttentionOps::attention.
+        let position_bias = match &self.position_bias {
+            Some(table) => {
+                let seq = hidden_states.shape()[1];
+                let heads = self.metadata.num_attention_heads;
+                let head_dim = self.metadata.hidden_size / heads;
+                let scale = 1.0 / (head_dim as f32).sqrt();
+                let bias = table
+                    .compute(seq, seq)?
+                    .mapv(|b| b / scale)
+                    .into_shape_with_order((heads * seq, seq))?;
+                Some(GpuTensor::from_ndarray(&self.context, &bias)?)
+            }
+            None => None,
+        };
+
         let mut current_states = hidden_states.clone();
+        let checkpoint = pool.checkpoint();
         for layer in &self.layers[start_layer..end_layer] {
             current_states = layer.forward(
                 cmd_encoder,
                 &current_states,
                 attention_mask,
+                position_bias.as_ref(),
+                self.rope.as_ref(),
                 &self.metadata,
                 pool,
             )?;
+            // Only the hidden state carries into the next layer; the rest of
+            // this layer's buffers can serve the next one. See GpuTensorPool::release_since.
+            pool.release_since(&checkpoint, &[&current_states]);
         }
         Ok(current_states)
     }

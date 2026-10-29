@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 description = "Local AI inference in the browser: embeddings, classification, reranking, semantic search and chat, compiled to WebAssembly."
 repository = "https://github.com/olafurjohannsson/kjarni"
-license = "MIT"
+license.workspace = true
 keywords = ["bert", "nlp", "wasm", "transformer", "embeddings"]
 categories = ["wasm", "text-processing", "encoding"]
 

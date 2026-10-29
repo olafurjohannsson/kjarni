@@ -53,10 +53,14 @@ namespace Kjarni
         public static ChatTurn Assistant(string content) => new ChatTurn(ChatTurnRole.Assistant, content);
     }
 
+    /// <summary>Preset sampling defaults for a <see cref="Chat"/>.</summary>
     public enum ChatMode
     {
+        /// <summary>Temperature 0.7, up to 512 new tokens.</summary>
         Default = 0,
+        /// <summary>Temperature 0.9, up to 1024 new tokens.</summary>
         Creative = 1,
+        /// <summary>Temperature 0.3, up to 2048 new tokens, for step-by-step answers.</summary>
         Reasoning = 2,
     }
 
@@ -66,12 +70,19 @@ namespace Kjarni
     /// </summary>
     public struct GenerationConfig
     {
+        /// <summary>Sampling temperature; higher is more random. -1 keeps the default.</summary>
         public float Temperature;
+        /// <summary>Sample only from the k most likely tokens. -1 keeps the default.</summary>
         public int TopK;
+        /// <summary>Nucleus sampling: sample from the smallest set of tokens whose probability sums to p. -1 keeps the default.</summary>
         public float TopP;
+        /// <summary>Drop tokens less likely than this fraction of the most likely token. -1 keeps the default.</summary>
         public float MinP;
+        /// <summary>Penalty above 1 for repeating earlier tokens; 1 disables it. -1 keeps the default.</summary>
         public float RepetitionPenalty;
+        /// <summary>Maximum number of tokens to generate. -1 keeps the default.</summary>
         public int MaxNewTokens;
+        /// <summary>1 samples, 0 decodes greedily (always the most likely token), -1 keeps the default.</summary>
         public int DoSample;
 
         /// <summary>All model defaults.</summary>
@@ -398,6 +409,9 @@ namespace Kjarni
             }
         }
 
+        /// <summary>
+        /// Starts a conversation whose history the engine keeps between messages.
+        /// </summary>
         public ChatConversation Conversation()
         {
             ThrowIfDisposed();
@@ -443,6 +457,7 @@ namespace Kjarni
                 throw new ObjectDisposedException(nameof(Chat));
         }
 
+        /// <summary>Releases the native model. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -567,6 +582,7 @@ namespace Kjarni
                 throw new ObjectDisposedException(nameof(ChatConversation));
         }
 
+        /// <summary>Releases the conversation and its history. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)

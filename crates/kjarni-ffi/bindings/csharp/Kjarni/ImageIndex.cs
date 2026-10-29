@@ -120,6 +120,7 @@ namespace Kjarni
             return (int)count;
         }
 
+        /// <summary>Releases the native model. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -134,6 +135,7 @@ namespace Kjarni
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>Releases the native model if <see cref="Dispose"/> was not called.</summary>
         ~ImageIndex()
         {
             Dispose();

@@ -4,6 +4,7 @@ use super::ops::AttentionOps;
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
+use crate::gpu_ops::blocks::rope::GpuRoPE;
 use std::sync::Arc;
 
 /// Bidirectional self-attention for encoder models
@@ -32,6 +33,8 @@ impl GpuEncoderSelfAttention {
         hidden_states: &GpuTensor,
         weights: &GpuAttentionWeights,
         padding_mask: Option<&GpuTensor>,
+        position_bias: Option<&GpuTensor>,
+        rope: Option<&GpuRoPE>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         // Project Q, K, V
@@ -58,8 +61,18 @@ impl GpuEncoderSelfAttention {
         );
 
         // Split heads: [B, S, H*D] -> [B, H, S, D]
-        let q_heads = self.ops.split_heads(encoder, &q_proj, pool);
-        let k_heads = self.ops.split_heads(encoder, &k_proj, pool);
+        let mut q_heads = self.ops.split_heads(encoder, &q_proj, pool);
+        let mut k_heads = self.ops.split_heads(encoder, &k_proj, pool);
+
+        // Rotary positions (nomic-bert), from position 0: an encoder has no cache.
+        if let Some(rope) = rope {
+            let q_rot = pool.get(q_heads.shape().to_vec());
+            let k_rot = pool.get(k_heads.shape().to_vec());
+            rope.encode(encoder, &q_heads, &q_rot, 0);
+            rope.encode(encoder, &k_heads, &k_rot, 0);
+            q_heads = q_rot;
+            k_heads = k_rot;
+        }
         let v_heads = self.ops.split_heads(encoder, &v_proj, pool);
 
         // Compute attention (bidirectional, no causal mask)
@@ -71,6 +84,7 @@ impl GpuEncoderSelfAttention {
             padding_mask,
             false, // is_causal = false for encoder
             0,     // position_offset = 0 (no KV cache)
+            position_bias,
             pool,
         );
 

@@ -224,6 +224,6 @@ you need the server half of the same product:
 
 ## Making your own `.kjq`
 
-See [the format guide](../scripts/README.md). Any BERT-family encoder,
+See [the format guide](https://github.com/olafurjohannsson/kjarni/blob/main/crates/kjarni-wasm/scripts/README.md). Any BERT-family encoder,
 cross-encoder, classifier or small decoder from Hugging Face converts with one
 script.

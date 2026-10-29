@@ -133,26 +133,6 @@ fn gemv_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 
 // BMM (BF16) - 2D Tiled
-@compute @workgroup_size(16, 16)
-fn bmm_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
-    let n = id.x;
-    let m = id.y;
-    
-    if (m >= info.M || n >= info.N) { return; }
-
-    var sum = 0.0;
-    let input_offset = m * info.K;
-    let k_pairs = info.K / 2u;
-    let weight_offset = n * k_pairs;
-    
-    for (var k = 0u; k < k_pairs; k = k + 1u) {
-        let w_vec = unpack_bf16(W_BF16[weight_offset + k]);
-        let in0 = Input[input_offset + k * 2u];
-        let in1 = Input[input_offset + k * 2u + 1u];
-        sum += in0 * w_vec.x + in1 * w_vec.y;
-    }
-    Output[m * info.N + n] = sum;
-}
 
 // GEMV (F32)
 @compute @workgroup_size(256)
@@ -169,21 +149,479 @@ fn gemv_f32(@builtin(global_invocation_id) id: vec3<u32>) {
     Output[n] = sum;
 }
 
-// BMM (F32)
+
+// ---------------------------------------------------------------------------
+// Tiled GEMM, 64x64 tiles: the same kernel with 4x4 outputs per thread.
+//
+// For fewer than a few hundred rows (short prompts, small encoder batches) the
+// 128x128 tile below leaves most of its rows empty; this one wastes less and
+// measured up to 1.5x faster there. GpuLinearLayer picks between them by M.
+// ---------------------------------------------------------------------------
+const GEMM64_BM: u32 = 64u;
+const GEMM64_BN: u32 = 64u;
+const GEMM64_BK: u32 = 16u;
+
+var<workgroup> gemm64_a: array<f32, 1024>; // [GEMM64_BK][GEMM64_BM]
+var<workgroup> gemm64_w: array<f32, 1024>; // [GEMM64_BK][GEMM64_BN]
+
 @compute @workgroup_size(16, 16)
-fn bmm_f32(@builtin(global_invocation_id) id: vec3<u32>) {
-    let n = id.x;
-    let m = id.y;
-    if (m >= info.M || n >= info.N) { return; }
+fn gemm64_f32(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm64_tile(wg, lid, GEMM64_F32);
+}
 
-    var sum = 0.0;
-    let input_offset = m * info.K;
-    let weight_offset = n * info.K;
+/// The same GEMM over BF16 weights, packed two to a word as [N, K/2]: decoder
+/// prefill at full precision. Only the weight load differs.
+@compute @workgroup_size(16, 16)
+fn gemm64_bf16(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm64_tile(wg, lid, GEMM64_BF16);
+}
 
-    for (var k = 0u; k < info.K; k = k + 1u) {
-        sum += Input[input_offset + k] * W_F32[weight_offset + k];
+/// The same GEMM over packed Q4_K weights: decoder prefill from a GGUF. The
+/// weight tile is dequantised as it is loaded, so the multiply is the F32 one.
+@compute @workgroup_size(16, 16)
+fn gemm64_q4k(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm64_tile(wg, lid, GEMM64_Q4K);
+}
+
+/// The same GEMM over packed Q6_K weights, which a Q4_K_M file uses for some
+/// of its tensors (attn_v and half the ffn_down).
+@compute @workgroup_size(16, 16)
+fn gemm64_q6k(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm64_tile(wg, lid, GEMM64_Q6K);
+}
+
+const GEMM64_F32: u32 = 0u;
+const GEMM64_BF16: u32 = 1u;
+const GEMM64_Q4K: u32 = 2u;
+const GEMM64_Q6K: u32 = 3u;
+
+/// Loads the weight tile for k0..k0+16 from Q6_K blocks.
+///
+/// A block is 256 weights as two halves of 128, each in four quarters of 32
+/// (see q6k_unit_weights). A 16-wide slice starting at a multiple of 16 lies in
+/// one quarter and shares one scale: four (ql, qh) word positions, one per
+/// thread, each giving four weights.
+fn gemm64_load_w_q6k(tid: u32, col0: u32, k0: u32) {
+    let r = tid / 4u;
+    let q = tid % 4u;
+    let gn = col0 + r;
+    var vals = vec4<f32>(0.0);
+    if (gn < info.N) {
+        let gk = k0 + q * 4u;
+        let blk = gk / 256u;
+        let t = gk % 256u;
+        let i = t / 128u;         // half-block
+        let p = t % 128u;
+        let quarter = p / 32u;
+        let jg = (p % 32u) / 4u;  // word within the quarter
+
+        let base = (gn * (info.K / 256u) + blk) * Q6K_WORDS;
+        let scale = unpack2x16float(W_Q6K[base + 52u]).x
+            * q6k_scale(base, i * 8u + quarter * 2u + jg / 4u);
+        let qlw = W_Q6K[base + i * 16u + jg + select(0u, 8u, (quarter & 1u) == 1u)];
+        let qhw = W_Q6K[base + 32u + i * 8u + jg];
+
+        // As in q6k_unit_weights: quarters 0 and 1 take the low nibbles of
+        // their ql word, 2 and 3 the high, each with its two bits of qh.
+        var low = qlw & 0x0F0F0F0Fu;
+        if (quarter >= 2u) { low = (qlw >> 4u) & 0x0F0F0F0Fu; }
+        let high = ((qhw >> (quarter * 2u)) & 0x03030303u) << 4u;
+        vals = (vec4<f32>(unpack4xU8(low | high)) - vec4<f32>(32.0)) * scale;
     }
-    Output[m * info.N + n] = sum;
+    let kk = q * 4u;
+    gemm64_w[kk * GEMM64_BN + r] = vals.x;
+    gemm64_w[(kk + 1u) * GEMM64_BN + r] = vals.y;
+    gemm64_w[(kk + 2u) * GEMM64_BN + r] = vals.z;
+    gemm64_w[(kk + 3u) * GEMM64_BN + r] = vals.w;
+}
+
+/// Loads the weight tile for k0..k0+16 from Q4_K blocks.
+///
+/// A block is 256 weights of one row, and within it each run of 32 shares a
+/// sub-block scale and min (see q4k_word_weights). A 16-wide slice starting at
+/// a multiple of 16 therefore sits inside one block and one sub-block, as four
+/// qs words. 64 rows x 4 words is one word per thread: each dequantises four
+/// weights with a single scale lookup.
+fn gemm64_load_w_q4k(tid: u32, col0: u32, k0: u32) {
+    let r = tid / 4u;
+    let q = tid % 4u;
+    let gn = col0 + r;
+    var vals = vec4<f32>(0.0);
+    if (gn < info.N) {
+        let gk = k0 + q * 4u;
+        let blk = gk / 256u;
+        let t = gk % 256u;
+        let g = t / 64u;          // which 64: one qs word range of 8
+        let within = t % 64u;
+        let hi = within >= 32u;   // high nibbles belong to the second sub-block
+        let wi = g * 8u + (within % 32u) / 4u;
+
+        let base = (gn * (info.K / 256u) + blk) * Q4K_WORDS;
+        let dd = unpack2x16float(W_Q4K[base]);
+        let sub = g * 2u + select(0u, 1u, hi);
+        let sm = q4k_scale_min(W_Q4K[base + 1u], W_Q4K[base + 2u], W_Q4K[base + 3u], sub);
+        let qword = W_Q4K[base + 4u + wi];
+        let nib = select(qword & 0x0F0F0F0Fu, (qword >> 4u) & 0x0F0F0F0Fu, hi);
+        vals = vec4<f32>(unpack4xU8(nib)) * (dd.x * sm.x) - vec4<f32>(dd.y * sm.y);
+    }
+    let kk = q * 4u;
+    gemm64_w[kk * GEMM64_BN + r] = vals.x;
+    gemm64_w[(kk + 1u) * GEMM64_BN + r] = vals.y;
+    gemm64_w[(kk + 2u) * GEMM64_BN + r] = vals.z;
+    gemm64_w[(kk + 3u) * GEMM64_BN + r] = vals.w;
+}
+
+/// One 64x64 output tile. `mode` is a constant at each call site, so the
+/// branches in the weight load fold away.
+fn gemm64_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
+    let row0 = wg.y * GEMM64_BM;
+    let col0 = wg.x * GEMM64_BN;
+    let tid = lid.y * 16u + lid.x;
+
+    // Four rows of four columns each, as vec4 so they stay in registers: an
+    // indexed array here is spilled to local memory and runs at half the speed
+    // of the untiled kernel.
+    var c0 = vec4<f32>(0.0);
+    var c1 = vec4<f32>(0.0);
+    var c2 = vec4<f32>(0.0);
+    var c3 = vec4<f32>(0.0);
+
+    for (var k0 = 0u; k0 < info.K; k0 += GEMM64_BK) {
+        // Each tile is 64 x 16 = 1024 values; 256 threads load four each.
+        // Consecutive threads take consecutive k, which is contiguous in both
+        // operands, so the loads coalesce.
+        for (var l = 0u; l < 4u; l++) {
+            let idx = tid + l * 256u;
+            let r = idx / GEMM64_BK;
+            let kk = idx % GEMM64_BK;
+            let gk = k0 + kk;
+
+            let gr = row0 + r;
+            var a = 0.0;
+            if (gr < info.M && gk < info.K) { a = Input[gr * info.K + gk]; }
+            gemm64_a[kk * GEMM64_BM + r] = a;
+
+            if (mode == GEMM64_Q4K || mode == GEMM64_Q6K) { continue; }
+            let gn = col0 + r;
+            var w = 0.0;
+            if (gn < info.N && gk < info.K) {
+                if (mode == GEMM64_BF16) {
+                    // K is even for packed weights, so a row's pairs never
+                    // straddle two rows.
+                    let pair = unpack_bf16(W_BF16[(gn * info.K + gk) / 2u]);
+                    w = select(pair.x, pair.y, (gk & 1u) == 1u);
+                } else {
+                    w = W_F32[gn * info.K + gk];
+                }
+            }
+            gemm64_w[kk * GEMM64_BN + r] = w;
+        }
+        if (mode == GEMM64_Q4K) { gemm64_load_w_q4k(tid, col0, k0); }
+        if (mode == GEMM64_Q6K) { gemm64_load_w_q6k(tid, col0, k0); }
+        workgroupBarrier();
+
+        for (var kk = 0u; kk < GEMM64_BK; kk++) {
+            let ab = kk * GEMM64_BM + lid.y;
+            let wb = kk * GEMM64_BN + lid.x;
+            let w = vec4<f32>(gemm64_w[wb], gemm64_w[wb + 16u], gemm64_w[wb + 32u], gemm64_w[wb + 48u]);
+            c0 += gemm64_a[ab] * w;
+            c1 += gemm64_a[ab + 16u] * w;
+            c2 += gemm64_a[ab + 32u] * w;
+            c3 += gemm64_a[ab + 48u] * w;
+        }
+        workgroupBarrier();
+    }
+
+    gemm64_store_row(row0 + lid.y, col0 + lid.x, c0);
+    gemm64_store_row(row0 + lid.y + 16u, col0 + lid.x, c1);
+    gemm64_store_row(row0 + lid.y + 32u, col0 + lid.x, c2);
+    gemm64_store_row(row0 + lid.y + 48u, col0 + lid.x, c3);
+}
+
+/// Writes one thread's four outputs of row `r`, at columns c, c+16, c+32, c+48.
+fn gemm64_store_row(r: u32, c: u32, v: vec4<f32>) {
+    if (r >= info.M) { return; }
+    let base = r * info.N;
+    if (c < info.N) { Output[base + c] = v.x; }
+    if (c + 16u < info.N) { Output[base + c + 16u] = v.y; }
+    if (c + 32u < info.N) { Output[base + c + 32u] = v.z; }
+    if (c + 48u < info.N) { Output[base + c + 48u] = v.w; }
+}
+
+// ---------------------------------------------------------------------------
+// Tiled GEMM: Output[M, N] = Input[M, K] * W[N, K]^T, W in F32, BF16, Q4_K or Q6_K
+//
+// The batched path for every weight type: encoders, seq2seq and decoder
+// prefill all land here. One output per thread, reading both operands from
+// global memory for every k, runs at about 150 GFLOP/s on an RTX A2000.
+// Here a 16x16 workgroup computes a 128x128 tile, 8x8 outputs per thread, from
+// 16-wide slices of both operands staged in workgroup memory, so each value
+// loaded from global memory is used 128 times and each workgroup-memory read
+// feeds eight multiply-adds.
+//
+// Threads take rows ly, ly+16, ..., ly+112 and the same stride in columns, so a
+// row of threads reads consecutive workgroup-memory words and writes
+// consecutive outputs. Out-of-range rows, columns and k are loaded as zero and
+// never stored, so any M, N and K work. Packed weights are dequantised as their
+// tile is loaded, so the multiply is the same for every type.
+//
+// The 64 accumulators are 16 named vec4s. An indexed array here is spilled to
+// local memory and ran at half the speed of the untiled kernel.
+// ---------------------------------------------------------------------------
+const GEMM_BM: u32 = 128u;
+const GEMM_BN: u32 = 128u;
+const GEMM_BK: u32 = 16u;
+
+var<workgroup> gemm_a: array<f32, 2048>; // [GEMM_BK][GEMM_BM]
+var<workgroup> gemm_w: array<f32, 2048>; // [GEMM_BK][GEMM_BN]
+
+@compute @workgroup_size(16, 16)
+fn gemm_f32(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm_tile(wg, lid, GEMM_F32);
+}
+
+/// The same GEMM over BF16 weights, packed two to a word as [N, K/2]: decoder
+/// prefill at full precision. Only the weight load differs.
+@compute @workgroup_size(16, 16)
+fn gemm_bf16(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm_tile(wg, lid, GEMM_BF16);
+}
+
+/// The same GEMM over packed Q4_K weights: decoder prefill from a GGUF.
+@compute @workgroup_size(16, 16)
+fn gemm_q4k(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm_tile(wg, lid, GEMM_Q4K);
+}
+
+/// The same GEMM over packed Q6_K weights, which a Q4_K_M file uses for some
+/// of its tensors (attn_v and half the ffn_down).
+@compute @workgroup_size(16, 16)
+fn gemm_q6k(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm_tile(wg, lid, GEMM_Q6K);
+}
+
+const GEMM_F32: u32 = 0u;
+const GEMM_BF16: u32 = 1u;
+const GEMM_Q4K: u32 = 2u;
+const GEMM_Q6K: u32 = 3u;
+
+/// Loads the weight tile for k0..k0+16 from Q6_K blocks.
+///
+/// A block is 256 weights as two halves of 128, each in four quarters of 32
+/// (see q6k_unit_weights). A 16-wide slice starting at a multiple of 16 lies in
+/// one quarter and shares one scale: four (ql, qh) word positions per row. 128
+/// rows x 4 words is two words per thread, each giving four weights.
+fn gemm_load_w_q6k(tid: u32, col0: u32, k0: u32) {
+    let q = tid % 4u;
+    for (var l = 0u; l < 2u; l++) {
+        let r = (tid + l * 256u) / 4u;
+        let gn = col0 + r;
+        var vals = vec4<f32>(0.0);
+        if (gn < info.N) {
+            let gk = k0 + q * 4u;
+            let blk = gk / 256u;
+            let t = gk % 256u;
+            let i = t / 128u;         // half-block
+            let p = t % 128u;
+            let quarter = p / 32u;
+            let jg = (p % 32u) / 4u;  // word within the quarter
+
+            let base = (gn * (info.K / 256u) + blk) * Q6K_WORDS;
+            let scale = unpack2x16float(W_Q6K[base + 52u]).x
+                * q6k_scale(base, i * 8u + quarter * 2u + jg / 4u);
+            let qlw = W_Q6K[base + i * 16u + jg + select(0u, 8u, (quarter & 1u) == 1u)];
+            let qhw = W_Q6K[base + 32u + i * 8u + jg];
+
+            // As in q6k_unit_weights: quarters 0 and 1 take the low nibbles of
+            // their ql word, 2 and 3 the high, each with its two bits of qh.
+            var low = qlw & 0x0F0F0F0Fu;
+            if (quarter >= 2u) { low = (qlw >> 4u) & 0x0F0F0F0Fu; }
+            let high = ((qhw >> (quarter * 2u)) & 0x03030303u) << 4u;
+            vals = (vec4<f32>(unpack4xU8(low | high)) - vec4<f32>(32.0)) * scale;
+        }
+        let kk = q * 4u;
+        gemm_w[kk * GEMM_BN + r] = vals.x;
+        gemm_w[(kk + 1u) * GEMM_BN + r] = vals.y;
+        gemm_w[(kk + 2u) * GEMM_BN + r] = vals.z;
+        gemm_w[(kk + 3u) * GEMM_BN + r] = vals.w;
+    }
+}
+
+/// Loads the weight tile for k0..k0+16 from Q4_K blocks.
+///
+/// A block is 256 weights of one row, and within it each run of 32 shares a
+/// sub-block scale and min (see q4k_word_weights). A 16-wide slice starting at
+/// a multiple of 16 therefore sits inside one block and one sub-block, as four
+/// qs words. 128 rows x 4 words is two words per thread, each dequantising four
+/// weights with a single scale lookup.
+fn gemm_load_w_q4k(tid: u32, col0: u32, k0: u32) {
+    let q = tid % 4u;
+    for (var l = 0u; l < 2u; l++) {
+        let r = (tid + l * 256u) / 4u;
+        let gn = col0 + r;
+        var vals = vec4<f32>(0.0);
+        if (gn < info.N) {
+            let gk = k0 + q * 4u;
+            let blk = gk / 256u;
+            let t = gk % 256u;
+            let g = t / 64u;          // which 64: one qs word range of 8
+            let within = t % 64u;
+            let hi = within >= 32u;   // high nibbles belong to the second sub-block
+            let wi = g * 8u + (within % 32u) / 4u;
+
+            let base = (gn * (info.K / 256u) + blk) * Q4K_WORDS;
+            let dd = unpack2x16float(W_Q4K[base]);
+            let sub = g * 2u + select(0u, 1u, hi);
+            let sm = q4k_scale_min(W_Q4K[base + 1u], W_Q4K[base + 2u], W_Q4K[base + 3u], sub);
+            let qword = W_Q4K[base + 4u + wi];
+            let nib = select(qword & 0x0F0F0F0Fu, (qword >> 4u) & 0x0F0F0F0Fu, hi);
+            vals = vec4<f32>(unpack4xU8(nib)) * (dd.x * sm.x) - vec4<f32>(dd.y * sm.y);
+        }
+        let kk = q * 4u;
+        gemm_w[kk * GEMM_BN + r] = vals.x;
+        gemm_w[(kk + 1u) * GEMM_BN + r] = vals.y;
+        gemm_w[(kk + 2u) * GEMM_BN + r] = vals.z;
+        gemm_w[(kk + 3u) * GEMM_BN + r] = vals.w;
+    }
+}
+
+/// One 128x128 output tile. `mode` is a constant at each call site, so the
+/// branches in the weight load fold away.
+fn gemm_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
+    let row0 = wg.y * GEMM_BM;
+    let col0 = wg.x * GEMM_BN;
+    let tid = lid.y * 16u + lid.x;
+
+    var c0l = vec4<f32>(0.0);
+    var c0r = vec4<f32>(0.0);
+    var c1l = vec4<f32>(0.0);
+    var c1r = vec4<f32>(0.0);
+    var c2l = vec4<f32>(0.0);
+    var c2r = vec4<f32>(0.0);
+    var c3l = vec4<f32>(0.0);
+    var c3r = vec4<f32>(0.0);
+    var c4l = vec4<f32>(0.0);
+    var c4r = vec4<f32>(0.0);
+    var c5l = vec4<f32>(0.0);
+    var c5r = vec4<f32>(0.0);
+    var c6l = vec4<f32>(0.0);
+    var c6r = vec4<f32>(0.0);
+    var c7l = vec4<f32>(0.0);
+    var c7r = vec4<f32>(0.0);
+
+    for (var k0 = 0u; k0 < info.K; k0 += GEMM_BK) {
+        // Each tile is 128 x 16 = 2048 values; 256 threads load eight each.
+        // Consecutive threads take consecutive k, which is contiguous in both
+        // operands, so the loads coalesce.
+        for (var l = 0u; l < 8u; l++) {
+            let idx = tid + l * 256u;
+            let r = idx / GEMM_BK;
+            let kk = idx % GEMM_BK;
+            let gk = k0 + kk;
+
+            let gr = row0 + r;
+            var a = 0.0;
+            if (gr < info.M && gk < info.K) { a = Input[gr * info.K + gk]; }
+            gemm_a[kk * GEMM_BM + r] = a;
+
+            if (mode == GEMM_Q4K || mode == GEMM_Q6K) { continue; }
+            let gn = col0 + r;
+            var w = 0.0;
+            if (gn < info.N && gk < info.K) {
+                if (mode == GEMM_BF16) {
+                    // K is even for packed weights, so a row's pairs never
+                    // straddle two rows.
+                    let pair = unpack_bf16(W_BF16[(gn * info.K + gk) / 2u]);
+                    w = select(pair.x, pair.y, (gk & 1u) == 1u);
+                } else {
+                    w = W_F32[gn * info.K + gk];
+                }
+            }
+            gemm_w[kk * GEMM_BN + r] = w;
+        }
+        if (mode == GEMM_Q4K) { gemm_load_w_q4k(tid, col0, k0); }
+        if (mode == GEMM_Q6K) { gemm_load_w_q6k(tid, col0, k0); }
+        workgroupBarrier();
+
+        for (var kk = 0u; kk < GEMM_BK; kk++) {
+            let ab = kk * GEMM_BM + lid.y;
+            let wb = kk * GEMM_BN + lid.x;
+            let wl = vec4<f32>(gemm_w[wb], gemm_w[wb + 16u], gemm_w[wb + 32u], gemm_w[wb + 48u]);
+            let wr = vec4<f32>(gemm_w[wb + 64u], gemm_w[wb + 80u], gemm_w[wb + 96u], gemm_w[wb + 112u]);
+            let a0 = gemm_a[ab + 0u];
+            c0l += a0 * wl;
+            c0r += a0 * wr;
+            let a1 = gemm_a[ab + 16u];
+            c1l += a1 * wl;
+            c1r += a1 * wr;
+            let a2 = gemm_a[ab + 32u];
+            c2l += a2 * wl;
+            c2r += a2 * wr;
+            let a3 = gemm_a[ab + 48u];
+            c3l += a3 * wl;
+            c3r += a3 * wr;
+            let a4 = gemm_a[ab + 64u];
+            c4l += a4 * wl;
+            c4r += a4 * wr;
+            let a5 = gemm_a[ab + 80u];
+            c5l += a5 * wl;
+            c5r += a5 * wr;
+            let a6 = gemm_a[ab + 96u];
+            c6l += a6 * wl;
+            c6r += a6 * wr;
+            let a7 = gemm_a[ab + 112u];
+            c7l += a7 * wl;
+            c7r += a7 * wr;
+        }
+        workgroupBarrier();
+    }
+
+    gemm_store_row(row0 + lid.y + 0u, col0 + lid.x, c0l, c0r);
+    gemm_store_row(row0 + lid.y + 16u, col0 + lid.x, c1l, c1r);
+    gemm_store_row(row0 + lid.y + 32u, col0 + lid.x, c2l, c2r);
+    gemm_store_row(row0 + lid.y + 48u, col0 + lid.x, c3l, c3r);
+    gemm_store_row(row0 + lid.y + 64u, col0 + lid.x, c4l, c4r);
+    gemm_store_row(row0 + lid.y + 80u, col0 + lid.x, c5l, c5r);
+    gemm_store_row(row0 + lid.y + 96u, col0 + lid.x, c6l, c6r);
+    gemm_store_row(row0 + lid.y + 112u, col0 + lid.x, c7l, c7r);
+}
+
+/// Writes one thread's eight outputs of row `r`, at columns c, c+16, ..., c+112.
+fn gemm_store_row(r: u32, c: u32, lo: vec4<f32>, hi: vec4<f32>) {
+    if (r >= info.M) { return; }
+    let base = r * info.N;
+    if (c < info.N) { Output[base + c] = lo.x; }
+    if (c + 16u < info.N) { Output[base + c + 16u] = lo.y; }
+    if (c + 32u < info.N) { Output[base + c + 32u] = lo.z; }
+    if (c + 48u < info.N) { Output[base + c + 48u] = lo.w; }
+    if (c + 64u < info.N) { Output[base + c + 64u] = hi.x; }
+    if (c + 80u < info.N) { Output[base + c + 80u] = hi.y; }
+    if (c + 96u < info.N) { Output[base + c + 96u] = hi.z; }
+    if (c + 112u < info.N) { Output[base + c + 112u] = hi.w; }
 }
 
 // ---------------------------------------------------------------------------
@@ -335,51 +773,6 @@ fn gemv_q4k(
         if (row0 + 3u < info.N) { Output[row0 + 3u] = r.w; }
     }
 }
-
-// Batched Q4_K. Prefill runs many rows at once, so the grid is (n, m) and each
-// workgroup reduces one output element. Same unpacking as the GEMV above; only
-// the input offset and the output index differ.
-@compute @workgroup_size(256)
-fn bmm_q4k(
-    @builtin(workgroup_id) wg_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>
-) {
-    let n = wg_id.x;
-    let row = wg_id.y;
-    let tid = local_id.x;
-    if (n >= info.N || row >= info.M) { return; }
-
-    let blocks_per_row = info.K / 256u;
-    let row_base = n * blocks_per_row * Q4K_WORDS;
-    let total_words = blocks_per_row * 32u;
-    let input_offset = row * info.K;
-
-    var partial = 0.0;
-    for (var w = tid; w < total_words; w = w + 256u) {
-        let blk = w / 32u;
-        let wi = w % 32u;
-        let l0 = input_offset + blk * 256u + (wi / 8u) * 64u + (wi % 8u) * 4u;
-        let a_lo = vec4<f32>(Input[l0], Input[l0 + 1u], Input[l0 + 2u], Input[l0 + 3u]);
-        let a_hi = vec4<f32>(
-            Input[l0 + 32u], Input[l0 + 33u], Input[l0 + 34u], Input[l0 + 35u],
-        );
-        let ww = q4k_word_weights(row_base + blk * Q4K_WORDS, wi);
-        partial += dot(a_lo, ww.lo) + dot(a_hi, ww.hi);
-    }
-
-    wg_sum[tid] = partial;
-    workgroupBarrier();
-    for (var s = 128u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            wg_sum[tid] += wg_sum[tid + s];
-        }
-        workgroupBarrier();
-    }
-    if (tid == 0u) {
-        Output[row * info.N + n] = wg_sum[0];
-    }
-}
-
 
 // ---------------------------------------------------------------------------
 // Q8_0 GEMV
@@ -616,51 +1009,5 @@ fn gemv_q6k(
         if (row0 + 1u < info.N) { Output[row0 + 1u] = r.y; }
         if (row0 + 2u < info.N) { Output[row0 + 2u] = r.z; }
         if (row0 + 3u < info.N) { Output[row0 + 3u] = r.w; }
-    }
-}
-
-// Batched Q6_K: grid is (n, m), one workgroup per output element.
-@compute @workgroup_size(256)
-fn bmm_q6k(
-    @builtin(workgroup_id) wg_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>
-) {
-    let n = wg_id.x;
-    let row = wg_id.y;
-    let tid = local_id.x;
-    if (n >= info.N || row >= info.M) { return; }
-
-    let blocks_per_row = info.K / 256u;
-    let row_base = n * blocks_per_row * Q6K_WORDS;
-    let total_units = blocks_per_row * 16u;
-    let input_offset = row * info.K;
-
-    var partial = 0.0;
-    for (var u = tid; u < total_units; u = u + 256u) {
-        let blk = u / 16u;
-        let ub = u % 16u;
-        let i = ub / 8u;
-        let jg = ub % 8u;
-        let ob = input_offset + blk * 256u + i * 128u + jg * 4u;
-
-        let a0 = vec4<f32>(Input[ob], Input[ob + 1u], Input[ob + 2u], Input[ob + 3u]);
-        let a1 = vec4<f32>(Input[ob + 32u], Input[ob + 33u], Input[ob + 34u], Input[ob + 35u]);
-        let a2 = vec4<f32>(Input[ob + 64u], Input[ob + 65u], Input[ob + 66u], Input[ob + 67u]);
-        let a3 = vec4<f32>(Input[ob + 96u], Input[ob + 97u], Input[ob + 98u], Input[ob + 99u]);
-
-        let w = q6k_unit_weights(row_base + blk * Q6K_WORDS, i, jg);
-        partial += dot(a0, w.a) + dot(a1, w.b) + dot(a2, w.c) + dot(a3, w.d);
-    }
-
-    wg_sum[tid] = partial;
-    workgroupBarrier();
-    for (var s = 128u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            wg_sum[tid] += wg_sum[tid + s];
-        }
-        workgroupBarrier();
-    }
-    if (tid == 0u) {
-        Output[row * info.N + n] = wg_sum[0];
     }
 }

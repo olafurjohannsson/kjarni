@@ -487,16 +487,20 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
 
         // Process layers
         let mut hidden = hidden_states.clone();
+        let checkpoint = pool.checkpoint();
         for (i, layer) in self.layers[start_layer..end_layer].iter().enumerate() {
             let layer_idx = start_layer + i;
             log::trace!("Processing encoder layer {}", layer_idx);
 
             // Use pre-norm or post-norm based on architecture
             hidden = if self.pre_norm {
-                layer.forward_prenorm(cmd_encoder, &hidden, attention_mask, pool)?
+                layer.forward_prenorm(cmd_encoder, &hidden, attention_mask, None, None, pool)?
             } else {
-                layer.forward_postnorm(cmd_encoder, &hidden, attention_mask, pool)?
+                layer.forward_postnorm(cmd_encoder, &hidden, attention_mask, None, None, pool)?
             };
+            // Only the hidden state carries into the next layer; see
+            // GpuTensorPool::release_since.
+            pool.release_since(&checkpoint, &[&hidden]);
         }
 
         Ok(hidden)

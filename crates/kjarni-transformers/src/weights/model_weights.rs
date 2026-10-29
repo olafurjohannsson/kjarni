@@ -33,6 +33,10 @@ struct ModelWeightsInner {
     /// several components need is loaded once. Weak, so they are freed with the
     /// last component holding them.
     shared: std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<Array2<f32>>>>,
+    /// Results of expensive conversions keyed by what produced them, handed out
+    /// by [`ModelWeights::shared_conversion`].
+    conversions:
+        std::sync::Mutex<std::collections::HashMap<String, Arc<dyn std::any::Any + Send + Sync>>>,
 }
 
 /// High-level interface for loading model weights.
@@ -71,6 +75,7 @@ impl ModelWeights {
                         config_json,
                         is_gguf: false,
                         shared: Default::default(),
+                        conversions: Default::default(),
                     }),
                 });
             }
@@ -96,6 +101,7 @@ impl ModelWeights {
                 config_json: config_json.to_string(),
                 is_gguf: false,
                 shared: Default::default(),
+                conversions: Default::default(),
             }),
         })
     }
@@ -120,6 +126,7 @@ impl ModelWeights {
                 config_json: unpacked.config_json.clone(),
                 is_gguf: false,
                 shared: Default::default(),
+                conversions: Default::default(),
             }),
         })
     }
@@ -144,6 +151,7 @@ impl ModelWeights {
                     config_json: "{}".to_string(),
                     is_gguf: false,
                     shared: Default::default(),
+                    conversions: Default::default(),
                 }),
             });
         }
@@ -167,6 +175,7 @@ impl ModelWeights {
                 config_json,
                 is_gguf: true,
                 shared: Default::default(),
+                conversions: Default::default(),
             }),
         })
     }
@@ -339,6 +348,32 @@ impl ModelWeights {
         let arr = Arc::new(self.get_array2(name)?);
         shared.insert(name.to_string(), Arc::downgrade(&arr));
         Ok(arr)
+    }
+
+    /// Returns the value `make` builds for `key`, building it on the first call
+    /// only.
+    ///
+    /// For conversions too expensive to repeat while a model loads. A quantised
+    /// embedding table expanded for the GPU was uploaded twice, once by the
+    /// decoder and once by the pipeline: two seconds of dequantising and 500MB
+    /// of VRAM for a copy nothing read. The value lives as long as these weights.
+    pub fn shared_conversion<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: String,
+        make: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let lock = || {
+            self.inner
+                .conversions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        };
+        if let Some(v) = lock().get(&key).and_then(|v| v.downcast_ref::<T>()) {
+            return Ok(v.clone());
+        }
+        let value = make()?;
+        lock().insert(key, Arc::new(value.clone()));
+        Ok(value)
     }
 
     /// Returns a 2D f32 array. Prefer `with_raw_tensor` for large matrices.
@@ -612,5 +647,34 @@ mod tests {
 
         let result: Vec<f32> = cast_or_copy(&bytes[1..]);
         assert_eq!(result, floats);
+    }
+
+    /// The decoder and the pipeline both asked for the expanded embedding
+    /// table and each built its own. The second request has to get the first
+    /// result, and a different key its own.
+    #[test]
+    fn shared_conversion_builds_each_key_once() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[("w", vec![1.0, 2.0], vec![1, 2])]).unwrap();
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        let builds = std::sync::atomic::AtomicUsize::new(0);
+        let make = |v: u32| {
+            builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(v)
+        };
+
+        assert_eq!(
+            weights.shared_conversion("a".into(), || make(7)).unwrap(),
+            7
+        );
+        assert_eq!(
+            weights.shared_conversion("a".into(), || make(8)).unwrap(),
+            7
+        );
+        assert_eq!(
+            weights.shared_conversion("b".into(), || make(9)).unwrap(),
+            9
+        );
+        assert_eq!(builds.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }

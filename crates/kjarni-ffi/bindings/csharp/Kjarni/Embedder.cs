@@ -115,6 +115,8 @@ namespace Kjarni
             return result;
         }
 
+        /// <summary>Cosine similarity of two vectors of the same length, from -1 to 1.</summary>
+        /// <exception cref="ArgumentException">The vectors have different lengths.</exception>
         public static float CosineSimilarity(float[] a, float[] b)
         {
             if (a.Length != b.Length)
@@ -134,6 +136,7 @@ namespace Kjarni
             }
         }
 
+        /// <summary>Releases the native model. The object cannot be used afterwards.</summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -150,6 +153,7 @@ namespace Kjarni
                 throw new ObjectDisposedException(nameof(Embedder));
         }
 
+        /// <summary>Releases the native model if <see cref="Dispose"/> was not called.</summary>
         ~Embedder()
         {
             Dispose();

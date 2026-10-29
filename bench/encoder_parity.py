@@ -29,6 +29,7 @@ for name in [
     # xlm-roberta architecture with an 8192 token window: the only long-context
     # encoder here, and the only one whose position embeddings are offset.
     "BAAI_bge-m3",
+    "intfloat_multilingual-e5-small",
 ]:
     path = f"{cache}/{name}"
     if not os.path.exists(f"{path}/model.safetensors"):

@@ -144,7 +144,17 @@ pub unsafe extern "C" fn kjarni_classifier_new(
                 };
 
                 let result = get_runtime().block_on(async {
-                    let mut builder = Classifier::builder("sentiment"); // default
+                    // The model name starts the builder, so every setting below
+                    // is applied to the builder that is built.
+                    let model = if config.model_name.is_null() {
+                        "sentiment"
+                    } else {
+                        match CStr::from_ptr(config.model_name).to_str() {
+                            Ok(s) => s,
+                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+                        }
+                    };
+                    let mut builder = Classifier::builder(model);
 
                     // Device
                     match config.device {
@@ -156,14 +166,6 @@ pub unsafe extern "C" fn kjarni_classifier_new(
                     if !config.cache_dir.is_null() {
                         match CStr::from_ptr(config.cache_dir).to_str() {
                             Ok(s) => builder = builder.cache_dir(s),
-                            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
-                        }
-                    }
-
-                    // Model name
-                    if !config.model_name.is_null() {
-                        match CStr::from_ptr(config.model_name).to_str() {
-                            Ok(s) => builder = Classifier::builder(s),
                             Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
                         }
                     }
@@ -565,5 +567,26 @@ mod batch_tests {
             assert_eq!(empty.len, 0);
             kjarni_classifier_free(handle);
         }
+    }
+
+    /// The model name used to start a fresh builder, which dropped the device and
+    /// cache directory set before it: every binding that asked for the GPU got a
+    /// classifier on the CPU.
+    #[test]
+    #[ignore = "GPU required"]
+    fn device_survives_the_model_name() {
+        let mut config = kjarni_classifier_config_default();
+        let name = CString::new("distilbert-sentiment").unwrap();
+        config.model_name = name.as_ptr();
+        config.device = KjarniDevice::Gpu;
+        config.quiet = 1;
+        let mut handle = ptr::null_mut();
+        assert_eq!(
+            unsafe { kjarni_classifier_new(&config, &mut handle) },
+            KjarniErrorCode::Ok
+        );
+        let device = unsafe { (*handle).inner.device() };
+        unsafe { kjarni_classifier_free(handle) };
+        assert!(device.is_gpu(), "asked for the GPU, got {device:?}");
     }
 }

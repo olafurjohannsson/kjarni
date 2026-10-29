@@ -1,6 +1,6 @@
 {
   "name": "kjarni-wasm",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Local AI inference in the browser: embeddings, classification, reranking, semantic search and chat, running in a Web Worker.",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
   "devDependencies": {
     "typescript": "^5.6.0"
   },
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/olafurjohannsson/kjarni.git",

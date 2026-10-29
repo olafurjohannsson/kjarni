@@ -282,17 +282,21 @@ impl GpuTensor {
             target
         );
 
-        let typed_cpu = weights.get_typed_tensor(name)?;
-        let (converted_bytes, final_shape) = convert_cpu_tensor_to_bytes(typed_cpu, target)?;
-
-        let converted_view = TensorView {
-            name: name.to_string(),
-            bytes: Cow::Owned(converted_bytes),
-            shape: final_shape,
-            dtype: target,
-        };
-
-        GpuTensor::from_raw(ctx, &converted_view, label)
+        // Several components can ask for the same expanded tensor (the decoder
+        // and the pipeline both load the embedding table), so the expansion and
+        // upload happen once per context and the rest share the buffer.
+        let key = format!("gpu-expanded:{name}:{target:?}:{:p}", Arc::as_ptr(ctx));
+        weights.shared_conversion(key, || {
+            let typed_cpu = weights.get_typed_tensor(name)?;
+            let (converted_bytes, final_shape) = convert_cpu_tensor_to_bytes(typed_cpu, target)?;
+            let converted_view = TensorView {
+                name: name.to_string(),
+                bytes: Cow::Owned(converted_bytes),
+                shape: final_shape,
+                dtype: target,
+            };
+            GpuTensor::from_raw(ctx, &converted_view, label)
+        })
     }
 
     /// Creates a tensor from f32 data.
@@ -806,45 +810,49 @@ pub(crate) fn repack_q8_0(blocks: &[crate::cpu::kernels::q_common::BlockQ8_0]) -
     out
 }
 
+/// Converts to a 16-bit float type, written straight into little-endian bytes,
+/// in parallel.
+fn to_half_bytes(data: &[f32], convert: impl Fn(f32) -> u16 + Sync) -> Vec<u8> {
+    use rayon::prelude::*;
+    const CHUNK: usize = 1 << 14;
+    let mut out = vec![0u8; data.len() * 2];
+    out.par_chunks_mut(CHUNK * 2)
+        .zip(data.par_chunks(CHUNK))
+        .for_each(|(dst, src)| {
+            for (d, &v) in dst.chunks_exact_mut(2).zip(src) {
+                d.copy_from_slice(&convert(v).to_le_bytes());
+            }
+        });
+    out
+}
+
 fn convert_cpu_tensor_to_bytes(
     tensor: CpuTensor,
     target_dtype: DType,
 ) -> Result<(Vec<u8>, Vec<usize>)> {
     let shape = tensor.shape().to_vec();
 
+    // Owned buffers throughout: copying a vocab-sized table costs a third of a
+    // second, and the conversion below reads it once.
     let f32_data: Vec<f32> = match shape.len() {
-        1 => tensor.to_array1_f32()?.to_vec(),
+        1 => tensor.to_array1_f32()?.into_raw_vec_and_offset().0,
         2 => {
             let arr = tensor.to_array2_f32()?;
-            arr.as_slice()
-                .ok_or_else(|| anyhow!("non-contiguous 2D array"))?
-                .to_vec()
+            anyhow::ensure!(arr.is_standard_layout(), "non-contiguous 2D array");
+            arr.into_raw_vec_and_offset().0
         }
         3 => {
             let arr = tensor.to_array3_f32()?;
-            arr.as_slice()
-                .ok_or_else(|| anyhow!("non-contiguous 3D array"))?
-                .to_vec()
+            anyhow::ensure!(arr.is_standard_layout(), "non-contiguous 3D array");
+            arr.into_raw_vec_and_offset().0
         }
         rank => anyhow::bail!("unsupported tensor rank {} for GPU conversion", rank),
     };
 
     let bytes = match target_dtype {
         DType::F32 => bytemuck::cast_slice(&f32_data).to_vec(),
-        DType::F16 => {
-            let f16_data: Vec<u16> = f32_data
-                .iter()
-                .map(|&v| half::f16::from_f32(v).to_bits())
-                .collect();
-            bytemuck::cast_slice(&f16_data).to_vec()
-        }
-        DType::BF16 => {
-            let bf16_data: Vec<u16> = f32_data
-                .iter()
-                .map(|&v| half::bf16::from_f32(v).to_bits())
-                .collect();
-            bytemuck::cast_slice(&bf16_data).to_vec()
-        }
+        DType::F16 => to_half_bytes(&f32_data, |v| half::f16::from_f32(v).to_bits()),
+        DType::BF16 => to_half_bytes(&f32_data, |v| half::bf16::from_f32(v).to_bits()),
         other => anyhow::bail!(
             "unsupported target dtype {:?} for CPU->GPU conversion",
             other
@@ -852,6 +860,32 @@ fn convert_cpu_tensor_to_bytes(
     };
 
     Ok((bytes, shape))
+}
+
+#[cfg(test)]
+mod half_bytes_tests {
+    use super::to_half_bytes;
+
+    /// Parallel chunks of 16k values: a length that is not a multiple of the
+    /// chunk, and values that round, must come out as the half crate writes them.
+    #[test]
+    fn to_half_bytes_matches_half_crate() {
+        let data: Vec<f32> = (0..40_000)
+            .map(|i| (i as f32 * 0.37).sin() * 1e3 + 1e-3)
+            .collect();
+        let bf = to_half_bytes(&data, |v| half::bf16::from_f32(v).to_bits());
+        let f = to_half_bytes(&data, |v| half::f16::from_f32(v).to_bits());
+        for (i, &v) in data.iter().enumerate() {
+            assert_eq!(
+                &bf[i * 2..i * 2 + 2],
+                &half::bf16::from_f32(v).to_bits().to_le_bytes()
+            );
+            assert_eq!(
+                &f[i * 2..i * 2 + 2],
+                &half::f16::from_f32(v).to_bits().to_le_bytes()
+            );
+        }
+    }
 }
 
 #[cfg(test)]

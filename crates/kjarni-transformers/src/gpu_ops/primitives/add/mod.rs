@@ -115,7 +115,7 @@ impl GpuAdd {
         cpass.set_pipeline(&self.broadcast_row_pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
         let workgroups = (a.num_elements() as u32).div_ceil(256);
-        cpass.dispatch_workgroups(workgroups, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut cpass, workgroups);
     }
     /// Encodes standard element-wise addition: `output = a + b`.
     ///
@@ -186,7 +186,7 @@ impl GpuAdd {
         compute_pass.set_pipeline(&self.elementwise_pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
         let workgroups = size.div_ceil(256);
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
     }
     /// Encodes broadcast addition with an offset: `output[i,j,k] = a[i,j,k] + b[j + offset, k]`.
     ///
@@ -267,7 +267,7 @@ impl GpuAdd {
         compute_pass.set_pipeline(&self.broadcast_offset_pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
         let workgroups = uniforms.output_size.div_ceil(256);
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
     }
 }
 

@@ -6,18 +6,32 @@ using System.Runtime.InteropServices;
 
 namespace Kjarni
 {
+    /// <summary>
+    /// Why a call into the native engine failed, carried by <see cref="KjarniException.ErrorCode"/>.
+    /// </summary>
     public enum KjarniErrorCode
     {
+        /// <summary>The operation succeeded.</summary>
         Ok = 0,
+        /// <summary>A required argument was null.</summary>
         NullPointer = 1,
+        /// <summary>A string was not valid UTF-8.</summary>
         InvalidUtf8 = 2,
+        /// <summary>The model name is not in the registry.</summary>
         ModelNotFound = 3,
+        /// <summary>The model could not be downloaded or loaded.</summary>
         LoadFailed = 4,
+        /// <summary>Running the model failed.</summary>
         InferenceFailed = 5,
+        /// <summary>A GPU was requested but no usable adapter was found.</summary>
         GpuUnavailable = 6,
+        /// <summary>An option or combination of options is invalid.</summary>
         InvalidConfig = 7,
+        /// <summary>The operation was cancelled through a <see cref="CancelToken"/>.</summary>
         Cancelled = 8,
+        /// <summary>The operation timed out.</summary>
         Timeout = 9,
+        /// <summary>A token stream has no more tokens.</summary>
         StreamEnded = 10,
 
         /// <summary>
@@ -26,30 +40,46 @@ namespace Kjarni
         /// </summary>
         Panic = 11,
 
+        /// <summary>An error the engine did not classify.</summary>
         Unknown = 255,
     }
 
+    /// <summary>Where a model runs.</summary>
     public enum KjarniDevice
     {
+        /// <summary>The CPU.</summary>
         Cpu = 0,
+        /// <summary>The GPU, through Vulkan, DirectX 12 or Metal.</summary>
         Gpu = 1,
     }
 
+    /// <summary>How a <see cref="Searcher"/> matches a query against an index.</summary>
     public enum KjarniSearchMode
     {
+        /// <summary>BM25 keyword matching.</summary>
         Keyword = 0,
+        /// <summary>Embedding similarity, which finds matches that share meaning but not words.</summary>
         Semantic = 1,
+        /// <summary>Keyword and semantic results combined by reciprocal rank fusion.</summary>
         Hybrid = 2,
     }
 
+    /// <summary>The step an indexing or search operation is on, reported through progress callbacks.</summary>
     public enum KjarniProgressStage
     {
+        /// <summary>Finding the files to index.</summary>
         Scanning = 0,
+        /// <summary>Reading and chunking documents.</summary>
         Loading = 1,
+        /// <summary>Computing embeddings for the chunks.</summary>
         Embedding = 2,
+        /// <summary>Writing chunks and vectors to the index.</summary>
         Writing = 3,
+        /// <summary>Finalizing the index on disk.</summary>
         Committing = 4,
+        /// <summary>Running a search.</summary>
         Searching = 5,
+        /// <summary>Rescoring search results with a cross-encoder.</summary>
         Reranking = 6,
     }
 
@@ -1090,23 +1120,31 @@ internal class Utf8StringArray : IDisposable
     }
 }
 
+    /// <summary>Library-wide functions.</summary>
     public class Kjarni
     {
+        /// <summary>
+        /// Initializes the native runtime. Optional: the first model created initializes it.
+        /// </summary>
         public static void Initialize()
         {
             Native.CheckError(Native.kjarni_init());
         }
 
+        /// <summary>The version of the native library, for example "0.2.6".</summary>
         public static string GetVersion()
         {
             return Native.GetVersion();
         }
     }
 
+    /// <summary>Thrown when a call into the native engine fails.</summary>
     public class KjarniException : Exception
     {
+        /// <summary>Why the call failed.</summary>
         public KjarniErrorCode ErrorCode { get; }
 
+        /// <summary>Creates an exception with the engine's message and error code.</summary>
         public KjarniException(string message, KjarniErrorCode code)
             : base(message)
         {

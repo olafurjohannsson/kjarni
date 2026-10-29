@@ -29,6 +29,7 @@ type KjarniError struct {
 	Message string
 }
 
+// Error returns the engine's message and error code.
 func (e *KjarniError) Error() string {
 	return fmt.Sprintf("kjarni: %s (code %d)", e.Message, e.Code)
 }

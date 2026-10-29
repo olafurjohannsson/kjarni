@@ -102,11 +102,13 @@ impl EncoderDecoderModelFactory for T5Model {
                 *load_config,
             )?) as Box<dyn CpuCrossDecoder>);
         } else if device.is_gpu() {
-            todo!()
+            // T5 needs a relative position bias in both stacks, RMSNorm without
+            // bias and a gated-GELU FFN; the GPU encoder-decoder has none of
+            // them yet. Refuse plainly rather than abort the caller.
+            anyhow::bail!(
+                "T5 models run on the CPU only; GPU support for T5 is not implemented yet"
+            );
         }
-
-        // TODO: GPU backends for T5
-        // if let Some(ctx) = context { ... }
 
         Ok((cpu_enc, gpu_enc, cpu_dec, gpu_dec))
     }

@@ -116,9 +116,6 @@ pub async fn run(
     } else if model_type.is_llama_model() {
         Arc::new(LlamaModel::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_qwen_model() {
-        // The registry has carried `is_qwen_model` all along and this dispatch
-        // never used it, so `kjarni chat` ran Qwen while `kjarni generate`
-        // rejected it as unsupported.
         Arc::new(QwenModel::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_phi_model() {
         Arc::new(PhiModel::from_registry(model_type, None, device, None, load_cfg).await?)

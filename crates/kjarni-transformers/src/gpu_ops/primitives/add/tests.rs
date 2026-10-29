@@ -118,3 +118,38 @@ async fn test_gpu_add_parity() -> Result<()> {
 
     Ok(())
 }
+
+/// 256 threads per workgroup: just over 2^24 elements needs 65540 workgroups,
+/// one past what fits in a single dimension, so the add runs on a 2D grid.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn test_gpu_add_beyond_dispatch_limit() -> Result<()> {
+    let context = WgpuContext::new().await?;
+    let gpu_add = GpuAdd::new(&context);
+
+    let len = 65_536 * 256 + 1000;
+    let shape = (1, 1, len);
+    let a_cpu = Array3::from_shape_fn(shape, |(_, _, k)| (k % 1000) as f32);
+    let b_cpu = Array3::from_shape_fn(shape, |(_, _, k)| (k / 1000 % 1000) as f32 * 1000.0);
+
+    let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
+    let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
+    let output_gpu =
+        GpuTensor::uninitialized(&context, vec![1, 1, len], a_gpu.dtype(), "add_output");
+
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    gpu_add.encode(&mut encoder, &[&a_gpu, &b_gpu], &output_gpu);
+    context.queue.submit(Some(encoder.finish()));
+
+    // Integers below 2^24 add exactly, so every element must match.
+    let out: Array3<f32> = read_gpu_tensor(&output_gpu).await?;
+    for k in [0, 65_535 * 256 - 1, 65_535 * 256, len - 1] {
+        assert_eq!(
+            out[[0, 0, k]],
+            (k % 1000) as f32 + (k / 1000 % 1000) as f32 * 1000.0,
+            "element {k}"
+        );
+    }
+    assert_eq!(out, &a_cpu + &b_cpu);
+    Ok(())
+}

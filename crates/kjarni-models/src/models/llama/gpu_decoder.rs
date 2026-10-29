@@ -294,6 +294,7 @@ impl GpuDecoder for LlamaGpuDecoder {
     ) -> Result<GpuTensor> {
         let mut current_state: GpuTensor = hidden_states.clone();
 
+        let checkpoint = pool.checkpoint();
         for i in start_layer..end_layer {
             let layer = &self.layers[i];
             let layer_cache = cache.as_deref_mut();
@@ -308,6 +309,9 @@ impl GpuDecoder for LlamaGpuDecoder {
                 pool,
                 &self.gpu_rope, // Always passed for Llama
             )?;
+            // Only the hidden state carries into the next layer (the KV cache owns
+            // its own buffers); see GpuTensorPool::release_since.
+            pool.release_since(&checkpoint, &[&current_state]);
         }
 
         Ok(current_state)

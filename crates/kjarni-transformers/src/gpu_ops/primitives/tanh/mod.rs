@@ -78,6 +78,6 @@ impl GpuTanh {
         let num_elements = tensor.num_elements() as u32;
         let workgroup_size = 256;
         let workgroups = num_elements.div_ceil(workgroup_size);
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
     }
 }

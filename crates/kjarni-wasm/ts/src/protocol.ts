@@ -8,17 +8,26 @@
 /** A model to load, either already in memory or somewhere to fetch it from. */
 export type ModelSource = string | URL | ArrayBuffer | Uint8Array;
 
+/** A kind of model a {@link Kjarni} instance can hold, one of each. */
 export type Capability = "encoder" | "classifier" | "reranker" | "chat";
 
+/** The top prediction for one text. */
 export interface ClassifyResult {
+  /** The predicted label, for example "POSITIVE". */
   label: string;
+  /** Its probability, from 0 to 1. */
   score: number;
+  /** The label's position in the model's label list. */
   index: number;
 }
 
+/** One document after reranking. */
 export interface RankedDocument {
+  /** Its position in the list that was passed in. */
   index: number;
+  /** The cross-encoder's raw score; higher is more relevant. */
   score: number;
+  /** The document text. */
   text: string;
 }
 

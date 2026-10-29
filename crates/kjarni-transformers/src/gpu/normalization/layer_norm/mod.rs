@@ -201,7 +201,7 @@ impl GpuLayerNorm {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
         let workgroups = (rows as u32).div_ceil(256);
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
     }
 }
 

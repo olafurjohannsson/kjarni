@@ -161,6 +161,46 @@ for p in sorted(json.load(sys.stdin)["packages"], key=lambda x: x["name"]):
     print(p["name"], ",".join(missing) if missing else "ok")
 ')
 
+# ── one license everywhere ────────────────────────────────────────
+#
+# The project is MIT OR Apache-2.0. Each registry shows the license its own
+# manifest declares, so a manifest that says only MIT tells NuGet, npm or PyPI
+# users something different from the repository.
+LICENSE_WANT="MIT OR Apache-2.0"
+echo
+echo "licenses:"
+while IFS=$'\t' read -r name value; do
+  report "$name" "$value" "$LICENSE_WANT"
+done < <(python3 - "$PYPROJECT" "$TS_PACKAGE" "${CSPROJ[@]}" <<'PY'
+import json, pathlib, re, sys
+pyproject, tspkg, *csprojs = sys.argv[1:]
+
+ws = pathlib.Path("Cargo.toml").read_text()
+m = re.search(r'^\[workspace\.package\](.*?)(?=^\[)', ws, re.S | re.M)
+workspace = re.search(r'^license\s*=\s*"([^"]+)"', m.group(1), re.M)
+print(f"Cargo.toml [workspace.package]\t{workspace.group(1) if workspace else ''}")
+for f in sorted(pathlib.Path("crates").glob("*/Cargo.toml")):
+    s = f.read_text()
+    pkg = re.search(r'^\[package\](.*?)(?=^\[|\Z)', s, re.S | re.M)
+    # Crates that never reach a registry carry no license to show anyone.
+    if not pkg or re.search(r'^publish\s*=\s*false', pkg.group(1), re.M):
+        continue
+    if re.search(r'^license\.workspace\s*=\s*true', pkg.group(1), re.M):
+        value = workspace.group(1) if workspace else ""
+    else:
+        own = re.search(r'^license\s*=\s*"([^"]+)"', pkg.group(1), re.M)
+        value = own.group(1) if own else ""
+    print(f"{f}\t{value}")
+
+own = re.search(r'^license\s*=\s*\{\s*text\s*=\s*"([^"]+)"', pathlib.Path(pyproject).read_text(), re.M)
+print(f"{pyproject}\t{own.group(1) if own else ''}")
+print(f"{tspkg}\t{json.load(open(tspkg)).get('license', '')}")
+for c in csprojs:
+    own = re.search(r'<PackageLicenseExpression>([^<]+)</PackageLicenseExpression>', pathlib.Path(c).read_text())
+    print(f"{c}\t{own.group(1) if own else ''}")
+PY
+)
+
 # ── the tag, when CI is running on one ────────────────────────────
 if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
   echo
@@ -170,7 +210,7 @@ fi
 
 echo
 if [ "$fail" -ne 0 ]; then
-  echo "version drift found. Run: $0 --set $WANT" >&2
+  echo "drift found. For versions, run: $0 --set $WANT" >&2
   exit 1
 fi
 echo "all versions agree on $WANT"

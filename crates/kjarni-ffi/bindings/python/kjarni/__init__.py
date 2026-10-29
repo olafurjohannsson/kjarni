@@ -1,4 +1,15 @@
-"""Kjarni - Fast ML inference library."""
+"""Kjarni: run transformer models inside your program.
+
+Embeddings, classification, reranking, search, chat, speech-to-text,
+summarization, translation and image search, on a native engine whose output
+matches PyTorch. Models download on first use and are cached, so everything
+after that works offline.
+
+    from kjarni import Embedder
+
+    e = Embedder("minilm-l6-v2")
+    print(e.similarity("doctor", "physician"))  # 0.8598
+"""
 
 from .embedder import Embedder
 from .classifier import Classifier

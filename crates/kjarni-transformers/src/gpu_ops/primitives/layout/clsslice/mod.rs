@@ -164,7 +164,7 @@ impl GpuClsSlice {
         let total_elements = (batch_size * hidden_size) as u32;
         let num_workgroups = total_elements.div_ceil(workgroup_size);
 
-        compute_pass.dispatch_workgroups(num_workgroups, 1, 1);
+        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, num_workgroups);
     }
 }
 

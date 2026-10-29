@@ -38,9 +38,12 @@ fn get_gamma(index: u32) -> f32 {
 @compute @workgroup_size(256)
 fn main(
     @builtin(workgroup_id) group_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
 ) {
-    let row = group_id.x;
+    // One workgroup per row, over a 2D grid when there are more than 65535
+    // rows; see gpu_ops::utils::grid_1d.
+    let row = group_id.y * grid.x + group_id.x;
     let tid = local_id.x;
 
     if (row >= uniforms.m) { return; }

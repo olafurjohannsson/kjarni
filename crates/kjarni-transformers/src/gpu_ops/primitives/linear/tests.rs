@@ -133,10 +133,18 @@ async fn q4k_gemv_matches_cpu() -> Result<()> {
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q4k_batched_matches_cpu() -> Result<()> {
-    for t in ["blk.0.attn_q.weight", "blk.0.ffn_gate.weight"] {
-        match run_q4k(8, t).await? {
-            None => println!("  skipping {t}"),
-            Some((gpu, cpu, shape)) => report(t, &gpu, &cpu, &shape),
+    // Prefill runs gemm_q4k, which dequantises 64x16 tiles: row counts that
+    // fill a tile, leave one partly empty, and span several.
+    for m in [8, 67, 300] {
+        for t in [
+            "blk.0.attn_q.weight",
+            "blk.0.ffn_gate.weight",
+            "blk.3.ffn_down.weight", // K = 8192
+        ] {
+            match run_q4k(m, t).await? {
+                None => println!("  skipping {t}"),
+                Some((gpu, cpu, shape)) => report(t, &gpu, &cpu, &shape),
+            }
         }
     }
     Ok(())
@@ -566,6 +574,127 @@ async fn q8_repack_preserves_every_value() -> Result<()> {
         assert_eq!(&packed[o + 2..o + 4], &[0, 0], "block {b} scale padding");
         for (i, &q) in block.qs.iter().enumerate() {
             assert_eq!(packed[o + 4 + i] as i8, q, "block {b} value {i}");
+        }
+    }
+    Ok(())
+}
+
+/// The tiled GEMM against a CPU matmul, for F32 and BF16 weights, at shapes
+/// that exercise every edge: M, N and K that are not multiples of the 64x64x16
+/// tile, one row, K smaller than one slice, and an encoder-sized shape that
+/// spans many tiles. BF16 needs an even K, as every packed weight has.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn gemm_matches_cpu() -> Result<()> {
+    let context = WgpuContext::new().await?;
+    let linear = GpuLinearLayer::new(&context);
+    for dtype in [DType::F32, DType::BF16] {
+        for (m, k, n) in [
+            (2, 4, 5),
+            (67, 130, 131),
+            (64, 64, 64),
+            (65, 18, 63),
+            (3, 1024, 4096),
+            (513, 384, 1536),
+            (2048, 1024, 1024),
+        ] {
+            // Values with a varying sign and size, so a misplaced row or column
+            // changes the sum rather than averaging out.
+            let a =
+                Array2::from_shape_fn((m, k), |(i, j)| ((i * 31 + j * 7) % 23) as f32 / 23.0 - 0.5);
+            let mut w =
+                Array2::from_shape_fn((n, k), |(i, j)| ((i * 13 + j * 5) % 19) as f32 / 19.0 - 0.5);
+            let w_gpu = if dtype == DType::BF16 {
+                // The CPU side multiplies by the same rounded weights.
+                w.mapv_inplace(|x| half::bf16::from_f32(x).to_f32());
+                let bits: Vec<u16> = w
+                    .iter()
+                    .map(|&x| half::bf16::from_f32(x).to_bits())
+                    .collect();
+                GpuTensor::from_bytes(
+                    &context,
+                    bytemuck::cast_slice(&bits),
+                    vec![n, k],
+                    DType::BF16,
+                    "w",
+                )?
+            } else {
+                GpuTensor::from_ndarray(&context, &w)?
+            };
+            let expected = a.dot(&w.t());
+
+            let a_gpu = GpuTensor::from_ndarray(&context, &a)?;
+            let out = GpuTensor::from_ndarray(&context, &Array2::<f32>::zeros((m, n)))?;
+            let mut encoder = context.device.create_command_encoder(&Default::default());
+            linear.encode(&mut encoder, &a_gpu, &w_gpu, &out);
+            context.queue.submit(Some(encoder.finish()));
+
+            let (got, _) = read_gpu_tensor_to_vec::<f32>(&out).await?;
+            let mut worst = 0.0f32;
+            for (g, c) in got.iter().zip(expected.iter()) {
+                worst = worst.max((g - c).abs() / c.abs().max(1.0));
+            }
+            println!("  gemm {dtype:?} {m}x{k}x{n}: worst relative diff {worst:.3e}");
+            assert!(
+                worst < 1e-4,
+                "{dtype:?} {m}x{k}x{n}: GPU differs from CPU by {worst:.3e}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Prefill through gemm_q6k: packed Q6_K against the same tensor expanded to
+/// F32, which dequantises exactly on load and runs gemm_f32. The two routes
+/// share nothing but the weights, so they agree to rounding unless the tile
+/// dequantisation reads the wrong block, half, quarter or scale.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q6k_batched_matches_expanded() -> Result<()> {
+    let path = gguf_path();
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let context = WgpuContext::new().await?;
+    let linear = GpuLinearLayer::new(&context);
+
+    for name in ["blk.1.ffn_down.weight", "blk.0.attn_v.weight"] {
+        if weights.tensor_dtype(name).ok() != Some(DType::Q6_K) {
+            println!("  skipping {name}");
+            continue;
+        }
+        let packed = GpuTensor::from_model_weights(&context, &weights, name, None, "p")?;
+        let expanded =
+            GpuTensor::from_model_weights(&context, &weights, name, Some(DType::F32), "e")?;
+        let (n, k) = (packed.shape()[0], packed.shape()[1]);
+
+        for m in [3usize, 67, 300] {
+            let input = Array2::from_shape_fn((m, k), |(i, j)| {
+                ((i * 37 + j * 11) % 29) as f32 / 29.0 - 0.5
+            });
+            let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+            let run = |w: &GpuTensor| -> Result<Vec<f32>> {
+                let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
+                let mut enc = context.device.create_command_encoder(&Default::default());
+                linear.encode(&mut enc, &gpu_in, w, &out);
+                context.queue.submit(std::iter::once(enc.finish()));
+                Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
+            };
+            let got = run(&packed)?;
+            let want = run(&expanded)?;
+            let mut worst = 0.0f32;
+            let mut scale = 0.0f32;
+            for (g, w) in got.iter().zip(&want) {
+                worst = worst.max((g - w).abs());
+                scale = scale.max(w.abs());
+            }
+            println!("  {name} rows={m}: max abs diff {worst:.3e}, |expanded| up to {scale:.3}");
+            assert!(
+                worst < 1e-4 * scale.max(1.0),
+                "{name} rows={m}: {worst:.3e}"
+            );
         }
     }
     Ok(())

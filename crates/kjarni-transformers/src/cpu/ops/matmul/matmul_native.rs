@@ -2106,7 +2106,7 @@ mod dequant_tiled_tests {
     }
 
     /// The reference: dequantize the whole weight, then a plain f32 product.
-    fn reference<B: crate::tensor::Dequantizable>(
+    fn reference<B: crate::tensor::Dequantizable + Sync>(
         a: &Array2<f32>,
         blocks: Vec<B>,
         n: usize,

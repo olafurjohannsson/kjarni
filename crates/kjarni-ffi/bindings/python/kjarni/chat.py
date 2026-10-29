@@ -313,6 +313,7 @@ class Conversation:
              top_p: Optional[float] = None, min_p: Optional[float] = None,
              repetition_penalty: Optional[float] = None, max_new_tokens: Optional[int] = None,
              do_sample: Optional[bool] = None) -> str:
+        """Send a message and return the whole reply. Both are added to the history."""
         gen = _generation_config(temperature, top_k, top_p, min_p, repetition_penalty, max_new_tokens, do_sample)
         out = c_void_p()
         check_error(_lib.kjarni_chat_conversation_send(self._handle, message.encode("utf-8"), gen, byref(out)))
@@ -323,6 +324,7 @@ class Conversation:
                top_p: Optional[float] = None, min_p: Optional[float] = None,
                repetition_penalty: Optional[float] = None, max_new_tokens: Optional[int] = None,
                do_sample: Optional[bool] = None) -> str:
+        """Stream a reply through `on_token`, as `Chat.stream` does, and add both to the history."""
         gen = _generation_config(temperature, top_k, top_p, min_p, repetition_penalty, max_new_tokens, do_sample)
         s = _Stream(on_token)
         err = _lib.kjarni_chat_conversation_stream(self._handle, message.encode("utf-8"), gen, s.callback, None, None)
