@@ -10,7 +10,11 @@ const TEXT: &str = "how do I get a refund for a damaged order?";
 
 #[tokio::main]
 async fn main() {
-    let embedder = Embedder::builder("minilm-l6-v2").quiet(true).build().await.unwrap();
+    let embedder = Embedder::builder("minilm-l6-v2")
+        .quiet(true)
+        .build()
+        .await
+        .unwrap();
     let mut times = Vec::with_capacity(CALLS);
     for i in 0..WARMUP + CALLS {
         let start = Instant::now();
