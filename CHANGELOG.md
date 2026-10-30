@@ -15,6 +15,15 @@
 - **Prompts in Qwen's Q4_K_M file are about 8x faster on the GPU**, from 186 to
   1,537 tokens a second. Q4_0 and Q5_0 tensors reach the GPU as Q8_0, which had no
   batched kernel: a long prompt dispatched one workgroup per output element.
+- **Streaming with beam search returned garbage.** `kjarni translate` streams by
+  default, and "The house is small." came back as "Das Haus ist klein.. aber Zimmer
+  sind ...". Streaming now gives the same text as not streaming; with more than one
+  beam, the tokens arrive once the search has finished.
+- **`Indexer.exclude()` did nothing for most patterns, and hidden folders were
+  indexed.** Patterns were compared with the full path, so `target` or `*.log` never
+  matched. `search_folder` over MCP therefore indexed build output and could return
+  passages from folders like `.aws` to the agent. Excluded and hidden folders are
+  now skipped.
 - **Short texts on the GPU are a little faster**: bge-m3 from 74 to 58 ms. Layer
   norm gives a few rows a workgroup each instead of one thread each. Batches are
   unchanged.

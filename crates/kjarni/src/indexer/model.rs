@@ -734,8 +734,6 @@ impl Indexer {
     }
 
     fn collect_files(&self, inputs: &[&str]) -> IndexerResult<Vec<PathBuf>> {
-        use walkdir::WalkDir;
-
         let mut files = Vec::new();
 
         for input in inputs {
@@ -750,36 +748,8 @@ impl Indexer {
                     files.push(path.to_path_buf());
                 }
             } else if path.is_dir() {
-                let walker = if self.loader_config.recursive {
-                    WalkDir::new(path)
-                } else {
-                    WalkDir::new(path).max_depth(1)
-                };
-
-                for entry in walker.into_iter().filter_map(|e| e.ok()) {
-                    let entry_path = entry.path();
-
-                    if !entry_path.is_file() {
-                        continue;
-                    }
-
-                    if !self.loader_config.include_hidden
-                        && let Some(name) = entry_path.file_name().and_then(|n| n.to_str())
-                        && name.starts_with('.')
-                    {
-                        continue;
-                    }
-
-                    let path_str = entry_path.to_string_lossy();
-                    let excluded = self
-                        .loader_config
-                        .exclude_patterns
-                        .iter()
-                        .any(|pattern| glob_match::glob_match(pattern, &path_str));
-                    if excluded {
-                        continue;
-                    }
-
+                let loader = DocumentLoader::new(self.loader_config.clone());
+                for entry_path in loader.files_in(path) {
                     if let Some(max_size) = self.loader_config.max_file_size
                         && let Ok(metadata) = entry_path.metadata()
                         && metadata.len() as usize > max_size
@@ -787,8 +757,8 @@ impl Indexer {
                         continue;
                     }
 
-                    if self.is_supported_file(entry_path) {
-                        files.push(entry_path.to_path_buf());
+                    if self.is_supported_file(&entry_path) {
+                        files.push(entry_path);
                     }
                 }
             }
@@ -854,7 +824,7 @@ mod indexer_tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    use crate::indexer::{IndexInfo, IndexStats, IndexerBuilder, IndexerError};
+    use crate::indexer::{IndexInfo, IndexStats, Indexer, IndexerBuilder, IndexerError};
 
     #[test]
     fn test_index_stats_construction() {
@@ -1339,20 +1309,38 @@ mod indexer_tests {
         assert!(!is_hidden(&dir.path().join("doc1.txt")));
     }
 
-    #[test]
-    fn test_exclude_pattern_matching() {
-        let patterns = ["*.log".to_string(), "temp/*".to_string()];
+    #[tokio::test]
+    async fn create_leaves_out_excluded_and_hidden_files() {
+        let dir = TempDir::new().unwrap();
+        for file in [
+            "keep/note.md",
+            "target/build.txt",
+            "keep/app.min.js",
+            ".hidden/secret.txt",
+            "temp/cache.txt",
+        ] {
+            let path = dir.path().join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "some indexable text").unwrap();
+        }
+        let indexer = Indexer::builder("minilm-l6-v2")
+            .exclude("target")
+            .exclude("*.min.js")
+            .exclude("temp/*")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
 
-        let is_excluded = |path: &str| -> bool {
-            patterns
-                .iter()
-                .any(|pattern| glob_match::glob_match(pattern, path))
-        };
+        let files = indexer
+            .collect_files(&[dir.path().to_str().unwrap()])
+            .unwrap();
 
-        assert!(is_excluded("error.log"));
-        assert!(is_excluded("temp/cache.txt"));
-        assert!(!is_excluded("document.txt"));
-        assert!(!is_excluded("data/file.txt"));
+        let names: Vec<_> = files
+            .iter()
+            .map(|p| p.strip_prefix(dir.path()).unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, ["keep/note.md"]);
     }
 
     #[test]

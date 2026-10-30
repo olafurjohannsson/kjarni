@@ -588,6 +588,37 @@ mod flan_t5_base_tests {
         assert_eq!(direct, streamed);
         assert_eq!(direct, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
     }
+
+    /// Streaming with default settings gives the text `translate` does: the same
+    /// settings for the task, and the winning beam's tokens. The expected text is
+    /// transformers' output for this prompt on the same weights.
+    #[tokio::test]
+    async fn streaming_with_beams_matches_non_streaming() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let direct = t.translate("The house is small.", "en", "de").await.unwrap();
+
+        let mut stream = t.stream("The house is small.", "en", "de").await.unwrap();
+        let mut chunks = Vec::new();
+        while let Some(result) = stream.next().await {
+            chunks.push(result.unwrap());
+        }
+        assert!(chunks.len() > 1, "expected tokens, got {chunks:?}");
+        let streamed: String = chunks.into_iter().collect();
+
+        assert_eq!(streamed, direct);
+        assert_eq!(streamed, "Das Haus ist klein.");
+    }
 }
 
 // Integration Tests - Model Output Verification (flan-t5-large)

@@ -372,17 +372,16 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
     Ok(false)
 }
 
-pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
-    model: &dyn EncoderDecoderLanguageModel,
-    backend: &B,
-    input_text: &str,
+/// Runs the search to its end and returns the best hypothesis's tokens, without
+/// the decoder start token or EOS.
+async fn search_to_end<B: EncoderDecoderGenerationBackend>(
+    ctx: &mut BeamContext<'_, B>,
     config: &GenerationConfig,
-) -> Result<String> {
-    let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
+) -> Result<Vec<u32>> {
     let mut stopped_early = false;
 
     for step in 0..config.max_length {
-        let should_stop = beam_step(&mut ctx, step).await?;
+        let should_stop = beam_step(ctx, step).await?;
         if should_stop {
             stopped_early = true;
             break;
@@ -394,7 +393,7 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
 
     // only add active beams if we didn't early-stop
     if !stopped_early {
-        for beam in ctx.beams {
+        for beam in std::mem::take(&mut ctx.beams) {
             if beam.score != f32::NEG_INFINITY {
                 ctx.finished.add(beam);
             }
@@ -421,19 +420,44 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
         tokens.len()
     };
 
-    let clean_tokens = if start < end {
-        &tokens[start..end]
+    Ok(if start < end {
+        tokens[start..end].to_vec()
     } else {
-        &[]
-    };
-
-    let text = model
-        .tokenizer()
-        .decode(clean_tokens, true)
-        .map_err(|e| anyhow!(e))?;
-    Ok(text)
+        Vec::new()
+    })
 }
 
+pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
+    model: &dyn EncoderDecoderLanguageModel,
+    backend: &B,
+    input_text: &str,
+    config: &GenerationConfig,
+) -> Result<String> {
+    let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
+    let tokens = search_to_end(&mut ctx, config).await?;
+    model.tokenizer().decode(&tokens, true).map_err(|e| anyhow!(e))
+}
+
+/// The text `tokens` adds beyond the first `prev_len` bytes of its decoding.
+/// Decoding the whole sequence each time keeps spacing right; a decoding that
+/// came out shorter adds nothing.
+fn decode_new_text(
+    model: &dyn EncoderDecoderLanguageModel,
+    tokens: &[u32],
+    prev_len: &mut usize,
+) -> String {
+    let full = model.tokenizer().decode(tokens, true).unwrap_or_default();
+    let new = full.get(*prev_len..).unwrap_or_default().to_string();
+    *prev_len = full.len().max(*prev_len);
+    new
+}
+
+/// Streams the same text as `run_beam_search`.
+///
+/// With one beam each token is final as soon as it is chosen, so tokens arrive as
+/// they are generated. With several, the leading beam's tokens can still be
+/// replaced, and the last token of whichever beam leads at each step does not form
+/// a sequence at all, so the tokens are sent once the search has picked its winner.
 pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
     model: &'a dyn EncoderDecoderLanguageModel,
     backend: &'a B,
@@ -442,45 +466,35 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
 ) -> impl Stream<Item = Result<StreamedToken>> + 'a {
     try_stream! {
         let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
-
-        if ctx.num_beams > 1 {
-            log::warn!("streaming beam search is unstable, tokens may change. use greedy for stability.");
-        }
-
-        // Track all generated tokens for proper decoding
-        let mut all_generated_tokens: Vec<u32> = Vec::new();
+        let mut generated: Vec<u32> = Vec::new();
         let mut prev_text_len = 0;
 
-        for step in 0..config.max_length {
-            let should_stop = beam_step(&mut ctx, step).await?;
-
-            // Check stop BEFORE yielding
-            if should_stop {
-                break;
+        if ctx.num_beams > 1 {
+            for token in search_to_end(&mut ctx, config).await? {
+                generated.push(token);
+                let text = decode_new_text(model, &generated, &mut prev_text_len);
+                if !text.is_empty() {
+                    yield StreamedToken { text, id: token, token_type: TokenType::Generated };
+                }
             }
+        } else {
+            for step in 0..config.max_length {
+                let should_stop = beam_step(&mut ctx, step).await?;
 
-            if let Some(best_beam) = ctx.beams.iter().find(|b| b.score != f32::NEG_INFINITY) {
-                let new_token = *best_beam.tokens.last().unwrap();
+                // Check stop BEFORE yielding
+                if should_stop {
+                    break;
+                }
 
-                if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
-                    // Add to our accumulated tokens
-                    all_generated_tokens.push(new_token);
+                if let Some(best_beam) = ctx.beams.iter().find(|b| b.score != f32::NEG_INFINITY) {
+                    let new_token = *best_beam.tokens.last().unwrap();
 
-                    // Decode ALL tokens so far to get proper spacing
-                    let full_text = ctx.model.tokenizer()
-                        .decode(&all_generated_tokens, true)
-                        .unwrap_or_default();
-
-                    // Yield only the NEW portion
-                    let new_text = &full_text[prev_text_len..];
-                    prev_text_len = full_text.len();
-
-                    if !new_text.is_empty() {
-                        yield StreamedToken {
-                            text: new_text.to_string(),
-                            id: new_token,
-                            token_type: TokenType::Generated,
-                        };
+                    if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
+                        generated.push(new_token);
+                        let text = decode_new_text(model, &generated, &mut prev_text_len);
+                        if !text.is_empty() {
+                            yield StreamedToken { text, id: new_token, token_type: TokenType::Generated };
+                        }
                     }
                 }
             }

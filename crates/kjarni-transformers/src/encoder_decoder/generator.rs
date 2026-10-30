@@ -188,17 +188,11 @@ impl EncoderDecoderGenerator {
         input_text: &'a str,
         config: Option<&GenerationConfig>,
     ) -> impl Stream<Item = Result<StreamedToken>> + 'a {
-        let owned_config =
-            config.map_or_else(|| self.model.get_default_generation_config(), |c| c.clone());
+        let owned_config = config
+            .cloned()
+            .unwrap_or_else(|| self.model.get_generation_config_for_input(input_text));
 
         try_stream! {
-            if let DecodingStrategy::BeamSearch(params) = &owned_config.strategy
-                && params.num_beams > 1 {
-                    log::warn!(
-                        "streaming with beam search enabled, output may differ from non-streaming generate"
-                    );
-                }
-
             let stream = run_beam_search_stream(
                 self.model.as_ref(),
                 &self.backend,

@@ -79,8 +79,8 @@ candidate answers, files, or search hits.
 ### Index and search a directory
 
 ```bash
-kjarni index create ./notes --name mynotes
-kjarni search -q --format json mynotes "how do refunds work?" --mode hybrid
+kjarni index create mynotes.idx ./notes
+kjarni search -q --format json mynotes.idx "how do refunds work?" --mode hybrid
 ```
 
 Modes: `hybrid` (default), `semantic`, `keyword`. Add `--rerank-model` for
