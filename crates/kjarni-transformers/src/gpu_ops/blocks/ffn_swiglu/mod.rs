@@ -4,7 +4,6 @@ use crate::tensor::DType;
 use crate::{WgpuContext, gpu_profile};
 use anyhow::Result;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -461,14 +460,7 @@ impl GpuSwiGLUFFN {
         let is_gemv = m == 1;
 
         let uniforms = FusedInfo { m, k, n };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Fused SwiGLU Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let is_q4k = weights.gate_proj.dtype() == DType::Q4_K;
 

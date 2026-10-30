@@ -3,7 +3,6 @@
 //! Supports both F32 and BF16 embedding tables. Output is always F32.
 
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 use crate::gpu::GpuTensor;
 use crate::tensor::DType;
@@ -98,14 +97,7 @@ impl GpuLookup2 {
             _padding: 0,
         };
 
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Lookup Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

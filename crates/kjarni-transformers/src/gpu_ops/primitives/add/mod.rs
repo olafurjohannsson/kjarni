@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
@@ -73,14 +72,7 @@ impl GpuAdd {
             n: a.shape()[1] as u32,
             _padding: [0; 2],
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Add Broadcast Row Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context
@@ -144,14 +136,7 @@ impl GpuAdd {
             size,
             _padding: [0; 3],
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Add Element-wise Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context
@@ -225,14 +210,7 @@ impl GpuAdd {
             b_stride_0: b_shape[1] as u32,
             _padding: [0; 3],
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Add Broadcast Offset Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

@@ -359,9 +359,7 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
             )?;
 
             let out = pool_ref.get(residual.shape().to_vec());
-            gpu_layer0
-                .add
-                .encode(enc, &[residual, &attn_output.hidden_states], &out);
+            gpu_layer0.add.encode(enc, &[residual, &attn_output], &out);
 
             frame.finish();
             out.to_ndarray_3d::<f32>().await?
@@ -590,21 +588,21 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
                 enc,
                 &rms_out,
                 &gpu_layer0.self_attn_weights.q_weight,
-                &gpu_layer0.self_attn_weights.q_bias,
+                gpu_layer0.self_attn_weights.q_bias.as_ref(),
                 pool_ref,
             );
             let k = gpu_layer0.self_attn.ops().project(
                 enc,
                 &rms_out,
                 &gpu_layer0.self_attn_weights.k_weight,
-                &gpu_layer0.self_attn_weights.k_bias,
+                gpu_layer0.self_attn_weights.k_bias.as_ref(),
                 pool_ref,
             );
             let v = gpu_layer0.self_attn.ops().project(
                 enc,
                 &rms_out,
                 &gpu_layer0.self_attn_weights.v_weight,
-                &gpu_layer0.self_attn_weights.v_bias,
+                gpu_layer0.self_attn_weights.v_bias.as_ref(),
                 pool_ref,
             );
 
@@ -669,14 +667,14 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
                 enc,
                 &rms_out,
                 &gpu_layer0.self_attn_weights.q_weight,
-                &gpu_layer0.self_attn_weights.q_bias,
+                gpu_layer0.self_attn_weights.q_bias.as_ref(),
                 pool_ref,
             );
             let k_proj = gpu_layer0.self_attn.ops().project(
                 enc,
                 &rms_out,
                 &gpu_layer0.self_attn_weights.k_weight,
-                &gpu_layer0.self_attn_weights.k_bias,
+                gpu_layer0.self_attn_weights.k_bias.as_ref(),
                 pool_ref,
             );
 

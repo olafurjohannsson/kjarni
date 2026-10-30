@@ -4,7 +4,6 @@ use crate::rope::RoPE;
 use anyhow::Result;
 use ndarray::Array2;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -138,6 +137,11 @@ impl GpuRoPE {
         })
     }
 
+    /// The rotation tables, `[positions, head_dim / 2]`: cosines, then sines.
+    pub fn tables(&self) -> (&GpuTensor, &GpuTensor) {
+        (&self.cos_cache, &self.sin_cache)
+    }
+
     /// Encodes the RoPE operation for a single tensor
     pub fn encode(
         &self,
@@ -163,14 +167,7 @@ impl GpuRoPE {
             sin_stride: self.sin_cache.shape()[1] as u32,
             _padding: 0,
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("RoPE Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

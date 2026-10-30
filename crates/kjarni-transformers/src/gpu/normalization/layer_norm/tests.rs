@@ -8,8 +8,22 @@ use ndarray::{Array1, Array3, Axis};
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn test_gpu_layernorm_parity() -> Result<()> {
+    // Both kernels: one thread per row from 64 rows, a workgroup per row below,
+    // including rows narrower than and not a multiple of its 64 threads.
+    for (b, s, h) in [
+        (4, 64, 256),
+        (1, 14, 384),
+        (1, 1, 1024),
+        (2, 31, 100),
+        (1, 3, 40),
+    ] {
+        layernorm_matches_cpu(b, s, h).await?;
+    }
+    Ok(())
+}
+
+async fn layernorm_matches_cpu(b: usize, s: usize, h: usize) -> Result<()> {
     let context = WgpuContext::new().await?;
-    let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize
     let eps = 1e-5;
     let gpu_layernorm = GpuLayerNorm::new(&context, eps);
     let input_cpu = Array3::from_shape_fn((b, s, h), |(i, j, k)| (i + j + k) as f32 * 0.01 - 5.0);

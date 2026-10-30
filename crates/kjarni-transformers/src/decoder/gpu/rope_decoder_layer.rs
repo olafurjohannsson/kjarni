@@ -99,22 +99,9 @@ impl GpuRoPEDecoderLayer {
             pool,
         )?;
 
-        if let Some(cache) = gpu_cache {
-            cache.update(
-                encoder,
-                layer_idx,
-                &attn_output.new_k,
-                &attn_output.new_v,
-                position_offset,
-            )?;
-        }
-
         let attn_block_output = pool.get(hidden_states.shape().to_vec());
-        self.add.encode(
-            encoder,
-            &[residual, &attn_output.hidden_states],
-            &attn_block_output,
-        );
+        self.add
+            .encode(encoder, &[residual, &attn_output], &attn_block_output);
 
         let residual_2 = &attn_block_output;
         let ln2_out = pool.get(residual_2.shape().to_vec());
@@ -389,7 +376,7 @@ mod rope_decoder_gpu_test {
         let gpu_norm1_v = gpu_norm1.to_ndarray_3d().await?;
         assert_all_close(&cpu_norm1, &gpu_norm1_v, 1e-4, 1e-5, "Norm 1");
 
-        let gpu_attn_v = gpu_attn_out.hidden_states.to_ndarray_3d().await?;
+        let gpu_attn_v = gpu_attn_out.to_ndarray_3d().await?;
         assert_all_close(&cpu_attn, &gpu_attn_v, 1e-3, 1e-4, "Attention Output");
 
         Ok(())

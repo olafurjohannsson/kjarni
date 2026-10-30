@@ -127,6 +127,7 @@ pub struct KjarniSearchOptions {
     pub filter_value: *const c_char,
 }
 
+/// Search options that leave every setting to the searcher's defaults.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_search_options_default() -> KjarniSearchOptions {
     KjarniSearchOptions {
@@ -151,6 +152,8 @@ pub struct KjarniSearcherConfig {
     pub quiet: i32,
 }
 
+/// The default searcher configuration: CPU, the default model, hybrid search and
+/// ten results.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_searcher_config_default() -> KjarniSearcherConfig {
     KjarniSearcherConfig {

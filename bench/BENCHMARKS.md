@@ -1,6 +1,6 @@
 # Benchmarks
 
-Kjarni against the usual ways of running the same models: PyTorch (through `transformers` and `sentence-transformers`), ONNX Runtime, faster-whisper and llama.cpp. Same weights, same inputs, same machine, CPU only.
+Kjarni against the usual ways of running the same models: PyTorch (through `transformers` and `sentence-transformers`), ONNX Runtime, faster-whisper and llama.cpp. Same weights, same inputs, same machine. The sections up to Text generation are CPU only; CPU and GPU covers both.
 
 Reproduce with `bench/compare/run_encoders.py` and `bench/compare/run_rest.py`; `make_charts.py` and `make_report.py` turn the results into this page.
 
@@ -106,4 +106,101 @@ The same Q4_K_M GGUF file in both engines. llama.cpp is timed with its own `llam
 | qwen2.5-0.5b-instruct | llama.cpp | 611 tok/s | 45.9 tok/s |
 | llama3.2-1b-instruct | **Kjarni** | 282 tok/s | 19.0 tok/s |
 | llama3.2-1b-instruct | llama.cpp | 424 tok/s | 27.2 tok/s |
+
+## CPU and GPU
+
+Reproduce with `bench/compare/run_matrix.py`. CPU as above; GPU an NVIDIA RTX A2000 12 GB, with Kjarni on WebGPU (Vulkan here) and the others on CUDA, in fresh processes on a quiet machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/matrix-embeddings-cpu-dark.svg">
+  <img alt="Embeddings on the CPU" src="charts/matrix-embeddings-cpu-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/matrix-embeddings-gpu-dark.svg">
+  <img alt="Embeddings on the GPU" src="charts/matrix-embeddings-gpu-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/matrix-whisper-dark.svg">
+  <img alt="Speech to text" src="charts/matrix-whisper-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/matrix-generation-cpu-dark.svg">
+  <img alt="Text generation on the CPU" src="charts/matrix-generation-cpu-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/matrix-generation-gpu-dark.svg">
+  <img alt="Text generation on the GPU" src="charts/matrix-generation-gpu-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/matrix-prompt-gpu-dark.svg">
+  <img alt="Prompt processing on the GPU" src="charts/matrix-prompt-gpu-light.svg">
+</picture>
+
+| Model | Device | Engine | Batch of 64 | One text | Load | Max diff vs PyTorch on CPU |
+|---|---|---|--:|--:|--:|--:|
+| minilm | CPU | **Kjarni** | 289.6/s | 2.3 ms | 91 ms | 2e-07 |
+| minilm | CPU | PyTorch | 282.7/s | 5.5 ms | 2,504 ms | reference |
+| minilm | CPU | ONNX Runtime | 321.8/s | 1.4 ms | 495 ms | 2e-07 |
+| minilm | GPU | **Kjarni** | 554.9/s | 6.2 ms | 452 ms | 2e-07 |
+| minilm | GPU | PyTorch | 1,767.1/s | 1.8 ms | 2,397 ms | 2e-07 |
+| minilm | GPU | ONNX Runtime | 2,720.4/s | 1.2 ms | 625 ms | 1e-04 |
+| bge-m3 | CPU | **Kjarni** | 15.3/s | 83.6 ms | 1,295 ms | 1e-06 |
+| bge-m3 | CPU | PyTorch | 9.9/s | 107.1 ms | 6,734 ms | reference |
+| bge-m3 | CPU | ONNX Runtime | 13.9/s | 61.2 ms | 1,451 ms | 4e-07 |
+| bge-m3 | GPU | **Kjarni** | 31.1/s | 57.7 ms | 2,467 ms | 2e-06 |
+| bge-m3 | GPU | PyTorch | 73.5/s | 10.5 ms | 8,153 ms | 1e-06 |
+| bge-m3 | GPU | ONNX Runtime | 172.1/s | 7.5 ms | 1,302 ms | 4e-04 |
+
+| Device | Engine | 55 s of speech | Faster than real time |
+|---|---|--:|--:|
+| CPU | **Kjarni** | 6.71 s | 8.6× |
+| CPU | openai-whisper | 7.84 s | 7.3× |
+| CPU | faster-whisper | 9.34 s | 6.2× |
+| CPU | faster-whisper-int8 | 4.49 s | 12.8× |
+| GPU | **Kjarni** | 3.61 s | 15.9× |
+| GPU | openai-whisper | 1.09 s | 52.6× |
+| GPU | faster-whisper | 0.64 s | 89.3× |
+| GPU | faster-whisper-int8 | 0.62 s | 92.7× |
+
+Generation is from the same Q4_K_M GGUF, except PyTorch and the rows marked safetensors. *After a prompt* follows 512 tokens; *short* starts from a nearly empty context, as llama-bench's tg128 does, so llama.cpp's one figure is in that column.
+
+| Model | Device | Engine | Prompt | After a prompt | Short |
+|---|---|---|--:|--:|--:|
+| qwen2.5-0.5b-instruct | CPU | **Kjarni** | 608 | 33.1 | 34.6 |
+| qwen2.5-0.5b-instruct | GPU | **Kjarni** | 1,537 | 67.7 | 91.0 |
+| qwen2.5-0.5b-instruct | CPU | **Kjarni** safetensors | 589 | 18.9 | 19.3 |
+| qwen2.5-0.5b-instruct | GPU | **Kjarni** safetensors | 1,422 | 58.6 | 74.3 |
+| qwen2.5-0.5b-instruct | CPU | PyTorch | 625 | 9.0 | 9.2 |
+| qwen2.5-0.5b-instruct | GPU | PyTorch | 21,578 | 125.4 | 127.1 |
+| qwen2.5-0.5b-instruct | CPU | llama.cpp | 665 |  | 37.7 |
+| qwen2.5-0.5b-instruct | GPU | llama.cpp CUDA | 15,342 |  | 328.3 |
+| qwen2.5-0.5b-instruct | GPU | llama.cpp Vulkan | 9,530 |  | 233.3 |
+| llama3.2-1b-instruct | CPU | **Kjarni** | 296 | 19.1 | 20.4 |
+| llama3.2-1b-instruct | GPU | **Kjarni** | 712 | 71.5 | 89.8 |
+| llama3.2-1b-instruct | CPU | **Kjarni** safetensors | 283 | 8.3 | 8.4 |
+| llama3.2-1b-instruct | GPU | **Kjarni** safetensors | 643 | 52.2 | 60.9 |
+| llama3.2-1b-instruct | CPU | PyTorch | 242 | 4.1 | 4.2 |
+| llama3.2-1b-instruct | GPU | PyTorch | 9,267 | 78.2 | 79.2 |
+| llama3.2-1b-instruct | CPU | llama.cpp | 450 |  | 20.7 |
+| llama3.2-1b-instruct | GPU | llama.cpp CUDA | 8,557 |  | 215.3 |
+| llama3.2-1b-instruct | GPU | llama.cpp Vulkan | 7,496 |  | 192.4 |
+
+## Binding overhead
+
+One MiniLM embedding of a short text, on the CPU, through each binding against the same library: the worst case for a binding, since the model does the least work. Median of 3,000 calls, best of three runs. Reproduce with `bench/bindings/run.py`.
+
+| Language | Median per call | Against C |
+|---|--:|--:|
+| C | 3.44 ms | baseline |
+| Rust | 3.43 ms | -11 µs |
+| Python | 3.49 ms | +44 µs |
+| Go | 3.37 ms | -76 µs |
+| C# | 3.47 ms | +22 µs |
+
+The differences are within run-to-run noise: Go and Rust come out ahead of C, which cannot be overhead.
 

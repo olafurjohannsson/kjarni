@@ -76,3 +76,28 @@ fn main(
         c_out[c_batch_offset + global_row * info.n + global_col] = acc;
     }
 }
+
+/// The same multiply for few rows and a short inner dimension: one thread per output,
+/// reading both operands directly. See FEW_ROWS.
+@compute @workgroup_size(32)
+fn main_few_rows(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let idx = (wg.y * grid.x + wg.x) * 32u + lid.x;
+    if (idx >= info.b * info.m * info.n) { return; }
+
+    let col = idx % info.n;
+    let row = (idx / info.n) % info.m;
+    let batch = idx / (info.n * info.m);
+
+    let a_base = batch * info.a_stride_batch + row * info.k;
+    let b_base = batch * info.b_stride_batch + col * info.b_stride_col;
+
+    var acc = 0.0;
+    for (var k = 0u; k < info.k; k++) {
+        acc += a_in[a_base + k] * b_in[b_base + k * info.b_stride_row];
+    }
+    c_out[batch * info.m * info.n + row * info.n + col] = acc;
+}

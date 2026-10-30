@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
+use wgpu::util::DeviceExt;
 use wgpu::{
     Adapter, DeviceDescriptor, Features, Instance, InstanceDescriptor, Limits, PowerPreference,
     RequestAdapterOptions,
@@ -48,6 +50,7 @@ pub struct WgpuContext {
     inference_pool: OnceLock<Arc<Mutex<GpuTensorPool>>>,
     pub profiler: GpuProfiler,
     pub uniform_arena: GpuUniformBuffer,
+    uniform_buffers: std::sync::Mutex<HashMap<Vec<u8>, wgpu::Buffer>>,
 }
 
 /// The largest workgroup any shader in the crate declares, `(32, 32, 1)`.
@@ -57,6 +60,10 @@ pub struct WgpuContext {
 /// silently NaN. Checked up front instead.
 const REQUIRED_INVOCATIONS: u32 = 1024;
 
+/// Distinct uniform values kept by [`WgpuContext::uniform_buffer`]. Far more than one
+/// token uses, so a decode step finds last step's buffers even with a few new ones.
+const MAX_UNIFORM_BUFFERS: usize = 4096;
+
 impl WgpuContext {
     pub async fn new() -> Result<Arc<Self>> {
         Self::with_config(GpuConfig::default()).await
@@ -64,6 +71,32 @@ impl WgpuContext {
 
     pub fn is_available() -> bool {
         true
+    }
+
+    /// A uniform buffer holding `value`, shared with every other use of the same bytes.
+    ///
+    /// A token's dispatches repeat the last token's shapes almost exactly, and a buffer
+    /// that is never written again can serve them all. Creating one per dispatch costs
+    /// an allocation and a staging copy each, several hundred per token.
+    pub fn uniform_buffer<T: bytemuck::Pod>(&self, value: &T) -> wgpu::Buffer {
+        let bytes = bytemuck::bytes_of(value);
+        let mut buffers = self.uniform_buffers.lock().unwrap();
+        if let Some(buffer) = buffers.get(bytes) {
+            return buffer.clone();
+        }
+        // Keys that grow with the position would otherwise accumulate forever.
+        if buffers.len() >= MAX_UNIFORM_BUFFERS {
+            buffers.clear();
+        }
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("shared uniforms"),
+                contents: bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        buffers.insert(bytes.to_vec(), buffer.clone());
+        buffer
     }
 
     pub async fn with_config(config: GpuConfig) -> Result<Arc<Self>> {
@@ -171,6 +204,7 @@ impl WgpuContext {
             inference_pool: OnceLock::new(),
             profiler,
             uniform_arena,
+            uniform_buffers: std::sync::Mutex::new(HashMap::new()),
         }))
     }
 
@@ -372,4 +406,30 @@ pub fn drain(device: &wgpu::Device) {
     }
     #[cfg(target_arch = "wasm32")]
     let _ = device;
+}
+
+#[cfg(test)]
+mod uniform_buffer_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn the_same_bytes_share_a_buffer_and_different_bytes_do_not() {
+        let context = WgpuContext::new().await.unwrap();
+        let a = context.uniform_buffer(&[1u32, 2, 3, 4]);
+        let again = context.uniform_buffer(&[1u32, 2, 3, 4]);
+        let other = context.uniform_buffer(&[1u32, 2, 3, 5]);
+        assert_eq!(a, again);
+        assert_ne!(a, other);
+    }
+
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn the_cache_does_not_grow_without_bound() {
+        let context = WgpuContext::new().await.unwrap();
+        for i in 0..MAX_UNIFORM_BUFFERS as u32 + 10 {
+            context.uniform_buffer(&[i, 0, 0, 0]);
+        }
+        assert!(context.uniform_buffers.lock().unwrap().len() <= MAX_UNIFORM_BUFFERS);
+    }
 }

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="242" viewBox="0 0 760 242" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Embeddings on the CPU (higher is better)">
+<rect width="760" height="242" rx="8" fill="#1a1a19"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#f0efec">Embeddings on the CPU (higher is better)</text>
+<text x="20" y="54" font-size="13" fill="#c3c2b7">64 texts per call, i7-13700 · texts per second, each model on its own scale</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#3987e5"/>
+<text x="36" y="76" font-size="12.5" fill="#c3c2b7">Kjarni</text>
+<rect x="102.4" y="66" width="11" height="11" rx="3" fill="#d95926"/>
+<text x="118.4" y="76" font-size="12.5" fill="#c3c2b7">PyTorch</text>
+<rect x="192.20000000000002" y="66" width="11" height="11" rx="3" fill="#199e70"/>
+<text x="208.20000000000002" y="76" font-size="12.5" fill="#c3c2b7">ONNX Runtime</text>
+<text x="176" y="122.5" text-anchor="end" font-size="13" fill="#f0efec">MiniLM-L6</text>
+<line x1="190" y1="89" x2="190" y2="147" stroke="#383835" stroke-width="1"/>
+<path d="M191,92 h427.95684735682175 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-427.95684735682175 z" fill="#3987e5"><title>Kjarni: 290/s</title></path>
+<text x="628.9568473568218" y="104.5" font-size="12" fill="#c3c2b7" font-weight="600">290/s</text>
+<path d="M191,110 h417.71860878897144 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-417.71860878897144 z" fill="#d95926"><title>PyTorch: 283/s</title></path>
+<text x="618.7186087889714" y="122.5" font-size="12" fill="#c3c2b7">283/s</text>
+<path d="M191,128 h476.00000000000006 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.00000000000006 z" fill="#199e70"><title>ONNX Runtime: 322/s</title></path>
+<text x="677.0" y="140.5" font-size="12" fill="#c3c2b7">322/s</text>
+<line x1="20" y1="152.0" x2="740" y2="152.0" stroke="#383835" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="192.5" text-anchor="end" font-size="13" fill="#f0efec">bge-m3</text>
+<line x1="190" y1="159" x2="190" y2="217" stroke="#383835" stroke-width="1"/>
+<path d="M191,162 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#3987e5"><title>Kjarni: 15.3/s</title></path>
+<text x="677.0" y="174.5" font-size="12" fill="#c3c2b7" font-weight="600">15.3/s</text>
+<path d="M191,180 h306.989566131125 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-306.989566131125 z" fill="#d95926"><title>PyTorch: 9.9/s</title></path>
+<text x="507.989566131125" y="192.5" font-size="12" fill="#c3c2b7">9.9/s</text>
+<path d="M191,198 h433.64336404128187 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-433.64336404128187 z" fill="#199e70"><title>ONNX Runtime: 13.9/s</title></path>
+<text x="634.6433640412819" y="210.5" font-size="12" fill="#c3c2b7">13.9/s</text>
+</svg>

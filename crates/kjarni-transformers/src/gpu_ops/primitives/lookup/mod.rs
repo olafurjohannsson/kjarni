@@ -4,7 +4,6 @@
 //! by looking up the corresponding vectors in an embedding table.
 
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
@@ -91,14 +90,7 @@ impl GpuLookup {
             input_seq_len: input_ids.shape()[1] as u32,
             vocab_size: embedding_table.shape()[0] as u32,
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Lookup Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

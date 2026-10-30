@@ -218,4 +218,33 @@ mod tests {
             "Should see Decoding stage"
         );
     }
+
+    /// The whole path on each device: mel, encoder, decoder, timestamps and text. They
+    /// differ only in the encoder and decoder kernels, so a transcript that changes
+    /// means one of them does.
+    #[tokio::test]
+    #[ignore = "needs a GPU and whisper-small in the local model cache"]
+    async fn gpu_transcript_matches_cpu_word_for_word() {
+        let path = speech_fixture();
+        let on_cpu = Transcriber::builder("whisper-small")
+            .language("en")
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap()
+            .transcribe_file(&path)
+            .unwrap();
+        let on_gpu = Transcriber::builder("whisper-small")
+            .language("en")
+            .gpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap()
+            .transcribe_file(&path)
+            .unwrap();
+        assert!(!on_cpu.text.trim().is_empty());
+        assert_eq!(on_cpu.text, on_gpu.text);
+    }
 }

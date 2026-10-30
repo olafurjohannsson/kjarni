@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# API reference for the Python, .NET and JavaScript bindings, as Markdown.
+# API reference for every language, as Markdown.
 #
 #   ./scripts/gen-reference.sh [out-dir]      default: target/reference
 #
-# Writes <out>/python/kjarni.md, <out>/dotnet/*.md and <out>/js/**/*.md, plus a
-# VERSION file. The website imports these into its own design; Rust and Go need
-# nothing here, since docs.rs and pkg.go.dev build theirs from the published
-# crate and module.
+# Writes <out>/python/kjarni.md, <out>/dotnet/*.md, <out>/js/**/*.md,
+# <out>/go/kjarni.md, <out>/rust/*.md, <out>/c/*.md and <out>/cpp/kjarni.md, plus a
+# VERSION file. The website imports these into its own design.
 #
-# Fails if any public item in those three bindings has no doc comment, so the
-# reference cannot quietly fall behind the API. Needs python3, dotnet and node.
+# Fails if any public item in the Python, .NET, JavaScript, Go, C or C++ APIs has no
+# doc comment, so the reference cannot quietly fall behind the API. Needs python3,
+# dotnet, node, go and cargo.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -65,6 +65,18 @@ TS=crates/kjarni-wasm/ts
       --out "$OUT/js" --logLevel Warn
 )
 echo "js: $(find "$OUT/js" -name '*.md' | wc -l) pages -> $OUT/js"
+
+# ── Go: go/doc reads the source; undocumented exports fail ──
+go run scripts/reference_go.go crates/kjarni-ffi/bindings/go "$OUT/go/kjarni.md"
+
+# ── Rust: RUSTC_BOOTSTRAP lets a stable toolchain write rustdoc's JSON ──
+RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-Z unstable-options --output-format json" \
+  cargo doc -p kjarni --no-deps --quiet --target-dir "$WORK/rustdoc"
+python3 -I scripts/reference_native.py rust "$WORK/rustdoc/doc/kjarni.json" . "$OUT/rust"
+
+# ── C and C++: the headers are the source ──
+python3 -I scripts/reference_native.py c crates/kjarni-ffi/include/kjarni.h "$OUT/c"
+python3 -I scripts/reference_native.py cpp crates/kjarni-ffi/include/kjarni.hpp "$OUT/cpp/kjarni.md"
 
 grep -m1 -E '^version *= *"' Cargo.toml | cut -d'"' -f2 > "$OUT/VERSION"
 echo "reference for $(cat "$OUT/VERSION") in $OUT"

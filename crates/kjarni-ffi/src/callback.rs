@@ -48,6 +48,9 @@ pub struct KjarniCancelToken {
     pub(crate) inner: Arc<AtomicBool>,
 }
 
+/// Create a token that cancels the long-running calls it is passed to.
+///
+/// Free it with `kjarni_cancel_token_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_cancel_token_new() -> *mut KjarniCancelToken {
     crate::panic::guard(

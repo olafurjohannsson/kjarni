@@ -542,9 +542,19 @@ async fn q8_gemv_matches_cpu() -> Result<()> {
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q8_batched_matches_cpu() -> Result<()> {
-    for (m, n, k) in [(4, 64, 128), (8, 129, 256), (2, 32, 64)] {
+    // Both tile sizes, with rows and columns that fill neither: GEMM_LARGE_TILE_MIN_ROWS
+    // separates the 64x64 tile from the 128x128 one.
+    for (m, n, k) in [
+        (4, 64, 128),
+        (8, 129, 256),
+        (2, 32, 64),
+        (67, 200, 96),
+        (127, 65, 160),
+        (128, 128, 64),
+        (300, 257, 128),
+    ] {
         let (gpu, cpu) = run_q8(m, n, k).await?;
-        report(&format!("q8 bmm [{m}x{k} @ {n}]"), &gpu, &cpu, &[n, k]);
+        report(&format!("q8 gemm [{m}x{k} @ {n}]"), &gpu, &cpu, &[n, k]);
     }
     Ok(())
 }
@@ -591,6 +601,7 @@ async fn gemm_matches_cpu() -> Result<()> {
     for dtype in [DType::F32, DType::BF16] {
         for (m, k, n) in [
             (2, 4, 5),
+            (2, 130, 131),
             (67, 130, 131),
             (64, 64, 64),
             (65, 18, 63),

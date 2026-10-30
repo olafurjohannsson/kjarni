@@ -3,7 +3,7 @@
 use crate::{Chunk, ChunkMetadata, SplitterConfig, TextSplitter};
 use anyhow::Result;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Supported file extensions for text loading
 pub const TEXT_EXTENSIONS: &[&str] = &[
@@ -180,42 +180,14 @@ impl DocumentLoader {
     pub fn load_directory(&self, dir: &Path) -> Result<Vec<Chunk>> {
         let mut all_chunks = Vec::new();
 
-        let walker = if self.config.recursive {
-            walkdir::WalkDir::new(dir)
-        } else {
-            walkdir::WalkDir::new(dir).max_depth(1)
-        };
-
-        // Hidden and excluded directories are pruned rather than walked and
-        // filtered: a repository's .git, target or node_modules can hold more
-        // files than everything else together. The directory asked for is
-        // always walked, whatever its name.
-        let walker = walker.into_iter().filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            let name = e.file_name().to_string_lossy();
-            if !self.config.include_hidden && name.starts_with('.') {
-                return false;
-            }
-            !self.is_excluded(&name)
-        });
-
-        for entry in walker.filter_map(|e| e.ok()) {
-            let path = entry.path();
-
-            // Skip directories
-            if !path.is_file() {
-                continue;
-            }
-
+        for path in self.files_in(dir) {
             // Check extension
-            if !self.is_supported_extension(path) {
+            if !self.is_supported_extension(&path) {
                 continue;
             }
 
             // Load file
-            match self.load_file(path) {
+            match self.load_file(&path) {
                 Ok(chunks) => all_chunks.extend(chunks),
                 Err(e) => {
                     log::warn!("Failed to load {}: {}", path.display(), e);
@@ -226,10 +198,44 @@ impl DocumentLoader {
         Ok(all_chunks)
     }
 
+    /// The files under a directory, leaving out hidden and excluded ones.
+    ///
+    /// Hidden and excluded directories are pruned rather than walked and
+    /// filtered: a repository's .git, target or node_modules can hold more files
+    /// than everything else together. The directory asked for is always walked,
+    /// whatever its name.
+    pub fn files_in(&self, dir: &Path) -> Vec<PathBuf> {
+        let walker = if self.config.recursive {
+            walkdir::WalkDir::new(dir)
+        } else {
+            walkdir::WalkDir::new(dir).max_depth(1)
+        };
+
+        walker
+            .into_iter()
+            .filter_entry(|e| {
+                if e.depth() == 0 {
+                    return true;
+                }
+                let name = e.file_name().to_string_lossy();
+                if !self.config.include_hidden && name.starts_with('.') {
+                    return false;
+                }
+                !self.is_excluded(&name)
+            })
+            .filter_map(|e| e.ok())
+            .map(walkdir::DirEntry::into_path)
+            .filter(|path| path.is_file())
+            .collect()
+    }
+
     /// Whether a file or directory name matches an exclude pattern.
     fn is_excluded(&self, name: &str) -> bool {
         self.config.exclude_patterns.iter().any(|pattern| {
-            let pattern = pattern.trim_end_matches("/**").trim_end_matches('/');
+            let pattern = pattern
+                .trim_end_matches("/**")
+                .trim_end_matches("/*")
+                .trim_end_matches('/');
             wildcard_match(pattern, name)
         })
     }

@@ -69,13 +69,13 @@ fn create_gpu_attention(
     let attention = GpuAttention::new(&context.clone(), h, n, n);
     let weights = GpuAttentionWeights {
         q_weight: GpuTensor::from_ndarray(context, q_w).unwrap(),
-        q_bias: GpuTensor::from_ndarray(context, q_b).unwrap(),
+        q_bias: Some(GpuTensor::from_ndarray(context, q_b).unwrap()),
         k_weight: GpuTensor::from_ndarray(context, k_w).unwrap(),
-        k_bias: GpuTensor::from_ndarray(context, k_b).unwrap(),
+        k_bias: Some(GpuTensor::from_ndarray(context, k_b).unwrap()),
         v_weight: GpuTensor::from_ndarray(context, v_w).unwrap(),
-        v_bias: GpuTensor::from_ndarray(context, v_b).unwrap(),
+        v_bias: Some(GpuTensor::from_ndarray(context, v_b).unwrap()),
         output_weight: GpuTensor::from_ndarray(context, o_w).unwrap(),
-        output_bias: GpuTensor::from_ndarray(context, o_b).unwrap(),
+        output_bias: Some(GpuTensor::from_ndarray(context, o_b).unwrap()),
     };
     (attention, weights)
 }

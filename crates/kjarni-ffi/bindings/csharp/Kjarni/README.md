@@ -1,11 +1,11 @@
 # Kjarni
 
-**Local AI inference for .NET. One package, running inside your process.**
+**Run transformer models inside your .NET program. Same output as PyTorch, no Python, no server.**
 
-Sentiment analysis, embeddings, semantic search, reranking, local LLM chat, speech to text,
-summarization, translation and photo search, on the CPU you
-already have. Add the package, name a model, call a method. Models download on first use and
-everything after that works offline.
+Kjarni is a transformer inference library: sentiment analysis, embeddings, semantic search,
+reranking, local LLM chat, speech to text, summarization, translation and photo search, on
+your CPU or GPU, in one package. Add the package, name a model, call a method. Models
+download on first use and everything after that works offline.
 
 The package has no dependencies and the native library links only against glibc.
 
@@ -225,7 +225,8 @@ using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
 ```
 
 GPU inference uses WebGPU: Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. It uses
-whichever adapter the platform already provides, so there is no toolkit to install.
+whichever adapter the platform already provides, so there is no toolkit to install, and the
+results match the CPU's. `Translator` runs on the CPU only for now.
 
 ## Configuration
 
@@ -249,6 +250,22 @@ Hugging Face repositories, such as any `meta-llama/*` model.
 
 The native library links only against glibc, so it runs on anything from a modern distribution back to CentOS 7.
 
+## How fast it is
+
+An i7-13700 and an RTX A2000 12 GB, each engine in its own process. On this NVIDIA card, engines using CUDA are well ahead of Kjarni's WebGPU; what WebGPU gives you is the same code on NVIDIA, AMD, Intel and Apple hardware with nothing to install.
+
+![Embeddings per second on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
+
+![Embeddings per second on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
+
+![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-whisper-light.png)
+
+![Text generation on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
+
+![Text generation on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
+
+Calling through .NET costs nothing measurable: one short MiniLM embedding takes 3.47 ms, against 3.44 ms calling the C ABI directly, a difference within run-to-run noise. Method and every number: [BENCHMARKS.md](https://github.com/olafurjohannsson/kjarni/blob/main/bench/BENCHMARKS.md).
+
 ## The same engine elsewhere
 
 Kjarni is one Rust engine behind several packages. If you are building the browser
@@ -267,4 +284,4 @@ half of the same product, or want to try it before installing anything:
   the Microsoft.Extensions.AI provider
 - **[kjarni.ai](https://kjarni.ai)**: guides and quickstarts
 
-MIT licensed.
+MIT or Apache-2.0.

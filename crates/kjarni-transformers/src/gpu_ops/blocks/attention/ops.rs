@@ -93,7 +93,7 @@ impl AttentionOps {
         encoder: &mut wgpu::CommandEncoder,
         input: &GpuTensor,
         weight: &GpuTensor,
-        bias: &GpuTensor,
+        bias: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         let (b, s, h) = input.dims3();
@@ -106,7 +106,7 @@ impl AttentionOps {
         self.linear.encode(encoder, &input_2d, weight, &proj_2d);
 
         // Add bias if present
-        let output_2d = if bias.shape()[0] > 0 {
+        let output_2d = if let Some(bias) = bias {
             let biased_2d = pool.get(vec![b * s, out_features]);
             self.add_bias.encode(encoder, &[&proj_2d, bias], &biased_2d);
             biased_2d

@@ -19,6 +19,7 @@ use kjarni_transformers::{
     cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
         encoder_decoder::{
+            Seq2SeqGPUDecoder, Seq2SeqGPUEncoder,
             cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
@@ -27,7 +28,7 @@ use kjarni_transformers::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
-    gpu::{GpuTensor, GpuTensorPool},
+    gpu::{GpuTensor, GpuTensorPool, cache::GpuBeamKVCache},
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
     traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
@@ -180,7 +181,7 @@ impl EncoderDecoderModelFactory for WhisperModel {
         _layout: &ModelLayout,
         config: &Arc<WhisperConfig>,
         load_config: &ModelLoadConfig,
-        _context: Option<&Arc<WgpuContext>>,
+        context: Option<&Arc<WgpuContext>>,
         device: Device,
     ) -> Result<(
         Option<Box<dyn CpuEncoder>>,
@@ -188,36 +189,37 @@ impl EncoderDecoderModelFactory for WhisperModel {
         Option<Box<dyn CpuCrossDecoder>>,
         Option<Box<dyn GpuCrossDecoder>>,
     )> {
-        let mut cpu_enc = None;
-        let mut cpu_dec = None;
-        let gpu_enc = None; // TODO: GPU Whisper
-        let gpu_dec = None;
-
-        if device.is_cpu() || load_config.offload_embeddings {
-            let enc_config = Seq2SeqEncoderConfig::whisper();
-            cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
+        if device.is_gpu() {
+            let context = context.ok_or_else(|| anyhow!("Whisper on a GPU needs a context"))?;
+            let encoder = Seq2SeqGPUEncoder::new(
+                context,
                 weights,
                 config.as_ref(),
-                enc_config,
+                Seq2SeqEncoderConfig::whisper(),
                 *load_config,
-            )?) as Box<dyn CpuEncoder>);
-
-            let dec_config = Seq2SeqDecoderConfig::whisper();
-            cpu_dec = Some(Box::new(Seq2SeqCPUDecoder::new(
+            )?;
+            let decoder = Seq2SeqGPUDecoder::new(
+                context,
                 weights,
                 config.as_ref(),
-                dec_config,
+                Seq2SeqDecoderConfig::whisper(),
                 *load_config,
-            )?) as Box<dyn CpuCrossDecoder>);
-        } else if device.is_gpu() {
-            // The audio frontend and the encoder-decoder have no GPU path yet.
-            // Refuse plainly rather than abort the caller.
-            anyhow::bail!(
-                "Whisper runs on the CPU only; GPU support for Whisper is not implemented yet"
-            );
+            )?;
+            return Ok((None, Some(Box::new(encoder)), None, Some(Box::new(decoder))));
         }
-
-        Ok((cpu_enc, gpu_enc, cpu_dec, gpu_dec))
+        let encoder = Seq2SeqCPUEncoder::new(
+            weights,
+            config.as_ref(),
+            Seq2SeqEncoderConfig::whisper(),
+            *load_config,
+        )?;
+        let decoder = Seq2SeqCPUDecoder::new(
+            weights,
+            config.as_ref(),
+            Seq2SeqDecoderConfig::whisper(),
+            *load_config,
+        )?;
+        Ok((Some(Box::new(encoder)), None, Some(Box::new(decoder)), None))
     }
 
     fn new_from_pipeline(
@@ -327,6 +329,17 @@ impl LanguageModel for WhisperModel {
         num_beams: usize,
     ) -> Result<Box<dyn Cache>> {
         let effective_batch = if num_beams > 0 { num_beams } else { batch_size };
+        if let Some(context) = self.context() {
+            let heads = self.config.decoder_attention_heads;
+            return Ok(Box::new(GpuBeamKVCache::new(
+                &context,
+                self.config.decoder_layers,
+                effective_batch,
+                heads,
+                self.config.d_model / heads,
+                max_len,
+            )?));
+        }
         Ok(Box::new(CpuBeamKVCache::new(
             self.config.decoder_layers,
             effective_batch,
@@ -532,25 +545,82 @@ mod tests {
         assert_eq!(mel_config.n_mels, 80);
     }
 
-    /// Asking for the GPU reached a todo!() and aborted the process, taking any
-    /// caller across the C ABI with it. It has to be an error.
+    /// A second of a mixed tone, as a mel spectrogram the model's own pipeline made.
+    fn test_mel() -> Array2<f32> {
+        let samples: Vec<f32> = (0..16000 * 30)
+            .map(|i| {
+                let t = i as f32 / 16000.0;
+                0.3 * (t * 440.0 * std::f32::consts::TAU).sin()
+                    + 0.2 * (t * 1250.0 * std::f32::consts::TAU).sin()
+            })
+            .collect();
+        kjarni_transformers::audio::compute_mel_spectrogram(&samples, &MelConfig::whisper())
+            .expect("mel")
+    }
+
+    /// The GPU encoder and decoder against the CPU ones. Everything around them is
+    /// shared, so this is what keeps a transcript the same on both devices.
     #[tokio::test]
     #[ignore = "needs a GPU and whisper-small in the local model cache"]
-    async fn whisper_on_the_gpu_is_an_error_not_a_panic() -> Result<()> {
-        let context = WgpuContext::new().await?;
-        let result = WhisperModel::from_registry(
-            ModelType::WhisperSmall,
-            None,
-            Device::Wgpu,
-            Some(context),
-            None,
-        )
-        .await;
-        let err = result.err().expect("Whisper on the GPU must be refused");
+    async fn gpu_encoder_matches_cpu() -> Result<()> {
+        let mel = test_mel();
+        let cpu =
+            WhisperModel::from_registry(ModelType::WhisperSmall, None, Device::Cpu, None, None)
+                .await?
+                .encode_mel(&mel)?;
+        let gpu =
+            WhisperModel::from_registry(ModelType::WhisperSmall, None, Device::Wgpu, None, None)
+                .await?
+                .encode_mel(&mel)?;
+        assert_eq!(cpu.dim(), gpu.dim());
+        let worst = cpu
+            .iter()
+            .zip(gpu.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        let scale = cpu.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        println!("max abs diff {worst:.3e}, largest value {scale:.2}");
         assert!(
-            format!("{err:#}").contains("CPU only"),
-            "unexpected error: {err:#}"
+            worst < 2e-4 * scale,
+            "GPU encoder differs from CPU by {worst:.3e} on values up to {scale:.2}"
         );
+
+        // The decoder on each device, fed the same encoder output: its logits, for a
+        // prompt and for the steps after it, one and two chunks at a time.
+        let cpu_model =
+            WhisperModel::from_registry(ModelType::WhisperSmall, None, Device::Cpu, None, None)
+                .await?;
+        let gpu_model =
+            WhisperModel::from_registry(ModelType::WhisperSmall, None, Device::Wgpu, None, None)
+                .await?;
+        let one = cpu;
+        let two = ndarray::concatenate(ndarray::Axis(0), &[one.view(), one.view()])?;
+        for encoded in [&one, &two] {
+            let batch = encoded.dim().0;
+            let mut on_cpu = cpu_model.decoder_steps(encoded, 8)?;
+            let mut on_gpu = gpu_model.decoder_steps(encoded, 8)?;
+            let prompt = Array2::from_shape_fn((batch, 3), |(_, j)| [50258u32, 50259, 50359][j]);
+            for ids in [
+                prompt,
+                Array2::from_elem((batch, 1), 400u32),
+                Array2::from_elem((batch, 1), 1078u32),
+            ] {
+                let c = on_cpu.step(&ids)?;
+                let g = on_gpu.step(&ids)?;
+                let last = c.dim().1 - 1;
+                let worst = c
+                    .slice(ndarray::s![.., last, ..])
+                    .iter()
+                    .zip(g.slice(ndarray::s![.., -1_i32, ..]).iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0f32, f32::max);
+                println!(
+                    "batch {batch}, {} tokens: logits differ by {worst:.3e}",
+                    ids.ncols()
+                );
+                assert!(worst < 1e-3, "GPU decoder logits differ by {worst:.3e}");
+            }
+        }
         Ok(())
     }
 }

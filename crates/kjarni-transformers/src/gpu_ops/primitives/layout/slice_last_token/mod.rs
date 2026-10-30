@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 pub struct GpuLastTokenSlice {
     pipeline: wgpu::ComputePipeline,
@@ -116,14 +115,7 @@ impl GpuLastTokenSlice {
             _padding: 0,
         };
 
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Last Token Slice Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

@@ -52,3 +52,59 @@ fn main(
         output[row_offset + i] = normalized * gamma[i] + beta[i];
     }
 }
+
+var<workgroup> wide_sum: array<f32, 64>;
+
+/// Adds up every thread's value in `wide_sum`, which holds it afterwards in slot 0.
+fn wide_reduce(tid: u32) {
+    for (var s = 32u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            wide_sum[tid] += wide_sum[tid + s];
+        }
+        workgroupBarrier();
+    }
+}
+
+/// The same normalization for a few rows: one workgroup per row, 64 threads across
+/// its columns. `main` gives each row one thread, which is what many rows want, but
+/// with a handful of rows only those threads run, walking the row one value at a
+/// time.
+@compute @workgroup_size(64)
+fn wide(
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let row = group_id.y * grid.x + group_id.x;
+    let tid = local_id.x;
+    if (row >= uniforms.m) { return; }
+
+    let hidden_size = uniforms.n;
+    let row_offset = row * hidden_size;
+
+    var partial = 0.0;
+    for (var i = tid; i < hidden_size; i += 64u) {
+        partial += input[row_offset + i];
+    }
+    wide_sum[tid] = partial;
+    workgroupBarrier();
+    wide_reduce(tid);
+    let mean = wide_sum[0] / f32(hidden_size);
+    workgroupBarrier();
+
+    partial = 0.0;
+    for (var i = tid; i < hidden_size; i += 64u) {
+        let val = input[row_offset + i] - mean;
+        partial += val * val;
+    }
+    wide_sum[tid] = partial;
+    workgroupBarrier();
+    wide_reduce(tid);
+    let variance = wide_sum[0] / f32(hidden_size);
+
+    let inv_std = 1.0 / sqrt(variance + uniforms.eps);
+    for (var i = tid; i < hidden_size; i += 64u) {
+        let normalized = (input[row_offset + i] - mean) * inv_std;
+        output[row_offset + i] = normalized * gamma[i] + beta[i];
+    }
+}
