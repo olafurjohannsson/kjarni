@@ -372,59 +372,73 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
     Ok(false)
 }
 
-/// Runs the search to its end and returns the best hypothesis's tokens, without
-/// the decoder start token or EOS.
-async fn search_to_end<B: EncoderDecoderGenerationBackend>(
-    ctx: &mut BeamContext<'_, B>,
-    config: &GenerationConfig,
-) -> Result<Vec<u32>> {
-    let mut stopped_early = false;
-
-    for step in 0..config.max_length {
-        let should_stop = beam_step(ctx, step).await?;
-        if should_stop {
-            stopped_early = true;
-            break;
-        }
-        if ctx.beams.iter().all(|b| b.score == f32::NEG_INFINITY) {
-            break;
-        }
-    }
-
-    // only add active beams if we didn't early-stop
-    if !stopped_early {
-        for beam in std::mem::take(&mut ctx.beams) {
-            if beam.score != f32::NEG_INFINITY {
-                ctx.finished.add(beam);
-            }
-        }
-    }
-
-    let best_beam = ctx
-        .finished
-        .best()
-        .ok_or_else(|| anyhow!("no hypotheses found"))?;
-
-    let tokens = &best_beam.tokens;
-
-    let mut start = 0;
-    if let Some(first) = tokens.first()
-        && *first == ctx.decoder_start_token_id
-    {
-        start += 1;
-    }
-
-    let end = if tokens.last() == Some(&ctx.eos_token_id) {
+/// A hypothesis's tokens without the decoder start token or EOS.
+fn generated_tokens(tokens: &[u32], decoder_start: u32, eos: u32) -> &[u32] {
+    let start = usize::from(tokens.first() == Some(&decoder_start));
+    let end = if tokens.last() == Some(&eos) {
         tokens.len() - 1
     } else {
         tokens.len()
     };
-
-    Ok(if start < end {
-        tokens[start..end].to_vec()
+    if start < end {
+        &tokens[start..end]
     } else {
-        Vec::new()
-    })
+        &[]
+    }
+}
+
+/// The longest run of leading tokens shared by every hypothesis still able to win.
+///
+/// The winner is either finished already or descends from a live beam, so these
+/// tokens are in the final answer whatever the search goes on to decide.
+fn settled_prefix<B: EncoderDecoderGenerationBackend>(ctx: &BeamContext<'_, B>) -> Vec<u32> {
+    let mut candidates = ctx
+        .beams
+        .iter()
+        .filter(|b| b.score != f32::NEG_INFINITY)
+        .chain(ctx.finished.hypotheses.iter())
+        .map(|b| generated_tokens(&b.tokens, ctx.decoder_start_token_id, ctx.eos_token_id));
+    let Some(first) = candidates.next() else {
+        return Vec::new();
+    };
+    let shared = candidates.fold(first.len(), |len, tokens| {
+        first
+            .iter()
+            .zip(tokens)
+            .take(len)
+            .take_while(|(a, b)| a == b)
+            .count()
+    });
+    first[..shared].to_vec()
+}
+
+/// Takes one search step. Returns true when the search is over.
+async fn search_step<B: EncoderDecoderGenerationBackend>(
+    ctx: &mut BeamContext<'_, B>,
+    step: usize,
+) -> Result<bool> {
+    if beam_step(ctx, step).await? {
+        // Stopping early leaves the live beams out of the running.
+        ctx.beams.clear();
+        return Ok(true);
+    }
+    Ok(ctx.beams.iter().all(|b| b.score == f32::NEG_INFINITY))
+}
+
+/// The best hypothesis's generated tokens, once the search is over.
+fn best_tokens<B: EncoderDecoderGenerationBackend>(
+    ctx: &mut BeamContext<'_, B>,
+) -> Result<Vec<u32>> {
+    for beam in std::mem::take(&mut ctx.beams) {
+        if beam.score != f32::NEG_INFINITY {
+            ctx.finished.add(beam);
+        }
+    }
+    let best = ctx
+        .finished
+        .best()
+        .ok_or_else(|| anyhow!("no hypotheses found"))?;
+    Ok(generated_tokens(&best.tokens, ctx.decoder_start_token_id, ctx.eos_token_id).to_vec())
 }
 
 pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
@@ -434,8 +448,16 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
     config: &GenerationConfig,
 ) -> Result<String> {
     let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
-    let tokens = search_to_end(&mut ctx, config).await?;
-    model.tokenizer().decode(&tokens, true).map_err(|e| anyhow!(e))
+    for step in 0..config.max_length {
+        if search_step(&mut ctx, step).await? {
+            break;
+        }
+    }
+    let tokens = best_tokens(&mut ctx)?;
+    model
+        .tokenizer()
+        .decode(&tokens, true)
+        .map_err(|e| anyhow!(e))
 }
 
 /// The text `tokens` adds beyond the first `prev_len` bytes of its decoding.
@@ -454,10 +476,10 @@ fn decode_new_text(
 
 /// Streams the same text as `run_beam_search`.
 ///
-/// With one beam each token is final as soon as it is chosen, so tokens arrive as
-/// they are generated. With several, the leading beam's tokens can still be
-/// replaced, and the last token of whichever beam leads at each step does not form
-/// a sequence at all, so the tokens are sent once the search has picked its winner.
+/// A token is sent once every hypothesis still able to win agrees on it, so nothing
+/// sent is ever taken back. With one beam that is each token as it is chosen; with
+/// several, tokens arrive in bursts as the beams converge, and the rest when the
+/// search ends.
 pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
     model: &'a dyn EncoderDecoderLanguageModel,
     backend: &'a B,
@@ -466,37 +488,29 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
 ) -> impl Stream<Item = Result<StreamedToken>> + 'a {
     try_stream! {
         let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
-        let mut generated: Vec<u32> = Vec::new();
+        let mut sent = 0;
         let mut prev_text_len = 0;
 
-        if ctx.num_beams > 1 {
-            for token in search_to_end(&mut ctx, config).await? {
-                generated.push(token);
-                let text = decode_new_text(model, &generated, &mut prev_text_len);
+        for step in 0..config.max_length {
+            let over = search_step(&mut ctx, step).await?;
+            if over {
+                break;
+            }
+            let settled = settled_prefix(&ctx);
+            for end in sent + 1..=settled.len() {
+                let text = decode_new_text(model, &settled[..end], &mut prev_text_len);
                 if !text.is_empty() {
-                    yield StreamedToken { text, id: token, token_type: TokenType::Generated };
+                    yield StreamedToken { text, id: settled[end - 1], token_type: TokenType::Generated };
                 }
             }
-        } else {
-            for step in 0..config.max_length {
-                let should_stop = beam_step(&mut ctx, step).await?;
+            sent = sent.max(settled.len());
+        }
 
-                // Check stop BEFORE yielding
-                if should_stop {
-                    break;
-                }
-
-                if let Some(best_beam) = ctx.beams.iter().find(|b| b.score != f32::NEG_INFINITY) {
-                    let new_token = *best_beam.tokens.last().unwrap();
-
-                    if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
-                        generated.push(new_token);
-                        let text = decode_new_text(model, &generated, &mut prev_text_len);
-                        if !text.is_empty() {
-                            yield StreamedToken { text, id: new_token, token_type: TokenType::Generated };
-                        }
-                    }
-                }
+        let tokens = best_tokens(&mut ctx)?;
+        for end in sent + 1..=tokens.len() {
+            let text = decode_new_text(model, &tokens[..end], &mut prev_text_len);
+            if !text.is_empty() {
+                yield StreamedToken { text, id: tokens[end - 1], token_type: TokenType::Generated };
             }
         }
     }
@@ -520,6 +534,14 @@ mod tests {
         },
         traits::InferenceModel,
     };
+
+    #[test]
+    fn generated_tokens_drops_the_start_token_and_eos() {
+        assert_eq!(generated_tokens(&[0, 5, 6, 1], 0, 1), [5, 6]);
+        assert_eq!(generated_tokens(&[0, 5, 6], 0, 1), [5, 6]);
+        assert!(generated_tokens(&[0], 0, 1).is_empty());
+        assert!(generated_tokens(&[0, 1], 0, 1).is_empty());
+    }
 
     #[test]
     fn test_length_penalty_formula() {

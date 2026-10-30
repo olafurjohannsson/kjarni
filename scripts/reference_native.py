@@ -8,7 +8,8 @@ Rust reads rustdoc's JSON and takes signatures from the source, which is steadie
 than rendering rustdoc's unstable type tree. C and C++ read the headers: kjarni.h
 comes from cbindgen and kjarni.hpp keeps one declaration style, so a scanner that
 tracks braces is enough. Rust and C get a page per module, since each runs to
-thousands of lines. Public items with no doc comment are listed on stderr.
+thousands of lines. C and C++ fail on a public item with no doc comment, so the
+reference cannot quietly fall behind the API.
 """
 
 import json
@@ -292,7 +293,7 @@ def c_header(header: str, out_path: str) -> None:
     total = sum(len(v) for v in functions.values())
     print(f"c: {len(types)} types, {total} functions -> {directory}")
     if undocumented:
-        print(f"note: {len(undocumented)} C functions have no doc comment: {', '.join(undocumented[:12])}")
+        sys.exit(f"{len(undocumented)} C functions have no doc comment: {', '.join(undocumented)}")
 
 
 # ─── C++ ───────────────────────────────────────────────────────────
@@ -462,7 +463,7 @@ def cpp_header(header: str, out_path: str) -> None:
     Path(out_path).write_text("".join(out))
     print(f"cpp: {len(top)} items -> {out_path}")
     if undocumented:
-        print(f"note: {len(undocumented)} C++ members have no doc comment: {', '.join(undocumented[:12])}")
+        sys.exit(f"{len(undocumented)} C++ members have no doc comment: {', '.join(undocumented)}")
 
 
 if __name__ == "__main__":

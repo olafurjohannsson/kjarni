@@ -10,7 +10,7 @@ use futures::{
 use ndarray::Array3;
 
 use crate::cache::Cache;
-use crate::common::{DecodingStrategy, GenerationConfig, StreamedToken};
+use crate::common::{GenerationConfig, StreamedToken};
 use crate::encoder_decoder::cpu_backend::{self, CpuBackend};
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,

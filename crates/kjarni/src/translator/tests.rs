@@ -606,7 +606,10 @@ mod flan_t5_base_tests {
             .await
             .unwrap();
 
-        let direct = t.translate("The house is small.", "en", "de").await.unwrap();
+        let direct = t
+            .translate("The house is small.", "en", "de")
+            .await
+            .unwrap();
 
         let mut stream = t.stream("The house is small.", "en", "de").await.unwrap();
         let mut chunks = Vec::new();

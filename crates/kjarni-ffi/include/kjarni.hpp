@@ -57,7 +57,9 @@ public:
     explicit Error(KjarniErrorCode code)
         : code_(code), message_(capture()) {}
 
+    /// The error code.
     [[nodiscard]] KjarniErrorCode code() const noexcept { return code_; }
+    /// A description of the failure, captured from the library when the error was created.
     [[nodiscard]] const std::string& message() const noexcept { return message_; }
 
 private:
@@ -187,13 +189,18 @@ class Embedding {
 public:
     explicit Embedding(KjarniFloatArray arr) noexcept : arr_(arr) {}
 
+    /// The vector.
     [[nodiscard]] std::span<const float> values() const noexcept {
         return {arr_.raw().data, arr_.raw().len};
     }
+    /// The number of dimensions.
     [[nodiscard]] std::size_t size() const noexcept { return arr_.raw().len; }
+    /// A pointer to the first element, valid for the lifetime of this object.
     [[nodiscard]] const float* data() const noexcept { return arr_.raw().data; }
 
+    /// An iterator to the first element.
     [[nodiscard]] auto begin() const noexcept { return values().begin(); }
+    /// An iterator past the last element.
     [[nodiscard]] auto end() const noexcept { return values().end(); }
 
     /// Copies into an owning vector, for when the embedding must outlive this object.
@@ -254,6 +261,7 @@ class Embedder {
 public:
     using Options = EmbedderOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Embedder> create(const EmbedderOptions& opts = {}) {
         KjarniEmbedderConfig cfg = kjarni_embedder_config_default();
         cfg.model_name = opts.model.c_str();
@@ -269,6 +277,7 @@ public:
         return Embedder{raw};
     }
 
+    /// The embedding of one text.
     [[nodiscard]] Result<Embedding> encode(std::string_view text) const {
         KjarniFloatArray arr{};
         const std::string owned{text};
@@ -306,6 +315,7 @@ public:
         return result;
     }
 
+    /// The number of dimensions the model produces.
     [[nodiscard]] std::size_t dimensions() const noexcept {
         return kjarni_embedder_dim(handle_.get());
     }
@@ -329,6 +339,7 @@ class Classifier {
 public:
     using Options = ClassifierOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Classifier> create(const ClassifierOptions& opts = {}) {
         KjarniClassifierConfig cfg = kjarni_classifier_config_default();
         cfg.model_name = opts.model.c_str();
@@ -394,6 +405,7 @@ public:
         return std::optional<Label>{std::move(labels->front())};
     }
 
+    /// The number of labels the model predicts.
     [[nodiscard]] std::size_t num_labels() const noexcept {
         return kjarni_classifier_num_labels(handle_.get());
     }
@@ -417,6 +429,7 @@ class Reranker {
 public:
     using Options = RerankerOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Reranker> create(const RerankerOptions& opts = {}) {
         KjarniRerankerConfig cfg = kjarni_reranker_config_default();
         cfg.model_name = opts.model.c_str();
@@ -542,6 +555,7 @@ class Chat {
 public:
     using Options = ChatOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Chat> create(const ChatOptions& opts = {}) {
         KjarniChatConfig cfg = kjarni_chat_config_default();
         cfg.model_name = opts.model.c_str();
@@ -569,6 +583,7 @@ public:
         return take(out);
     }
 
+    /// Sends one message with these generation settings and returns the reply.
     [[nodiscard]] Result<std::string> send(std::string_view message,
                                            const Generation& gen) const {
         const std::string owned{message};
@@ -597,6 +612,7 @@ public:
                                                 &fn, nullptr));
     }
 
+    /// Streams a reply with these generation settings. `on_token` works as in the overload above.
     template <typename F>
     [[nodiscard]] std::expected<void, Error> stream(std::string_view message,
                                                     const Generation& gen,
@@ -663,6 +679,7 @@ class Indexer {
 public:
     using Options = IndexerOptions;
 
+    /// Loads the embedding model, downloading it on first use.
     [[nodiscard]] static Result<Indexer> create(const IndexerOptions& opts = {}) {
         KjarniIndexerConfig cfg = kjarni_indexer_config_default();
         const std::string extensions = detail::join(opts.extensions);
@@ -757,6 +774,7 @@ class Searcher {
 public:
     using Options = SearcherOptions;
 
+    /// Loads the models, downloading them on first use.
     [[nodiscard]] static Result<Searcher> create(const SearcherOptions& opts = {}) {
         KjarniSearcherConfig cfg = kjarni_searcher_config_default();
         cfg.model_name = opts.model.c_str();
@@ -774,6 +792,7 @@ public:
         return Searcher{raw};
     }
 
+    /// Searches an index with the searcher's default mode and result count.
     [[nodiscard]] Result<std::vector<Hit>> search(std::string_view index_path,
                                                   std::string_view query) const {
         const std::string path{index_path}, q{query};
@@ -785,6 +804,7 @@ public:
         return hits(out.raw());
     }
 
+    /// Searches an index with these options for this call.
     [[nodiscard]] Result<std::vector<Hit>> search(std::string_view index_path, std::string_view query,
                                                   const SearchOptions& options) const {
         const std::string path{index_path}, q{query};
@@ -805,6 +825,7 @@ public:
         return hits(out.raw());
     }
 
+    /// Whether this searcher was created with a reranker.
     [[nodiscard]] bool has_reranker() const noexcept { return kjarni_searcher_has_reranker(handle_.get()); }
 
 private:
@@ -856,6 +877,7 @@ class Transcriber {
 public:
     using Options = TranscriberOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Transcriber> create(const TranscriberOptions& opts = {}) {
         KjarniTranscriberConfig cfg = kjarni_transcriber_config_default();
         cfg.model_name = opts.model.c_str();
@@ -927,6 +949,7 @@ class Summarizer {
 public:
     using Options = SummarizerOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Summarizer> create(const SummarizerOptions& opts = {}) {
         KjarniSummarizerConfig cfg = kjarni_summarizer_config_default();
         cfg.model_name = opts.model.c_str();
@@ -943,6 +966,7 @@ public:
         return Summarizer{raw};
     }
 
+    /// A summary of the text.
     [[nodiscard]] Result<std::string> summarize(std::string_view text) const {
         const std::string t{text};
         char* out = nullptr;
@@ -975,6 +999,7 @@ class Translator {
 public:
     using Options = TranslatorOptions;
 
+    /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Translator> create(const TranslatorOptions& opts = {}) {
         KjarniTranslatorConfig cfg = kjarni_translator_config_default();
         cfg.model_name = opts.model.c_str();
@@ -996,6 +1021,7 @@ public:
         return run(text, nullptr, nullptr);
     }
 
+    /// Translates between these languages for this call, such as "en" and "de".
     [[nodiscard]] Result<std::string> translate(std::string_view text, std::string_view from,
                                                 std::string_view to) const {
         const std::string f{from}, t{to};
@@ -1043,6 +1069,7 @@ class ImageIndex {
 public:
     using Options = ImageIndexOptions;
 
+    /// Loads the CLIP model, downloading it on first use.
     [[nodiscard]] static Result<ImageIndex> create(const ImageIndexOptions& opts = {}) {
         KjarniImageIndex* raw = nullptr;
         if (auto e = detail::check(kjarni_image_index_new(detail::or_null(opts.model_dir), &raw)); !e) {
@@ -1051,6 +1078,7 @@ public:
         return ImageIndex{raw};
     }
 
+    /// Adds one image file.
     [[nodiscard]] std::expected<void, Error> add(std::string_view path) {
         const std::string p{path};
         return detail::check(kjarni_image_index_add(handle_.get(), p.c_str()));
@@ -1066,6 +1094,7 @@ public:
         return ScanReport{report.added, report.skipped};
     }
 
+    /// The images that best match a description, best first.
     [[nodiscard]] Result<std::vector<ImageHit>> search(std::string_view query, std::size_t top_k = 10) const {
         const std::string q{query};
         detail::Owning<KjarniImageResults, kjarni_image_results_free> out;
@@ -1096,6 +1125,7 @@ public:
         return count;
     }
 
+    /// The number of images in the index.
     [[nodiscard]] std::size_t size() const noexcept { return kjarni_image_index_len(handle_.get()); }
 
 private:

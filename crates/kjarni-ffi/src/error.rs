@@ -67,6 +67,9 @@ pub fn map_result<T, E: std::fmt::Display>(
     })
 }
 
+/// Get the name of an error code as a C string.
+///
+/// The string is static: do not free it.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_error_code_to_string(err: KjarniErrorCode) -> *const c_char {
     kjarni_error_name(err)

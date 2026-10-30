@@ -757,6 +757,11 @@ void kjarni_string_array_free(struct KjarniStringArray arr);
  */
 float kjarni_cosine_similarity(const float *a, const float *b, uintptr_t len);
 
+/**
+ * Create a token that cancels the long-running calls it is passed to.
+ *
+ * Free it with `kjarni_cancel_token_free`.
+ */
 struct KjarniCancelToken *kjarni_cancel_token_new(void);
 
 /**
@@ -1160,6 +1165,11 @@ enum KjarniErrorCode kjarni_embedder_similarity(struct KjarniEmbedder *embedder,
  */
 uintptr_t kjarni_embedder_dim(const struct KjarniEmbedder *embedder);
 
+/**
+ * Get the name of an error code as a C string.
+ *
+ * The string is static: do not free it.
+ */
 const char *kjarni_error_code_to_string(enum KjarniErrorCode err);
 
 /**
@@ -1592,8 +1602,15 @@ enum KjarniErrorCode kjarni_reranker_rerank_top_k(struct KjarniReranker *reranke
  */
 void kjarni_search_results_free(struct KjarniSearchResults results);
 
+/**
+ * Search options that leave every setting to the searcher's defaults.
+ */
 struct KjarniSearchOptions kjarni_search_options_default(void);
 
+/**
+ * The default searcher configuration: CPU, the default model, hybrid search and
+ * ten results.
+ */
 struct KjarniSearcherConfig kjarni_searcher_config_default(void);
 
 /**

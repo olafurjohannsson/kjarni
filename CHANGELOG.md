@@ -17,8 +17,9 @@
   batched kernel: a long prompt dispatched one workgroup per output element.
 - **Streaming with beam search returned garbage.** `kjarni translate` streams by
   default, and "The house is small." came back as "Das Haus ist klein.. aber Zimmer
-  sind ...". Streaming now gives the same text as not streaming; with more than one
-  beam, the tokens arrive once the search has finished.
+  sind ...". Streaming now gives the same text as not streaming: with more than one
+  beam, a token is sent once every hypothesis still able to win agrees on it, so
+  text arrives in bursts and is never taken back.
 - **`Indexer.exclude()` did nothing for most patterns, and hidden folders were
   indexed.** Patterns were compared with the full path, so `target` or `*.log` never
   matched. `search_folder` over MCP therefore indexed build output and could return

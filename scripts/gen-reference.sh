@@ -8,7 +8,7 @@
 # <out>/go/kjarni.md, <out>/rust/*.md, <out>/c/*.md and <out>/cpp/kjarni.md, plus a
 # VERSION file. The website imports these into its own design.
 #
-# Fails if any public item in the Python, .NET, JavaScript or Go bindings has no
+# Fails if any public item in the Python, .NET, JavaScript, Go, C or C++ APIs has no
 # doc comment, so the reference cannot quietly fall behind the API. Needs python3,
 # dotnet, node, go and cargo.
 set -euo pipefail
