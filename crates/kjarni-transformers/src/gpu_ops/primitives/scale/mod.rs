@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 #[repr(C)]
@@ -63,11 +62,7 @@ impl GpuScale {
             scale,
             _padding: [0; 2],
         };
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scale Out-of-Place Uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scale Out-of-Place Bind Group"),
@@ -116,11 +111,7 @@ fn run_internal_scale(
         scale,
         _padding: [0; 2],
     };
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Scale Uniforms"),
-        contents: bytemuck::cast_slice(&[uniforms]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let uniform_buffer = context.uniform_buffer(&uniforms);
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Scale Bind Group"),

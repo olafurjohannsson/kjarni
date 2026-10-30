@@ -923,21 +923,21 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 enc,
                 &gpu_decoder_hidden,
                 &gpu_layer0.self_attn_weights.q_weight,
-                &gpu_layer0.self_attn_weights.q_bias,
+                gpu_layer0.self_attn_weights.q_bias.as_ref(),
                 pool_ref,
             );
             let k_out = gpu_layer0.self_attn.ops.project(
                 enc,
                 &gpu_decoder_hidden,
                 &gpu_layer0.self_attn_weights.k_weight,
-                &gpu_layer0.self_attn_weights.k_bias,
+                gpu_layer0.self_attn_weights.k_bias.as_ref(),
                 pool_ref,
             );
             let v_out = gpu_layer0.self_attn.ops.project(
                 enc,
                 &gpu_decoder_hidden,
                 &gpu_layer0.self_attn_weights.v_weight,
-                &gpu_layer0.self_attn_weights.v_bias,
+                gpu_layer0.self_attn_weights.v_bias.as_ref(),
                 pool_ref,
             );
 

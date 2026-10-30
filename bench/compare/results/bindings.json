@@ -1,0 +1,32 @@
+[
+  {
+    "lang": "C",
+    "median_us": 3444.2,
+    "min_us": 2077.5,
+    "overhead_us": 0.0
+  },
+  {
+    "lang": "Rust",
+    "median_us": 3433.6,
+    "min_us": 2028.9,
+    "overhead_us": -10.599999999999909
+  },
+  {
+    "lang": "Python",
+    "median_us": 3488.2274994743057,
+    "min_us": 2119.210999808274,
+    "overhead_us": 44.02749947430584
+  },
+  {
+    "lang": "Go",
+    "median_us": 3368.5,
+    "min_us": 2103.5,
+    "overhead_us": -75.69999999999982
+  },
+  {
+    "lang": "C#",
+    "median_us": 3466.1,
+    "min_us": 2084.7,
+    "overhead_us": 21.90000000000009
+  }
+]

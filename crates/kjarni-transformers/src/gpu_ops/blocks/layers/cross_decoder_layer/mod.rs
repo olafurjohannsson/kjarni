@@ -151,6 +151,67 @@ impl GpuCrossDecoderLayer {
 
         Ok((final_output, self_attn_out.new_k, self_attn_out.new_v))
     }
+
+    /// `forward` with each sublayer normalizing its input rather than its output,
+    /// as Whisper does.
+    pub fn forward_prenorm(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        hidden_states: &GpuTensor,
+        cross_kv: &(GpuTensor, GpuTensor),
+        decoder_mask: &GpuTensor,
+        encoder_mask: Option<&GpuTensor>,
+        cached_kv: Option<(&GpuTensor, &GpuTensor)>,
+        cache_len: usize,
+        pool: &mut GpuTensorPool,
+    ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
+        let shape = hidden_states.shape().to_vec();
+
+        let norm1 = pool.get(shape.clone());
+        self.self_attn_norm
+            .encode(encoder, &self.self_attn_norm_weights, hidden_states, &norm1);
+        let self_attn_out = self.self_attn.forward(
+            encoder,
+            &norm1,
+            &self.self_attn_weights,
+            decoder_mask,
+            cached_kv,
+            cache_len,
+            pool,
+        )?;
+        let after_self = pool.get(shape.clone());
+        self.add.encode(
+            encoder,
+            &[hidden_states, &self_attn_out.hidden_states],
+            &after_self,
+        );
+
+        let norm2 = pool.get(shape.clone());
+        self.cross_attn_norm
+            .encode(encoder, &self.cross_attn_norm_weights, &after_self, &norm2);
+        let cross_attn_out = self.cross_attn.forward(
+            encoder,
+            &norm2,
+            cross_kv,
+            &self.cross_attn_weights,
+            encoder_mask,
+            pool,
+        );
+        let after_cross = pool.get(shape.clone());
+        self.add
+            .encode(encoder, &[&after_self, &cross_attn_out], &after_cross);
+
+        let norm3 = pool.get(shape.clone());
+        self.ffn_norm
+            .encode(encoder, &self.ffn_norm_weights, &after_cross, &norm3);
+        let ffn_out = pool.get(shape.clone());
+        self.feedforward
+            .encode(encoder, &self.ff_weights, &norm3, &ffn_out, pool);
+        let output = pool.get(shape);
+        self.add.encode(encoder, &[&after_cross, &ffn_out], &output);
+
+        Ok((output, self_attn_out.new_k, self_attn_out.new_v))
+    }
 }
 
 #[cfg(test)]

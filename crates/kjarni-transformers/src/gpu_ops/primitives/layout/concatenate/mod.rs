@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
@@ -174,14 +173,7 @@ impl GpuConcatenate {
             _padding: [0; 3],
         };
 
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Concat Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

@@ -2,7 +2,6 @@ use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use anyhow::Result;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -12,6 +11,9 @@ struct NormUniforms {
     eps: f32,
     _padding: u32,
 }
+
+/// Below this many rows each gets a workgroup of its own; see `wide` in the shader.
+const WIDE_BELOW_ROWS: usize = 64;
 
 pub struct GpuLayerNormWeights {
     pub(crate) gamma: GpuTensor, // scale
@@ -37,6 +39,7 @@ impl GpuLayerNormWeights {
 /// A GPU kernel for Layer Normalization.
 pub struct GpuLayerNorm {
     pipeline: wgpu::ComputePipeline,
+    wide_pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     context: Arc<WgpuContext>,
     eps: f32,
@@ -113,18 +116,21 @@ impl GpuLayerNorm {
                     bind_group_layouts: &[&bind_group_layout],
                     push_constant_ranges: &[],
                 });
-        let pipeline = context
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("LayerNorm Pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let make_pipeline = |entry_point: &str| {
+            context
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("LayerNorm Pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader,
+                    entry_point: Some(entry_point),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+        };
         Self {
-            pipeline,
+            pipeline: make_pipeline("main"),
+            wide_pipeline: make_pipeline("wide"),
             bind_group_layout,
             context: context.clone(),
             eps,
@@ -155,14 +161,7 @@ impl GpuLayerNorm {
             eps: self.eps,
             _padding: 0,
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("LayerNorm Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context
@@ -198,10 +197,15 @@ impl GpuLayerNorm {
             label: Some("LayerNorm Pass"),
             timestamp_writes: None,
         });
-        compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (rows as u32).div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+        if rows < WIDE_BELOW_ROWS {
+            compute_pass.set_pipeline(&self.wide_pipeline);
+            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, rows as u32);
+        } else {
+            compute_pass.set_pipeline(&self.pipeline);
+            let workgroups = (rows as u32).div_ceil(256);
+            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+        }
     }
 }
 

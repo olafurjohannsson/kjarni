@@ -1,7 +1,11 @@
 # kjarni-wasm
 
-Local AI inference in the browser. Embeddings, classification, reranking, semantic
-search and chat, running in a Web Worker so the page never freezes.
+**Run transformer models inside your web page. Same output as PyTorch, no server.**
+
+Kjarni is a transformer inference library, and this is its WebAssembly build:
+embeddings, classification, reranking, semantic search and chat in the browser,
+running in a Web Worker so the page never freezes. The same engine ships for
+Python, C#, Go, C++ and Rust.
 
 ```bash
 npm i kjarni-wasm
@@ -11,7 +15,7 @@ Or without a bundler, straight from a CDN:
 
 ```html
 <script type="module">
-  import { Kjarni } from "https://cdn.jsdelivr.net/npm/kjarni-wasm@0.1.4/dist/index.js";
+  import { Kjarni } from "https://cdn.jsdelivr.net/npm/kjarni-wasm@0.2/dist/index.js";
 </script>
 ```
 
@@ -32,7 +36,7 @@ server will do.
 ```html
 <pre id="out">starting…</pre>
 <script type="module">
-  import init, { WasmModel } from "https://cdn.jsdelivr.net/npm/kjarni-wasm@0.1.4/pkg/kjarni_wasm.js";
+  import init, { WasmModel } from "https://cdn.jsdelivr.net/npm/kjarni-wasm@0.2/pkg/kjarni_wasm.js";
   await init();
 
   const url = "https://huggingface.co/olafuraron/all-MiniLM-L6-v2-q8/resolve/main/all-MiniLM-L6-v2-q8.kjq";

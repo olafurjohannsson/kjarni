@@ -8,7 +8,7 @@ vocab.txt
 # its publish job had nothing to build. Ignore the generated ones by path instead.
 **/obj/*.json
 **/bin/*.json
-
+bench/compare/results/matrix.log
 # Personal editor and tool state, previously hidden by the blanket *.json.
 .claude/settings.local.json
 .vscode/

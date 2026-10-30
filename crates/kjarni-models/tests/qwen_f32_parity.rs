@@ -24,6 +24,7 @@
 use std::path::PathBuf;
 
 use kjarni_models::models::qwen::QwenModel;
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::generator::DecoderGenerator;
 use kjarni_transformers::models::base::ModelLoadConfig;
@@ -51,6 +52,18 @@ fn torch_reference() -> Option<String> {
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "generation is far too slow unoptimised")]
 async fn qwen_f32_matches_pytorch() {
+    matches_pytorch_on(Device::Cpu).await;
+}
+
+/// Attention on the GPU reads the KV cache in place and writes into it directly, a
+/// different route from the CPU's: this is what holds it to the same tokens.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn qwen_f32_matches_pytorch_on_gpu() {
+    matches_pytorch_on(Device::Wgpu).await;
+}
+
+async fn matches_pytorch_on(device: Device) {
     let Some(dir) = model_dir() else {
         eprintln!("skipping: qwen2.5-0.5b not cached");
         return;
@@ -66,8 +79,13 @@ async fn qwen_f32_matches_pytorch() {
         target_dtype: Some(DType::F32),
         ..Default::default()
     };
+    let context = if device == Device::Wgpu {
+        Some(WgpuContext::new().await.expect("gpu context"))
+    } else {
+        None
+    };
     let model: QwenModel =
-        DecoderLoader::load_from_pretrained(&dir, Device::Cpu, None, Some(cfg), None)
+        DecoderLoader::load_from_pretrained(&dir, device, context, Some(cfg), None)
             .expect("load qwen as f32");
 
     let generator = DecoderGenerator::new(std::sync::Arc::new(model)).expect("generator");

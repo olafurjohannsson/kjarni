@@ -7,9 +7,9 @@
 [![CI](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-**Local embeddings, semantic search, classification, reranking, chat, speech to text, summarization, translation and image search for C#, Go, Rust, Python, C++ and the command line.**
+**Run transformer models inside your program, in any language. Same output as PyTorch, no Python, no server.**
 
-Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine.
+Kjarni is a transformer inference library: local AI inference as one native engine for Python, C#, Go, C++, Rust and the browser. It runs embeddings, classification, reranking, semantic search, chat, speech to text, summarization, translation and image search on your CPU or GPU, downloads its own models, and works entirely on your machine. It is written from scratch in Rust and ships as a single shared library.
 
 ## Try it in 30 seconds
 
@@ -281,34 +281,54 @@ ONNX Runtime is a general-purpose tensor executor and does that job well. Kjarni
 
 ### Speed, start-up and memory
 
-Measured against the same models in PyTorch, ONNX Runtime, faster-whisper and
-llama.cpp, on one CPU, with each engine in its own process. Outputs are checked
-against PyTorch's: embeddings agree to within 3e-7.
+Measured against the same models in PyTorch, ONNX Runtime, faster-whisper,
+openai-whisper and llama.cpp, each engine in its own process, on an i7-13700 and an
+RTX A2000 12 GB.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/encoders-throughput-dark.svg">
-  <img alt="Batch throughput for embeddings, reranking and classification" src="bench/charts/encoders-throughput-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/matrix-embeddings-cpu-dark.svg">
+  <img alt="Embeddings per second on the CPU" src="bench/charts/matrix-embeddings-cpu-light.svg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/encoders-load-dark.svg">
-  <img alt="Time to load a model" src="bench/charts/encoders-load-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/matrix-embeddings-gpu-dark.svg">
+  <img alt="Embeddings per second on the GPU" src="bench/charts/matrix-embeddings-gpu-light.svg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/encoders-memory-dark.svg">
-  <img alt="Memory in use" src="bench/charts/encoders-memory-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/matrix-whisper-dark.svg">
+  <img alt="Speech to text speed on CPU and GPU" src="bench/charts/matrix-whisper-light.svg">
 </picture>
 
-- **Embeddings, reranking, classification:** faster than PyTorch on every task and level with ONNX Runtime on reranking and classification; ONNX Runtime is 11 to 17% faster on embeddings. Loads 10 to 25 times faster than PyTorch and 4 to 7 times faster than ONNX Runtime.
-- **Same answers as PyTorch:** embeddings, rerank scores, class probabilities and CLIP scores agree with PyTorch's to within 4e-6, as closely as ONNX Runtime's do. Summaries, translations and greedy chat replies come out word for word the same.
-- **Speech to text:** whisper-small transcribes a minute of audio at 7.9× real time, ahead of openai-whisper (6.2×) and faster-whisper at full precision (5.5×); faster-whisper's int8 mode is faster still (11.5×).
-- **Summarization and translation:** level with PyTorch, 0.95 and 1.04 times its time with the same beam search, and loads in 0.5 s against 2.3 s.
-- **Image search:** CLIP indexes 57 images a second against open_clip's 52, and loads in 0.3 s against 3.5 s.
-- **Memory:** a loaded model takes about the size of its weight file, less than the same model elsewhere: Whisper-small 1.1 GB against 1.3 GB in openai-whisper and 1.7 GB in faster-whisper, distilbart 1.3 GB against 1.7 GB, CLIP 0.8 GB against 1.2 GB.
-- **Where it is behind:** text generation runs at 70 to 79% of llama.cpp's speed on the same GGUF files; prompt processing is level with llama.cpp on Qwen2.5 0.5B and at 66% on Llama 3.2 1B. On short clips openai-whisper transcribes faster.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/matrix-generation-cpu-dark.svg">
+  <img alt="Text generation on the CPU" src="bench/charts/matrix-generation-cpu-light.svg">
+</picture>
 
-Method, every number and how to reproduce them: [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bench/charts/matrix-generation-gpu-dark.svg">
+  <img alt="Text generation on the GPU" src="bench/charts/matrix-generation-gpu-light.svg">
+</picture>
+
+- **Same answers as PyTorch:** on the CPU, embeddings agree to within 1e-6 on MiniLM and bge-m3, and within 4e-6 across rerank scores, class probabilities and CLIP. On the GPU, embeddings agree to within 2.2e-6, closer than ONNX Runtime's CUDA path at 3.8e-4. Summaries, translations and greedy chat replies come out word for word the same on the CPU, and Whisper's transcript is the same on CPU and GPU on the test clips.
+- **Embeddings on the CPU:** level with ONNX Runtime on batches (10% behind on MiniLM, 10% ahead on bge-m3) and ahead of PyTorch. ONNX Runtime is faster on a single text: 1.4 ms against 2.3 ms on MiniLM.
+- **Speech to text on the CPU:** 8.6× real time, ahead of openai-whisper (7.3×) and faster-whisper at full precision (6.2×). faster-whisper's int8 mode is faster still (12.8×).
+- **Generation on the CPU:** 92 to 99% of llama.cpp's speed on the same GGUF files, and about four to five times PyTorch's. Prompt processing is 91% of llama.cpp's on Qwen2.5 0.5B and 66% on Llama 3.2 1B.
+- **On the GPU, no CUDA, and slower than CUDA:** WebGPU runs on NVIDIA, AMD, Intel and Apple hardware with nothing to install. On this NVIDIA card, CUDA engines are well ahead: ONNX Runtime embeds 5 times as fast, faster-whisper transcribes 6 times as fast, and llama.cpp generates 2 to 4 times as fast. Kjarni's GPU beats its CPU on batches, generation and Whisper, by about 2 to 4.5 times; for one short MiniLM text the CPU is faster.
+- **Load time:** MiniLM loads in 91 ms against 495 ms for ONNX Runtime and 2.5 s for PyTorch. bge-m3 loads in 1.3 s against 1.5 s and 6.7 s.
+- **Memory:** after a batch on the CPU, MiniLM holds 272 MB against 419 MB in ONNX Runtime and 613 MB in PyTorch. bge-m3 is the other way round: 2.8 GB against 1.9 GB and 2.1 GB.
+
+Summarization, translation, image search, method and every number: [bench/BENCHMARKS.md](bench/BENCHMARKS.md).
+
+### Cost of the language binding
+
+There is none you can measure. One MiniLM embedding of a short text, the worst case for a binding, through each one against the same library on the CPU:
+
+| C | Rust | Python | Go | C# |
+| --: | --: | --: | --: | --: |
+| 3.44 ms | 3.43 ms | 3.49 ms | 3.37 ms | 3.47 ms |
+
+Those differences are run-to-run noise: Go comes out ahead of C, which cannot be overhead. Median of 3,000 calls, best of three runs.
 
 ## What it does
 
@@ -433,7 +453,7 @@ Yes. Models are downloaded once and cached on disk; after that, nothing touches 
 
 ### Is a GPU required?
 
-No. Every capability runs on CPU with hand-tuned SIMD kernels (AVX2/FMA on x86, NEON on ARM). GPU acceleration is optional and uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. CUDA is not required and not used.
+No. Every capability runs on CPU with hand-tuned SIMD kernels (AVX2/FMA on x86, NEON on ARM). GPU acceleration is optional and uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. CUDA is not required and not used. On the GPU, embeddings, classification, reranking and chat give the same results as on the CPU; speech to text gives the same transcript on the test clips. It is faster for batches, generation and transcription, not for one short text. Translation runs on the CPU only for now.
 
 ### How does it compare to ONNX Runtime?
 

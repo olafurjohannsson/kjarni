@@ -3,6 +3,9 @@ the CPU, in a fresh process. Prints JSON.
 
     python whisper_worker.py ENGINE AUDIO
 ENGINE: kjarni | openai-whisper | faster-whisper | faster-whisper-int8
+
+BENCH_DEVICE=gpu runs on CUDA, at the precision each engine recommends there:
+float16 for openai-whisper and faster-whisper, int8_float16 for the int8 mode.
 """
 import json, os, sys, time, resource
 
@@ -17,21 +20,24 @@ def rss_now_mb():
 ENGINE, AUDIO = sys.argv[1], sys.argv[2]
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 RUNS = 3
+GPU = os.environ.get("BENCH_DEVICE") == "gpu"
 
 t0 = time.perf_counter()
 if ENGINE == "kjarni":
     sys.path.insert(0, os.path.join(REPO, "crates/kjarni-ffi/bindings/python"))
     import kjarni
-    m = kjarni.Transcriber(model="whisper-small", language="en", quiet=True)
+    m = kjarni.Transcriber(model="whisper-small", language="en", device="gpu" if GPU else "cpu", quiet=True)
     run = lambda: m.transcribe_file(AUDIO).text
 elif ENGINE == "openai-whisper":
     import whisper, torch
-    m = whisper.load_model("small", device="cpu")
-    run = lambda: m.transcribe(AUDIO, language="en", temperature=0.0, fp16=False, beam_size=None)["text"]
+    m = whisper.load_model("small", device="cuda" if GPU else "cpu")
+    run = lambda: m.transcribe(AUDIO, language="en", temperature=0.0, fp16=GPU, beam_size=None)["text"]
 else:
     import numpy as np, wave
     from faster_whisper import WhisperModel
-    m = WhisperModel("small", device="cpu", compute_type="int8" if ENGINE.endswith("int8") else "float32")
+    int8 = ENGINE.endswith("int8")
+    m = WhisperModel("small", device="cuda" if GPU else "cpu",
+                     compute_type=("int8_float16" if int8 else "float16") if GPU else ("int8" if int8 else "float32"))
     # Decoded here and passed as samples: faster-whisper's own decoder needs a
     # PyAV older than the one installed. The file is 16 kHz mono PCM already,
     # so decoding is not part of what is being compared.
@@ -48,6 +54,6 @@ for _ in range(RUNS):
 import wave
 with wave.open(AUDIO) as w:
     duration = w.getnframes() / w.getframerate()
-print(json.dumps(dict(engine=ENGINE, audio=os.path.basename(AUDIO), audio_secs=duration, load_ms=load_ms,
+print(json.dumps(dict(engine=ENGINE, device="gpu" if GPU else "cpu", audio=os.path.basename(AUDIO), audio_secs=duration, load_ms=load_ms,
                       secs=min(times), realtime_x=duration / min(times), text=text.strip(),
                       peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, rss_mb=rss_now_mb())))

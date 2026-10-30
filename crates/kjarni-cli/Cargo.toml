@@ -2,7 +2,7 @@
 name = "kjarni-cli"
 version.workspace = true
 edition.workspace = true
-description = "Command-line interface for the Kjarni inference engine: embeddings, classification, reranking, generation and search"
+description = "Kjarni from the shell: classification, embeddings, reranking, search, chat, summarization, translation and speech-to-text as commands, and an MCP server for AI agents. Same output as PyTorch."
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

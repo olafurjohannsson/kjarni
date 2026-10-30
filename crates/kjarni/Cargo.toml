@@ -9,7 +9,7 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Kjarni: The SQLite of AI. A fast, small-footprint inference toolkit for edge, browser, and native platforms."
+description = "Transformer inference library: run embeddings, classification, reranking, search, chat, speech-to-text, summarization and translation inside your program. Same output as PyTorch, no Python, no server."
 
 [lib]
 name = "kjarni"

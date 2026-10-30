@@ -1,12 +1,17 @@
 # Kjarni
 
-A native ML inference engine in Rust. Embeddings, classification, reranking,
-retrieval and chat, running on CPU or GPU inside your process. No Python runtime,
-no ONNX conversion, no server.
+**Run transformer models inside your program, in any language. Same output as
+PyTorch, no Python, no server.**
+
+Kjarni is a transformer inference library written in Rust: embeddings,
+classification, reranking, search, chat, speech to text, summarization and
+translation, on CPU or GPU inside your process. This crate is its Rust API; the
+same engine ships for Python, C#, Go, C++ and the browser.
 
 ```toml
 [dependencies]
-kjarni = "0.1"
+kjarni = "0.2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```rust
@@ -41,6 +46,22 @@ is one dependency with no toolchain.
 | `kjarni-rag` | Retrieval-augmented generation |
 | `kjarni-cli` | The `kjarni` command line tool |
 | `kjarni-ffi` | The C ABI every other language binding is built on |
+
+## How fast it is
+
+An i7-13700 and an RTX A2000 12 GB, each engine in its own process. On this NVIDIA card, engines using CUDA are well ahead of Kjarni's WebGPU; what WebGPU gives you is the same code on NVIDIA, AMD, Intel and Apple hardware with nothing to install.
+
+![Embeddings per second on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
+
+![Embeddings per second on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
+
+![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-whisper-light.png)
+
+![Text generation on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
+
+![Text generation on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
+
+These are the Rust engine's own numbers measured through its bindings; the Rust API and the C ABI take the same time, 3.43 and 3.44 ms for one short MiniLM embedding. Method and every number: [BENCHMARKS.md](https://github.com/olafurjohannsson/kjarni/blob/main/bench/BENCHMARKS.md).
 
 ## The same engine elsewhere
 

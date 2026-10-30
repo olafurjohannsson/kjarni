@@ -3,6 +3,9 @@ and generation speed, greedy, on the CPU. Prints JSON. llama.cpp is timed on the
 same file with its own llama-bench (pp512 / tg128); run_rest.py does both.
 
     python decoder_worker.py MODEL_NAME GGUF TOKENIZER_JSON
+
+KJARNI_QUANTIZED=0 uses the safetensors weights instead; BENCH_DEVICE=gpu runs on
+the GPU through WebGPU.
 """
 import ctypes, json, os, sys, time, resource
 
@@ -26,6 +29,7 @@ cfg = kc._lib.kjarni_chat_config_default()
 cfg.model_name = MODEL.encode()
 cfg.quantized = int(os.environ.get("KJARNI_QUANTIZED", "1"))  # 1: the GGUF weights, the same file llama.cpp is given
 cfg.quiet = 1
+cfg.device = kc.KjarniDevice.GPU if os.environ.get("BENCH_DEVICE") == "gpu" else kc.KjarniDevice.CPU
 handle = ctypes.c_void_p()
 check_error(kc._lib.kjarni_chat_new(ctypes.byref(cfg), ctypes.byref(handle)))
 load_ms = (time.perf_counter() - t0) * 1000
@@ -53,6 +57,12 @@ for _ in range(3):
     r = dict(ttft_ms=first * 1000, prompt_tok_s=(len(ids) + 24) / first, gen_tok_s=decode, generated=len(stamps))
     if best is None or r["gen_tok_s"] > best["gen_tok_s"]:
         best = r
+# Generation from a nearly empty context, which is what llama-bench's tg128 measures;
+# the figure above follows a 512-token prompt, so attention has far more keys to read.
+prompt = "Write a long story about a lighthouse keeper."
+once()
+start, stamps = once()
+best["gen_short_tok_s"] = (len(stamps) - 1) / (stamps[-1] - stamps[0]) if len(stamps) > 1 else 0.0
 kc._lib.kjarni_chat_free(handle)
 print(json.dumps(dict(engine="kjarni", model=os.path.basename(GGUF), load_ms=load_ms,
                       threads=int(os.environ.get("RAYON_NUM_THREADS") or os.cpu_count()),

@@ -1,4 +1,19 @@
-# Kjarni CLI Commands
+# Kjarni CLI
+
+**Run transformer models from your shell. Same output as PyTorch, no Python, no server.**
+
+`kjarni` is the command-line build of Kjarni, a transformer inference library:
+classification, embeddings, similarity, reranking, indexing and search, chat,
+summarization, translation and speech to text, as ordinary commands that read stdin
+and write text or JSON. `kjarni mcp` serves the same tools to AI agents over MCP.
+
+```bash
+curl -fsSL https://kjarni.ai/install.sh | sh     # Linux and macOS
+irm https://kjarni.ai/install.ps1 | iex          # Windows
+cargo install kjarni-cli                         # from source
+```
+
+# Commands
 
 ## Model Management
 

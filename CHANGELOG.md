@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.8
+
+### Faster GPU generation, and Whisper on the GPU
+
+- **Whisper runs on the GPU.** `Transcriber` with `device="gpu"` was an error. It
+  now runs the encoder and decoder there, at 15.9x real time on an RTX A2000
+  against 8.6x on an i7-13700's CPU, with the same transcript on the test clips.
+- **Generation is about twice as fast on the GPU.** Llama 3.2 1B went from 32 to
+  72 tokens a second after a 512-token prompt. Attention writes keys and values
+  straight into the KV cache and reads them in place, which cuts each layer from
+  over twenty dispatches to eight; readback blocks in the driver instead of polling
+  on a sleep; a model without an attention bias no longer adds zeros.
+- **Prompts in Qwen's Q4_K_M file are about 8x faster on the GPU**, from 186 to
+  1,537 tokens a second. Q4_0 and Q5_0 tensors reach the GPU as Q8_0, which had no
+  batched kernel: a long prompt dispatched one workgroup per output element.
+- **Short texts on the GPU are a little faster**: bge-m3 from 74 to 58 ms. Layer
+  norm gives a few rows a workgroup each instead of one thread each. Batches are
+  unchanged.
+
 ## 0.2.7
 
 ### GPU results match PyTorch

@@ -37,14 +37,14 @@ impl GpuCrossAttention {
             encoder,
             encoder_hidden_states,
             &weights.k_weight,
-            &weights.k_bias,
+            weights.k_bias.as_ref(),
             pool,
         );
         let v_proj = self.ops.project(
             encoder,
             encoder_hidden_states,
             &weights.v_weight,
-            &weights.v_bias,
+            weights.v_bias.as_ref(),
             pool,
         );
 
@@ -75,7 +75,7 @@ impl GpuCrossAttention {
             encoder,
             decoder_hidden_states,
             &weights.q_weight,
-            &weights.q_bias,
+            weights.q_bias.as_ref(),
             pool,
         );
 
@@ -105,7 +105,7 @@ impl GpuCrossAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }

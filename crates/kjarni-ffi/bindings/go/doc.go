@@ -1,7 +1,8 @@
-// Package kjarni provides text classification, embeddings, semantic search,
-// reranking, chat, speech to text, summarization, translation and image search
-// using pre-trained models, running inside your process against a native
-// library. Models download automatically on first use
+// Package kjarni runs transformer models inside your Go program: text
+// classification, embeddings, semantic search, reranking, chat, speech to text,
+// summarization, translation and image search, with the same output as PyTorch
+// and no Python or server. Kjarni is a transformer inference library; this
+// package calls its native library. Models download automatically on first use
 // and are cached on disk, so everything after that works offline.
 //
 // The same engine ships for other runtimes: Kjarni on NuGet for C#, kjarni-wasm

@@ -687,6 +687,23 @@ jobs:
       - name: Build FFI
         run: cargo build --release --package kjarni-ffi --target aarch64-apple-darwin
 
+      # Until this step the macOS binary was built and shipped without ever being
+      # run. It executes the exact binary that goes into the release and checks its
+      # numbers against the Linux build, so a crash on load or a NEON kernel that
+      # disagrees with AVX2 fails here instead of on a user's machine.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache smoke-test models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kjarni-models
+          key: kjarni-models-smoke-macos-v1
+      - name: Smoke test
+        env:
+          KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
+        run: python scripts/smoke_test.py target/aarch64-apple-darwin/release/kjarni
+
       - name: Prepare artifacts
         run: |
           mkdir -p dist
@@ -719,6 +736,20 @@ jobs:
 
       - name: Build FFI
         run: cargo build --release --package kjarni-ffi --target x86_64-pc-windows-msvc
+
+      # Same check as build-macos: run the binary that ships, compare against Linux.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache smoke-test models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kjarni-models
+          key: kjarni-models-smoke-windows-v1
+      - name: Smoke test
+        env:
+          KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
+        run: python scripts/smoke_test.py target/x86_64-pc-windows-msvc/release/kjarni.exe
 
       - name: Prepare artifacts
         shell: bash

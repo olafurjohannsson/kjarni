@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupEntry, CommandEncoder, ComputePipeline};
 
 #[repr(C)]
@@ -125,14 +124,7 @@ impl GpuReorderCache {
             _padding: [0; 3],
         };
 
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Reorder Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

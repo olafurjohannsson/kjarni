@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2};
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
 use crate::WgpuContext;
@@ -232,14 +231,7 @@ impl GpuFeedForwardStd {
             n: intermediate_size,
             _padding: 0,
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("ffn fc1 uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context
@@ -310,14 +302,7 @@ impl GpuFeedForwardStd {
             n: hidden_size,
             _padding: 0,
         };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("ffn fc2 uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context

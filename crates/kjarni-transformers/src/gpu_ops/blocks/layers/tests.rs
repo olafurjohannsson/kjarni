@@ -494,21 +494,21 @@ mod tests {
             &mut encoder,
             &ln1_out_gpu,
             &gpu_layer.self_attn_weights.q_weight,
-            &gpu_layer.self_attn_weights.q_bias,
+            gpu_layer.self_attn_weights.q_bias.as_ref(),
             temp,
         );
         let k_proj = gpu_layer.self_attn.project(
             &mut encoder,
             &ln1_out_gpu,
             &gpu_layer.self_attn_weights.k_weight,
-            &gpu_layer.self_attn_weights.k_bias,
+            gpu_layer.self_attn_weights.k_bias.as_ref(),
             temp,
         );
         let v_proj = gpu_layer.self_attn.project(
             &mut encoder,
             &ln1_out_gpu,
             &gpu_layer.self_attn_weights.v_weight,
-            &gpu_layer.self_attn_weights.v_bias,
+            gpu_layer.self_attn_weights.v_bias.as_ref(),
             temp,
         );
         let q_split = gpu_layer.self_attn.split_heads(&mut encoder, &q_proj, temp);

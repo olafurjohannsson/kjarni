@@ -210,8 +210,19 @@ impl GpuDecoderBackend {
         let map_result;
 
         loop {
-            match self.context.device.poll(wgpu::PollType::Poll) {
-                Ok(_) => {}
+            // Native blocks in the driver until the GPU signals, so the result is
+            // picked up the moment it exists. A browser cannot block: it polls,
+            // and yields to the event loop that completes the mapping.
+            #[cfg(not(target_arch = "wasm32"))]
+            let poll = wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(self.timeout_config.timeout.saturating_sub(start.elapsed())),
+            };
+            #[cfg(target_arch = "wasm32")]
+            let poll = wgpu::PollType::Poll;
+
+            match self.context.device.poll(poll) {
+                Ok(_) | Err(wgpu::PollError::Timeout) => {}
                 Err(e) => {
                     return Err(anyhow!("gpu poll failed: {:?}", e));
                 }
@@ -238,6 +249,7 @@ impl GpuDecoderBackend {
                 .into());
             }
 
+            #[cfg(target_arch = "wasm32")]
             tokio::time::sleep(self.timeout_config.poll_interval).await;
         }
 

@@ -1,5 +1,4 @@
 use crate::WgpuContext;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline, include_wgsl};
 
 use crate::gpu::GpuTensor;
@@ -96,11 +95,7 @@ fn run_internal_apply_mask(
     uniforms: Uniforms,
 ) {
     let device = &context.device;
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Apply Mask Uniforms"),
-        contents: bytemuck::cast_slice(&[uniforms]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let uniform_buffer = context.uniform_buffer(&uniforms);
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Apply Mask Bind Group"),

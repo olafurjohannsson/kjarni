@@ -2,7 +2,6 @@ use crate::gpu::GpuTensor;
 use crate::tensor::DType;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -17,6 +16,13 @@ struct LinearInfo {
 /// rows, the two meet near 128, and 128x128 is 1.5x faster by 255 rows.
 const GEMM_LARGE_TILE_MIN_ROWS: u32 = 128;
 
+/// Row count below which the F32 and BF16 GEMMs take one thread per output instead
+/// of a tile: two rows, a pair of chunks or beams stepping together. A tile costs the
+/// same from 2 to 48 rows because reading the weights is what limits it. Measured on
+/// an RTX A2000 at K=768, N=3072: 0.22 ms against 0.31 at two rows, level at three,
+/// 0.38 against 0.31 at four.
+const GEMM_FEW_ROWS: u32 = 3;
+
 pub struct GpuLinearLayer {
     context: Arc<WgpuContext>,
     bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -30,13 +36,16 @@ pub struct GpuLinearLayer {
     gemv_q6k: wgpu::ComputePipeline,
     gemm_q6k: wgpu::ComputePipeline,
     gemv_q8: wgpu::ComputePipeline,
-    bmm_q8: wgpu::ComputePipeline,
+    gemm_q8: wgpu::ComputePipeline,
     gemm_f32: wgpu::ComputePipeline,
     gemm64_f32: wgpu::ComputePipeline,
     gemm64_bf16: wgpu::ComputePipeline,
     gemm64_q4k: wgpu::ComputePipeline,
     gemm64_q6k: wgpu::ComputePipeline,
+    gemm64_q8: wgpu::ComputePipeline,
     gemm_bf16: wgpu::ComputePipeline,
+    gemm_few_rows_f32: wgpu::ComputePipeline,
+    gemm_few_rows_bf16: wgpu::ComputePipeline,
 
     buffer: wgpu::Buffer,
 }
@@ -175,13 +184,16 @@ impl GpuLinearLayer {
             gemv_q6k: make_pipeline("gemv_q6k"),
             gemm_q6k: make_pipeline("gemm_q6k"),
             gemv_q8: make_pipeline("gemv_q8"),
-            bmm_q8: make_pipeline("bmm_q8"),
+            gemm_q8: make_pipeline("gemm_q8"),
             gemm_f32: make_pipeline("gemm_f32"),
             gemm64_f32: make_pipeline("gemm64_f32"),
             gemm64_bf16: make_pipeline("gemm64_bf16"),
             gemm64_q4k: make_pipeline("gemm64_q4k"),
             gemm64_q6k: make_pipeline("gemm64_q6k"),
+            gemm64_q8: make_pipeline("gemm64_q8"),
             gemm_bf16: make_pipeline("gemm_bf16"),
+            gemm_few_rows_f32: make_pipeline("gemm_few_rows_f32"),
+            gemm_few_rows_bf16: make_pipeline("gemm_few_rows_bf16"),
             buffer,
         }
     }
@@ -213,6 +225,8 @@ impl GpuLinearLayer {
         // Below this many rows the 128x128 GEMM tile is mostly empty and the
         // 64x64 one is faster; above it the larger tile reuses more.
         let small_tile = m < GEMM_LARGE_TILE_MIN_ROWS;
+        let is_float = matches!(weights.dtype(), DType::F32 | DType::BF16);
+        let few_rows = is_float && !is_gemv && m < GEMM_FEW_ROWS;
 
         let pipeline = if use_q4k_kernel {
             &self.gemv_q4k
@@ -233,13 +247,19 @@ impl GpuLinearLayer {
         } else if use_q8_kernel {
             &self.gemv_q8
         } else if is_q8 {
-            &self.bmm_q8
+            if small_tile {
+                &self.gemm64_q8
+            } else {
+                &self.gemm_q8
+            }
         } else if use_wide_kernel {
             &self.gemv_bf16_wide
         } else {
             match (is_gemv, is_bf16) {
                 (true, true) => &self.gemv_bf16,
                 (true, false) => &self.gemv_f32,
+                (false, true) if few_rows => &self.gemm_few_rows_bf16,
+                (false, false) if few_rows => &self.gemm_few_rows_f32,
                 (false, true) if small_tile => &self.gemm64_bf16,
                 (false, true) => &self.gemm_bf16,
                 (false, false) if small_tile => &self.gemm64_f32,
@@ -248,14 +268,7 @@ impl GpuLinearLayer {
         };
 
         let uniforms = LinearInfo { m, k, n };
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Linear Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let (b_f32, b_bf16, b_q4k, b_q6k, b_q8) = if is_q4k {
             let b = &self.buffer;
@@ -349,9 +362,8 @@ impl GpuLinearLayer {
                     // Standard GEMV: 1 Thread per Output Neuron
                     let groups = n.div_ceil(256);
                     pass.dispatch_workgroups(groups, 1, 1);
-                } else if is_q8 {
-                    // One workgroup reduces one output element.
-                    pass.dispatch_workgroups(n, m, 1);
+                } else if few_rows {
+                    crate::gpu_ops::utils::dispatch_1d(pass, (m * n).div_ceil(32));
                 } else {
                     // The GEMMs: one 64x64 or 128x128 tile of outputs per workgroup.
                     let tile = if small_tile { 64 } else { 128 };

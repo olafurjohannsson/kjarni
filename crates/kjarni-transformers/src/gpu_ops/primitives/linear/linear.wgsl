@@ -151,6 +151,55 @@ fn gemv_f32(@builtin(global_invocation_id) id: vec3<u32>) {
 
 
 // ---------------------------------------------------------------------------
+// GEMM for two rows: one thread per output, reading both operands directly.
+//
+// A tile's time is the time to read the weights, whatever the row count, so it is
+// the right kernel from three rows up. At two, this is 1.4x faster on an RTX A2000.
+// Each thread walks one row of weights, consecutive threads take consecutive columns.
+// ---------------------------------------------------------------------------
+@compute @workgroup_size(32)
+fn gemm_few_rows_f32(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let idx = (wg.y * grid.x + wg.x) * 32u + lid.x;
+    if (idx >= info.M * info.N) { return; }
+    let row = idx / info.N;
+    let col = idx % info.N;
+    let a_base = row * info.K;
+    let w_base = col * info.K;
+
+    var acc = 0.0;
+    for (var k = 0u; k < info.K; k++) {
+        acc += Input[a_base + k] * W_F32[w_base + k];
+    }
+    Output[idx] = acc;
+}
+
+/// The same over BF16 weights, packed two to a word as [N, K/2].
+@compute @workgroup_size(32)
+fn gemm_few_rows_bf16(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let idx = (wg.y * grid.x + wg.x) * 32u + lid.x;
+    if (idx >= info.M * info.N) { return; }
+    let row = idx / info.N;
+    let col = idx % info.N;
+    let a_base = row * info.K;
+    let w_base = col * info.K / 2u;
+
+    var acc = 0.0;
+    for (var pair = 0u; pair < info.K / 2u; pair++) {
+        let w = unpack_bf16(W_BF16[w_base + pair]);
+        acc += Input[a_base + pair * 2u] * w.x + Input[a_base + pair * 2u + 1u] * w.y;
+    }
+    Output[idx] = acc;
+}
+
+// ---------------------------------------------------------------------------
 // Tiled GEMM, 64x64 tiles: the same kernel with 4x4 outputs per thread.
 //
 // For fewer than a few hundred rows (short prompts, small encoder batches) the
@@ -202,10 +251,42 @@ fn gemm64_q6k(
     gemm64_tile(wg, lid, GEMM64_Q6K);
 }
 
+/// The same GEMM over Q8_0 weights, which a Q4_K_M file can use for its FFN and
+/// attention projections (Q4_0 and Q5_0 arrive transcoded to Q8_0).
+@compute @workgroup_size(16, 16)
+fn gemm64_q8(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm64_tile(wg, lid, GEMM64_Q8);
+}
+
 const GEMM64_F32: u32 = 0u;
 const GEMM64_BF16: u32 = 1u;
 const GEMM64_Q4K: u32 = 2u;
 const GEMM64_Q6K: u32 = 3u;
+const GEMM64_Q8: u32 = 4u;
+
+/// Loads the weight tile for k0..k0+16 from Q8_0 blocks.
+///
+/// A block is 32 weights of one row under one scale, so a 16-wide slice starting
+/// at a multiple of 16 lies in one block as four qs words. 64 rows x 4 words is
+/// one word per thread, each giving four weights.
+fn gemm64_load_w_q8(tid: u32, col0: u32, k0: u32) {
+    let r = tid / 4u;
+    let q = tid % 4u;
+    let gn = col0 + r;
+    var vals = vec4<f32>(0.0);
+    if (gn < info.N) {
+        let gk = k0 + q * 4u;
+        vals = q8_unit_weights((gn * (info.K / 32u) + gk / 32u) * Q8_WORDS, (gk % 32u) / 4u);
+    }
+    let kk = q * 4u;
+    gemm64_w[kk * GEMM64_BN + r] = vals.x;
+    gemm64_w[(kk + 1u) * GEMM64_BN + r] = vals.y;
+    gemm64_w[(kk + 2u) * GEMM64_BN + r] = vals.z;
+    gemm64_w[(kk + 3u) * GEMM64_BN + r] = vals.w;
+}
 
 /// Loads the weight tile for k0..k0+16 from Q6_K blocks.
 ///
@@ -313,7 +394,7 @@ fn gemm64_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
             if (gr < info.M && gk < info.K) { a = Input[gr * info.K + gk]; }
             gemm64_a[kk * GEMM64_BM + r] = a;
 
-            if (mode == GEMM64_Q4K || mode == GEMM64_Q6K) { continue; }
+            if (mode == GEMM64_Q4K || mode == GEMM64_Q6K || mode == GEMM64_Q8) { continue; }
             let gn = col0 + r;
             var w = 0.0;
             if (gn < info.N && gk < info.K) {
@@ -330,6 +411,7 @@ fn gemm64_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
         }
         if (mode == GEMM64_Q4K) { gemm64_load_w_q4k(tid, col0, k0); }
         if (mode == GEMM64_Q6K) { gemm64_load_w_q6k(tid, col0, k0); }
+        if (mode == GEMM64_Q8) { gemm64_load_w_q8(tid, col0, k0); }
         workgroupBarrier();
 
         for (var kk = 0u; kk < GEMM64_BK; kk++) {
@@ -361,7 +443,7 @@ fn gemm64_store_row(r: u32, c: u32, v: vec4<f32>) {
 }
 
 // ---------------------------------------------------------------------------
-// Tiled GEMM: Output[M, N] = Input[M, K] * W[N, K]^T, W in F32, BF16, Q4_K or Q6_K
+// Tiled GEMM: Output[M, N] = Input[M, K] * W[N, K]^T, W in F32, BF16, Q4_K, Q6_K or Q8_0
 //
 // The batched path for every weight type: encoders, seq2seq and decoder
 // prefill all land here. One output per thread, reading both operands from
@@ -424,10 +506,40 @@ fn gemm_q6k(
     gemm_tile(wg, lid, GEMM_Q6K);
 }
 
+/// The same GEMM over Q8_0 weights; see gemm64_q8.
+@compute @workgroup_size(16, 16)
+fn gemm_q8(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm_tile(wg, lid, GEMM_Q8);
+}
+
 const GEMM_F32: u32 = 0u;
 const GEMM_BF16: u32 = 1u;
 const GEMM_Q4K: u32 = 2u;
 const GEMM_Q6K: u32 = 3u;
+const GEMM_Q8: u32 = 4u;
+
+/// Loads the weight tile for k0..k0+16 from Q8_0 blocks: four qs words per row,
+/// so 128 rows x 4 words is two words per thread. See gemm64_load_w_q8.
+fn gemm_load_w_q8(tid: u32, col0: u32, k0: u32) {
+    let q = tid % 4u;
+    for (var l = 0u; l < 2u; l++) {
+        let r = (tid + l * 256u) / 4u;
+        let gn = col0 + r;
+        var vals = vec4<f32>(0.0);
+        if (gn < info.N) {
+            let gk = k0 + q * 4u;
+            vals = q8_unit_weights((gn * (info.K / 32u) + gk / 32u) * Q8_WORDS, (gk % 32u) / 4u);
+        }
+        let kk = q * 4u;
+        gemm_w[kk * GEMM_BN + r] = vals.x;
+        gemm_w[(kk + 1u) * GEMM_BN + r] = vals.y;
+        gemm_w[(kk + 2u) * GEMM_BN + r] = vals.z;
+        gemm_w[(kk + 3u) * GEMM_BN + r] = vals.w;
+    }
+}
 
 /// Loads the weight tile for k0..k0+16 from Q6_K blocks.
 ///
@@ -548,7 +660,7 @@ fn gemm_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
             if (gr < info.M && gk < info.K) { a = Input[gr * info.K + gk]; }
             gemm_a[kk * GEMM_BM + r] = a;
 
-            if (mode == GEMM_Q4K || mode == GEMM_Q6K) { continue; }
+            if (mode == GEMM_Q4K || mode == GEMM_Q6K || mode == GEMM_Q8) { continue; }
             let gn = col0 + r;
             var w = 0.0;
             if (gn < info.N && gk < info.K) {
@@ -565,6 +677,7 @@ fn gemm_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
         }
         if (mode == GEMM_Q4K) { gemm_load_w_q4k(tid, col0, k0); }
         if (mode == GEMM_Q6K) { gemm_load_w_q6k(tid, col0, k0); }
+        if (mode == GEMM_Q8) { gemm_load_w_q8(tid, col0, k0); }
         workgroupBarrier();
 
         for (var kk = 0u; kk < GEMM_BK; kk++) {
@@ -849,44 +962,6 @@ fn gemv_q8(
     }
 }
 
-// Batched Q8_0: grid is (n, m), one workgroup per output element.
-@compute @workgroup_size(256)
-fn bmm_q8(
-    @builtin(workgroup_id) wg_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>
-) {
-    let n = wg_id.x;
-    let row = wg_id.y;
-    let tid = local_id.x;
-    if (n >= info.N || row >= info.M) { return; }
-
-    let blocks_per_row = info.K / 32u;
-    let row_base = n * blocks_per_row * Q8_WORDS;
-    let total_units = blocks_per_row * 8u;
-    let input_offset = row * info.K;
-
-    var partial = 0.0;
-    for (var u = tid; u < total_units; u = u + 256u) {
-        let blk = u / 8u;
-        let jg = u % 8u;
-        let ob = input_offset + blk * 32u + jg * 4u;
-
-        let a = vec4<f32>(Input[ob], Input[ob + 1u], Input[ob + 2u], Input[ob + 3u]);
-        partial += dot(a, q8_unit_weights(row_base + blk * Q8_WORDS, jg));
-    }
-
-    wg_sum[tid] = partial;
-    workgroupBarrier();
-    for (var s = 128u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            wg_sum[tid] += wg_sum[tid + s];
-        }
-        workgroupBarrier();
-    }
-    if (tid == 0u) {
-        Output[row * info.N + n] = wg_sum[0];
-    }
-}
 
 // Q6_K GEMV
 //

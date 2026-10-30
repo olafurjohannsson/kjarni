@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="278" viewBox="0 0 760 278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Speech to text (higher is better)">
+<rect width="760" height="278" rx="8" fill="#fcfcfb"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#0b0b0b">Speech to text (higher is better)</text>
+<text x="20" y="54" font-size="13" fill="#52514e">whisper-small, 55 s of English, greedy · times faster than real time, each device on its own scale</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#2a78d6"/>
+<text x="36" y="76" font-size="12.5" fill="#52514e">Kjarni</text>
+<rect x="102.4" y="66" width="11" height="11" rx="3" fill="#1baf7a"/>
+<text x="118.4" y="76" font-size="12.5" fill="#52514e">faster-whisper</text>
+<rect x="244.00000000000003" y="66" width="11" height="11" rx="3" fill="#eda100"/>
+<text x="260.0" y="76" font-size="12.5" fill="#52514e">faster-whisper int8</text>
+<rect x="422.6" y="66" width="11" height="11" rx="3" fill="#eb6834"/>
+<text x="438.6" y="76" font-size="12.5" fill="#52514e">openai-whisper</text>
+<text x="176" y="131.5" text-anchor="end" font-size="13" fill="#0b0b0b">CPU, i7-13700</text>
+<line x1="190" y1="89" x2="190" y2="165" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,92 h317.44720645157844 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-317.44720645157844 z" fill="#2a78d6"><title>Kjarni: 8.6×</title></path>
+<text x="518.4472064515785" y="104.5" font-size="12" fill="#52514e" font-weight="600">8.6×</text>
+<path d="M191,110 h226.83639849258475 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-226.83639849258475 z" fill="#1baf7a"><title>faster-whisper: 6.2×</title></path>
+<text x="427.83639849258475" y="122.5" font-size="12" fill="#52514e">6.2×</text>
+<path d="M191,128 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#eda100"><title>faster-whisper int8: 12.8×</title></path>
+<text x="677.0" y="140.5" font-size="12" fill="#52514e">12.8×</text>
+<path d="M191,146 h271.107102714559 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-271.107102714559 z" fill="#eb6834"><title>openai-whisper: 7.3×</title></path>
+<text x="472.107102714559" y="158.5" font-size="12" fill="#52514e">7.3×</text>
+<line x1="20" y1="170.0" x2="740" y2="170.0" stroke="#c3c2b7" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="219.5" text-anchor="end" font-size="13" fill="#0b0b0b">GPU, RTX A2000 12 GB</text>
+<line x1="190" y1="177" x2="190" y2="253" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,180 h78.33398135783206 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-78.33398135783206 z" fill="#2a78d6"><title>Kjarni: 15.9×</title></path>
+<text x="279.33398135783204" y="192.5" font-size="12" fill="#52514e" font-weight="600">15.9×</text>
+<path d="M191,198 h458.1031404436554 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-458.1031404436554 z" fill="#1baf7a"><title>faster-whisper: 89.3×</title></path>
+<text x="659.1031404436553" y="210.5" font-size="12" fill="#52514e">89.3×</text>
+<path d="M191,216 h476.00000000000006 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.00000000000006 z" fill="#eda100"><title>faster-whisper int8: 92.7×</title></path>
+<text x="677.0" y="228.5" font-size="12" fill="#52514e">92.7×</text>
+<path d="M191,234 h268.33594857588935 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-268.33594857588935 z" fill="#eb6834"><title>openai-whisper: 52.6×</title></path>
+<text x="469.33594857588935" y="246.5" font-size="12" fill="#52514e">52.6×</text>
+</svg>

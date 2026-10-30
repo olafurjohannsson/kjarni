@@ -1,10 +1,20 @@
 //! Whisper transcription logic: chunking, greedy decode, timestamp parsing
+use std::sync::Arc;
+
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3, Axis, s};
 
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
+use kjarni_transformers::models::base::ModelInput;
 use kjarni_transformers::{
-    Cache, LanguageModel, cache::CpuBeamKVCache, cpu::encoder::CpuEncoderOps,
-    encoder_decoder::traits::EncoderDecoderLanguageModel,
+    Cache, LanguageModel, WgpuContext,
+    cache::CpuBeamKVCache,
+    cpu::encoder::{CpuEncoderOps, GpuEncoderOps, prelude::EncoderLanguageModel},
+    encoder_decoder::traits::{
+        CpuCrossAttentionKVCache, CpuEncoderDecoderOps, EncoderDecoderLanguageModel,
+        GpuCrossAttentionKVCache, GpuEncoderDecoderOps,
+    },
+    traits::InferenceModel,
 };
 
 use super::WhisperModel;
@@ -139,6 +149,116 @@ fn quietest_point(samples: &[f32], lo: usize, hi: usize, sample_rate: u32) -> us
         .map_or(hi, |&(at, _)| at + window / 2)
 }
 
+/// A Whisper text decoder stepped a token at a time, on the device the model is on.
+pub(super) enum DecoderSteps<'a> {
+    Cpu {
+        ops: &'a dyn CpuEncoderDecoderOps,
+        encoder: Array3<f32>,
+        encoder_mask: Array2<f32>,
+        cross_kv: CpuCrossAttentionKVCache,
+        cache: Box<dyn Cache>,
+    },
+    Gpu {
+        ops: &'a dyn GpuEncoderDecoderOps,
+        context: Arc<WgpuContext>,
+        encoder: GpuTensor,
+        cross_kv: GpuCrossAttentionKVCache,
+        cache: Box<dyn Cache>,
+    },
+}
+
+impl DecoderSteps<'_> {
+    /// Feeds `input_ids`, `[batch, tokens]`, and returns logits whose last
+    /// position predicts the next token.
+    pub(super) fn step(&mut self, input_ids: &Array2<u32>) -> Result<Array3<f32>> {
+        match self {
+            DecoderSteps::Cpu {
+                ops,
+                encoder,
+                encoder_mask,
+                cross_kv,
+                cache,
+            } => {
+                let cache = cache
+                    .as_any_mut()
+                    .downcast_mut::<CpuBeamKVCache>()
+                    .ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
+                // Rows step in lockstep, so none is ever padded, and the decoder's
+                // padding mask only broadcasts at batch 1.
+                let padding_mask =
+                    (input_ids.nrows() == 1).then(|| Array2::<f32>::ones(input_ids.dim()));
+                #[allow(
+                    deprecated,
+                    reason = "internal caller of an API deprecated without a named replacement"
+                )]
+                let output = ops.decoder().forward(
+                    input_ids,
+                    encoder,
+                    padding_mask.as_ref(),
+                    Some(encoder_mask),
+                    Some(cache),
+                    Some(cross_kv),
+                )?;
+                for (i, (k, v)) in output.new_self_attn_kv.into_iter().enumerate() {
+                    cache.update(i, &k, &v)?;
+                }
+                cache.increment_len(input_ids.ncols());
+                ops.project_to_logits(&output.last_hidden_state)
+            }
+            DecoderSteps::Gpu {
+                ops,
+                context,
+                encoder,
+                cross_kv,
+                cache,
+            } => pollster::block_on(async {
+                // The GPU KV cache appends one token per call, so a prompt goes in
+                // one token at a time and only the last position's logits are read.
+                let mut last = None;
+                for column in input_ids.columns() {
+                    let batch = column.len();
+                    let position = cache.get_seq_length();
+                    let tokens = column.to_owned().into_shape_with_order((batch, 1))?;
+                    let tokens = GpuTensor::from_ndarray(context, &tokens)?;
+                    let mask = Array2::<f32>::ones((batch, position + 1));
+                    let mask = GpuTensor::from_ndarray(context, &mask)?;
+
+                    let pool = context.get_inference_pool();
+                    let pool_guard = pool.lock().await;
+                    let mut frame = GpuFrameContext::new(context, pool_guard);
+                    let (cmd, pool) = frame.resources();
+                    let embedded = ops.embed_decoder_tokens(
+                        cmd,
+                        pool,
+                        ModelInput::TokensGpu(&tokens),
+                        position,
+                    )?;
+                    let embedded = ops.decoder().embed_norm(cmd, pool, &embedded)?;
+                    let output = ops.decoder().forward_layers(
+                        cmd,
+                        pool,
+                        &embedded,
+                        encoder,
+                        &mask,
+                        position,
+                        Some(cache.as_mut()),
+                        Some(cross_kv),
+                        0,
+                        ops.decoder().num_layers(),
+                    )?;
+                    let logits = ops.project_to_logits(&mut frame, &output.last_hidden_state)?;
+                    frame.finish();
+                    cache.increment_len(1);
+                    last = Some(logits);
+                }
+                last.ok_or_else(|| anyhow!("no tokens to decode"))?
+                    .to_ndarray_3d()
+                    .await
+            }),
+        }
+    }
+}
+
 impl WhisperModel {
     /// Split audio into windows of at most 30 seconds, cut at pauses.
     ///
@@ -182,16 +302,91 @@ impl WhisperModel {
             .to_owned();
 
         // Convolutional frontend + positional embeddings
-        let embedded = self.embed_audio(&mel_batch)?;
+        let embedded = CpuEncoderOps::embed_audio(self, &mel_batch)?;
         let embedded = embedded.as_standard_layout().to_owned();
 
         // Transformer encoder
         let seq_len = embedded.dim().1;
         let attention_mask = Array2::<f32>::ones((1, seq_len));
+        if self.encoder_gpu_ops().is_some() {
+            return pollster::block_on(self.encode_on_gpu(&embedded, &attention_mask));
+        }
         let encoder = CpuEncoderOps::encoder(self);
         let output = encoder.forward(&embedded, &attention_mask)?;
 
         Ok(output.last_hidden_state)
+    }
+
+    async fn encode_on_gpu(
+        &self,
+        embedded: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        let context = self
+            .context()
+            .ok_or_else(|| anyhow!("Whisper on a GPU has no GPU context"))?;
+        let hidden = GpuTensor::from_ndarray(&context, embedded)?;
+        let mask = GpuTensor::from_ndarray(&context, attention_mask)?;
+
+        let pool = context.get_inference_pool();
+        let pool_guard = pool.lock().await;
+        let mut frame = GpuFrameContext::new(&context, pool_guard);
+        let (cmd, pool) = frame.resources();
+
+        let encoder = GpuEncoderOps::encoder(self);
+        let layers = encoder.forward_layers(cmd, pool, &hidden, &mask, 0, encoder.num_layers())?;
+        let output = encoder.final_norm(cmd, pool, &layers)?;
+        frame.finish();
+
+        output.to_ndarray_3d().await
+    }
+
+    /// A decoder ready to step over `encoder_hidden_states`, with room for
+    /// `max_len` tokens per row.
+    pub(super) fn decoder_steps(
+        &self,
+        encoder_hidden_states: &Array3<f32>,
+        max_len: usize,
+    ) -> Result<DecoderSteps<'_>> {
+        let batch = encoder_hidden_states.dim().0;
+        let cache = self.new_cache(batch, max_len, batch)?;
+        if let Some(ops) = self.encoder_decoder_cpu_ops() {
+            let cross_kv = ops
+                .decoder()
+                .precompute_cross_attention_kv(encoder_hidden_states)?;
+            return Ok(DecoderSteps::Cpu {
+                ops,
+                encoder: encoder_hidden_states.to_owned(),
+                encoder_mask: Array2::ones((batch, encoder_hidden_states.dim().1)),
+                cross_kv,
+                cache,
+            });
+        }
+        let ops = self
+            .encoder_decoder_gpu_ops()
+            .ok_or_else(|| anyhow!("Whisper loaded without a decoder"))?;
+        let context = self
+            .context()
+            .ok_or_else(|| anyhow!("Whisper on a GPU has no GPU context"))?;
+        let encoder = GpuTensor::from_ndarray(&context, encoder_hidden_states)?;
+        let cross_kv = pollster::block_on(async {
+            let pool = context.get_inference_pool();
+            let pool_guard = pool.lock().await;
+            let mut frame = GpuFrameContext::new(&context, pool_guard);
+            let (cmd, pool) = frame.resources();
+            let kv = ops
+                .decoder()
+                .precompute_cross_attention_kv(cmd, pool, &encoder);
+            frame.finish();
+            kv
+        })?;
+        Ok(DecoderSteps::Gpu {
+            ops,
+            context,
+            encoder,
+            cross_kv,
+            cache,
+        })
     }
 
     /// Decode encoder hidden states into text segments
@@ -208,46 +403,12 @@ impl WhisperModel {
         let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
         let prompt_tokens = self.build_prompt_tokens(config);
 
-        let decoder_ops = self
-            .encoder_decoder_cpu_ops()
-            .ok_or_else(|| anyhow!("CPU decoder ops not available"))?;
-
         let max_len = prompt_tokens.len() + config.max_tokens_per_chunk;
-        let mut cache_box = self.new_cache(1, max_len, 0)?;
-        let cache = cache_box
-            .as_any_mut()
-            .downcast_mut::<CpuBeamKVCache>()
-            .ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
-
-        let decoder = decoder_ops.decoder();
-        let cross_kv = decoder.precompute_cross_attention_kv(encoder_hidden_states)?;
-
-        let enc_seq_len = encoder_hidden_states.dim().1;
-        let encoder_mask = Array2::<f32>::ones((1, enc_seq_len));
-
-        let input_ids = Array2::from_shape_vec((1, prompt_tokens.len()), prompt_tokens.clone())?;
-        let padding_mask = Array2::<f32>::ones((1, prompt_tokens.len()));
-
-        #[allow(
-            deprecated,
-            reason = "internal caller of an API deprecated without a named replacement"
-        )]
-        let output = decoder.forward(
-            &input_ids,
-            encoder_hidden_states,
-            Some(&padding_mask),
-            Some(&encoder_mask),
-            Some(cache),
-            Some(&cross_kv),
-        )?;
-
-        for (i, (k, v)) in output.new_self_attn_kv.into_iter().enumerate() {
-            cache.update(i, &k, &v)?;
-        }
-        cache.increment_len(prompt_tokens.len());
+        let mut steps = self.decoder_steps(encoder_hidden_states, max_len)?;
 
         // First predicted token from the last prompt position
-        let logits = decoder_ops.project_to_logits(&output.last_hidden_state)?;
+        let input_ids = Array2::from_shape_vec((1, prompt_tokens.len()), prompt_tokens.clone())?;
+        let logits = steps.step(&input_ids)?;
         let last_logits = logits.slice(s![0, -1_i32, ..]);
 
         let mut next_token = Self::pick_token(&last_logits, &[], config, eos_token_id, audio_end);
@@ -268,27 +429,7 @@ impl WhisperModel {
             }
 
             let step_ids = Array2::from_shape_vec((1, 1), vec![next_token])?;
-            let step_mask = Array2::<f32>::ones((1, 1));
-
-            #[allow(
-                deprecated,
-                reason = "internal caller of an API deprecated without a named replacement"
-            )]
-            let output = decoder.forward(
-                &step_ids,
-                encoder_hidden_states,
-                Some(&step_mask),
-                Some(&encoder_mask),
-                Some(cache),
-                Some(&cross_kv),
-            )?;
-
-            for (i, (k, v)) in output.new_self_attn_kv.into_iter().enumerate() {
-                cache.update(i, &k, &v)?;
-            }
-            cache.increment_len(1);
-
-            let logits = decoder_ops.project_to_logits(&output.last_hidden_state)?;
+            let logits = steps.step(&step_ids)?;
             let last_logits = logits.slice(s![0, -1_i32, ..]);
 
             next_token = Self::pick_token(
@@ -341,48 +482,17 @@ impl WhisperModel {
         }
         let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
         let prompt_tokens = self.build_prompt_tokens(config);
-        let decoder_ops = self
-            .encoder_decoder_cpu_ops()
-            .ok_or_else(|| anyhow!("CPU decoder ops not available"))?;
-        let decoder = decoder_ops.decoder();
-
         let views: Vec<_> = encoder_hidden_states.iter().map(|e| e.view()).collect();
         let encoder = ndarray::concatenate(Axis(0), &views)?;
-        let encoder_mask = Array2::<f32>::ones((n, encoder.dim().1));
-        let cross_kv = decoder.precompute_cross_attention_kv(&encoder)?;
-
         let max_len = prompt_tokens.len() + config.max_tokens_per_chunk;
-        let mut cache_box = self.new_cache(n, max_len, 0)?;
-        let cache = cache_box
-            .as_any_mut()
-            .downcast_mut::<CpuBeamKVCache>()
-            .ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
+        let mut steps = self.decoder_steps(&encoder, max_len)?;
 
         let mut input_ids =
             Array2::from_shape_fn((n, prompt_tokens.len()), |(_, j)| prompt_tokens[j]);
         let mut generated: Vec<Vec<u32>> = vec![Vec::new(); n];
         let mut done = vec![false; n];
         for _ in 0..=config.max_tokens_per_chunk {
-            #[allow(
-                deprecated,
-                reason = "internal caller of an API deprecated without a named replacement"
-            )]
-            // No decoder padding mask: chunks step in lockstep, so no row is
-            // ever padded, and the decoder's mask only broadcasts at batch 1.
-            let output = decoder.forward(
-                &input_ids,
-                &encoder,
-                None,
-                Some(&encoder_mask),
-                Some(cache),
-                Some(&cross_kv),
-            )?;
-            for (i, (k, v)) in output.new_self_attn_kv.into_iter().enumerate() {
-                cache.update(i, &k, &v)?;
-            }
-            cache.increment_len(input_ids.ncols());
-
-            let logits = decoder_ops.project_to_logits(&output.last_hidden_state)?;
+            let logits = steps.step(&input_ids)?;
             let mut next = vec![eos_token_id; n];
             for b in 0..n {
                 if done[b] {
@@ -418,31 +528,9 @@ impl WhisperModel {
     /// The language spoken in a chunk, as Whisper itself decides it: given
     /// only start-of-transcript, the language token it rates highest.
     pub fn detect_language(&self, encoder_hidden_states: &Array3<f32>) -> Result<String> {
-        let decoder_ops = self
-            .encoder_decoder_cpu_ops()
-            .ok_or_else(|| anyhow!("CPU decoder ops not available"))?;
-        let decoder = decoder_ops.decoder();
         let encoder = encoder_hidden_states.slice(s![0..1, .., ..]).to_owned();
-        let cross_kv = decoder.precompute_cross_attention_kv(&encoder)?;
-        let mut cache_box = self.new_cache(1, 1, 0)?;
-        let cache = cache_box
-            .as_any_mut()
-            .downcast_mut::<CpuBeamKVCache>()
-            .ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
-        let input_ids = Array2::from_elem((1, 1), SOT_TOKEN);
-        #[allow(
-            deprecated,
-            reason = "internal caller of an API deprecated without a named replacement"
-        )]
-        let output = decoder.forward(
-            &input_ids,
-            &encoder,
-            Some(&Array2::<f32>::ones((1, 1))),
-            Some(&Array2::<f32>::ones((1, encoder.dim().1))),
-            Some(cache),
-            Some(&cross_kv),
-        )?;
-        let logits = decoder_ops.project_to_logits(&output.last_hidden_state)?;
+        let mut steps = self.decoder_steps(&encoder, 1)?;
+        let logits = steps.step(&Array2::from_elem((1, 1), SOT_TOKEN))?;
         let logits = logits.slice(s![0, -1_i32, ..]);
         LANGUAGES
             .iter()

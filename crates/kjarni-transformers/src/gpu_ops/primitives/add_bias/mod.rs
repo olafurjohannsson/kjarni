@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 #[repr(C)]
@@ -89,11 +88,7 @@ fn run_internal_add_bias(
         _padding: [0; 3],
     };
 
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("AddBias Uniforms"),
-        contents: bytemuck::cast_slice(&[uniforms]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let uniform_buffer = context.uniform_buffer(&uniforms);
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("AddBias Bind Group"),

@@ -49,6 +49,24 @@ async fn run_bmm_test(batch: usize, heads: usize, m: usize, k: usize, n: usize) 
     Ok(())
 }
 
+/// Each side of `FEW_ROWS`, where the kernel changes, with shapes that fill no tile
+/// or workgroup evenly.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn test_bmm_either_side_of_few_rows() -> Result<()> {
+    for (batch, heads, m, k, n) in [
+        (1, 12, 1, 64, 1500),
+        (2, 12, 1, 1500, 64),
+        (2, 6, 14, 33, 14),
+        (1, 8, 63, 40, 63),
+        (1, 8, 64, 40, 64),
+        (3, 2, 65, 31, 17),
+    ] {
+        run_bmm_test(batch, heads, m, k, n).await?;
+    }
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn test_bmm_q_k_scores() -> Result<()> {

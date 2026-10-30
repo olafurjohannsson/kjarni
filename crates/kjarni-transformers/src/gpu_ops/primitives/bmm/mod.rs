@@ -1,7 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 #[repr(C)]
@@ -24,6 +23,7 @@ pub struct BStrides {
 
 pub struct GpuBatchedMatMul {
     pipeline: Arc<ComputePipeline>,
+    few_rows_pipeline: Arc<ComputePipeline>,
     bind_group_layout: Arc<BindGroupLayout>,
     context: Arc<WgpuContext>,
 }
@@ -90,9 +90,10 @@ impl Kernel for GpuBatchedMatMul {
 
 impl GpuBatchedMatMul {
     pub fn new(context: &Arc<WgpuContext>) -> Self {
-        let (pipeline, bind_group_layout) = compile_bmm_pipeline(context);
+        let (pipeline, few_rows_pipeline, bind_group_layout) = compile_bmm_pipeline(context);
         Self {
             pipeline: Arc::new(pipeline),
+            few_rows_pipeline: Arc::new(few_rows_pipeline),
             bind_group_layout: Arc::new(bind_group_layout),
             context: context.clone(),
         }
@@ -127,6 +128,7 @@ impl GpuBatchedMatMul {
             &self.context,
             encoder,
             &self.pipeline,
+            &self.few_rows_pipeline,
             &self.bind_group_layout,
             a.buffer(),
             b.buffer(),
@@ -181,6 +183,7 @@ impl GpuBatchedMatMul {
             &self.context,
             encoder,
             &self.pipeline,
+            &self.few_rows_pipeline,
             &self.bind_group_layout,
             a.buffer(),
             b.buffer(),
@@ -197,10 +200,18 @@ impl GpuBatchedMatMul {
     }
 }
 
+/// Rows below which `main_few_rows` may run instead of the tiled `main`. It does when
+/// the output is wider than the inner dimension, as in attention scores for one token
+/// over many keys. Measured on an RTX A2000 at 12 heads, one query, 64 dimensions,
+/// 1500 keys: 101 us against 291 for the scores, but 698 against 292 for the reverse
+/// shape, which multiplies those scores by the values. Between short texts they tie.
+const FEW_ROWS: u32 = 64;
+
 fn run_internal_bmm(
     context: &WgpuContext,
     encoder: &mut CommandEncoder,
     pipeline: &ComputePipeline,
+    few_rows_pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,
     a: &Buffer,
     b: &Buffer,
@@ -226,11 +237,7 @@ fn run_internal_bmm(
         b_stride_col,
     };
 
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("BMM Uniforms"),
-        contents: bytemuck::cast_slice(&[uniforms]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let uniform_buffer = context.uniform_buffer(&uniforms);
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("BMM Bind Group"),
@@ -261,9 +268,16 @@ fn run_internal_bmm(
     // });
     let label = "BMM".to_string();
     context.profiler.profile(encoder, &label, |compute_pass| {
-        compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
+        if m < FEW_ROWS && k < n {
+            compute_pass.set_pipeline(few_rows_pipeline);
+            let threads = batch * m * n;
+            crate::gpu_ops::utils::dispatch_1d(compute_pass, threads.div_ceil(32));
+            return;
+        }
+
+        compute_pass.set_pipeline(pipeline);
         const TILE_DIM: u32 = 32;
         let workgroup_x = n.div_ceil(TILE_DIM);
         let workgroup_y = m.div_ceil(TILE_DIM);
@@ -273,7 +287,9 @@ fn run_internal_bmm(
     });
 }
 
-fn compile_bmm_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
+fn compile_bmm_pipeline(
+    context: &WgpuContext,
+) -> (ComputePipeline, ComputePipeline, BindGroupLayout) {
     let device = &context.device;
     let shader = device.create_shader_module(wgpu::include_wgsl!("./bmm.wgsl"));
 
@@ -329,15 +345,21 @@ fn compile_bmm_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLay
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("BMM Pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-    (pipeline, bind_group_layout)
+    let make_pipeline = |entry_point: &str| {
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("BMM Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some(entry_point),
+            compilation_options: Default::default(),
+            cache: None,
+        })
+    };
+    (
+        make_pipeline("main"),
+        make_pipeline("main_few_rows"),
+        bind_group_layout,
+    )
 }
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,7 @@
 {
   "name": "kjarni-wasm",
-  "version": "0.2.7",
-  "description": "Local AI inference in the browser: embeddings, classification, reranking, semantic search and chat, running in a Web Worker.",
+  "version": "0.2.8",
+  "description": "Run transformer models inside your web page: embeddings, classification, reranking, semantic search and chat in a Web Worker. Same output as PyTorch, no server.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="242" viewBox="0 0 760 242" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Embeddings on the GPU (higher is better)">
+<rect width="760" height="242" rx="8" fill="#1a1a19"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#f0efec">Embeddings on the GPU (higher is better)</text>
+<text x="20" y="54" font-size="13" fill="#c3c2b7">64 texts per call, RTX A2000 12 GB · texts per second, each model on its own scale</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#3987e5"/>
+<text x="36" y="76" font-size="12.5" fill="#c3c2b7">Kjarni WebGPU</text>
+<rect x="154.2" y="66" width="11" height="11" rx="3" fill="#d95926"/>
+<text x="170.2" y="76" font-size="12.5" fill="#c3c2b7">PyTorch CUDA</text>
+<rect x="281.0" y="66" width="11" height="11" rx="3" fill="#199e70"/>
+<text x="297.0" y="76" font-size="12.5" fill="#c3c2b7">ONNX Runtime CUDA</text>
+<text x="176" y="122.5" text-anchor="end" font-size="13" fill="#f0efec">MiniLM-L6</text>
+<line x1="190" y1="89" x2="190" y2="147" stroke="#383835" stroke-width="1"/>
+<path d="M191,92 h93.91429234081262 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-93.91429234081262 z" fill="#3987e5"><title>Kjarni WebGPU: 555/s</title></path>
+<text x="294.9142923408126" y="104.5" font-size="12" fill="#c3c2b7" font-weight="600">555/s</text>
+<path d="M191,110 h307.7977730279405 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-307.7977730279405 z" fill="#d95926"><title>PyTorch CUDA: 1,767/s</title></path>
+<text x="508.7977730279405" y="122.5" font-size="12" fill="#c3c2b7">1,767/s</text>
+<path d="M191,128 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#199e70"><title>ONNX Runtime CUDA: 2,720/s</title></path>
+<text x="677.0" y="140.5" font-size="12" fill="#c3c2b7">2,720/s</text>
+<line x1="20" y1="152.0" x2="740" y2="152.0" stroke="#383835" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="192.5" text-anchor="end" font-size="13" fill="#f0efec">bge-m3</text>
+<line x1="190" y1="159" x2="190" y2="217" stroke="#383835" stroke-width="1"/>
+<path d="M191,162 h82.67059688383888 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-82.67059688383888 z" fill="#3987e5"><title>Kjarni WebGPU: 31.1/s</title></path>
+<text x="283.67059688383887" y="174.5" font-size="12" fill="#c3c2b7" font-weight="600">31.1/s</text>
+<path d="M191,180 h200.8500984516799 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-200.8500984516799 z" fill="#d95926"><title>PyTorch CUDA: 73.5/s</title></path>
+<text x="401.8500984516799" y="192.5" font-size="12" fill="#c3c2b7">73.5/s</text>
+<path d="M191,198 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#199e70"><title>ONNX Runtime CUDA: 172/s</title></path>
+<text x="677.0" y="210.5" font-size="12" fill="#c3c2b7">172/s</text>
+</svg>

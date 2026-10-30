@@ -431,13 +431,18 @@ impl Seq2SeqGPUDecoder {
                 .map(|c| c.get_seq_length())
                 .unwrap_or(position_offset);
 
-            // Forward through layer (post-norm for BART)
-            let (new_hidden, new_k, new_v) = layer.forward(
+            let forward = if self.pre_norm {
+                GpuCrossDecoderLayer::forward_prenorm
+            } else {
+                GpuCrossDecoderLayer::forward
+            };
+            let (new_hidden, new_k, new_v) = forward(
+                layer,
                 encoder,
                 &current_hidden,
                 cross_kv_ref,
                 decoder_attention_mask,
-                None, // encoder_mask - usually None for BART
+                None, // the encoder is never padded: BART's batch of one, Whisper's fixed 30 s
                 cached_kv,
                 cache_len,
                 pool,

@@ -37,13 +37,13 @@ pub use ops::AttentionOps;
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
     pub q_weight: GpuTensor,
-    pub q_bias: GpuTensor,
+    pub q_bias: Option<GpuTensor>,
     pub k_weight: GpuTensor,
-    pub k_bias: GpuTensor,
+    pub k_bias: Option<GpuTensor>,
     pub v_weight: GpuTensor,
-    pub v_bias: GpuTensor,
+    pub v_bias: Option<GpuTensor>,
     pub output_weight: GpuTensor,
-    pub output_bias: GpuTensor,
+    pub output_bias: Option<GpuTensor>,
 }
 
 impl GpuAttentionWeights {
@@ -54,7 +54,7 @@ impl GpuAttentionWeights {
         layer_idx: usize,
         target_dtype: Option<DType>,
         label_prefix: &str,
-        hidden_size: usize, // Add this parameter
+        _hidden_size: usize,
     ) -> Result<Self> {
         let i_str = &layer_idx.to_string();
 
@@ -68,28 +68,26 @@ impl GpuAttentionWeights {
             )
         };
 
-        // Load optional bias - returns zero tensor if not present
-        let load_bias_opt = |template: &Option<String>, label: &str| -> Result<GpuTensor> {
+        // A layout names every bias its architecture may have; a checkpoint can still
+        // leave one out. Whisper's k_proj has none, for one.
+        let load_bias_opt = |template: &Option<String>, label: &str| -> Result<Option<GpuTensor>> {
             match template {
-                Some(name) => load(name, label),
-                None => GpuTensor::zeros(
-                    context,
-                    vec![hidden_size],
-                    target_dtype.unwrap_or(DType::F32),
-                    &format!("{}.{}", label_prefix, label),
-                ),
+                Some(name) if weights.contains(&name.replace("{}", i_str)) => {
+                    load(name, label).map(Some)
+                }
+                _ => Ok(None),
             }
         };
 
         Self::new(
             load(&attn_layout.q_weight, "q_w")?,
-            Some(load_bias_opt(&attn_layout.q_bias, "q_b")?),
+            load_bias_opt(&attn_layout.q_bias, "q_b")?,
             load(&attn_layout.k_weight, "k_w")?,
-            Some(load_bias_opt(&attn_layout.k_bias, "k_b")?),
+            load_bias_opt(&attn_layout.k_bias, "k_b")?,
             load(&attn_layout.v_weight, "v_w")?,
-            Some(load_bias_opt(&attn_layout.v_bias, "v_b")?),
+            load_bias_opt(&attn_layout.v_bias, "v_b")?,
             load(&attn_layout.o_weight, "o_w")?,
-            Some(load_bias_opt(&attn_layout.o_bias, "o_b")?),
+            load_bias_opt(&attn_layout.o_bias, "o_b")?,
         )
     }
 
@@ -180,60 +178,34 @@ impl GpuAttentionWeights {
         output_weight: GpuTensor,
         output_bias: Option<GpuTensor>,
     ) -> Result<Self> {
-        let resolve_bias =
-            |w: &GpuTensor, b: Option<GpuTensor>, label: &str| -> Result<GpuTensor> {
-                match b {
-                    Some(tensor) => Ok(tensor),
-                    None => {
-                        // A bias is always f32, whatever the weight dtype is. Sizing this
-                        // by a quantised dtype would allocate one block per 256 entries
-                        // and leave the shader reading past the end of it.
-                        let out_features = w.shape()[0];
-                        GpuTensor::zeros(w.context(), vec![out_features], DType::F32, label)
-                    }
-                }
-            };
-
-        let q_b = resolve_bias(&q_weight, q_bias, "q_bias_zero")?;
-        let k_b = resolve_bias(&k_weight, k_bias, "k_bias_zero")?;
-        let v_b = resolve_bias(&v_weight, v_bias, "v_bias_zero")?;
-        let o_b = resolve_bias(&output_weight, output_bias, "o_bias_zero")?;
+        // A model without a bias has no add-bias dispatch at all, rather than one that
+        // adds zeros: over a deep decoder that is several wasted dispatches per layer.
+        let bias_len = |b: &Option<GpuTensor>, w: &GpuTensor, label: &str| {
+            if let Some(b) = b {
+                assert_eq!(b.rank(), 1, "{label} bias must be 1D");
+                assert_eq!(
+                    b.shape()[0],
+                    w.linear_layer_dims().1,
+                    "{label} weight output dim must match bias size"
+                );
+            }
+        };
+        bias_len(&q_bias, &q_weight, "Q");
+        bias_len(&k_bias, &k_weight, "K");
+        bias_len(&v_bias, &v_weight, "V");
+        bias_len(&output_bias, &output_weight, "output");
 
         assert_eq!(q_weight.rank(), 2, "Q weight must be 2D");
-        assert_eq!(q_b.rank(), 1, "Q bias must be 1D");
         let (q_in, q_out) = q_weight.linear_layer_dims();
-        assert_eq!(
-            q_out,
-            q_b.shape()[0],
-            "Q weight output dim must match bias size"
-        );
 
         assert_eq!(k_weight.rank(), 2, "K weight must be 2D");
-        assert_eq!(k_b.rank(), 1, "K bias must be 1D");
-        let (k_in, k_out) = k_weight.linear_layer_dims();
-        assert_eq!(
-            k_out,
-            k_b.shape()[0],
-            "K weight output dim must match bias size"
-        );
+        let (k_in, _) = k_weight.linear_layer_dims();
 
         assert_eq!(v_weight.rank(), 2, "V weight must be 2D");
-        assert_eq!(v_b.rank(), 1, "V bias must be 1D");
-        let (v_in, v_out) = v_weight.linear_layer_dims();
-        assert_eq!(
-            v_out,
-            v_b.shape()[0],
-            "V weight output dim must match bias size"
-        );
+        let (v_in, _) = v_weight.linear_layer_dims();
 
         assert_eq!(output_weight.rank(), 2, "output weight must be 2D");
-        assert_eq!(o_b.rank(), 1, "output bias must be 1D");
         let (o_in, o_out) = output_weight.linear_layer_dims();
-        assert_eq!(
-            o_out,
-            o_b.shape()[0],
-            "output weight output dim must match bias size"
-        );
 
         let hidden_size = q_in;
 
@@ -256,13 +228,13 @@ impl GpuAttentionWeights {
 
         Ok(Self {
             q_weight,
-            q_bias: q_b,
+            q_bias,
             k_weight,
-            k_bias: k_b,
+            k_bias,
             v_weight,
-            v_bias: v_b,
+            v_bias,
             output_weight,
-            output_bias: o_b,
+            output_bias,
         })
     }
 }
@@ -371,7 +343,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }
@@ -393,9 +365,27 @@ impl GpuAttention {
 
         let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[1]);
 
-        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
-        let k_proj = self.project(encoder, kv_source, &weights.k_weight, &weights.k_bias, pool);
-        let v_proj = self.project(encoder, kv_source, &weights.v_weight, &weights.v_bias, pool);
+        let q_proj = self.project(
+            encoder,
+            query,
+            &weights.q_weight,
+            weights.q_bias.as_ref(),
+            pool,
+        );
+        let k_proj = self.project(
+            encoder,
+            kv_source,
+            &weights.k_weight,
+            weights.k_bias.as_ref(),
+            pool,
+        );
+        let v_proj = self.project(
+            encoder,
+            kv_source,
+            &weights.v_weight,
+            weights.v_bias.as_ref(),
+            pool,
+        );
 
         let (q_rotated, k_rotated) = if let Some(rope_encoder) = rope {
             let q_split = self.split_heads(encoder, &q_proj, pool);
@@ -479,7 +469,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         );
 
@@ -534,7 +524,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }
@@ -548,9 +538,27 @@ impl GpuAttention {
         attention_mask: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
-        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
-        let k_proj = self.project(encoder, key_value, &weights.k_weight, &weights.k_bias, pool);
-        let v_proj = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, pool);
+        let q_proj = self.project(
+            encoder,
+            query,
+            &weights.q_weight,
+            weights.q_bias.as_ref(),
+            pool,
+        );
+        let k_proj = self.project(
+            encoder,
+            key_value,
+            &weights.k_weight,
+            weights.k_bias.as_ref(),
+            pool,
+        );
+        let v_proj = self.project(
+            encoder,
+            key_value,
+            &weights.v_weight,
+            weights.v_bias.as_ref(),
+            pool,
+        );
 
         let q_heads = self.split_heads(encoder, &q_proj, pool);
         let k_heads = self.split_heads(encoder, &k_proj, pool);
@@ -581,7 +589,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }
@@ -623,9 +631,27 @@ impl GpuAttention {
     ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
         let (_, query_len, _hidden_size) = query.dims3();
 
-        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
-        let k_proj = self.project(encoder, query, &weights.k_weight, &weights.k_bias, pool);
-        let v_proj = self.project(encoder, query, &weights.v_weight, &weights.v_bias, pool);
+        let q_proj = self.project(
+            encoder,
+            query,
+            &weights.q_weight,
+            weights.q_bias.as_ref(),
+            pool,
+        );
+        let k_proj = self.project(
+            encoder,
+            query,
+            &weights.k_weight,
+            weights.k_bias.as_ref(),
+            pool,
+        );
+        let v_proj = self.project(
+            encoder,
+            query,
+            &weights.v_weight,
+            weights.v_bias.as_ref(),
+            pool,
+        );
 
         let q_heads = self.split_heads(encoder, &q_proj, pool);
         let k_heads_new = self.split_heads(encoder, &k_proj, pool);
@@ -700,7 +726,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         );
 
@@ -716,8 +742,20 @@ impl GpuAttention {
         pool: &mut GpuTensorPool,
         rope: Option<&GpuRoPE>,
     ) -> (GpuTensor, GpuTensor) {
-        let new_k = self.project(encoder, key_value, &weights.k_weight, &weights.k_bias, pool);
-        let new_v = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, pool);
+        let new_k = self.project(
+            encoder,
+            key_value,
+            &weights.k_weight,
+            weights.k_bias.as_ref(),
+            pool,
+        );
+        let new_v = self.project(
+            encoder,
+            key_value,
+            &weights.v_weight,
+            weights.v_bias.as_ref(),
+            pool,
+        );
 
         let new_k_rotated = if let Some(rope_encoder) = rope {
             let k_split = self.split_heads(encoder, &new_k, pool);
@@ -746,7 +784,13 @@ impl GpuAttention {
         let (batch, _, _) = query.dims3();
         let (_, max_seq_len, head_dim) = physical_k.dims3();
 
-        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
+        let q_proj = self.project(
+            encoder,
+            query,
+            &weights.q_weight,
+            weights.q_bias.as_ref(),
+            pool,
+        );
         let q_split = self.split_heads(encoder, &q_proj, pool);
         let q_for_attn = if let Some(r) = rope {
             let out = pool.get(q_split.shape().to_vec());
@@ -801,7 +845,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }
@@ -819,7 +863,13 @@ impl GpuAttention {
     ) -> GpuTensor {
         let (cache_k, cache_v) = kv_cache;
 
-        let q_biased = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
+        let q_biased = self.project(
+            encoder,
+            query,
+            &weights.q_weight,
+            weights.q_bias.as_ref(),
+            pool,
+        );
         let q_split = self.split_heads(encoder, &q_biased, pool);
 
         let k_transposed = cache_k.permute(encoder, &self.permute, &[0, 1, 3, 2]);
@@ -845,7 +895,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }
@@ -855,7 +905,7 @@ impl GpuAttention {
         encoder: &mut wgpu::CommandEncoder,
         input: &GpuTensor,
         weight: &GpuTensor,
-        bias: &GpuTensor,
+        bias: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         let (b, s, h) = input.dims3();
@@ -867,7 +917,7 @@ impl GpuAttention {
 
         self.linear.encode(encoder, &input_2d, weight, &proj_2d);
 
-        let output_2d = if bias.shape()[0] > 0 {
+        let output_2d = if let Some(bias) = bias {
             let biased_2d = pool.get(vec![b * s, out_features]);
             self.add_bias.encode(encoder, &[&proj_2d, bias], &biased_2d);
             biased_2d
@@ -958,8 +1008,20 @@ impl GpuAttention {
         weights: &GpuAttentionWeights,
         pool: &mut GpuTensorPool,
     ) -> (GpuTensor, GpuTensor) {
-        let k_proj = self.project(encoder, key_value, &weights.k_weight, &weights.k_bias, pool);
-        let v_proj = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, pool);
+        let k_proj = self.project(
+            encoder,
+            key_value,
+            &weights.k_weight,
+            weights.k_bias.as_ref(),
+            pool,
+        );
+        let v_proj = self.project(
+            encoder,
+            key_value,
+            &weights.v_weight,
+            weights.v_bias.as_ref(),
+            pool,
+        );
 
         let k_heads = self.split_heads(encoder, &k_proj, pool);
         let v_heads = self.split_heads(encoder, &v_proj, pool);
@@ -980,7 +1042,13 @@ impl GpuAttention {
         attention_mask: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
-        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
+        let q_proj = self.project(
+            encoder,
+            query,
+            &weights.q_weight,
+            weights.q_bias.as_ref(),
+            pool,
+        );
 
         let q_heads = self.split_heads(encoder, &q_proj, pool);
 
@@ -1008,7 +1076,7 @@ impl GpuAttention {
             encoder,
             &context_merged,
             &weights.output_weight,
-            &weights.output_bias,
+            weights.output_bias.as_ref(),
             pool,
         )
     }

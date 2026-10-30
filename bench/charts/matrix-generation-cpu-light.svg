@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="242" viewBox="0 0 760 242" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Text generation on the CPU (higher is better)">
+<rect width="760" height="242" rx="8" fill="#fcfcfb"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#0b0b0b">Text generation on the CPU (higher is better)</text>
+<text x="20" y="54" font-size="13" fill="#52514e">Q4_K_M GGUF, float32 for PyTorch, from a nearly empty context, i7-13700 · tokens per second</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#2a78d6"/>
+<text x="36" y="76" font-size="12.5" fill="#52514e">Kjarni</text>
+<rect x="102.4" y="66" width="11" height="11" rx="3" fill="#1baf7a"/>
+<text x="118.4" y="76" font-size="12.5" fill="#52514e">llama.cpp</text>
+<rect x="207.0" y="66" width="11" height="11" rx="3" fill="#eb6834"/>
+<text x="223.0" y="76" font-size="12.5" fill="#52514e">PyTorch</text>
+<text x="176" y="122.5" text-anchor="end" font-size="13" fill="#0b0b0b">Qwen2.5 0.5B</text>
+<line x1="190" y1="89" x2="190" y2="147" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,92 h437.3742836718658 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-437.3742836718658 z" fill="#2a78d6"><title>Kjarni: 35 tok/s</title></path>
+<text x="638.3742836718658" y="104.5" font-size="12" fill="#52514e" font-weight="600">35 tok/s</text>
+<path d="M191,110 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp: 38 tok/s</title></path>
+<text x="677.0" y="122.5" font-size="12" fill="#52514e">38 tok/s</text>
+<path d="M191,128 h113.05480075637502 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-113.05480075637502 z" fill="#eb6834"><title>PyTorch: 9 tok/s</title></path>
+<text x="314.054800756375" y="140.5" font-size="12" fill="#52514e">9 tok/s</text>
+<line x1="20" y1="152.0" x2="740" y2="152.0" stroke="#c3c2b7" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="192.5" text-anchor="end" font-size="13" fill="#0b0b0b">Llama 3.2 1B</text>
+<line x1="190" y1="159" x2="190" y2="217" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,162 h467.9311314191279 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-467.9311314191279 z" fill="#2a78d6"><title>Kjarni: 20 tok/s</title></path>
+<text x="668.931131419128" y="174.5" font-size="12" fill="#52514e" font-weight="600">20 tok/s</text>
+<path d="M191,180 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp: 21 tok/s</title></path>
+<text x="677.0" y="192.5" font-size="12" fill="#52514e">21 tok/s</text>
+<path d="M191,198 h92.33442631432172 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-92.33442631432172 z" fill="#eb6834"><title>PyTorch: 4 tok/s</title></path>
+<text x="293.3344263143217" y="210.5" font-size="12" fill="#52514e">4 tok/s</text>
+</svg>

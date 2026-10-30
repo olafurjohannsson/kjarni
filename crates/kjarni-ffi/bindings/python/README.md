@@ -1,7 +1,12 @@
 # Kjarni for Python
 
-Embeddings, classification, reranking and semantic search, running locally on CPU
-inside your process. No PyTorch, no ONNX Runtime, no model conversion, no server.
+**Run transformer models inside your Python program. Same output as PyTorch, without
+PyTorch, and no server.**
+
+Kjarni is a transformer inference library: embeddings, classification, reranking,
+semantic search, chat, speech to text, summarization, translation and photo search,
+running locally on CPU or GPU inside your process. No PyTorch, no ONNX Runtime, no
+model conversion.
 
 ```bash
 pip install kjarni           # no dependencies at all
@@ -228,11 +233,28 @@ The cost is measured in
 **Threading.** Handles are not individually thread safe. Give each thread its own, or
 serialise calls. The engine already parallelises across cores inside a single call.
 
-**GPU.** Pass `device="gpu"` to any constructor. It uses WebGPU, so there is no CUDA
-toolkit to install.
+**GPU.** Pass `device="gpu"` to a constructor. It uses WebGPU (Vulkan, DirectX 12 or
+Metal), so there is no CUDA toolkit to install, and the results match the CPU's.
+`Translator` runs on the CPU only for now.
 
 **Errors.** Failures raise `kjarni.KjarniException`, which carries the engine's message
 and error code.
+
+## How fast it is
+
+An i7-13700 and an RTX A2000 12 GB, each engine in its own process. On this NVIDIA card, engines using CUDA are well ahead of Kjarni's WebGPU; what WebGPU gives you is the same code on NVIDIA, AMD, Intel and Apple hardware with nothing to install.
+
+![Embeddings per second on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
+
+![Embeddings per second on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
+
+![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-whisper-light.png)
+
+![Text generation on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
+
+![Text generation on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
+
+Calling through Python costs nothing measurable: one short MiniLM embedding takes 3.49 ms, against 3.44 ms calling the C ABI directly, a difference within run-to-run noise. Method and every number: [BENCHMARKS.md](https://github.com/olafurjohannsson/kjarni/blob/main/bench/BENCHMARKS.md).
 
 ## The same engine elsewhere
 

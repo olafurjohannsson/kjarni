@@ -82,21 +82,21 @@ impl GpuPreNormDecoderLayer {
             encoder,
             &ln1_out,
             &self.self_attn_weights.q_weight,
-            &self.self_attn_weights.q_bias,
+            self.self_attn_weights.q_bias.as_ref(),
             temp,
         );
         let k_proj = self.self_attn.project(
             encoder,
             &ln1_out,
             &self.self_attn_weights.k_weight,
-            &self.self_attn_weights.k_bias,
+            self.self_attn_weights.k_bias.as_ref(),
             temp,
         );
         let v_proj = self.self_attn.project(
             encoder,
             &ln1_out,
             &self.self_attn_weights.v_weight,
-            &self.self_attn_weights.v_bias,
+            self.self_attn_weights.v_bias.as_ref(),
             temp,
         );
 

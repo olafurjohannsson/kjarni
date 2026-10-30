@@ -1,7 +1,6 @@
 use crate::gpu::GpuTensor;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
 #[repr(C)]
@@ -71,14 +70,7 @@ impl GpuPermute {
             perm: perm_padded,
         };
 
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Permute Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let uniform_buffer = self.context.uniform_buffer(&uniforms);
 
         let bind_group = self
             .context
