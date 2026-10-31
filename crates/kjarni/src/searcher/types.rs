@@ -9,7 +9,8 @@ pub struct SearchOptions {
     pub top_k: Option<usize>,
     /// Use reranker if available (default: true if configured)
     pub rerank: Option<bool>,
-    /// Minimum score threshold
+    /// Minimum score. Not available for hybrid search without a reranker, whose
+    /// scores depend on rank alone.
     pub threshold: Option<f32>,
     /// Metadata filter
     pub filter: Option<MetadataFilter>,
@@ -64,6 +65,12 @@ pub enum SearcherError {
 
     #[error("Dimension mismatch: index expects {index_dim}, model produces {model_dim}")]
     DimensionMismatch { index_dim: usize, model_dim: usize },
+
+    #[error("Index was built with {index_model}, but this searcher uses {model}")]
+    ModelMismatch { index_model: String, model: String },
+
+    #[error("Invalid search options: {0}")]
+    InvalidOptions(String),
 
     #[error("Search failed: {0}")]
     SearchFailed(#[from] anyhow::Error),

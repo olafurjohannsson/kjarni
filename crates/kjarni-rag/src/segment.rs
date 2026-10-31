@@ -6,6 +6,8 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::Bm25Index;
+use kjarni_search::bm25::CorpusStats;
+use kjarni_search::hybrid::rank_order;
 
 /// Segment metadata JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +138,12 @@ impl SegmentBuilder {
         self.docs_writer.flush()?;
         self.metadata_writer.flush()?;
 
+        // The manifest may name this segment moments later, so its data has to reach
+        // the disk first.
+        self.vectors_writer.get_ref().sync_all()?;
+        self.docs_writer.get_ref().sync_all()?;
+        self.metadata_writer.get_ref().sync_all()?;
+
         // Drop writers to release file handles
         drop(self.vectors_writer);
         drop(self.docs_writer);
@@ -151,11 +159,11 @@ impl SegmentBuilder {
 
         // Write document offsets index
         let offsets_data = bincode::serialize(&self.doc_offsets)?;
-        fs::write(segment_dir.join("docs.idx"), offsets_data)?;
+        write_synced(&segment_dir.join("docs.idx"), &offsets_data)?;
 
         // Write BM25 index
         let bm25_data = bincode::serialize(&self.bm25)?;
-        fs::write(segment_dir.join("bm25.bin"), bm25_data)?;
+        write_synced(&segment_dir.join("bm25.bin"), &bm25_data)?;
 
         // Write segment metadata
         let vectors_size = fs::metadata(segment_dir.join("vectors.bin"))?.len();
@@ -172,9 +180,9 @@ impl SegmentBuilder {
             total_bytes: vectors_size + docs_size,
         };
 
-        fs::write(
-            segment_dir.join("segment.json"),
-            serde_json::to_string_pretty(&meta)?,
+        write_synced(
+            &segment_dir.join("segment.json"),
+            serde_json::to_string_pretty(&meta)?.as_bytes(),
         )?;
 
         // Cleanup temp dir if empty
@@ -311,19 +319,40 @@ impl Segment {
 
         // Partial sort for top-k
         if scores.len() > limit {
-            scores.select_nth_unstable_by(limit, |a, b| {
-                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-            });
+            scores.select_nth_unstable_by(limit, rank_order);
             scores.truncate(limit);
         }
 
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.sort_by(rank_order);
         scores
     }
 
-    /// BM25 keyword search
+    /// BM25 keyword search scored within this segment alone
     pub fn search_keywords(&self, query: &str, limit: usize) -> Vec<(usize, f32)> {
         self.bm25.search(query, limit)
+    }
+
+    /// BM25 keyword search scored against statistics for the whole index
+    pub fn search_keywords_with_stats(
+        &self,
+        query: &str,
+        limit: usize,
+        stats: &CorpusStats,
+    ) -> Vec<(usize, f32)> {
+        self.bm25.search_with_stats(query, limit, stats)
+    }
+
+    pub fn bm25(&self) -> &Bm25Index {
+        &self.bm25
+    }
+
+    /// Every document's metadata, indexed by document ID
+    pub fn read_all_metadata(&self) -> Result<Vec<std::collections::HashMap<String, String>>> {
+        let reader = BufReader::new(File::open(self.path.join("metadata.jsonl"))?);
+        reader
+            .lines()
+            .map(|line| serde_json::from_str(&line?).map_err(|e| anyhow!("Invalid JSON: {}", e)))
+            .collect()
     }
 
     /// Document count
@@ -334,6 +363,13 @@ impl Segment {
     pub fn is_empty(&self) -> bool {
         self.meta.doc_count == 0
     }
+}
+
+fn write_synced(path: &Path, contents: &[u8]) -> Result<()> {
+    let mut file = File::create(path)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 /// Cosine similarity with pre-computed query norm
@@ -351,7 +387,9 @@ fn cosine_similarity_with_norm(a: &[f32], b: &[f32], a_norm: f32) -> f32 {
         return 0.0;
     }
 
-    dot / (a_norm * b_norm)
+    // A vector holding NaN is unrankable; it scores as unrelated.
+    let similarity = dot / (a_norm * b_norm);
+    if similarity.is_nan() { 0.0 } else { similarity }
 }
 
 #[cfg(test)]

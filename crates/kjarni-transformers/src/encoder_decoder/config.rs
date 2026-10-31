@@ -84,6 +84,15 @@ impl Seq2SeqEncoderConfig {
             final_layer_norm: false,
         }
     }
+    /// Marian's sinusoidal positions are stored in its weights, so they load as a
+    /// table, and start at zero where BART's start at two.
+    pub fn marian() -> Self {
+        Self {
+            position_encoding: PositionEncodingType::Learned { offset: 0 },
+            normalize_embeddings: false,
+            final_layer_norm: false,
+        }
+    }
     pub fn t5() -> Self {
         Self {
             position_encoding: PositionEncodingType::RelativeBias {
@@ -116,6 +125,15 @@ impl Seq2SeqDecoderConfig {
         Self {
             position_encoding: PositionEncodingType::Learned { offset: 2 },
             normalize_embeddings: true,
+            final_layer_norm: false,
+            pre_norm: false,
+        }
+    }
+    /// See [`Seq2SeqEncoderConfig::marian`].
+    pub fn marian() -> Self {
+        Self {
+            position_encoding: PositionEncodingType::Learned { offset: 0 },
+            normalize_embeddings: false,
             final_layer_norm: false,
             pre_norm: false,
         }

@@ -265,6 +265,8 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
                 return;
             }
 
+            ctx.model.adjust_logits(&mut logits_row);
+
             // Log-probabilities first, then the processors, as transformers'
             // beam search does: a banned token's probability is dropped, not
             // shared out among the rest. Masking the logits and normalizing

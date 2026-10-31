@@ -4,6 +4,13 @@ use crate::{embedder::Embedder, searcher::SearcherBuilder};
 use kjarni_rag::{IndexReader, SearchMode, SearchResult};
 use kjarni_transformers::Device;
 
+fn open_reader(index_path: &str) -> SearcherResult<IndexReader> {
+    if !std::path::Path::new(index_path).exists() {
+        return Err(SearcherError::IndexNotFound(index_path.to_string()));
+    }
+    IndexReader::open(index_path).map_err(SearcherError::SearchFailed)
+}
+
 pub struct Searcher {
     embedder: Embedder,
     reranker: Option<Reranker>,
@@ -19,7 +26,7 @@ impl Searcher {
 
     pub(crate) async fn from_builder(builder: SearcherBuilder) -> SearcherResult<Self> {
         // Build embedder
-        let mut embedder_builder = Embedder::builder(&builder.model);
+        let mut embedder_builder = Embedder::builder(&builder.model).quiet(builder.quiet);
 
         match builder.device {
             Device::Wgpu => embedder_builder = embedder_builder.gpu(),
@@ -37,7 +44,7 @@ impl Searcher {
 
         // Build reranker if specified
         let reranker = if let Some(ref rerank_model) = builder.rerank_model {
-            let mut reranker_builder = Reranker::builder(rerank_model);
+            let mut reranker_builder = Reranker::builder(rerank_model).quiet(builder.quiet);
 
             match builder.device {
                 Device::Wgpu => reranker_builder = reranker_builder.gpu(),
@@ -79,7 +86,7 @@ impl Searcher {
         query: &str,
         top_k: usize,
     ) -> SearcherResult<Vec<SearchResult>> {
-        let reader = IndexReader::open(index_path).map_err(SearcherError::SearchFailed)?;
+        let reader = open_reader(index_path)?;
 
         let results = reader.search_keywords(query, top_k);
         Ok(results.into_iter().collect())
@@ -98,26 +105,30 @@ impl Searcher {
         query: &str,
         options: &SearchOptions,
     ) -> SearcherResult<Vec<SearchResult>> {
-        let reader = IndexReader::open(index_path).map_err(SearcherError::SearchFailed)?;
-
-        // Validate dimension
-        if reader.dimension() != self.embedder.dimension() {
-            return Err(SearcherError::DimensionMismatch {
-                index_dim: reader.dimension(),
-                model_dim: self.embedder.dimension(),
-            });
-        }
+        let reader = open_reader(index_path)?;
 
         let mode = options.mode.unwrap_or(self.default_mode);
         let top_k = options.top_k.unwrap_or(self.default_top_k);
         let use_reranker = options.rerank.unwrap_or(self.reranker.is_some());
+        let reranking = use_reranker && self.reranker.is_some();
+
+        // Rank fusion scores depend on position alone and never exceed about 0.033, so
+        // a threshold on them would either pass everything or nothing.
+        if options.threshold.is_some() && mode == SearchMode::Hybrid && !reranking {
+            return Err(SearcherError::InvalidOptions(
+                "threshold has no meaning for hybrid search without a reranker; \
+                 use semantic mode or configure a reranker"
+                    .to_string(),
+            ));
+        }
+
+        // Keyword search does not use vectors, so only other modes need a matching model
+        if mode != SearchMode::Keyword {
+            self.check_compatible(&reader)?;
+        }
 
         // Fetch more if reranking
-        let fetch_k = if use_reranker && self.reranker.is_some() {
-            top_k * 5
-        } else {
-            top_k
-        };
+        let fetch_k = if reranking { top_k * 5 } else { top_k };
 
         // Get results based on mode
         let mut results = match mode {
@@ -183,6 +194,25 @@ impl Searcher {
         results.truncate(top_k);
 
         Ok(results.into_iter().collect())
+    }
+
+    fn check_compatible(&self, reader: &IndexReader) -> SearcherResult<()> {
+        if reader.dimension() != self.embedder.dimension() {
+            return Err(SearcherError::DimensionMismatch {
+                index_dim: reader.dimension(),
+                model_dim: self.embedder.dimension(),
+            });
+        }
+        // Two models with the same dimension still produce unrelated vectors.
+        if let Some(index_model) = reader.embedding_model()
+            && index_model != self.embedder.model_name()
+        {
+            return Err(SearcherError::ModelMismatch {
+                index_model: index_model.to_string(),
+                model: self.embedder.model_name().to_string(),
+            });
+        }
+        Ok(())
     }
 
     // Accessors

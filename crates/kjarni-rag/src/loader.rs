@@ -1,5 +1,6 @@
 //! Document loading and chunking utilities
 
+use crate::index_writer::is_index_dir;
 use crate::{Chunk, ChunkMetadata, SplitterConfig, TextSplitter};
 use anyhow::Result;
 use std::fs;
@@ -29,6 +30,20 @@ pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png"];
 /// the sentence encoder, image chunks through CLIP.
 pub const KIND_KEY: &str = "kind";
 pub const KIND_IMAGE: &str = "image";
+
+/// Metadata key holding a chunk's file as an absolute path. `source` keeps the path as
+/// the caller typed it, which is what they recognise but differs between runs, so this
+/// is what identifies a file when replacing or removing it.
+pub const SOURCE_PATH_KEY: &str = "source_path";
+
+/// The value of [`SOURCE_PATH_KEY`] for a path, which need not exist any more.
+pub fn source_path(path: &Path) -> String {
+    path.canonicalize()
+        .or_else(|_| std::path::absolute(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
 
 #[derive(Debug, Clone)]
 pub struct LoaderConfig {
@@ -129,10 +144,10 @@ impl DocumentLoader {
             source: Some(path.display().to_string()),
             chunk_index: Some(0),
             total_chunks: Some(1),
-            custom: std::collections::HashMap::from([(
-                KIND_KEY.to_string(),
-                KIND_IMAGE.to_string(),
-            )]),
+            custom: std::collections::HashMap::from([
+                (KIND_KEY.to_string(), KIND_IMAGE.to_string()),
+                (SOURCE_PATH_KEY.to_string(), source_path(path)),
+            ]),
             ..Default::default()
         };
         Ok(vec![
@@ -153,11 +168,16 @@ impl DocumentLoader {
                 content.len()
             );
         }
-        let texts = self.splitter.split(&content);
+        let texts = if is_markup(path) {
+            self.splitter.split(&content)
+        } else {
+            self.splitter.split_verbatim(&content)
+        };
         if !self.config.quiet {
             eprintln!("  -> Generated {} chunks", texts.len());
         }
         let total = texts.len();
+        let file_identity = source_path(path);
 
         let chunks: Vec<Chunk> = texts
             .into_iter()
@@ -167,6 +187,10 @@ impl DocumentLoader {
                     source: Some(path.display().to_string()),
                     chunk_index: Some(i),
                     total_chunks: Some(total),
+                    custom: std::collections::HashMap::from([(
+                        SOURCE_PATH_KEY.to_string(),
+                        file_identity.clone(),
+                    )]),
                     ..Default::default()
                 };
                 Chunk::new(text).with_metadata(metadata)
@@ -211,9 +235,16 @@ impl DocumentLoader {
             walkdir::WalkDir::new(dir).max_depth(1)
         };
 
+        // Sorted so the same folder always produces the same document order.
         walker
+            .sort_by_file_name()
             .into_iter()
             .filter_entry(|e| {
+                // An index's own files are JSON, which would otherwise get indexed
+                // when the index sits inside the folder being read.
+                if e.file_type().is_dir() && is_index_dir(e.path()) {
+                    return false;
+                }
                 if e.depth() == 0 {
                     return true;
                 }
@@ -276,6 +307,15 @@ impl DocumentLoader {
             None => false,
         }
     }
+}
+
+/// Files whose markup is noise to a search. In source code, data and plain text the
+/// same characters are the content: `<` is a comparison and `[0]` an index.
+fn is_markup(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .is_some_and(|e| matches!(e.as_str(), "md" | "markdown" | "html" | "htm"))
 }
 
 /// A filename turned into something a keyword search can match.

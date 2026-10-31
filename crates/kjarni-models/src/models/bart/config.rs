@@ -93,6 +93,11 @@ impl BartConfig {
 
         Ok(config)
     }
+    /// Marian shares BART's layers but has no embedding norm, and its generation
+    /// settings and logit handling differ.
+    pub fn is_marian(&self) -> bool {
+        self.model_type == "marian"
+    }
     pub fn get_forced_eos_token_id(&self) -> Option<u32> {
         self.forced_eos_token_id
     }
@@ -143,7 +148,7 @@ impl ModelConfig for BartConfig {
             activation: match self.activation_function.as_deref() {
                 Some("gelu") => Activation::Gelu,
                 Some("gelu_new") => Activation::GeluNew,
-                Some("silu") => Activation::SilU,
+                Some("silu") | Some("swish") => Activation::SilU,
                 _ => Activation::Gelu,
             },
             rope_theta: None,
@@ -168,6 +173,9 @@ impl ModelConfig for BartConfig {
 
     fn layout(&self) -> ModelLayout {
         let shared = self.get_shared_weight_name();
+        let embedding_norm = |part: &str, name: &str| {
+            (!self.is_marian()).then(|| format!("model.{part}.layernorm_embedding.{name}"))
+        };
 
         let encoder_layer = EncoderLayerLayout {
             self_attn: AttentionLayout {
@@ -237,8 +245,8 @@ impl ModelConfig for BartConfig {
             encoder: Some(EncoderLayout {
                 position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
                 token_type_embedding: None,
-                embedding_norm_weight: Some("model.encoder.layernorm_embedding.weight".to_string()),
-                embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
+                embedding_norm_weight: embedding_norm("encoder", "weight"),
+                embedding_norm_bias: embedding_norm("encoder", "bias"),
                 final_norm_weight: None, // BART encoder doesn't have a final norm
                 final_norm_bias: None,
                 layer: encoder_layer,
@@ -246,8 +254,8 @@ impl ModelConfig for BartConfig {
             decoder: Some(DecoderLayout {
                 position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
                 token_type_embedding: None,
-                embedding_norm_weight: Some("model.decoder.layernorm_embedding.weight".to_string()),
-                embedding_norm_bias: Some("model.decoder.layernorm_embedding.bias".to_string()),
+                embedding_norm_weight: embedding_norm("decoder", "weight"),
+                embedding_norm_bias: embedding_norm("decoder", "bias"),
                 final_norm_weight: None, // BART decoder doesn't have a final norm before the LM head
                 final_norm_bias: None,
                 layer: decoder_layer,
@@ -259,6 +267,37 @@ impl ModelConfig for BartConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OPUS_MT_CONFIG_JSON: &str = r#"{
+      "activation_function": "swish",
+      "bos_token_id": 0,
+      "d_model": 512,
+      "decoder_attention_heads": 8,
+      "decoder_ffn_dim": 2048,
+      "decoder_layers": 6,
+      "decoder_start_token_id": 58100,
+      "encoder_attention_heads": 8,
+      "encoder_ffn_dim": 2048,
+      "encoder_layers": 6,
+      "eos_token_id": 0,
+      "forced_eos_token_id": 0,
+      "is_encoder_decoder": true,
+      "max_position_embeddings": 512,
+      "model_type": "marian",
+      "pad_token_id": 58100,
+      "scale_embedding": true,
+      "vocab_size": 58101
+    }"#;
+
+    #[test]
+    fn marian_uses_swish_and_has_no_embedding_norm() {
+        let config = BartConfig::from_json(OPUS_MT_CONFIG_JSON).unwrap();
+        assert!(config.is_marian());
+        assert!(matches!(config.metadata().activation, Activation::SilU));
+        let layout = config.layout();
+        assert_eq!(layout.encoder.unwrap().embedding_norm_weight, None);
+        assert_eq!(layout.decoder.unwrap().embedding_norm_bias, None);
+    }
 
     const DISTILBART_CNN_CONFIG_JSON: &str = r#"{
       "d_model": 1024,

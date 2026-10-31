@@ -6,12 +6,15 @@ use kjarni::{IndexReader, SearchMode, SearchResult, embedder::Embedder};
 
 use crate::commands::display;
 
+/// For indexes that did not record their model.
+const DEFAULT_EMBEDDING_MODEL: &str = "minilm-l6-v2";
+
 pub async fn run(
     index_path: &str,
     query: &str,
     top_k: usize,
     mode: &str,
-    model: &str,
+    model: Option<&str>,
     rerank_model: Option<&str>,
     format: &str,
     gpu: bool,
@@ -35,6 +38,23 @@ pub async fn run(
             .dimmed()
         );
     }
+
+    // Vectors from any other model are unrelated to the index's, so the recorded model
+    // is the default and a different one is refused.
+    let recorded = reader.embedding_model();
+    if let (Some(requested), Some(recorded)) = (model, recorded)
+        && requested != recorded
+    {
+        return Err(anyhow!(
+            "This index was built with '{recorded}', not '{requested}'. \
+             Leave out --model to use it."
+        ));
+    }
+    let model = model
+        .or(recorded)
+        .unwrap_or(DEFAULT_EMBEDDING_MODEL)
+        .to_string();
+    let model = model.as_str();
 
     // Parse search mode
     let search_mode: SearchMode = mode.parse().map_err(|e: String| anyhow!(e))?;

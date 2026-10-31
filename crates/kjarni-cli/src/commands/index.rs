@@ -1,17 +1,21 @@
 //! Index management commands
 use anyhow::{Result, anyhow};
-use kjarni::Chunk;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use tokio::sync::mpsc;
 
 use kjarni::embedder::Embedder;
-use kjarni::{DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, SplitterConfig};
+use kjarni::indexer::Indexer;
+#[cfg(test)]
+use kjarni::{DocumentLoader, LoaderConfig};
+use kjarni::{
+    IndexBuild, IndexConfig, IndexReader, IndexWriter, ProgressStage, SplitterConfig, is_index_dir,
+};
 use kjarni_cli::IndexCommands;
 
 const ENCODE_BATCH_SIZE: usize = 32;
+
+/// For indexes that did not record their model.
+const DEFAULT_EMBEDDING_MODEL: &str = "minilm-l6-v2";
 
 pub async fn run(action: IndexCommands) -> Result<()> {
     match action {
@@ -51,12 +55,17 @@ pub async fn run(action: IndexCommands) -> Result<()> {
                 &inputs,
                 chunk_size,
                 chunk_overlap,
-                &model,
+                model.as_deref(),
                 gpu,
                 quiet,
             )
             .await
         }
+        IndexCommands::Remove {
+            index_path,
+            paths,
+            quiet,
+        } => remove(&index_path, &paths, quiet),
         IndexCommands::Info { index_path } => info(&index_path),
     }
 }
@@ -79,7 +88,53 @@ async fn create(
         ));
     }
 
-    // Load embedder (Handles download, validation, device automatically)
+    validate_chunking(chunk_size, chunk_overlap)?;
+    check_output_is_free(output)?;
+    check_inputs_exist(inputs)?;
+
+    match &from_chunks {
+        Some(path) => create_from_chunks(output, path, model, gpu, quiet).await,
+        None => {
+            create_from_inputs(output, inputs, chunk_size, chunk_overlap, model, gpu, quiet).await
+        }
+    }
+}
+
+async fn create_from_inputs(
+    output: &str,
+    inputs: &[String],
+    chunk_size: usize,
+    chunk_overlap: usize,
+    model: &str,
+    gpu: bool,
+    quiet: bool,
+) -> Result<()> {
+    let indexer = build_indexer(model, gpu, chunk_size, chunk_overlap, quiet).await?;
+    if !quiet {
+        eprintln!("Model: {}", indexer.model_name());
+        eprintln!("Dimension: {}", indexer.dimension());
+    }
+
+    let input_refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+    let stats = indexer.create(output, &input_refs).await?;
+    finish_progress_line(quiet);
+
+    if stats.documents_indexed == 0 {
+        Indexer::delete(output)?;
+        return Err(anyhow!("No documents found to index."));
+    }
+
+    print_created(output, stats.documents_indexed, stats.dimension, quiet);
+    Ok(())
+}
+
+async fn create_from_chunks(
+    output: &str,
+    chunks_path: &str,
+    model: &str,
+    gpu: bool,
+    quiet: bool,
+) -> Result<()> {
     let embedder = load_embedder(model, gpu, quiet).await?;
     let dimension = embedder.dimension();
 
@@ -88,110 +143,167 @@ async fn create(
         eprintln!("Dimension: {}", dimension);
     }
 
-    // Create index writer
     let config = IndexConfig {
         dimension,
         max_docs_per_segment: 10_000,
-        embedding_model: Some(model.to_string()),
+        embedding_model: Some(embedder.model_name().to_string()),
+        created_at: Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+        ),
         ..Default::default()
     };
 
-    let mut writer = IndexWriter::open(output, config)?;
+    // Built beside the output and moved there once complete, so a failed run leaves
+    // nothing behind.
+    let build = IndexBuild::new(output)?;
+    let mut writer = IndexWriter::open(build.path(), config)?;
 
-    // Process documents
-    let total_indexed = match &from_chunks {
-        Some(path) => process_chunk_file(&mut writer, &embedder, path, quiet).await?,
-        None => {
-            process_inputs(
-                &mut writer,
-                &embedder,
-                inputs,
-                chunk_size,
-                chunk_overlap,
-                quiet,
-            )
-            .await?
-        }
-    };
-
+    let total_indexed = process_chunk_file(&mut writer, &embedder, chunks_path, quiet).await?;
     if total_indexed == 0 {
         return Err(anyhow!("No documents found to index."));
     }
 
-    // Commit
     writer.commit()?;
+    build.install()?;
 
-    if !quiet {
-        eprintln!();
-        eprintln!("✓ Index created: {}", output);
-        eprintln!("  Documents: {}", total_indexed);
-        eprintln!("  Dimension: {}", dimension);
-
-        if let Ok(size) = calculate_index_size(output) {
-            eprintln!("  Size: {}", format_size(size));
-        }
-    }
-
+    print_created(output, total_indexed, dimension, quiet);
     Ok(())
 }
 
-/// Add documents to an existing index
+fn print_created(output: &str, documents: usize, dimension: usize, quiet: bool) {
+    if quiet {
+        return;
+    }
+    eprintln!();
+    eprintln!("✓ Index created: {}", output);
+    eprintln!("  Documents: {}", documents);
+    eprintln!("  Dimension: {}", dimension);
+    if let Ok(size) = calculate_index_size(output) {
+        eprintln!("  Size: {}", format_size(size));
+    }
+}
+
+async fn build_indexer(
+    model: &str,
+    gpu: bool,
+    chunk_size: usize,
+    chunk_overlap: usize,
+    quiet: bool,
+) -> Result<Indexer> {
+    let mut builder = Indexer::builder(model)
+        .chunk_size(chunk_size)
+        .chunk_overlap(chunk_overlap)
+        .max_file_size(usize::MAX)
+        .quiet(quiet);
+    for pattern in super::mcp::EXCLUDED {
+        builder = builder.exclude(pattern);
+    }
+    if gpu {
+        builder = builder.gpu();
+    }
+    // Carriage-return progress only makes sense on a terminal. Redirected it would run
+    // every update together on one line in the log.
+    if !quiet && std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        builder = builder.on_progress(|progress, _| {
+            if matches!(progress.stage, ProgressStage::Embedding) {
+                eprint!("\r  Indexed {} documents", progress.current);
+            }
+        });
+    }
+    Ok(builder.build().await?)
+}
+
+fn finish_progress_line(quiet: bool) {
+    if !quiet && std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        eprintln!();
+    }
+}
+
+fn validate_chunking(chunk_size: usize, chunk_overlap: usize) -> Result<()> {
+    SplitterConfig {
+        chunk_size,
+        chunk_overlap,
+        clean_markdown: true,
+    }
+    .validate()
+    .map_err(|e| anyhow!("{e} (--chunk-size {chunk_size}, --chunk-overlap {chunk_overlap})"))
+}
+
+fn check_output_is_free(output: &str) -> Result<()> {
+    let path = Path::new(output);
+    if is_index_dir(path) {
+        return Err(anyhow!(
+            "{output} already holds an index. Use `kjarni index add` to add to it, \
+             or delete it to start again."
+        ));
+    }
+    if path.exists() && !std::fs::read_dir(path).is_ok_and(|mut d| d.next().is_none()) {
+        return Err(anyhow!("{output} exists and is not an empty folder."));
+    }
+    Ok(())
+}
+
+fn check_inputs_exist(inputs: &[String]) -> Result<()> {
+    match inputs.iter().find(|input| !Path::new(input).exists()) {
+        Some(input) => Err(anyhow!("Input not found: {input}")),
+        None => Ok(()),
+    }
+}
+
+/// Add files to an existing index, replacing any it already holds
 async fn add(
     index_path: &str,
     inputs: &[String],
     chunk_size: usize,
     chunk_overlap: usize,
-    model: &str,
+    model: Option<&str>,
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
     if inputs.is_empty() {
         return Err(anyhow!("No input files specified."));
     }
+    validate_chunking(chunk_size, chunk_overlap)?;
+    check_inputs_exist(inputs)?;
 
-    // Open existing index
-    let mut writer = IndexWriter::open_existing(index_path)?;
-    let initial_count = writer.len();
-    let dimension = writer.dimension();
+    let reader = IndexReader::open(index_path)?;
+    let initial_count = reader.len();
+    let recorded = reader.embedding_model().map(str::to_string);
+    drop(reader);
 
     if !quiet {
         eprintln!("Opened index with {} documents", initial_count);
     }
 
-    // Load embedder
-    let embedder = load_embedder(model, gpu, quiet).await?;
+    let model = model
+        .map(str::to_string)
+        .or(recorded)
+        .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string());
+    let indexer = build_indexer(&model, gpu, chunk_size, chunk_overlap, quiet).await?;
 
-    // Verify dimension matches
-    if embedder.dimension() != dimension {
-        return Err(anyhow!(
-            "Dimension mismatch: index has {}, model '{}' produces {}.\n\
-             Use the same model that was used to create the index.",
-            dimension,
-            embedder.model_name(),
-            embedder.dimension()
-        ));
-    }
-
-    // Process new documents
-    let added = process_inputs(
-        &mut writer,
-        &embedder,
-        inputs,
-        chunk_size,
-        chunk_overlap,
-        quiet,
-    )
-    .await?;
-
-    // Commit
-    writer.commit()?;
+    let input_refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+    let added = indexer.add(index_path, &input_refs).await?;
+    finish_progress_line(quiet);
 
     if !quiet {
+        let total = IndexReader::open(index_path)?.len();
         eprintln!();
-        eprintln!("✓ Added {} documents to index", added);
-        eprintln!("  Total documents: {}", initial_count + added);
+        eprintln!("✓ Indexed {} documents", added);
+        eprintln!("  Total documents: {}", total);
     }
 
+    Ok(())
+}
+
+/// Remove files or folders from an index
+fn remove(index_path: &str, paths: &[String], quiet: bool) -> Result<()> {
+    let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let removed = Indexer::remove(index_path, &path_refs)?;
+    if !quiet {
+        eprintln!("✓ Removed {} documents", removed);
+    }
     Ok(())
 }
 
@@ -267,118 +379,6 @@ async fn process_chunk_file(
         }
     }
     Ok(total)
-}
-
-/// Reads documents for an index, leaving out hidden folders and the build output
-/// and dependencies `search_folder` also skips.
-fn document_loader(chunk_size: usize, chunk_overlap: usize, quiet: bool) -> DocumentLoader {
-    DocumentLoader::new(LoaderConfig {
-        splitter: SplitterConfig {
-            chunk_size,
-            chunk_overlap,
-            clean_markdown: true,
-        },
-        quiet,
-        exclude_patterns: super::mcp::EXCLUDED.iter().map(|p| p.to_string()).collect(),
-        ..Default::default()
-    })
-}
-
-async fn process_inputs(
-    writer: &mut IndexWriter,
-    embedder: &Embedder,
-    inputs: &[String],
-    chunk_size: usize,
-    chunk_overlap: usize,
-    quiet: bool,
-) -> Result<usize> {
-    let loader = Arc::new(document_loader(chunk_size, chunk_overlap, quiet));
-
-    let (tx, mut rx) = mpsc::channel::<Vec<Chunk>>(64);
-    let concurrency_limit = 16;
-    let semaphore = Arc::new(Semaphore::new(concurrency_limit));
-
-    // Producer Task
-    let inputs_owned = inputs.to_vec();
-    let loader_ref = loader.clone();
-
-    tokio::spawn(async move {
-        for input in inputs_owned {
-            let path = Path::new(&input);
-            if !path.exists() {
-                continue;
-            }
-
-            for file_path in loader_ref.files_in(path) {
-                if !loader_ref.is_supported_extension(&file_path) {
-                    continue;
-                }
-
-                let permit = match semaphore.clone().acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => break,
-                };
-
-                let loader = loader_ref.clone();
-                let tx = tx.clone();
-
-                tokio::spawn(async move {
-                    let _p = permit;
-
-                    let result =
-                        tokio::task::spawn_blocking(move || loader.load_file(&file_path)).await;
-
-                    if let Ok(Ok(chunks)) = result
-                        && !chunks.is_empty()
-                    {
-                        let _ = tx.send(chunks).await;
-                    }
-                });
-            }
-        }
-    });
-
-    // Consumer Loop
-    let mut batch_texts: Vec<String> = Vec::with_capacity(ENCODE_BATCH_SIZE);
-    let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(ENCODE_BATCH_SIZE);
-    let mut total_indexed = 0;
-
-    while let Some(chunks) = rx.recv().await {
-        for chunk in chunks {
-            batch_texts.push(chunk.text);
-            batch_metadata.push(chunk.metadata.to_hashmap());
-
-            if batch_texts.len() >= ENCODE_BATCH_SIZE {
-                total_indexed +=
-                    flush_batch(writer, embedder, &mut batch_texts, &mut batch_metadata).await?;
-
-                // Carriage-return progress only makes sense on a terminal. Piped
-                // or redirected it emits one line per batch with no newline
-                // between them, which for the Python docs was a thousand copies
-                // of "Indexed N documents" run together in the log.
-                if !quiet && std::io::IsTerminal::is_terminal(&std::io::stderr()) {
-                    eprint!("\r  Indexed {} documents", total_indexed);
-                }
-            }
-        }
-    }
-
-    if !batch_texts.is_empty() {
-        total_indexed +=
-            flush_batch(writer, embedder, &mut batch_texts, &mut batch_metadata).await?;
-    }
-
-    // The final count is worth having in a log, so this one is unconditional; only
-    // the leading \r is dropped when nothing will consume it.
-    if !quiet && total_indexed > 0 {
-        if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
-            eprintln!("\r  Indexed {} documents", total_indexed);
-        } else {
-            eprintln!("  Indexed {} documents", total_indexed);
-        }
-    }
-
-    Ok(total_indexed)
 }
 
 /// Encode a batch and write to index
@@ -504,6 +504,21 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len - 3])
     }
+}
+
+/// A loader with the exclusions `build_indexer` applies.
+#[cfg(test)]
+fn document_loader(chunk_size: usize, chunk_overlap: usize, quiet: bool) -> DocumentLoader {
+    DocumentLoader::new(LoaderConfig {
+        splitter: SplitterConfig {
+            chunk_size,
+            chunk_overlap,
+            clean_markdown: true,
+        },
+        quiet,
+        exclude_patterns: super::mcp::EXCLUDED.iter().map(|p| p.to_string()).collect(),
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]

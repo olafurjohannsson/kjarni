@@ -11,8 +11,8 @@ pub fn validate_for_translation(model_type: ModelType) -> TranslatorResult<()> {
 
     // Must be T5 (BART is primarily for summarization)
     match info.architecture {
-        ModelArchitecture::T5 => {
-            // T5/FLAN-T5 - ideal for translation
+        ModelArchitecture::T5 | ModelArchitecture::Marian => {
+            // T5/FLAN-T5 takes the languages in a prompt; Marian has one direction per model
         }
         ModelArchitecture::Bart => {
             // BART can technically translate but isn't ideal
@@ -33,6 +33,35 @@ pub fn validate_for_translation(model_type: ModelType) -> TranslatorResult<()> {
     }
 
     Ok(())
+}
+
+/// The source and target language of a model that translates in only one direction.
+pub fn fixed_direction(model_type: ModelType) -> Option<(&'static str, &'static str)> {
+    match model_type {
+        ModelType::OpusMtEnDe => Some(("English", "German")),
+        ModelType::OpusMtDeEn => Some(("German", "English")),
+        _ => None,
+    }
+}
+
+/// What the model is given: the bare text for a one-direction model, which refuses any
+/// other direction, and a T5 prompt otherwise. Languages are in normalized form.
+pub fn translation_input(
+    model_type: ModelType,
+    text: &str,
+    from: &str,
+    to: &str,
+) -> TranslatorResult<String> {
+    let Some((model_from, model_to)) = fixed_direction(model_type) else {
+        return Ok(format!("translate {} to {}: {}", from, to, text));
+    };
+    if (from, to) != (model_from, model_to) {
+        return Err(TranslatorError::IncompatibleModel {
+            model: model_type.cli_name().to_string(),
+            reason: format!("It only translates {model_from} to {model_to}, not {from} to {to}."),
+        });
+    }
+    Ok(text.to_string())
 }
 
 /// Get all available translation models.

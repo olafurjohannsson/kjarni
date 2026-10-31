@@ -46,6 +46,9 @@ pub enum ModelArchitecture {
     /// BART family with learned positional embeddings.
     Bart,
 
+    /// Marian family: BART's layers with one model per translation direction.
+    Marian,
+
     /// GPT family (legacy).
     GPT,
 
@@ -75,6 +78,7 @@ impl ModelArchitecture {
             Self::NomicBert => "Nomic-BERT",
             Self::T5 => "T5",
             Self::Bart => "BART",
+            Self::Marian => "Marian",
             Self::GPT => "GPT",
             Self::Whisper => "Whisper (ASR)",
         }
@@ -90,7 +94,7 @@ impl ModelArchitecture {
             Self::Bert | Self::NomicBert | Self::Mpnet | Self::Clip => "encoder",
 
             // Seq2Seq
-            Self::T5 | Self::Bart | Self::Whisper => "encoder-decoder",
+            Self::T5 | Self::Bart | Self::Marian | Self::Whisper => "encoder-decoder",
         }
     }
 }
@@ -175,6 +179,8 @@ pub enum ModelType {
     FlanT5Large,
     DistilBartCnn,
     BartLargeCnn,
+    OpusMtEnDe,
+    OpusMtDeEn,
     WhisperSmall,
     WhisperLargeV3,
     DistilGpt2,
@@ -311,6 +317,8 @@ impl ModelType {
             Self::FlanT5Large => "flan-t5-large",
             Self::DistilBartCnn => "distilbart-cnn",
             Self::BartLargeCnn => "bart-large-cnn",
+            Self::OpusMtEnDe => "opus-mt-en-de",
+            Self::OpusMtDeEn => "opus-mt-de-en",
             Self::WhisperSmall => "whisper-small",
             Self::WhisperLargeV3 => "whisper-large-v3",
 
@@ -755,6 +763,40 @@ impl ModelType {
                 params_millions: 780,
             },
 
+            Self::OpusMtEnDe => ModelInfo {
+                architecture: ModelArchitecture::Marian,
+                task: ModelTask::Translation,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/kjarni-ai/opus-mt-en-de/resolve/main/model.safetensors",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/kjarni-ai/opus-mt-en-de/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/kjarni-ai/opus-mt-en-de/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Opus-MT English to German translation.",
+                size_mb: 298,
+                params_millions: 74,
+            },
+
+            Self::OpusMtDeEn => ModelInfo {
+                architecture: ModelArchitecture::Marian,
+                task: ModelTask::Translation,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/kjarni-ai/opus-mt-de-en/resolve/main/model.safetensors",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/kjarni-ai/opus-mt-de-en/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/kjarni-ai/opus-mt-de-en/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Opus-MT German to English translation.",
+                size_mb: 298,
+                params_millions: 74,
+            },
+
             Self::BartLargeCnn => ModelInfo {
                 architecture: ModelArchitecture::Bart,
                 task: ModelTask::Seq2Seq,
@@ -961,6 +1003,8 @@ impl ModelType {
                 Some(Self::DistilBartCnn)
             }
             "bart-large-cnn" | "facebook/bart-large-cnn" => Some(Self::BartLargeCnn),
+            "opus-mt-en-de" | "helsinki-nlp/opus-mt-en-de" => Some(Self::OpusMtEnDe),
+            "opus-mt-de-en" | "helsinki-nlp/opus-mt-de-en" => Some(Self::OpusMtDeEn),
             "whisper-small" | "openai/whisper-small" => Some(Self::WhisperSmall),
             "whisper-large-v3" | "openai/whisper-large-v3" => Some(Self::WhisperLargeV3),
             "distilgpt2" | "distilgpt2/resolve/main/model.safetensors" => Some(Self::DistilGpt2),
