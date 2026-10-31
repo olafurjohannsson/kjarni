@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.10
+## 0.3.0
 
 - **`kjarni::Conversation` in `kjarni.hpp`.** `Chat::conversation()` starts a chat that
   remembers its turns, with `send`, `stream`, `clear` and `size`. C++ callers previously
