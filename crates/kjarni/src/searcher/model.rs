@@ -3,7 +3,6 @@ use crate::searcher::{SearchOptions, SearcherError, SearcherResult};
 use crate::{embedder::Embedder, searcher::SearcherBuilder};
 use kjarni_rag::{IndexReader, SearchMode, SearchResult};
 use kjarni_transformers::Device;
-use std::sync::{Arc, Mutex};
 
 fn open_reader(index_path: &str) -> SearcherResult<IndexReader> {
     if !std::path::Path::new(index_path).exists() {
@@ -18,9 +17,6 @@ pub struct Searcher {
     default_mode: SearchMode,
     default_top_k: usize,
     quiet: bool,
-    /// The last index searched, reused until a commit changes it. Opening one loads its
-    /// keyword index into memory.
-    last_reader: Mutex<Option<(String, Arc<IndexReader>)>>,
 }
 
 impl Searcher {
@@ -75,7 +71,6 @@ impl Searcher {
             default_mode: builder.default_mode,
             default_top_k: builder.default_top_k,
             quiet: builder.quiet,
-            last_reader: Mutex::new(None),
         })
     }
 
@@ -110,7 +105,7 @@ impl Searcher {
         query: &str,
         options: &SearchOptions,
     ) -> SearcherResult<Vec<SearchResult>> {
-        let reader = self.reader(index_path)?;
+        let reader = open_reader(index_path)?;
 
         let mode = options.mode.unwrap_or(self.default_mode);
         let top_k = options.top_k.unwrap_or(self.default_top_k);
@@ -199,22 +194,6 @@ impl Searcher {
         results.truncate(top_k);
 
         Ok(results.into_iter().collect())
-    }
-
-    fn reader(&self, index_path: &str) -> SearcherResult<Arc<IndexReader>> {
-        let mut last = self
-            .last_reader
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((path, reader)) = last.as_ref()
-            && path == index_path
-            && reader.is_current()
-        {
-            return Ok(reader.clone());
-        }
-        let reader = Arc::new(open_reader(index_path)?);
-        *last = Some((index_path.to_string(), reader.clone()));
-        Ok(reader)
     }
 
     fn check_compatible(&self, reader: &IndexReader) -> SearcherResult<()> {
