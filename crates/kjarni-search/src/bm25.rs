@@ -1,3 +1,4 @@
+use crate::hybrid::rank_order;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -39,6 +40,31 @@ impl Default for Bm25Params {
     }
 }
 
+/// Document statistics for the query's terms across one or more indexes.
+#[derive(Debug, Clone, Default)]
+pub struct CorpusStats {
+    total_docs: usize,
+    total_length: usize,
+    doc_frequencies: HashMap<String, usize>,
+}
+
+impl CorpusStats {
+    pub fn for_query<'a>(query: &str, indexes: impl IntoIterator<Item = &'a Bm25Index>) -> Self {
+        let terms: HashSet<String> = tokenize(query).into_iter().collect();
+        let mut stats = Self::default();
+        for index in indexes {
+            stats.total_docs += index.total_docs;
+            stats.total_length += index.total_length;
+            for term in &terms {
+                if let Some(df) = index.doc_frequencies.get(term) {
+                    *stats.doc_frequencies.entry(term.clone()).or_insert(0) += df;
+                }
+            }
+        }
+        stats
+    }
+}
+
 /// BM25 index for efficient keyword search
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Bm25Index {
@@ -60,10 +86,7 @@ pub struct Bm25Index {
     /// BM25 parameters
     params: Bm25Params,
 
-    /// Token to index mapping for faster lookups
-    token_to_docs: HashMap<String, HashSet<usize>>,
-
-    #[serde(default)]
+    /// Total tokens across all documents
     total_length: usize,
 }
 
@@ -76,35 +99,56 @@ impl Bm25Index {
             total_docs: 0,
             inverted_index: HashMap::new(),
             params: Bm25Params::default(),
-            token_to_docs: HashMap::new(),
             total_length: 0,
         }
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Vec<(usize, f32)> {
-        if self.total_docs == 0 {
+        let stats = CorpusStats::for_query(query, [self]);
+        self.search_with_stats(query, limit, &stats)
+    }
+
+    /// Scores this index's documents against statistics covering a whole corpus.
+    ///
+    /// A segmented index passes the same `stats` to every segment, which is what
+    /// makes their scores comparable: identical text scores the same in any segment.
+    pub fn search_with_stats(
+        &self,
+        query: &str,
+        limit: usize,
+        stats: &CorpusStats,
+    ) -> Vec<(usize, f32)> {
+        if self.total_docs == 0 || stats.total_docs == 0 {
             return Vec::new();
         }
 
-        let query_tokens = tokenize(query);
-        if query_tokens.is_empty() {
-            return Vec::new();
-        }
-
+        let avg_doc_length = stats.total_length as f32 / stats.total_docs as f32;
         let mut scores: HashMap<usize, f32> = HashMap::new();
 
-        for doc_id in 0..self.total_docs {
-            let score = self.calculate_score(&query_tokens, doc_id);
-            if score > 0.0 {
-                scores.insert(doc_id, score);
+        for term in tokenize(query) {
+            let Some(postings) = self.inverted_index.get(&term) else {
+                continue;
+            };
+            let df = stats.doc_frequencies.get(&term).copied().unwrap_or(0) as f32;
+            // log((N - df + 0.5) / (df + 0.5) + 1) stays positive for common terms.
+            let idf = ((stats.total_docs as f32 - df + 0.5) / (df + 0.5) + 1.0).ln();
+
+            for &(doc_id, tf) in postings {
+                let tf = tf as f32;
+                let length_ratio = self.doc_lengths[doc_id] as f32 / avg_doc_length;
+                let length_norm = 1.0 - self.params.b + self.params.b * length_ratio;
+                let normalized_tf =
+                    (tf * (self.params.k1 + 1.0)) / (tf + self.params.k1 * length_norm);
+                *scores.entry(doc_id).or_insert(0.0) += idf * normalized_tf;
             }
         }
 
         let mut results: Vec<(usize, f32)> = scores.into_iter().collect();
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(rank_order);
         results.truncate(limit);
         results
     }
+
     pub fn add_document(&mut self, doc_id: usize, text: &str) {
         let tokens = tokenize(text);
         let doc_length = tokens.len();
@@ -134,43 +178,8 @@ impl Bm25Index {
         self.total_docs = self.total_docs.max(doc_id + 1);
         self.total_length += doc_length;
         self.avg_doc_length = self.total_length as f32 / self.total_docs as f32;
-        // self.avg_doc_length =
-        //     self.doc_lengths.iter().sum::<usize>() as f32 / self.total_docs as f32;
     }
-    /// Calculate BM25 score for a document given query terms
-    fn calculate_score(&self, query_tokens: &[String], doc_id: usize) -> f32 {
-        let mut score = 0.0;
-        let doc_length = self.doc_lengths[doc_id] as f32;
-
-        // Length normalization factor
-        let length_norm = 1.0 - self.params.b + self.params.b * (doc_length / self.avg_doc_length);
-
-        for term in query_tokens {
-            // Get term frequency in this document
-            let tf = self.get_term_frequency(term, doc_id) as f32;
-            if tf == 0.0 {
-                continue;
-            }
-
-            // Get document frequency
-            let df = self.doc_frequencies.get(term).copied().unwrap_or(0) as f32;
-            if df == 0.0 {
-                continue;
-            }
-
-            // Calculate IDF component
-            // Using log((N - df + 0.5) / (df + 0.5) + 1) for better scores
-            let idf = ((self.total_docs as f32 - df + 0.5) / (df + 0.5) + 1.0).ln();
-
-            // Calculate normalized term frequency with saturation
-            let normalized_tf = (tf * (self.params.k1 + 1.0)) / (tf + self.params.k1 * length_norm);
-
-            score += idf * normalized_tf;
-        }
-
-        score
-    }
-
+    #[cfg(test)]
     fn get_term_frequency(&self, term: &str, doc_id: usize) -> usize {
         self.inverted_index
             .get(term)
@@ -184,17 +193,54 @@ impl Bm25Index {
     }
 }
 
+/// Lowercased alphanumeric words. Runs of CJK text have no spaces between words, so
+/// they become overlapping pairs of characters, which lets a query match inside a run.
 fn tokenize(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|s| !s.is_empty() && s.len() >= 2)
-        .map(|s| s.to_string())
-        .collect()
+    let mut tokens = Vec::new();
+    for word in text.to_lowercase().split(|c: char| !c.is_alphanumeric()) {
+        let chars: Vec<char> = word.chars().collect();
+        let mut start = 0;
+        while start < chars.len() {
+            let cjk = is_cjk(chars[start]);
+            let mut end = start + 1;
+            while end < chars.len() && is_cjk(chars[end]) == cjk {
+                end += 1;
+            }
+            let run = &chars[start..end];
+            if cjk && run.len() > 1 {
+                tokens.extend(run.windows(2).map(|pair| pair.iter().collect::<String>()));
+            } else {
+                tokens.push(run.iter().collect());
+            }
+            start = end;
+        }
+    }
+    tokens
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3040}'..='\u{30FF}'
+        | '\u{3400}'..='\u{4DBF}'
+        | '\u{4E00}'..='\u{9FFF}'
+        | '\u{AC00}'..='\u{D7AF}'
+        | '\u{F900}'..='\u{FAFF}'
+        | '\u{20000}'..='\u{2A6DF}')
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One document's score for a term, for indexes whose fields a test set by hand.
+    fn score_of(index: &mut Bm25Index, term: &str, doc_id: usize) -> f32 {
+        index.total_length = index.doc_lengths.iter().sum();
+        index
+            .search(term, usize::MAX)
+            .into_iter()
+            .find(|(id, _)| *id == doc_id)
+            .map_or(0.0, |(_, score)| score)
+    }
 
     #[test]
     fn test_bm25_params_default() {
@@ -220,9 +266,56 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_filters_short() {
-        let tokens = tokenize("I am a test");
-        assert_eq!(tokens, vec!["am", "test"]);
+    fn test_tokenize_keeps_single_letters() {
+        assert_eq!(tokenize("I am a test"), vec!["i", "am", "a", "test"]);
+        assert_eq!(tokenize("C++"), vec!["c"]);
+    }
+
+    #[test]
+    fn test_tokenize_splits_cjk_runs_into_pairs() {
+        assert_eq!(tokenize("機械学習"), vec!["機械", "械学", "学習"]);
+        assert_eq!(tokenize("学"), vec!["学"]);
+        assert_eq!(tokenize("rust言語"), vec!["rust", "言語"]);
+    }
+
+    #[test]
+    fn search_finds_c_and_cjk_substrings() {
+        let mut index = Bm25Index::new();
+        index.add_document(0, "Written in C++ and C");
+        index.add_document(1, "機械学習のモデルを読み込む");
+        index.add_document(2, "vector search");
+
+        assert_eq!(index.search("C++", 5)[0].0, 0);
+        assert_eq!(index.search("機械学習", 5)[0].0, 1);
+    }
+
+    #[test]
+    fn ties_rank_by_document_id() {
+        let mut index = Bm25Index::new();
+        for id in 0..50 {
+            index.add_document(id, "same text");
+        }
+        let ids: Vec<usize> = index.search("same", 3).iter().map(|r| r.0).collect();
+        assert_eq!(ids, [0, 1, 2]);
+    }
+
+    #[test]
+    fn stats_from_two_indexes_score_identical_text_identically() {
+        let mut big = Bm25Index::new();
+        big.add_document(0, "zebra migration routes");
+        for id in 1..5000 {
+            big.add_document(id, &format!("filler text number n{id}"));
+        }
+        let mut small = Bm25Index::new();
+        small.add_document(0, "zebra migration routes");
+
+        let stats = CorpusStats::for_query("zebra", [&big, &small]);
+        let in_big = big.search_with_stats("zebra", 1, &stats)[0].1;
+        let in_small = small.search_with_stats("zebra", 1, &stats)[0].1;
+
+        assert_eq!(in_big, in_small);
+        // N = 5001, df = 2, avgdl = 3.9996, doc length 3, k1 = 1.2, b = 0.75
+        assert!((in_big - 8.46698).abs() < 1e-3, "got {in_big}");
     }
 
     #[test]
@@ -315,6 +408,7 @@ mod tests {
             .inverted_index
             .insert("test".to_string(), vec![(0, 1), (1, 3)]);
 
+        index.total_length = index.doc_lengths.iter().sum();
         let results = index.search("test", 10);
         assert_eq!(results.len(), 2);
 
@@ -355,8 +449,8 @@ mod tests {
         );
 
         // Score for rare term should be higher (higher IDF)
-        let rare_score = index.calculate_score(&["rare".to_string()], 0);
-        let common_score = index.calculate_score(&["common".to_string()], 0);
+        let rare_score = score_of(&mut index, "rare", 0);
+        let common_score = score_of(&mut index, "common", 0);
 
         assert!(
             rare_score > common_score,
@@ -377,8 +471,8 @@ mod tests {
             .inverted_index
             .insert("test".to_string(), vec![(0, 1), (1, 1)]);
 
-        let short_doc_score = index.calculate_score(&["test".to_string()], 0);
-        let long_doc_score = index.calculate_score(&["test".to_string()], 1);
+        let short_doc_score = score_of(&mut index, "test", 0);
+        let long_doc_score = score_of(&mut index, "test", 1);
 
         // Same term frequency, but short doc should score higher (length normalization)
         assert!(
@@ -439,6 +533,7 @@ mod tests {
             .inverted_index
             .insert("fast".to_string(), vec![(1, 1), (2, 1)]);
 
+        index.total_length = index.doc_lengths.iter().sum();
         let results = index.search("rust fast", 10);
 
         // Doc 2 should rank first (matches both terms)

@@ -2,11 +2,11 @@ use crate::embedder::Embedder;
 use crate::indexer::{IndexInfo, IndexStats, IndexerBuilder, IndexerError, IndexerResult};
 use anyhow::Result;
 use kjarni_rag::{
-    DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
-    ProgressCallback, ProgressStage, SplitterConfig,
+    DocumentLoader, IndexBuild, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
+    ProgressCallback, ProgressStage, SOURCE_PATH_KEY, SplitterConfig, is_index_dir, source_path,
 };
 use kjarni_transformers::Device;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio::sync::watch;
 
@@ -24,6 +24,42 @@ pub struct Indexer {
     quiet: bool,
     progress_callback: Option<ProgressCallback>,
     cancel_token: Option<watch::Receiver<bool>>,
+}
+
+fn unix_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Checks that an index may be written at `index_path`, before anything is touched.
+fn check_target(index_path: &str, inputs: &[&str], force: bool) -> IndexerResult<()> {
+    let target = Path::new(index_path);
+    if !target.exists() {
+        return Ok(());
+    }
+    if !force {
+        return Err(IndexerError::IndexExists(index_path.to_string()));
+    }
+
+    // Force replaces an index. Any other folder is someone's files.
+    let is_empty_dir = std::fs::read_dir(target).is_ok_and(|mut d| d.next().is_none());
+    if !is_index_dir(target) && !is_empty_dir {
+        return Err(IndexerError::NotAnIndex(index_path.to_string()));
+    }
+
+    let target = target
+        .canonicalize()
+        .map_err(|e| IndexerError::IndexingFailed(e.into()))?;
+    for input in inputs {
+        let input_path = Path::new(input)
+            .canonicalize()
+            .map_err(|e| IndexerError::IndexingFailed(e.into()))?;
+        if input_path.starts_with(&target) {
+            return Err(IndexerError::InputInsideIndex(input.to_string()));
+        }
+    }
+    Ok(())
 }
 
 fn calculate_index_size(path: &str) -> Result<u64> {
@@ -45,8 +81,18 @@ impl Indexer {
     }
 
     pub(crate) async fn from_builder(builder: IndexerBuilder) -> IndexerResult<Self> {
+        let chunk_overlap = builder.resolved_chunk_overlap();
+        let splitter_config = SplitterConfig {
+            chunk_size: builder.chunk_size,
+            chunk_overlap,
+            ..Default::default()
+        };
+        splitter_config
+            .validate()
+            .map_err(|e| IndexerError::InvalidConfig(e.to_string()))?;
+
         // Build embedder
-        let mut embedder_builder = Embedder::builder(&builder.model);
+        let mut embedder_builder = Embedder::builder(&builder.model).quiet(builder.quiet);
 
         match builder.device {
             Device::Wgpu => embedder_builder = embedder_builder.gpu(),
@@ -62,11 +108,18 @@ impl Indexer {
             .await
             .map_err(IndexerError::EmbedderError)?;
 
-        let splitter_config = SplitterConfig {
-            chunk_size: builder.chunk_size,
-            chunk_overlap: builder.chunk_overlap,
-            ..Default::default()
-        };
+        // About 3.5 characters to a token in English. Past the encoder's window the tail
+        // of each chunk is dropped and the vector still looks normal.
+        let window_chars = embedder.max_seq_length() * 7 / 2;
+        if !builder.quiet && builder.chunk_size > window_chars {
+            eprintln!(
+                "Warning: chunk size {} is more than {} reads ({} tokens, about {window_chars} \
+                 characters); text past that will not be embedded",
+                builder.chunk_size,
+                embedder.model_name(),
+                embedder.max_seq_length(),
+            );
+        }
 
         let loader_config = LoaderConfig {
             splitter: splitter_config,
@@ -86,7 +139,7 @@ impl Indexer {
             embedder,
             loader_config,
             chunk_size: builder.chunk_size,
-            chunk_overlap: builder.chunk_overlap,
+            chunk_overlap,
             max_docs_per_segment: builder.max_docs_per_segment,
             batch_size: builder.batch_size,
             quiet: builder.quiet,
@@ -111,15 +164,12 @@ impl Indexer {
         let size_bytes = calculate_index_size(index_path).unwrap_or(0);
 
         // Read config for model info
-        let config_path = Path::new(index_path).join("config.json");
-        let embedding_model = if config_path.exists() {
-            std::fs::read_to_string(&config_path)
-                .ok()
-                .and_then(|s| serde_json::from_str::<IndexConfig>(&s).ok())
-                .and_then(|c| c.embedding_model)
-        } else {
-            None
-        };
+        let config = std::fs::read_to_string(Path::new(index_path).join("config.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<IndexConfig>(&s).ok());
+        let (embedding_model, created_at) = config
+            .map(|c| (c.embedding_model, c.created_at))
+            .unwrap_or_default();
 
         Ok(IndexInfo {
             path: index_path.to_string(),
@@ -128,7 +178,7 @@ impl Indexer {
             dimension: reader.dimension(),
             size_bytes,
             embedding_model,
-            created_at: None,
+            created_at,
         })
     }
 
@@ -137,7 +187,34 @@ impl Indexer {
         if !Path::new(index_path).exists() {
             return Err(IndexerError::IndexNotFound(index_path.to_string()));
         }
+        let is_empty_dir = std::fs::read_dir(index_path).is_ok_and(|mut d| d.next().is_none());
+        if !is_index_dir(Path::new(index_path)) && !is_empty_dir {
+            return Err(IndexerError::NotAnIndex(index_path.to_string()));
+        }
         std::fs::remove_dir_all(index_path).map_err(|e| IndexerError::IndexingFailed(e.into()))
+    }
+
+    /// Removes every chunk from the given files or folders, which need not still exist,
+    /// and returns how many. Needs no embedder.
+    pub fn remove(index_path: &str, paths: &[&str]) -> IndexerResult<usize> {
+        if !Path::new(index_path).exists() {
+            return Err(IndexerError::IndexNotFound(index_path.to_string()));
+        }
+        let targets: Vec<PathBuf> = paths
+            .iter()
+            .map(|p| PathBuf::from(source_path(Path::new(p))))
+            .collect();
+
+        let mut writer =
+            IndexWriter::open_existing(index_path).map_err(IndexerError::IndexingFailed)?;
+        let removed = writer
+            .remove_where(|meta| {
+                meta.get(SOURCE_PATH_KEY)
+                    .is_some_and(|source| targets.iter().any(|t| Path::new(source).starts_with(t)))
+            })
+            .map_err(IndexerError::IndexingFailed)?;
+        writer.commit().map_err(IndexerError::IndexingFailed)?;
+        Ok(removed)
     }
 
     /// Report progress
@@ -181,131 +258,17 @@ impl Indexer {
         inputs: &[&str],
         force: bool,
     ) -> IndexerResult<IndexStats> {
-        if inputs.is_empty() {
-            return Err(IndexerError::NoInputs);
-        }
-
-        // Check if exists
-        if Path::new(index_path).exists() {
-            if force {
-                std::fs::remove_dir_all(index_path)
-                    .map_err(|e| IndexerError::IndexingFailed(e.into()))?;
-            } else {
-                return Err(IndexerError::IndexExists(index_path.to_string()));
-            }
-        }
-
-        let start = std::time::Instant::now();
-        let dimension = self.embedder.dimension();
-
-        // Create index writer
-        let config = IndexConfig {
-            dimension,
-            max_docs_per_segment: self.max_docs_per_segment,
-            embedding_model: Some(self.embedder.model_name().to_string()),
-            ..Default::default()
+        let report = |stage, current, total, msg: Option<&str>| {
+            self.report_stored_progress(stage, current, total, msg);
         };
-
-        let mut writer =
-            IndexWriter::open(index_path, config).map_err(IndexerError::IndexingFailed)?;
-
-        // Collect files
-        self.report_stored_progress(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
-        let files = self.collect_files(inputs)?;
-        let total_files = files.len();
-
-        if self.is_cancelled() {
-            return Err(IndexerError::Cancelled);
-        }
-
-        let loader = DocumentLoader::new(self.loader_config.clone());
-
-        let mut total_docs = 0usize;
-        let mut total_chunks = 0usize;
-        let mut files_processed = 0usize;
-        let mut files_skipped = 0usize;
-
-        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
-        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
-
-        for (file_idx, file_path) in files.iter().enumerate() {
-            if self.is_cancelled() {
-                return Err(IndexerError::Cancelled);
-            }
-
-            self.report_stored_progress(
-                ProgressStage::Loading,
-                file_idx,
-                total_files,
-                Some(&file_path.to_string_lossy()),
-            );
-
-            match loader.load_file(file_path) {
-                Ok(chunks) => {
-                    total_chunks += chunks.len();
-                    files_processed += 1;
-
-                    for chunk in chunks {
-                        batch_texts.push(chunk.text);
-                        batch_metadata.push(chunk.metadata.to_hashmap());
-
-                        if batch_texts.len() >= self.batch_size {
-                            if self.is_cancelled() {
-                                return Err(IndexerError::Cancelled);
-                            }
-
-                            self.report_stored_progress(
-                                ProgressStage::Embedding,
-                                total_docs,
-                                0,
-                                None,
-                            );
-
-                            let added = self
-                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                                .await?;
-                            total_docs += added;
-                        }
-                    }
-                }
-                Err(e) => {
-                    files_skipped += 1;
-                    if !self.quiet {
-                        eprintln!("Warning: Failed to load {}: {}", file_path.display(), e);
-                    }
-                }
-            }
-        }
-
-        // Flush remaining
-        if !batch_texts.is_empty() {
-            self.report_stored_progress(ProgressStage::Embedding, total_docs, 0, None);
-            let added = self
-                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                .await?;
-            total_docs += added;
-        }
-
-        self.report_stored_progress(
-            ProgressStage::Committing,
-            total_docs,
-            total_docs,
-            Some("Finalizing index..."),
-        );
-
-        writer.commit().map_err(IndexerError::IndexingFailed)?;
-
-        let size_bytes = calculate_index_size(index_path).unwrap_or(0);
-
-        Ok(IndexStats {
-            documents_indexed: total_docs,
-            chunks_created: total_chunks,
-            dimension,
-            size_bytes,
-            files_processed,
-            files_skipped,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        })
+        self.create_impl(
+            index_path,
+            inputs,
+            force,
+            Some(report),
+            None::<fn() -> bool>,
+        )
+        .await
     }
 
     /// Create with callback and cancellation support (for FFI)
@@ -341,16 +304,6 @@ impl Indexer {
             return Err(IndexerError::NoInputs);
         }
 
-        // Check if exists
-        if Path::new(index_path).exists() {
-            if force {
-                std::fs::remove_dir_all(index_path)
-                    .map_err(|e| IndexerError::IndexingFailed(e.into()))?;
-            } else {
-                return Err(IndexerError::IndexExists(index_path.to_string()));
-            }
-        }
-
         let start = std::time::Instant::now();
         let dimension = self.embedder.dimension();
 
@@ -362,27 +315,33 @@ impl Indexer {
         };
 
         // Helper to check cancellation
-        let check_cancelled = || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
-
-        // Create index writer
-        let config = IndexConfig {
-            dimension,
-            max_docs_per_segment: self.max_docs_per_segment,
-            embedding_model: Some(self.embedder.model_name().to_string()),
-            ..Default::default()
-        };
-
-        let mut writer =
-            IndexWriter::open(index_path, config).map_err(IndexerError::IndexingFailed)?;
+        let check_cancelled =
+            || self.is_cancelled() || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
 
         // Collect files
         report(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
         let files = self.collect_files(inputs)?;
         let total_files = files.len();
 
+        check_target(index_path, inputs, force)?;
+
         if check_cancelled() {
             return Err(IndexerError::Cancelled);
         }
+
+        // Create index writer. The index is built beside the target, so a failure or
+        // cancellation leaves anything already there untouched.
+        let config = IndexConfig {
+            dimension,
+            max_docs_per_segment: self.max_docs_per_segment,
+            embedding_model: Some(self.embedder.model_name().to_string()),
+            created_at: Some(unix_time()),
+            ..Default::default()
+        };
+
+        let build = IndexBuild::new(index_path).map_err(IndexerError::IndexingFailed)?;
+        let mut writer =
+            IndexWriter::open(build.path(), config).map_err(IndexerError::IndexingFailed)?;
 
         let loader = DocumentLoader::new(self.loader_config.clone());
 
@@ -455,6 +414,7 @@ impl Indexer {
         );
 
         writer.commit().map_err(IndexerError::IndexingFailed)?;
+        build.install().map_err(IndexerError::IndexingFailed)?;
 
         let size_bytes = calculate_index_size(index_path).unwrap_or(0);
 
@@ -469,112 +429,19 @@ impl Indexer {
         })
     }
 
-    /// Add documents to existing index
+    /// Add files to an existing index. A file already in the index has its chunks
+    /// replaced. A file that fails to load keeps the chunks it had.
     pub async fn add(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
         self.add_internal(index_path, inputs).await
     }
 
     /// Internal add that uses the stored progress callback
     async fn add_internal(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
-        if inputs.is_empty() {
-            return Ok(0);
-        }
-
-        if !Path::new(index_path).exists() {
-            return Err(IndexerError::IndexNotFound(index_path.to_string()));
-        }
-
-        // Open existing inde
-        let mut writer =
-            IndexWriter::open_existing(index_path).map_err(IndexerError::IndexingFailed)?;
-
-        // Validate dimension
-        if writer.dimension() != self.embedder.dimension() {
-            return Err(IndexerError::DimensionMismatch {
-                index_dim: writer.dimension(),
-                model_dim: self.embedder.dimension(),
-            });
-        }
-
-        // Collect
-        self.report_stored_progress(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
-        let files = self.collect_files(inputs)?;
-        let total_files = files.len();
-
-        if self.is_cancelled() {
-            return Err(IndexerError::Cancelled);
-        }
-
-        let loader = DocumentLoader::new(self.loader_config.clone());
-
-        let mut total_docs = 0usize;
-        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
-        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
-
-        for (file_idx, file_path) in files.iter().enumerate() {
-            if self.is_cancelled() {
-                return Err(IndexerError::Cancelled);
-            }
-
-            self.report_stored_progress(
-                ProgressStage::Loading,
-                file_idx,
-                total_files,
-                Some(&file_path.to_string_lossy()),
-            );
-
-            match loader.load_file(file_path) {
-                Ok(chunks) => {
-                    for chunk in chunks {
-                        batch_texts.push(chunk.text);
-                        batch_metadata.push(chunk.metadata.to_hashmap());
-
-                        if batch_texts.len() >= self.batch_size {
-                            if self.is_cancelled() {
-                                return Err(IndexerError::Cancelled);
-                            }
-
-                            self.report_stored_progress(
-                                ProgressStage::Embedding,
-                                total_docs,
-                                0,
-                                None,
-                            );
-
-                            let added = self
-                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                                .await?;
-                            total_docs += added;
-                        }
-                    }
-                }
-                Err(e) => {
-                    if !self.quiet {
-                        eprintln!("Warning: Failed to load {}: {}", file_path.display(), e);
-                    }
-                }
-            }
-        }
-
-        // Flush remaining
-        if !batch_texts.is_empty() {
-            self.report_stored_progress(ProgressStage::Embedding, total_docs, 0, None);
-            let added = self
-                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                .await?;
-            total_docs += added;
-        }
-
-        self.report_stored_progress(
-            ProgressStage::Committing,
-            total_docs,
-            total_docs,
-            Some("Finalizing..."),
-        );
-
-        writer.commit().map_err(IndexerError::IndexingFailed)?;
-
-        Ok(total_docs)
+        let report = |stage, current, total, msg: Option<&str>| {
+            self.report_stored_progress(stage, current, total, msg);
+        };
+        self.add_impl(index_path, inputs, Some(report), None::<fn() -> bool>)
+            .await
     }
 
     /// callback support (for FFI)
@@ -620,7 +487,8 @@ impl Indexer {
         };
 
         // check cancellation
-        let check_cancelled = || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
+        let check_cancelled =
+            || self.is_cancelled() || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
 
         // Open existing index for appending
         let mut writer =
@@ -631,6 +499,15 @@ impl Indexer {
             return Err(IndexerError::DimensionMismatch {
                 index_dim: writer.dimension(),
                 model_dim: self.embedder.dimension(),
+            });
+        }
+
+        if let Some(index_model) = writer.embedding_model()
+            && index_model != self.embedder.model_name()
+        {
+            return Err(IndexerError::ModelMismatch {
+                index_model: index_model.to_string(),
+                model: self.embedder.model_name().to_string(),
             });
         }
 
@@ -646,6 +523,7 @@ impl Indexer {
         let loader = DocumentLoader::new(self.loader_config.clone());
 
         let mut total_docs = 0usize;
+        let mut replaced = HashSet::new();
         let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
         let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
 
@@ -663,6 +541,7 @@ impl Indexer {
 
             match loader.load_file(file_path) {
                 Ok(chunks) => {
+                    replaced.insert(source_path(file_path));
                     for chunk in chunks {
                         batch_texts.push(chunk.text);
                         batch_metadata.push(chunk.metadata.to_hashmap());
@@ -704,6 +583,12 @@ impl Indexer {
             Some("Finalizing..."),
         );
 
+        writer
+            .remove_where(|meta| {
+                meta.get(SOURCE_PATH_KEY)
+                    .is_some_and(|source| replaced.contains(source))
+            })
+            .map_err(IndexerError::IndexingFailed)?;
         writer.commit().map_err(IndexerError::IndexingFailed)?;
 
         Ok(total_docs)
@@ -733,7 +618,10 @@ impl Indexer {
         Ok(count)
     }
 
+    /// The files to index, in a stable order, each once however many inputs reach it.
     fn collect_files(&self, inputs: &[&str]) -> IndexerResult<Vec<PathBuf>> {
+        let loader = DocumentLoader::new(self.loader_config.clone());
+        let mut seen = HashSet::new();
         let mut files = Vec::new();
 
         for input in inputs {
@@ -743,23 +631,35 @@ impl Indexer {
                 return Err(IndexerError::PathNotFound(input.to_string()));
             }
 
-            if path.is_file() {
-                if self.is_supported_file(path) {
-                    files.push(path.to_path_buf());
-                }
-            } else if path.is_dir() {
-                let loader = DocumentLoader::new(self.loader_config.clone());
-                for entry_path in loader.files_in(path) {
-                    if let Some(max_size) = self.loader_config.max_file_size
-                        && let Ok(metadata) = entry_path.metadata()
-                        && metadata.len() as usize > max_size
-                    {
-                        continue;
-                    }
+            let candidates = if path.is_dir() {
+                loader.files_in(path)
+            } else {
+                vec![path.to_path_buf()]
+            };
 
-                    if self.is_supported_file(&entry_path) {
-                        files.push(entry_path);
+            for candidate in candidates {
+                if !self.is_supported_file(&candidate) {
+                    // A folder holds plenty of files nobody expects to be read, but a
+                    // file named directly was meant to be.
+                    if !self.quiet && !path.is_dir() {
+                        eprintln!("Warning: skipped {}: unsupported type", candidate.display());
                     }
+                    continue;
+                }
+                if let Some(max_size) = self.loader_config.max_file_size
+                    && let Ok(metadata) = candidate.metadata()
+                    && metadata.len() as usize > max_size
+                {
+                    if !self.quiet {
+                        eprintln!(
+                            "Warning: skipped {}: larger than {max_size} bytes",
+                            candidate.display()
+                        );
+                    }
+                    continue;
+                }
+                if seen.insert(source_path(&candidate)) {
+                    files.push(candidate);
                 }
             }
         }
@@ -1040,7 +940,7 @@ mod indexer_tests {
         assert!(matches!(builder.device, kjarni_transformers::Device::Cpu));
         assert!(builder.cache_dir.is_none());
         assert_eq!(builder.chunk_size, 512);
-        assert_eq!(builder.chunk_overlap, 50);
+        assert_eq!(builder.chunk_overlap, None);
         assert!(builder.extensions.is_empty());
         assert!(builder.exclude_patterns.is_empty());
         assert!(builder.recursive);
@@ -1107,7 +1007,7 @@ mod indexer_tests {
     #[test]
     fn test_builder_chunk_overlap() {
         let builder = IndexerBuilder::new("model").chunk_overlap(100);
-        assert_eq!(builder.chunk_overlap, 100);
+        assert_eq!(builder.chunk_overlap, Some(100));
     }
 
     #[test]
@@ -1231,7 +1131,7 @@ mod indexer_tests {
         assert!(matches!(builder.device, kjarni_transformers::Device::Wgpu));
         assert_eq!(builder.cache_dir, Some(PathBuf::from("/cache")));
         assert_eq!(builder.chunk_size, 1000);
-        assert_eq!(builder.chunk_overlap, 100);
+        assert_eq!(builder.chunk_overlap, Some(100));
         assert_eq!(builder.extensions, vec!["txt", "md"]);
         assert_eq!(builder.exclude_patterns, vec!["*.log"]);
         assert!(builder.recursive);
@@ -1434,7 +1334,7 @@ mod indexer_tests {
             .max_docs_per_segment(0);
 
         assert_eq!(builder.chunk_size, 0);
-        assert_eq!(builder.chunk_overlap, 0);
+        assert_eq!(builder.chunk_overlap, Some(0));
         assert_eq!(builder.batch_size, 0);
         assert_eq!(builder.max_docs_per_segment, 0);
     }
@@ -1764,5 +1664,164 @@ mod indexer_tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    use super::{IndexConfig, ProgressStage, check_target};
+
+    #[test]
+    fn default_overlap_fits_small_chunks() {
+        for (size, expected) in [(512, 50), (100, 20), (50, 10), (1, 0)] {
+            let builder = IndexerBuilder::new("test-model").chunk_size(size);
+            assert_eq!(builder.resolved_chunk_overlap(), expected);
+        }
+    }
+
+    #[test]
+    fn force_refuses_a_folder_that_is_not_an_index() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("thesis.md"), "my work").unwrap();
+        let target = dir.path().to_str().unwrap();
+
+        let error = check_target(target, &[], true).unwrap_err();
+        assert!(matches!(error, IndexerError::NotAnIndex(_)));
+        assert!(dir.path().join("thesis.md").exists());
+    }
+
+    #[test]
+    fn force_refuses_inputs_inside_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("index");
+        kjarni_rag::IndexWriter::open(&index, IndexConfig::default())
+            .unwrap()
+            .commit()
+            .unwrap();
+        let target = index.to_str().unwrap();
+
+        let error = check_target(target, &[target], true).unwrap_err();
+        assert!(matches!(error, IndexerError::InputInsideIndex(_)));
+    }
+
+    #[test]
+    fn force_allows_replacing_an_index_and_an_empty_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("index");
+        kjarni_rag::IndexWriter::open(&index, IndexConfig::default())
+            .unwrap()
+            .commit()
+            .unwrap();
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+
+        check_target(index.to_str().unwrap(), &[], true).unwrap();
+        check_target(empty.to_str().unwrap(), &[], true).unwrap();
+        assert!(matches!(
+            check_target(index.to_str().unwrap(), &[], false),
+            Err(IndexerError::IndexExists(_))
+        ));
+    }
+
+    #[test]
+    fn delete_refuses_a_folder_that_is_not_an_index() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("thesis.md"), "my work").unwrap();
+
+        let error = Indexer::delete(dir.path().to_str().unwrap()).unwrap_err();
+        assert!(matches!(error, IndexerError::NotAnIndex(_)));
+        assert!(dir.path().join("thesis.md").exists());
+    }
+
+    #[test]
+    fn delete_accepts_an_index_and_an_empty_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("index");
+        kjarni_rag::IndexWriter::open(&index, IndexConfig::default())
+            .unwrap()
+            .commit()
+            .unwrap();
+        Indexer::delete(index.to_str().unwrap()).unwrap();
+        assert!(!index.exists());
+    }
+
+    #[test]
+    fn remove_takes_files_and_folders_even_after_they_are_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("index");
+        let source = |p: &str| {
+            std::collections::HashMap::from([(
+                kjarni_rag::SOURCE_PATH_KEY.to_string(),
+                dir.path().join(p).display().to_string(),
+            )])
+        };
+        let config = IndexConfig {
+            dimension: 2,
+            ..Default::default()
+        };
+        let mut writer = kjarni_rag::IndexWriter::open(&index, config).unwrap();
+        for (text, path) in [
+            ("one", "docs/a.md"),
+            ("two", "docs/sub/b.md"),
+            ("three", "docsy/c.md"),
+            ("four", "d.md"),
+        ] {
+            writer.add(text, &[1.0, 0.0], Some(&source(path))).unwrap();
+        }
+        writer.commit().unwrap();
+
+        let target = index.to_str().unwrap();
+        let docs = dir.path().join("docs");
+        let d = dir.path().join("d.md");
+        assert_eq!(
+            Indexer::remove(target, &[docs.to_str().unwrap()]).unwrap(),
+            2
+        );
+        assert_eq!(Indexer::remove(target, &[d.to_str().unwrap()]).unwrap(), 1);
+
+        let reader = kjarni_rag::IndexReader::open(&index).unwrap();
+        assert_eq!(reader.len(), 1);
+        assert_eq!(reader.get_document(0).unwrap(), "three");
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads minilm-l6-v2"]
+    async fn adding_an_edited_file_replaces_it_and_cancelling_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes.md");
+        let other = dir.path().join("other.md");
+        fs::write(&notes, "penguins live in the south").unwrap();
+        fs::write(&other, "zebras live on the savanna").unwrap();
+        let index = dir.path().join("out").join("index");
+        fs::create_dir_all(index.parent().unwrap()).unwrap();
+        let index = index.to_str().unwrap();
+        let inputs = [notes.to_str().unwrap(), other.to_str().unwrap()];
+
+        let indexer = Indexer::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        indexer.create(index, &inputs).await.unwrap();
+        assert_eq!(kjarni_rag::IndexReader::open(index).unwrap().len(), 2);
+
+        fs::write(&notes, "walruses live in the north").unwrap();
+        indexer.add(index, &[inputs[0]]).await.unwrap();
+
+        let reader = kjarni_rag::IndexReader::open(index).unwrap();
+        assert_eq!(reader.len(), 2);
+        assert!(reader.search_keywords("penguins", 5).is_empty());
+        assert_eq!(reader.search_keywords("walruses", 5).len(), 1);
+        assert_eq!(reader.search_keywords("zebras", 5).len(), 1);
+
+        fs::write(&notes, "seals live everywhere").unwrap();
+        let cancelled = indexer
+            .add_with_callback(
+                index,
+                &[inputs[0]],
+                None::<fn(ProgressStage, usize, usize, Option<&str>)>,
+                Some(|| true),
+            )
+            .await;
+        assert!(matches!(cancelled, Err(IndexerError::Cancelled)));
+        let reader = kjarni_rag::IndexReader::open(index).unwrap();
+        assert_eq!(reader.search_keywords("walruses", 5).len(), 1);
     }
 }

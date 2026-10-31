@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+/// The newest on-disk format this build reads.
+pub const INDEX_VERSION: u32 = 2;
+
 /// Index configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexConfig {
@@ -21,7 +24,7 @@ impl Default for IndexConfig {
             embedding_model: None,
             model_name: None,
             created_at: None,
-            version: 1,
+            version: INDEX_VERSION,
         }
     }
 }

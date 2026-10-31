@@ -70,8 +70,9 @@ pub use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
 pub use kjarni_transformers::cpu::encoder::traits::EncoderLanguageModel;
 
 pub use kjarni_rag::{
-    DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
-    ProgressCallback, ProgressStage, SearchIndex, SplitterConfig, TextSplitter,
+    DocumentLoader, IndexBuild, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
+    ProgressCallback, ProgressStage, SOURCE_PATH_KEY, SearchIndex, SplitterConfig, TextSplitter,
+    is_index_dir, source_path,
 };
 
 pub use kjarni_rag::MetadataFilter;

@@ -468,9 +468,10 @@ pub enum Commands {
         #[arg(long, default_value = "hybrid")]
         mode: String,
 
-        /// Encoder model for semantic search
-        #[arg(short, long, default_value = "minilm-l6-v2")]
-        model: String,
+        /// Encoder model for semantic search. Defaults to the model the index was
+        /// built with.
+        #[arg(short, long)]
+        model: Option<String>,
 
         /// Reranking model (optional)
         /// Use a cross-encoder model to rerank initial results
@@ -642,7 +643,7 @@ pub enum IndexCommands {
         quiet: bool,
     },
 
-    /// Add documents to an existing index
+    /// Add files to an existing index, replacing any it already holds
     Add {
         /// Index file path
         index_path: String,
@@ -659,12 +660,27 @@ pub enum IndexCommands {
         #[arg(long, default_value_t = 100)]
         chunk_overlap: usize,
 
-        #[arg(short, long, default_value = "minilm-l6-v2")]
-        model: String,
+        /// Encoder model. Defaults to the model the index was built with.
+        #[arg(short, long)]
+        model: Option<String>,
 
         /// Run on the GPU
         #[arg(long)]
         gpu: bool,
+
+        /// Suppress progress output
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
+    /// Remove files or folders from an index
+    Remove {
+        /// Index file path
+        index_path: String,
+
+        /// Files or folders to remove, which need not still exist
+        #[arg(required = true)]
+        paths: Vec<String>,
 
         /// Suppress progress output
         #[arg(short, long)]
@@ -1117,7 +1133,7 @@ mod tests {
                 assert_eq!(query, "my query");
                 assert_eq!(top_k, 10);
                 assert_eq!(mode, "hybrid");
-                assert_eq!(model, "minilm-l6-v2");
+                assert_eq!(model, None);
                 assert_eq!(format, "text");
             }
             _ => panic!("Expected Search command"),

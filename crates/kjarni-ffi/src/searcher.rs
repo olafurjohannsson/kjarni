@@ -406,7 +406,9 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
                     unsafe { *out = KjarniSearchResults::empty() };
                     match e {
                         SearcherError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
-                        SearcherError::DimensionMismatch { .. } => KjarniErrorCode::InvalidConfig,
+                        SearcherError::DimensionMismatch { .. }
+                        | SearcherError::ModelMismatch { .. }
+                        | SearcherError::InvalidOptions(_) => KjarniErrorCode::InvalidConfig,
                         _ => KjarniErrorCode::InferenceFailed,
                     }
                 }

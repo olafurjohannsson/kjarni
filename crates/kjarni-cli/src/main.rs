@@ -294,7 +294,7 @@ async fn main() -> Result<()> {
                 &query,
                 top_k,
                 &mode,
-                &model,
+                model.as_deref(),
                 rerank_model.as_deref(),
                 &format,
                 gpu,

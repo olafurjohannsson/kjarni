@@ -767,11 +767,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Marian,
                 task: ModelTask::Translation,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/olafuraron/opus-mt-en-de/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/opus-mt-en-de/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/opus-mt-en-de/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/opus-mt-en-de/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/opus-mt-en-de/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/opus-mt-en-de/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },
@@ -784,11 +784,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Marian,
                 task: ModelTask::Translation,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/olafuraron/opus-mt-de-en/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/opus-mt-de-en/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/opus-mt-de-en/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/opus-mt-de-en/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/opus-mt-de-en/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/opus-mt-de-en/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },

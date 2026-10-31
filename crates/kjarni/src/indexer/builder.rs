@@ -13,7 +13,7 @@ pub struct IndexerBuilder {
 
     // Chunking config
     pub(crate) chunk_size: usize,
-    pub(crate) chunk_overlap: usize,
+    pub(crate) chunk_overlap: Option<usize>,
 
     // File loading config
     pub(crate) extensions: Vec<String>,
@@ -39,7 +39,7 @@ impl IndexerBuilder {
             device: Device::Cpu,
             cache_dir: None,
             chunk_size: 512,
-            chunk_overlap: 50,
+            chunk_overlap: None,
             extensions: vec![], // Empty = use defaults
             exclude_patterns: vec![],
             recursive: true,
@@ -83,8 +83,13 @@ impl IndexerBuilder {
         self
     }
     pub fn chunk_overlap(mut self, overlap: usize) -> Self {
-        self.chunk_overlap = overlap;
+        self.chunk_overlap = Some(overlap);
         self
+    }
+
+    /// The overlap set by the caller, or one that fits the chunk size.
+    pub(crate) fn resolved_chunk_overlap(&self) -> usize {
+        self.chunk_overlap.unwrap_or(50.min(self.chunk_size / 5))
     }
 
     // File filtering
