@@ -31,6 +31,22 @@ pub struct Transcriber {
     progress_callback: Option<TranscriptionProgressCallback>,
 }
 
+/// Sends an error down the stream if the task feeding it panics. Otherwise the
+/// channel just closes, which looks like a transcription that found no speech.
+pub(super) async fn report_panic<T>(
+    job: tokio::task::JoinHandle<()>,
+    tx: tokio::sync::mpsc::Sender<TranscriberResult<T>>,
+) {
+    if let Err(e) = job.await
+        && e.is_panic()
+    {
+        let error = anyhow::anyhow!("the transcription task panicked: {e}");
+        let _ = tx
+            .send(Err(TranscriberError::TranscriptionFailed(error)))
+            .await;
+    }
+}
+
 impl Transcriber {
     /// Create a builder targeting the given model
     pub fn builder(model: &str) -> TranscriberBuilder {
@@ -260,7 +276,8 @@ impl Transcriber {
 
         let (tx, rx) = tokio::sync::mpsc::channel::<TranscriberResult<TranscribedToken>>(64);
 
-        tokio::task::spawn_blocking(move || {
+        let panic_tx = tx.clone();
+        let job = tokio::task::spawn_blocking(move || {
             let chunks = WhisperModel::chunk_audio(&samples, WHISPER_SAMPLE_RATE);
 
             for chunk in &chunks {
@@ -313,6 +330,7 @@ impl Transcriber {
             }
             // tx drops -> stream ends
         });
+        tokio::spawn(report_panic(job, panic_tx));
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Ok(Box::pin(stream))

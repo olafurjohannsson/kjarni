@@ -235,11 +235,27 @@ impl WeightLoader for SafeTensorsLoader {
             .tensor(name)
             .with_context(|| format!("failed to read tensor '{}'", name))?;
 
+        let dtype = DType::from_safetensors(view.dtype())?;
+        // No kernel takes f16, so half-precision weights (whisper-large-v3 ships
+        // only those) reach the model as f32, as they do in transformers.
+        if dtype == DType::F16 {
+            let widened: Vec<f32> = crate::weights::cast_or_copy::<half::f16>(view.data())
+                .into_iter()
+                .map(half::f16::to_f32)
+                .collect();
+            return Ok(TensorView {
+                name: name.to_string(),
+                bytes: Cow::Owned(bytemuck::cast_slice(&widened).to_vec()),
+                shape: view.shape().to_vec(),
+                dtype: DType::F32,
+            });
+        }
+
         Ok(TensorView {
             name: name.to_string(),
             bytes: Cow::Borrowed(view.data()),
             shape: view.shape().to_vec(),
-            dtype: DType::from_safetensors(view.dtype())?,
+            dtype,
         })
     }
 
@@ -257,6 +273,27 @@ mod tests {
     use super::*;
     use safetensors::tensor::{Dtype, TensorView as StTensorView};
     use tempfile::TempDir;
+
+    #[test]
+    fn half_precision_weights_load_as_f32() {
+        let dir = TempDir::new().unwrap();
+        let values: Vec<half::f16> = [1.5f32, -0.25, 1024.0]
+            .iter()
+            .map(|v| half::f16::from_f32(*v))
+            .collect();
+        let bytes: Vec<u8> = bytemuck::cast_slice(&values).to_vec();
+        let view = StTensorView::new(Dtype::F16, vec![3], &bytes).unwrap();
+        let data = safetensors::serialize([("w", view)], &None).unwrap();
+        fs::write(dir.path().join("model.safetensors"), data).unwrap();
+
+        let weights = crate::weights::ModelWeights::new(dir.path()).unwrap();
+
+        assert_eq!(weights.tensor_dtype("w").unwrap(), DType::F32);
+        assert_eq!(
+            weights.get_array1("w").unwrap().to_vec(),
+            [1.5, -0.25, 1024.0]
+        );
+    }
 
     fn create_safetensors_file(
         dir: &TempDir,

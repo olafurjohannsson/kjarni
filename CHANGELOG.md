@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.9
+
+### whisper-large-v3 works, and `--translate` asks for a translation
+
+- **whisper-large-v3 failed to load**, with an unsupported dtype on the CPU and a
+  panic on the GPU. Its weights are half precision only; they now load as f32, as
+  they do in transformers. Other half-precision safetensors files load the same way.
+- **Whisper's task and timestamp tokens were fixed numbers**, from whisper-small, and
+  the translate one was wrong even there. `--translate` sent `<|startoflm|>`, which
+  still came out in English but repeated itself and strayed from transformers. On
+  large-v3, transcribing sent `<|translate|>` and streaming sent `<|nospeech|>`, which
+  gave an empty result. They now come from each model's tokenizer, and translations
+  of German speech match transformers on both models.
+- **A panic while streaming a transcription looked like success**, with no text and
+  exit code 0. It now reaches the caller as an error.
+- **`kjarni index create` indexed hidden folders and build output**, unlike
+  `search_folder`. It now skips the same folders. A file or folder named directly is
+  always read.
+
 ## 0.2.8
 
 ### Faster GPU generation, and Whisper on the GPU
