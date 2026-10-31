@@ -1,6 +1,6 @@
 //! Text splitting with markdown-aware chunking and preprocessing
 use std::collections::HashMap;
-use text_splitter::MarkdownSplitter;
+use text_splitter::{ChunkConfig, MarkdownSplitter};
 
 /// Configuration for text splitting
 #[derive(Debug, Clone)]
@@ -76,25 +76,25 @@ impl TextSplitter {
 
     /// Split text into chunks using markdown-aware boundaries
     pub fn split(&self, text: &str) -> Vec<String> {
-        if text.is_empty() {
-            return vec![];
-        }
-
-        // Preprocess: clean markdown noise
-        let cleaned = if self.config.clean_markdown {
-            clean_markdown(text)
+        if self.config.clean_markdown {
+            self.split_verbatim(&clean_markdown(text))
         } else {
-            text.to_string()
-        };
+            self.split_verbatim(text)
+        }
+    }
 
-        if cleaned.trim().is_empty() {
+    /// Split text into chunks without cleaning it first
+    pub fn split_verbatim(&self, text: &str) -> Vec<String> {
+        if text.trim().is_empty() {
             return vec![];
         }
 
-        let splitter = MarkdownSplitter::new(self.config.chunk_size);
+        let chunk_config = ChunkConfig::new(self.config.chunk_size)
+            .with_overlap(self.config.chunk_overlap)
+            .expect("validated in TextSplitter::new");
 
-        splitter
-            .chunks(&cleaned)
+        MarkdownSplitter::new(chunk_config)
+            .chunks(text)
             .map(|chunk| chunk.to_string())
             .filter(|chunk| !chunk.trim().is_empty())
             .collect()
@@ -136,15 +136,67 @@ impl TextSplitter {
     }
 }
 
+/// Removes markdown and HTML markup, leaving code spans and fenced blocks as written.
 pub fn clean_markdown(text: &str) -> String {
     let text = strip_frontmatter(text);
-    let text = strip_noisy_lines(&text);
-    let text = clean_wikilinks(&text);
+    let mut result = String::with_capacity(text.len());
+    let mut prose = String::new();
+    let mut fence: Option<&str> = None;
+
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        match fence {
+            Some(marker) => {
+                result.push_str(line);
+                if trimmed.starts_with(marker) {
+                    fence = None;
+                }
+            }
+            None if trimmed.starts_with("```") || trimmed.starts_with("~~~") => {
+                result.push_str(&clean_prose(&prose));
+                prose.clear();
+                result.push_str(line);
+                fence = Some(&trimmed[..3]);
+            }
+            None => prose.push_str(line),
+        }
+    }
+    result.push_str(&clean_prose(&prose));
+
+    collapse_whitespace(&result)
+}
+
+fn clean_prose(text: &str) -> String {
+    let text = strip_noisy_lines(text);
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+
+    // Inline code spans: a run of backticks closed by a run of the same length.
+    while let Some(open) = rest.find('`') {
+        let ticks = rest[open..].chars().take_while(|c| *c == '`').count();
+        let after = &rest[open + ticks..];
+        let marker = "`".repeat(ticks);
+        match after.find(&marker) {
+            Some(close) => {
+                result.push_str(&clean_inline(&rest[..open]));
+                result.push_str(&rest[open..open + ticks + close + ticks]);
+                rest = &after[close + ticks..];
+            }
+            None => {
+                result.push_str(&clean_inline(&rest[..open + ticks]));
+                rest = after;
+            }
+        }
+    }
+    result.push_str(&clean_inline(rest));
+    result
+}
+
+fn clean_inline(text: &str) -> String {
+    let text = clean_wikilinks(text);
     let text = clean_markdown_images(&text);
     let text = clean_markdown_links(&text);
-    let text = strip_html_tags(&text);
-
-    collapse_whitespace(&text)
+    strip_html_tags(&text)
 }
 
 fn strip_frontmatter(text: &str) -> String {
@@ -207,47 +259,30 @@ fn strip_noisy_lines(text: &str) -> String {
 /// - `[[page|display]]` → `display`
 /// - `[[path/to/page]]` → `page`
 /// - `[[path/to/page|display]]` → `display`
+///
+/// Anything else with double brackets, such as `[[1, 2], [3, 4]]`, is left alone.
 fn clean_wikilinks(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
     let mut i = 0;
 
-    while i < len {
-        // Look for [[
-        if i + 1 < len && chars[i] == '[' && chars[i + 1] == '[' {
-            i += 2; // skip [[
-
-            // Collect everything until ]]
-            let mut link_content = String::new();
-            let mut found_close = false;
-
-            while i + 1 < len {
-                if chars[i] == ']' && chars[i + 1] == ']' {
-                    i += 2; // skip ]]
-                    found_close = true;
-                    break;
-                }
-                link_content.push(chars[i]);
-                i += 1;
-            }
-
-            if found_close {
-                // Use display text (after |) if present
-                let display = if let Some(pipe_pos) = link_content.rfind('|') {
-                    &link_content[pipe_pos + 1..]
-                } else if let Some(slash_pos) = link_content.rfind('/') {
-                    // Use filename part of path
-                    &link_content[slash_pos + 1..]
-                } else {
-                    &link_content
-                };
-                result.push_str(display);
+    while i < chars.len() {
+        if chars[i] == '['
+            && chars.get(i + 1) == Some(&'[')
+            && let Some(close) = wikilink_end(&chars, i + 2)
+        {
+            let link_content: String = chars[i + 2..close].iter().collect();
+            // Use display text (after |) if present
+            let display = if let Some(pipe_pos) = link_content.rfind('|') {
+                &link_content[pipe_pos + 1..]
+            } else if let Some(slash_pos) = link_content.rfind('/') {
+                // Use filename part of path
+                &link_content[slash_pos + 1..]
             } else {
-                // Malformed — output as-is
-                result.push_str("[[");
-                result.push_str(&link_content);
-            }
+                &link_content
+            };
+            result.push_str(display);
+            i = close + 2;
         } else {
             result.push(chars[i]);
             i += 1;
@@ -257,6 +292,59 @@ fn clean_wikilinks(text: &str) -> String {
     result
 }
 
+/// The index of the `]]` closing a wikilink whose content starts at `start`.
+fn wikilink_end(chars: &[char], start: usize) -> Option<usize> {
+    for i in start..chars.len() {
+        match chars[i] {
+            ']' if chars.get(i + 1) == Some(&']') => return Some(i),
+            '[' | ']' | '\n' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The index of the `]` closing a bracket opened just before `start`, on the same line.
+fn closing_bracket(chars: &[char], start: usize) -> Option<usize> {
+    let mut depth = 1;
+    for (i, c) in chars.iter().enumerate().skip(start) {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            '\n' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The index of the `)` closing a `(` at `open`, on the same line.
+fn closing_paren(chars: &[char], open: usize) -> Option<usize> {
+    if chars.get(open) != Some(&'(') {
+        return None;
+    }
+    let mut depth = 0;
+    for (i, c) in chars.iter().enumerate().skip(open) {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            '\n' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Convert markdown images to just alt text
 ///
 /// `![alt text](url)` → `alt text`
@@ -264,42 +352,17 @@ fn clean_wikilinks(text: &str) -> String {
 fn clean_markdown_images(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
     let mut i = 0;
 
-    while i < len {
-        if i + 1 < len && chars[i] == '!' && chars[i + 1] == '[' {
-            i += 2; // skip ![
-
-            // Collect alt text until ]
-            let mut alt = String::new();
-            while i < len && chars[i] != ']' {
-                alt.push(chars[i]);
-                i += 1;
-            }
-
-            if i < len {
-                i += 1; // skip ]
-            }
-
-            // Skip (url) if present
-            if i < len && chars[i] == '(' {
-                i += 1;
-                let mut depth = 1;
-                while i < len && depth > 0 {
-                    if chars[i] == '(' {
-                        depth += 1;
-                    } else if chars[i] == ')' {
-                        depth -= 1;
-                    }
-                    i += 1;
-                }
-            }
-
-            // Keep alt text if non-empty
-            if !alt.trim().is_empty() {
-                result.push_str(alt.trim());
-            }
+    while i < chars.len() {
+        if chars[i] == '!'
+            && chars.get(i + 1) == Some(&'[')
+            && let Some(close) = closing_bracket(&chars, i + 2)
+            && let Some(end) = closing_paren(&chars, close + 1)
+        {
+            let alt: String = chars[i + 2..close].iter().collect();
+            result.push_str(alt.trim());
+            i = end + 1;
         } else {
             result.push(chars[i]);
             i += 1;
@@ -311,57 +374,19 @@ fn clean_markdown_images(text: &str) -> String {
 
 /// Convert markdown links to just display text
 ///
-/// `[display](url)` → `display`
+/// `[display](url)` → `display`. Brackets not followed by a URL are left alone.
 fn clean_markdown_links(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
     let mut i = 0;
 
-    while i < len {
-        // [display](url) — but not ![image](url) which is already handled
-        if chars[i] == '[' && (i == 0 || chars[i - 1] != '!') {
-            i += 1; // skip [
-
-            // Collect display text until ]
-            let mut display = String::new();
-            let mut depth = 1;
-            while i < len && depth > 0 {
-                if chars[i] == '[' {
-                    depth += 1;
-                } else if chars[i] == ']' {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                display.push(chars[i]);
-                i += 1;
-            }
-
-            if i < len {
-                i += 1; // skip ]
-            }
-
-            // Check if followed by (url)
-            if i < len && chars[i] == '(' {
-                i += 1; // skip (
-                let mut paren_depth = 1;
-                while i < len && paren_depth > 0 {
-                    if chars[i] == '(' {
-                        paren_depth += 1;
-                    } else if chars[i] == ')' {
-                        paren_depth -= 1;
-                    }
-                    i += 1;
-                }
-                // Output just the display text
-                result.push_str(&display);
-            } else {
-                // Not a link, output as-is
-                result.push('[');
-                result.push_str(&display);
-            }
+    while i < chars.len() {
+        if chars[i] == '['
+            && let Some(close) = closing_bracket(&chars, i + 1)
+            && let Some(end) = closing_paren(&chars, close + 1)
+        {
+            result.extend(&chars[i + 1..close]);
+            i = end + 1;
         } else {
             result.push(chars[i]);
             i += 1;
@@ -371,20 +396,30 @@ fn clean_markdown_links(text: &str) -> String {
     result
 }
 
-/// Strip HTML tags, keep inner text
+/// Strip HTML tags, keep inner text. A `<` only opens a tag when a tag name, `/` or `!`
+/// follows and a `>` closes it, so `a < b` is kept.
 fn strip_html_tags(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
-    let mut in_tag = false;
+    let mut rest = text;
 
-    for ch in text.chars() {
-        if ch == '<' {
-            in_tag = true;
-        } else if ch == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            result.push(ch);
+    while let Some(open) = rest.find('<') {
+        result.push_str(&rest[..open]);
+        let tag = &rest[open + 1..];
+        let opens_tag = tag
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '/' || c == '!');
+        let close = tag.find(['<', '>']).filter(|&i| tag.as_bytes()[i] == b'>');
+
+        match (opens_tag, close) {
+            (true, Some(close)) => rest = &tag[close + 1..],
+            _ => {
+                result.push('<');
+                rest = tag;
+            }
         }
     }
+    result.push_str(rest);
 
     result
 }
@@ -407,6 +442,58 @@ fn collapse_whitespace(text: &str) -> String {
     }
 
     result.trim().to_string()
+}
+
+#[cfg(test)]
+mod review_regression_tests {
+    use super::*;
+
+    #[test]
+    fn prose_with_brackets_and_comparisons_survives_cleaning() {
+        for (input, expected) in [
+            (
+                "Prices < 5 dollars.\nMore text.",
+                "Prices < 5 dollars.\nMore text.",
+            ),
+            ("See [note] for details.", "See [note] for details."),
+            ("matrix = [[1, 2], [3, 4]]", "matrix = [[1, 2], [3, 4]]"),
+            ("Wow![really] yes", "Wow![really] yes"),
+            ("a <b>bold</b> word", "a bold word"),
+            ("![alt](u.png) [t](http://x) [[p|d]]", "alt t d"),
+        ] {
+            assert_eq!(clean_markdown(input), expected);
+        }
+    }
+
+    #[test]
+    fn code_in_markdown_is_left_alone() {
+        let input = "Use `Vec<String>` or `arr[0]`.\n\n```rust\nlet v = vec![1];\nif a < b {}\n```\n\n<b>done</b>";
+        let expected =
+            "Use `Vec<String>` or `arr[0]`.\n\n```rust\nlet v = vec![1];\nif a < b {}\n```\n\ndone";
+        assert_eq!(clean_markdown(input), expected);
+    }
+
+    #[test]
+    fn chunk_overlap_repeats_text_between_chunks() {
+        let text = (0..400)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let split = |chunk_overlap| {
+            TextSplitter::new(SplitterConfig {
+                chunk_size: 200,
+                chunk_overlap,
+                clean_markdown: false,
+            })
+            .split(&text)
+        };
+        let (without, with) = (split(0), split(100));
+
+        assert!(with.len() > without.len());
+        let tail = without[0].split(' ').next_back().unwrap();
+        assert!(with[1].contains(tail));
+        assert!(!without[1].contains(tail));
+    }
 }
 
 #[cfg(test)]

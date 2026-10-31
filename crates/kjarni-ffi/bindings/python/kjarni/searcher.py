@@ -146,7 +146,8 @@ class Searcher:
             mode: Search mode (None = use default)
             top_k: Number of results (None = use default)
             rerank: Use reranker (None = auto, use if configured)
-            threshold: Minimum score threshold (results below this are filtered)
+            threshold: Minimum score (results below this are filtered). Not available
+                for hybrid search without a reranker, whose scores depend on rank alone
             source_pattern: Filter by source file pattern (glob syntax, e.g. "*.md")
             filter_key: Metadata key to filter on
             filter_value: Required value for filter_key

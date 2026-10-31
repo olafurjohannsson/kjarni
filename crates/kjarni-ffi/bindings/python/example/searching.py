@@ -261,7 +261,7 @@ def test_search_threshold(index_path: str):
     query = "transformers attention mechanism"
     
     # Get results without threshold
-    all_results = searcher.search(index_path, query, top_k=10)
+    all_results = searcher.search(index_path, query, mode=SearchMode.SEMANTIC, top_k=10)
     print(f"  Without threshold: {len(all_results)} results")
     
     if all_results:
@@ -272,7 +272,9 @@ def test_search_threshold(index_path: str):
         print(f"  Score range: {min(scores):.4f} - {max(scores):.4f}")
         print(f"  Using threshold: {mid_score:.4f}")
         
-        filtered_results = searcher.search(index_path, query, top_k=10, threshold=mid_score)
+        filtered_results = searcher.search(
+            index_path, query, mode=SearchMode.SEMANTIC, top_k=10, threshold=mid_score
+        )
         print(f"  With threshold: {len(filtered_results)} results")
         
         # All results should be above threshold

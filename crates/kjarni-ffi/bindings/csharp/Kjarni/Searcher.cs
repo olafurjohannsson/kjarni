@@ -117,7 +117,7 @@ namespace Kjarni
         /// <param name="mode">Search mode (null = use default)</param>
         /// <param name="topK">Number of results (null = use default)</param>
         /// <param name="rerank">Use reranker (null = auto)</param>
-        /// <param name="threshold">Minimum score threshold</param>
+        /// <param name="threshold">Minimum score. Not available for hybrid search without a reranker, whose scores depend on rank alone.</param>
         /// <param name="sourcePattern">Filter by source file pattern (glob)</param>
         /// <param name="filterKey">Metadata key to filter on</param>
         /// <param name="filterValue">Required value for filterKey</param>

@@ -297,6 +297,10 @@ fn indexer_error_to_code(e: &IndexerError) -> KjarniErrorCode {
         IndexerError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
         IndexerError::DimensionMismatch { .. } => KjarniErrorCode::InvalidConfig,
         IndexerError::NoInputs => KjarniErrorCode::InvalidConfig,
+        IndexerError::NotAnIndex(_) => KjarniErrorCode::InvalidConfig,
+        IndexerError::InputInsideIndex(_) => KjarniErrorCode::InvalidConfig,
+        IndexerError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+        IndexerError::ModelMismatch { .. } => KjarniErrorCode::InvalidConfig,
         IndexerError::PathNotFound(_) => KjarniErrorCode::ModelNotFound,
         _ => KjarniErrorCode::InferenceFailed,
     }

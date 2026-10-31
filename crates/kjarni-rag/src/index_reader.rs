@@ -1,13 +1,15 @@
 //! Index reader with multi-segment search
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::IndexConfig;
+use super::index_writer::{Manifest, check_version, read_manifest};
 use super::segment::Segment;
 use crate::SearchResult;
+use kjarni_search::bm25::CorpusStats;
 use kjarni_search::hybrid::hybrid_search;
 
 /// Filter for metadata-based search
@@ -53,6 +55,11 @@ impl MetadataFilter {
         // Check source patterns
         if !self.source_patterns.is_empty() {
             if let Some(source) = metadata.get("source") {
+                // Sources are stored as the path the caller typed, which may be
+                // relative, absolute or use backslashes.
+                let source = source.replace('\\', "/");
+                let source = source.strip_prefix("./").unwrap_or(&source);
+
                 // Extract filename for patterns without path separators
                 let filename = std::path::Path::new(source)
                     .file_name()
@@ -61,8 +68,10 @@ impl MetadataFilter {
 
                 let matches_pattern = self.source_patterns.iter().any(|pattern| {
                     if pattern.contains('/') {
-                        // Pattern has path components - match against full path
+                        // Pattern has path components - it may match the full path
+                        // or any trailing part of it
                         glob_match::glob_match(pattern, source)
+                            || glob_match::glob_match(&format!("**/{pattern}"), source)
                     } else {
                         // Simple pattern - match against filename only
                         glob_match::glob_match(pattern, filename)
@@ -102,27 +111,25 @@ impl MetadataFilter {
 
 /// Reads and searches a segmented index
 pub struct IndexReader {
-    #[expect(
-        dead_code,
-        reason = "not referenced yet; kept until the path that needs it lands"
-    )]
     root: PathBuf,
     config: IndexConfig,
+    manifest: Manifest,
     segments: Vec<Segment>,
     total_docs: usize,
 }
 
 impl IndexReader {
     /// Search with metadata filtering
+    ///
+    /// Filters walk the full ranking, so a match is found however low it ranks.
     pub fn search_semantic_filtered(
         &self,
         query_embedding: &[f32],
         limit: usize,
         filter: &MetadataFilter,
     ) -> Vec<SearchResult> {
-        // Get more results, then filter
-        let candidates = self.search_semantic(query_embedding, limit * 3);
-        self.apply_filter(candidates, filter, limit)
+        let ranked = self.ranked_semantic(query_embedding, self.total_docs);
+        self.convert_results(self.take_matching(ranked, filter, limit))
     }
 
     /// Search keywords with filter
@@ -132,8 +139,8 @@ impl IndexReader {
         limit: usize,
         filter: &MetadataFilter,
     ) -> Vec<SearchResult> {
-        let candidates = self.search_keywords(query, limit * 3);
-        self.apply_filter(candidates, filter, limit)
+        let ranked = self.ranked_keywords(query, self.total_docs);
+        self.convert_results(self.take_matching(ranked, filter, limit))
     }
 
     /// Hybrid search with filter
@@ -144,21 +151,48 @@ impl IndexReader {
         limit: usize,
         filter: &MetadataFilter,
     ) -> Vec<SearchResult> {
-        let candidates = self.search_hybrid(query, query_embedding, limit * 3);
-        self.apply_filter(candidates, filter, limit)
+        let fetch = limit.saturating_mul(2);
+        let keyword =
+            self.take_matching(self.ranked_keywords(query, self.total_docs), filter, fetch);
+        let semantic = self.take_matching(
+            self.ranked_semantic(query_embedding, self.total_docs),
+            filter,
+            fetch,
+        );
+        self.fuse(keyword, semantic, limit)
     }
 
-    fn apply_filter(
+    /// The best `limit` entries of a ranking whose metadata passes the filter.
+    fn take_matching(
         &self,
-        results: Vec<SearchResult>,
+        ranked: Vec<(usize, usize, f32)>,
         filter: &MetadataFilter,
         limit: usize,
-    ) -> Vec<SearchResult> {
-        results
-            .into_iter()
-            .filter(|r| filter.matches(&r.metadata))
-            .take(limit)
-            .collect()
+    ) -> Vec<(usize, usize, f32)> {
+        let mut metadata: HashMap<usize, Vec<HashMap<String, String>>> = HashMap::new();
+        let mut matching = Vec::new();
+
+        for (seg_idx, doc_id, score) in ranked {
+            if matching.len() >= limit {
+                break;
+            }
+            let segment_metadata = metadata.entry(seg_idx).or_insert_with(|| {
+                self.segments[seg_idx]
+                    .read_all_metadata()
+                    .unwrap_or_else(|e| {
+                        log::warn!("Failed to read metadata of segment {seg_idx}: {e}");
+                        Vec::new()
+                    })
+            });
+            if segment_metadata
+                .get(doc_id)
+                .is_some_and(|m| filter.matches(m))
+            {
+                matching.push((seg_idx, doc_id, score));
+            }
+        }
+
+        matching
     }
 }
 
@@ -169,27 +203,24 @@ impl IndexReader {
 
         let config: IndexConfig =
             serde_json::from_str(&fs::read_to_string(root.join("config.json"))?)?;
+        check_version(&config)?;
 
-        // Load all segments
-        let mut segments = Vec::new();
-        let segments_dir = root.join("segments");
-
-        if segments_dir.exists() {
-            let mut entries: Vec<_> = fs::read_dir(&segments_dir)?
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_dir())
-                .collect();
-
-            // Sort by segment ID
-            entries.sort_by_key(|e| e.file_name());
-
-            for entry in entries {
-                match Segment::open(&entry.path()) {
-                    Ok(segment) => segments.push(segment),
-                    Err(e) => log::warn!("Failed to load segment {:?}: {}", entry.path(), e),
+        // A commit can retire a segment between reading the manifest and opening the
+        // segment, which reads as damage until the manifest shows it has moved on.
+        let mut attempts = 0;
+        let (manifest, segments) = loop {
+            let manifest = read_manifest(&root)?;
+            match Self::open_segments(&root, &manifest) {
+                Ok(segments) => break (manifest, segments),
+                Err(e) => {
+                    attempts += 1;
+                    let moved_on = read_manifest(&root).is_ok_and(|m| m != manifest);
+                    if !moved_on || attempts >= 5 {
+                        return Err(e);
+                    }
                 }
             }
-        }
+        };
 
         let total_docs = segments.iter().map(|s| s.len()).sum();
 
@@ -202,50 +233,38 @@ impl IndexReader {
         Ok(Self {
             root,
             config,
+            manifest,
             segments,
             total_docs,
         })
     }
 
+    fn open_segments(root: &Path, manifest: &Manifest) -> Result<Vec<Segment>> {
+        // Skipping a damaged segment would return incomplete results that look complete,
+        // and shift every global document ID after it.
+        manifest
+            .segments
+            .iter()
+            .map(|name| {
+                Segment::open(&root.join("segments").join(name))
+                    .with_context(|| format!("index segment {name} is damaged; rebuild the index"))
+            })
+            .collect()
+    }
+
+    /// Whether this reader still shows the latest commit.
+    pub fn is_current(&self) -> bool {
+        read_manifest(&self.root).is_ok_and(|m| m == self.manifest)
+    }
+
     /// Semantic search across all segments
     pub fn search_semantic(&self, query_embedding: &[f32], limit: usize) -> Vec<SearchResult> {
-        if query_embedding.len() != self.config.dimension {
-            return vec![];
-        }
-
-        // Collect results from all segments
-        let mut all_results: Vec<(usize, usize, f32)> = Vec::new(); // (segment_idx, doc_id, score)
-
-        for (seg_idx, segment) in self.segments.iter().enumerate() {
-            let segment_results = segment.search_vectors(query_embedding, limit);
-            for (doc_id, score) in segment_results {
-                all_results.push((seg_idx, doc_id, score));
-            }
-        }
-
-        // Sort by score descending
-        all_results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        all_results.truncate(limit);
-
-        // Convert to SearchResults
-        self.convert_results(all_results)
+        self.convert_results(self.ranked_semantic(query_embedding, limit))
     }
 
     /// Keyword search across all segments
     pub fn search_keywords(&self, query: &str, limit: usize) -> Vec<SearchResult> {
-        let mut all_results: Vec<(usize, usize, f32)> = Vec::new();
-
-        for (seg_idx, segment) in self.segments.iter().enumerate() {
-            let segment_results = segment.search_keywords(query, limit);
-            for (doc_id, score) in segment_results {
-                all_results.push((seg_idx, doc_id, score));
-            }
-        }
-
-        all_results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        all_results.truncate(limit);
-
-        self.convert_results(all_results)
+        self.convert_results(self.ranked_keywords(query, limit))
     }
 
     /// Hybrid search (BM25 + semantic)
@@ -256,40 +275,70 @@ impl IndexReader {
         limit: usize,
     ) -> Vec<SearchResult> {
         // Get more results for fusion
-        let keyword_results = self.search_keywords(query, limit * 2);
-        let semantic_results = self.search_semantic(query_embedding, limit * 2);
+        let fetch = limit.saturating_mul(2);
+        let keyword = self.ranked_keywords(query, fetch);
+        let semantic = self.ranked_semantic(query_embedding, fetch);
+        self.fuse(keyword, semantic, limit)
+    }
 
-        // Convert to (global_id, score) format for fusion
-        let keyword_indexed: Vec<(usize, f32)> = keyword_results
-            .iter()
-            .map(|r| (r.document_id, r.score))
-            .collect();
+    /// (segment_idx, doc_id, score), best first, across all segments.
+    fn ranked_semantic(&self, query_embedding: &[f32], limit: usize) -> Vec<(usize, usize, f32)> {
+        if query_embedding.len() != self.config.dimension {
+            return vec![];
+        }
 
-        let semantic_indexed: Vec<(usize, f32)> = semantic_results
-            .iter()
-            .map(|r| (r.document_id, r.score))
-            .collect();
+        let mut all_results = Vec::new();
+        for (seg_idx, segment) in self.segments.iter().enumerate() {
+            for (doc_id, score) in segment.search_vectors(query_embedding, limit) {
+                all_results.push((seg_idx, doc_id, score));
+            }
+        }
+        Self::best_first(all_results, limit)
+    }
 
-        let fused = hybrid_search(keyword_indexed, semantic_indexed, limit);
+    /// (segment_idx, doc_id, score), best first, scored against the whole index.
+    fn ranked_keywords(&self, query: &str, limit: usize) -> Vec<(usize, usize, f32)> {
+        let stats = CorpusStats::for_query(query, self.segments.iter().map(|s| s.bm25()));
 
-        // Look up full results
-        fused
+        let mut all_results = Vec::new();
+        for (seg_idx, segment) in self.segments.iter().enumerate() {
+            for (doc_id, score) in segment.search_keywords_with_stats(query, limit, &stats) {
+                all_results.push((seg_idx, doc_id, score));
+            }
+        }
+        Self::best_first(all_results, limit)
+    }
+
+    /// Segments are visited in order, so a stable sort keeps ties deterministic.
+    fn best_first(mut results: Vec<(usize, usize, f32)>, limit: usize) -> Vec<(usize, usize, f32)> {
+        results.sort_by(|a, b| b.2.total_cmp(&a.2));
+        results.truncate(limit);
+        results
+    }
+
+    /// Reciprocal rank fusion of two rankings.
+    fn fuse(
+        &self,
+        keyword: Vec<(usize, usize, f32)>,
+        semantic: Vec<(usize, usize, f32)>,
+        limit: usize,
+    ) -> Vec<SearchResult> {
+        let to_global = |ranked: Vec<(usize, usize, f32)>| -> Vec<(usize, f32)> {
+            ranked
+                .into_iter()
+                .map(|(seg_idx, doc_id, score)| (self.local_to_global(seg_idx, doc_id), score))
+                .collect()
+        };
+
+        let fused = hybrid_search(to_global(keyword), to_global(semantic), limit)
             .into_iter()
             .filter_map(|(global_id, score)| {
-                let (seg_idx, local_id) = self.global_to_local(global_id)?;
-                let segment = &self.segments[seg_idx];
-
-                let text = segment.get_document(local_id).ok()?;
-                let metadata = segment.get_metadata(local_id).ok()?;
-
-                Some(SearchResult {
-                    score,
-                    document_id: global_id,
-                    text,
-                    metadata,
-                })
+                let (seg_idx, doc_id) = self.global_to_local(global_id)?;
+                Some((seg_idx, doc_id, score))
             })
-            .collect()
+            .collect();
+
+        self.convert_results(fused)
     }
 
     /// Convert (segment_idx, local_doc_id, score) to SearchResults
@@ -357,6 +406,11 @@ impl IndexReader {
 
     pub fn is_empty(&self) -> bool {
         self.total_docs == 0
+    }
+
+    /// The model the index's vectors came from, if recorded
+    pub fn embedding_model(&self) -> Option<&str> {
+        self.config.embedding_model.as_deref()
     }
 
     /// Embedding dimension

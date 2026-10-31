@@ -1,7 +1,10 @@
 //! Unified search index combining BM25 and vector search
 use anyhow::Result;
 use kjarni_search::{
-    bm25::Bm25Index, hybrid::hybrid_search, types::SearchResult, vector::VectorStore,
+    bm25::Bm25Index,
+    hybrid::{hybrid_search, rank_order},
+    types::SearchResult,
+    vector::VectorStore,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -352,7 +355,7 @@ fn hybrid_search_weighted(
     }
 
     let mut results: Vec<(usize, f32)> = scores.into_iter().collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(rank_order);
     results.truncate(limit);
     results
 }

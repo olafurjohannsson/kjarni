@@ -2,6 +2,18 @@
 
 ## 0.3.0
 
+- **Index format 2, with correct updates.** Indexes from earlier versions must be
+  rebuilt. Commits are atomic, a writer holds a lock, and small segments merge.
+  `index add` and `Indexer::add` replace a file already in the index, and
+  `index remove` and `Indexer::remove` take files and folders out.
+
+- **Search fixes.** Source code and plain text are stored as written, and markdown
+  cleanup keeps code and plain brackets. `chunk_overlap` takes effect. Keyword scores
+  are comparable across segments, results are deterministic, and filters search the
+  whole ranking. `force` and `Indexer::delete` refuse folders that are not indexes.
+  Searching with a different model from the one that built the index is an error, and
+  so is a threshold on hybrid search without a reranker.
+
 - **`kjarni::Conversation` in `kjarni.hpp`.** `Chat::conversation()` starts a chat that
   remembers its turns, with `send`, `stream`, `clear` and `size`. C++ callers previously
   had to use the C API for this, because `Chat::send` and `Chat::stream` keep no history.

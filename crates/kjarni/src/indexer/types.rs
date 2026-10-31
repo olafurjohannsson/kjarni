@@ -51,6 +51,18 @@ pub enum IndexerError {
     #[error("Index not found at {0}")]
     IndexNotFound(String),
 
+    #[error("{0} exists but is not a Kjarni index; refusing to replace it")]
+    NotAnIndex(String),
+
+    #[error("Input {0} is inside the index being replaced")]
+    InputInsideIndex(String),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("Index was built with {index_model}, but this indexer uses {model}")]
+    ModelMismatch { index_model: String, model: String },
+
     #[error("Failed to load embedder: {0}")]
     EmbedderError(#[from] crate::embedder::EmbedderError),
 

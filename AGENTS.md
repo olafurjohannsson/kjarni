@@ -83,6 +83,9 @@ kjarni index create mynotes.idx ./notes
 kjarni search -q --format json mynotes.idx "how do refunds work?" --mode hybrid
 ```
 
+`kjarni index add mynotes.idx ./notes/edited.md` replaces a file already in the
+index, and `kjarni index remove mynotes.idx ./notes/old.md` takes one out.
+
 Modes: `hybrid` (default), `semantic`, `keyword`. Add `--rerank-model` for
 cross-encoder reranking of the results.
 
