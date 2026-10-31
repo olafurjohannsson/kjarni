@@ -30,8 +30,10 @@ pub const WHISPER_CHUNK_SAMPLES: usize = 480_000;
 
 const SOT_TOKEN: u32 = 50258; // <|startoftranscript|>
 const EOT_TOKEN: u32 = 50257; // <|endoftext|>
+// large-v3 added a language, which moved every token after the language tokens, so
+// these are looked up in the tokenizer. The values are whisper-small's.
 const TRANSCRIBE_TOKEN: u32 = 50359; // <|transcribe|>
-const TRANSLATE_TOKEN: u32 = 50360; // <|translate|>
+const TRANSLATE_TOKEN: u32 = 50358; // <|translate|>
 const NO_TIMESTAMPS_TOKEN: u32 = 50363; // <|notimestamps|>
 const TIMESTAMP_BEGIN: u32 = 50364; // <|0.00|>
 const FIRST_SPECIAL_TOKEN: u32 = 50257;
@@ -55,8 +57,8 @@ const TIMESTAMP_RESOLUTION: f32 = 0.02;
 const MIN_SEGMENT_TOKENS: u32 = 25;
 
 /// The timestamp token at which a window's audio ends and its padding begins.
-fn audio_end_timestamp(chunk: &AudioChunk) -> u32 {
-    TIMESTAMP_BEGIN + (chunk.duration_secs / TIMESTAMP_RESOLUTION).round() as u32
+fn audio_end_timestamp(chunk: &AudioChunk, timestamp_begin: u32) -> u32 {
+    timestamp_begin + (chunk.duration_secs / TIMESTAMP_RESOLUTION).round() as u32
 }
 
 /// Configuration for Whisper transcription, passed down from the high-level API.
@@ -398,7 +400,8 @@ impl WhisperModel {
         mut on_token: Option<&mut dyn FnMut(u32, &str) -> bool>,
     ) -> Result<WhisperChunkResult> {
         let chunk_time_offset = chunk.start_secs;
-        let audio_end = audio_end_timestamp(chunk);
+        let timestamp_begin = self.timestamp_begin();
+        let audio_end = audio_end_timestamp(chunk, timestamp_begin);
         let tokenizer = self.tokenizer();
         let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
         let prompt_tokens = self.build_prompt_tokens(config);
@@ -411,7 +414,14 @@ impl WhisperModel {
         let logits = steps.step(&input_ids)?;
         let last_logits = logits.slice(s![0, -1_i32, ..]);
 
-        let mut next_token = Self::pick_token(&last_logits, &[], config, eos_token_id, audio_end);
+        let mut next_token = Self::pick_token(
+            &last_logits,
+            &[],
+            config,
+            eos_token_id,
+            audio_end,
+            timestamp_begin,
+        );
         let mut generated_ids: Vec<u32> = vec![next_token];
 
         // Notify callback
@@ -438,9 +448,10 @@ impl WhisperModel {
                 config,
                 eos_token_id,
                 audio_end,
+                timestamp_begin,
             );
             generated_ids.push(next_token);
-            if let Some(keep) = looping_tail(&generated_ids) {
+            if let Some(keep) = looping_tail(&generated_ids, timestamp_begin) {
                 generated_ids.truncate(keep);
                 break;
             }
@@ -487,6 +498,7 @@ impl WhisperModel {
         let max_len = prompt_tokens.len() + config.max_tokens_per_chunk;
         let mut steps = self.decoder_steps(&encoder, max_len)?;
 
+        let timestamp_begin = self.timestamp_begin();
         let mut input_ids =
             Array2::from_shape_fn((n, prompt_tokens.len()), |(_, j)| prompt_tokens[j]);
         let mut generated: Vec<Vec<u32>> = vec![Vec::new(); n];
@@ -503,11 +515,12 @@ impl WhisperModel {
                     &generated[b],
                     config,
                     eos_token_id,
-                    audio_end_timestamp(&chunks[b]),
+                    audio_end_timestamp(&chunks[b], timestamp_begin),
+                    timestamp_begin,
                 );
                 generated[b].push(next[b]);
                 done[b] = next[b] == eos_token_id;
-                if let Some(keep) = looping_tail(&generated[b]) {
+                if let Some(keep) = looping_tail(&generated[b], timestamp_begin) {
                     generated[b].truncate(keep);
                     done[b] = true;
                 }
@@ -560,6 +573,7 @@ impl WhisperModel {
         config: &WhisperTranscriberConfig,
         eos_token_id: u32,
         audio_end: u32,
+        timestamp_begin: u32,
     ) -> u32 {
         let argmax = |allowed: &dyn Fn(u32) -> bool| {
             logits
@@ -574,7 +588,7 @@ impl WhisperModel {
             return argmax(&|id| is_text(id) || id == eos_token_id);
         }
 
-        let is_ts = |id: u32| id >= TIMESTAMP_BEGIN;
+        let is_ts = |id: u32| id >= timestamp_begin;
         let last_was_ts = generated.last().is_some_and(|&t| is_ts(t));
         let penultimate_was_ts = generated.len() < 2 || is_ts(generated[generated.len() - 2]);
         let (mut text_ok, ts_ok) = match (last_was_ts, penultimate_was_ts) {
@@ -589,12 +603,12 @@ impl WhisperModel {
             // closed the last; any other must be later.
             Some(&t) if last_was_ts && !penultimate_was_ts => t,
             Some(&t) => t + 1,
-            None => TIMESTAMP_BEGIN,
+            None => timestamp_begin,
         };
         // The first segment starts within the first second.
         let last_ts = if generated.is_empty() {
             text_ok = false;
-            TIMESTAMP_BEGIN + 50
+            timestamp_begin + 50
         } else {
             u32::MAX
         };
@@ -641,16 +655,30 @@ impl WhisperModel {
 
         // Task token
         match config.task {
-            WhisperTask::Transcribe => tokens.push(TRANSCRIBE_TOKEN),
-            WhisperTask::Translate => tokens.push(TRANSLATE_TOKEN),
+            WhisperTask::Transcribe => {
+                tokens.push(self.special_token("<|transcribe|>", TRANSCRIBE_TOKEN))
+            }
+            WhisperTask::Translate => {
+                tokens.push(self.special_token("<|translate|>", TRANSLATE_TOKEN))
+            }
         }
 
         // Suppress timestamp generation unless requested
         if !config.timestamps {
-            tokens.push(NO_TIMESTAMPS_TOKEN);
+            tokens.push(self.special_token("<|notimestamps|>", NO_TIMESTAMPS_TOKEN));
         }
 
         tokens
+    }
+
+    /// A special token's id in this model's tokenizer.
+    fn special_token(&self, token: &str, fallback: u32) -> u32 {
+        self.tokenizer().token_to_id(token).unwrap_or(fallback)
+    }
+
+    /// The id of `<|0.00|>`: this and every id above it are timestamps.
+    fn timestamp_begin(&self) -> u32 {
+        self.special_token("<|0.00|>", TIMESTAMP_BEGIN)
     }
 
     /// Resolve a language code
@@ -667,8 +695,12 @@ impl WhisperModel {
         chunk_offset: f32,
     ) -> Result<WhisperChunkResult> {
         if config.timestamps {
-            let segments =
-                Self::parse_timestamp_segments(&generated_ids, self.tokenizer(), chunk_offset);
+            let segments = Self::parse_timestamp_segments(
+                &generated_ids,
+                self.tokenizer(),
+                chunk_offset,
+                self.timestamp_begin(),
+            );
             let text = segments
                 .iter()
                 .map(|s| s.text.as_str())
@@ -706,15 +738,16 @@ impl WhisperModel {
         token_ids: &[u32],
         tokenizer: &tokenizers::Tokenizer,
         chunk_offset: f32,
+        timestamp_begin: u32,
     ) -> Vec<WhisperSegment> {
         let mut segments = Vec::new();
         let mut current_start: Option<f32> = None;
         let mut current_tokens: Vec<u32> = Vec::new();
 
         for &id in token_ids {
-            if id >= TIMESTAMP_BEGIN {
+            if id >= timestamp_begin {
                 // Timestamp token
-                let time = (id - TIMESTAMP_BEGIN) as f32 * TIMESTAMP_RESOLUTION + chunk_offset;
+                let time = (id - timestamp_begin) as f32 * TIMESTAMP_RESOLUTION + chunk_offset;
 
                 if current_start.is_none() {
                     // Opening timestamp
@@ -799,7 +832,7 @@ impl WhisperModel {
 /// came out as "er því að" two hundred times, and took three times longer
 /// than its sense would have. A cycle of up to `MAX_PERIOD` tokens seen
 /// `LOOP_REPEATS` times running at the end ends the chunk.
-fn looping_tail(ids: &[u32]) -> Option<usize> {
+fn looping_tail(ids: &[u32], timestamp_begin: u32) -> Option<usize> {
     const MAX_PERIOD: usize = 16;
     const LOOP_REPEATS: usize = 4;
     (1..=MAX_PERIOD).find_map(|period| {
@@ -811,7 +844,7 @@ fn looping_tail(ids: &[u32]) -> Option<usize> {
         let cycle = &tail[..period];
         // Timestamps are never part of a real loop's evidence: each one is a
         // new moment, and a run of "<|t|> word <|t|> word" is speech.
-        if cycle.iter().any(|&t| t >= TIMESTAMP_BEGIN) {
+        if cycle.iter().any(|&t| t >= timestamp_begin) {
             return None;
         }
         tail.chunks(period)
@@ -895,7 +928,55 @@ mod tests {
             ..Default::default()
         };
         let audio_end = TIMESTAMP_BEGIN + (audio_end_secs / TIMESTAMP_RESOLUTION) as u32;
-        WhisperModel::pick_token(&logits.view(), generated, &config, EOT_TOKEN, audio_end)
+        WhisperModel::pick_token(
+            &logits.view(),
+            generated,
+            &config,
+            EOT_TOKEN,
+            audio_end,
+            TIMESTAMP_BEGIN,
+        )
+    }
+
+    /// The fallback ids are whisper-small's, read from its tokenizer.
+    #[test]
+    #[ignore = "needs whisper-small in the local model cache"]
+    fn fallback_ids_match_the_whisper_small_tokenizer() {
+        let path = kjarni_transformers::models::get_default_cache_dir()
+            .join("openai_whisper-small/tokenizer.json");
+        let tokenizer = tokenizers::Tokenizer::from_file(path).unwrap();
+        for (token, id) in [
+            ("<|transcribe|>", TRANSCRIBE_TOKEN),
+            ("<|translate|>", TRANSLATE_TOKEN),
+            ("<|notimestamps|>", NO_TIMESTAMPS_TOKEN),
+            ("<|0.00|>", TIMESTAMP_BEGIN),
+        ] {
+            assert_eq!(tokenizer.token_to_id(token), Some(id), "{token}");
+        }
+    }
+
+    /// On large-v3 `<|notimestamps|>` sits where whisper-small's `<|0.00|>` does.
+    #[test]
+    fn the_token_before_the_first_timestamp_is_not_a_timestamp() {
+        const LARGE_V3_BEGIN: u32 = 50365;
+        let config = WhisperTranscriberConfig {
+            timestamps: true,
+            ..Default::default()
+        };
+        let mut logits = ndarray::Array1::<f32>::zeros(51_866);
+        logits[(LARGE_V3_BEGIN - 1) as usize] = 9.0;
+        logits[(LARGE_V3_BEGIN + 3) as usize] = 1.0;
+
+        let token = WhisperModel::pick_token(
+            &logits.view(),
+            &[],
+            &config,
+            EOT_TOKEN,
+            LARGE_V3_BEGIN + 1500,
+            LARGE_V3_BEGIN,
+        );
+
+        assert_eq!(token, LARGE_V3_BEGIN + 3);
     }
 
     #[test]
@@ -944,13 +1025,17 @@ mod tests {
         for _ in 0..3 {
             ids.extend(phrase);
         }
-        assert_eq!(looping_tail(&ids), None, "three times is still speech");
+        assert_eq!(
+            looping_tail(&ids, TIMESTAMP_BEGIN),
+            None,
+            "three times is still speech"
+        );
         ids.extend(phrase);
-        assert_eq!(looping_tail(&ids), Some(6));
+        assert_eq!(looping_tail(&ids, TIMESTAMP_BEGIN), Some(6));
         // A single token stuck.
-        assert_eq!(looping_tail(&[5, 7, 7, 7, 7]), Some(2));
+        assert_eq!(looping_tail(&[5, 7, 7, 7, 7], TIMESTAMP_BEGIN), Some(2));
         // Distinct timestamps keep the same word from counting as a loop.
         let stamped: Vec<u32> = (0..8).flat_map(|i| [TIMESTAMP_BEGIN + i, 42]).collect();
-        assert_eq!(looping_tail(&stamped), None);
+        assert_eq!(looping_tail(&stamped, TIMESTAMP_BEGIN), None);
     }
 }

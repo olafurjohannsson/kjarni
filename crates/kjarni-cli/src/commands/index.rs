@@ -269,6 +269,21 @@ async fn process_chunk_file(
     Ok(total)
 }
 
+/// Reads documents for an index, leaving out hidden folders and the build output
+/// and dependencies `search_folder` also skips.
+fn document_loader(chunk_size: usize, chunk_overlap: usize, quiet: bool) -> DocumentLoader {
+    DocumentLoader::new(LoaderConfig {
+        splitter: SplitterConfig {
+            chunk_size,
+            chunk_overlap,
+            clean_markdown: true,
+        },
+        quiet,
+        exclude_patterns: super::mcp::EXCLUDED.iter().map(|p| p.to_string()).collect(),
+        ..Default::default()
+    })
+}
+
 async fn process_inputs(
     writer: &mut IndexWriter,
     embedder: &Embedder,
@@ -277,16 +292,7 @@ async fn process_inputs(
     chunk_overlap: usize,
     quiet: bool,
 ) -> Result<usize> {
-    let loader_config = LoaderConfig {
-        splitter: SplitterConfig {
-            chunk_size,
-            chunk_overlap,
-            clean_markdown: true,
-        },
-        quiet,
-        ..Default::default()
-    };
-    let loader = Arc::new(DocumentLoader::new(loader_config));
+    let loader = Arc::new(document_loader(chunk_size, chunk_overlap, quiet));
 
     let (tx, mut rx) = mpsc::channel::<Vec<Chunk>>(64);
     let concurrency_limit = 16;
@@ -303,15 +309,8 @@ async fn process_inputs(
                 continue;
             }
 
-            for entry in walkdir::WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-
-                if !loader_ref.is_supported_extension(entry.path()) {
+            for file_path in loader_ref.files_in(path) {
+                if !loader_ref.is_supported_extension(&file_path) {
                     continue;
                 }
 
@@ -322,7 +321,6 @@ async fn process_inputs(
 
                 let loader = loader_ref.clone();
                 let tx = tx.clone();
-                let file_path = entry.path().to_owned();
 
                 tokio::spawn(async move {
                     let _p = permit;
@@ -511,6 +509,34 @@ fn truncate(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folders_skip_hidden_and_build_output() {
+        let dir = tempfile::tempdir().unwrap();
+        for file in [
+            "keep/note.md",
+            ".hidden/secret.md",
+            "target/build.md",
+            "node_modules/pkg/readme.md",
+        ] {
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "some indexable text").unwrap();
+        }
+
+        let files = document_loader(100, 10, true).files_in(dir.path());
+
+        assert_eq!(files, [dir.path().join("keep/note.md")]);
+    }
+
+    #[test]
+    fn a_hidden_file_named_directly_is_indexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".notes.md");
+        std::fs::write(&file, "some indexable text").unwrap();
+
+        assert_eq!(document_loader(100, 10, true).files_in(&file), [file]);
+    }
 
     #[test]
     fn test_format_size_bytes() {

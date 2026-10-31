@@ -431,7 +431,7 @@ Referenced by short name; the underlying HuggingFace model is listed for searcha
 | Emotion (7-class) | `distilroberta-emotion` | `j-hartmann/emotion-english-distilroberta-base` \* | 82 MB |
 | Emotion (28-class) | `roberta-emotions` | `SamLowe/roberta-base-go_emotions` | 125 MB |
 | Speech-to-text | `whisper-small` | `openai/whisper-small` | 244 MB |
-| Speech-to-text | `whisper-large-v3` | `openai/whisper-large-v3` | 1.6 GB |
+| Speech-to-text | `whisper-large-v3` | `openai/whisper-large-v3` | 3.1 GB |
 | Summarization | `distilbart-cnn` | `sshleifer/distilbart-cnn-12-6` \* | 306 MB |
 | Summarization | `bart-large-cnn` | `facebook/bart-large-cnn` | 406 MB |
 | Instruction / seq2seq | `flan-t5-base` | `google/flan-t5-base` | 250 MB |

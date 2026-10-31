@@ -19,7 +19,7 @@ option(KJARNI_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 
 enable_testing()
 
-add_executable(test_kjarni test_kjarni.cpp)
+add_executable(test_kjarni test_kjarni.cpp include_order.cpp)
 
 target_include_directories(test_kjarni PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 target_link_directories(test_kjarni PRIVATE "${KJARNI_LIB_DIR}")

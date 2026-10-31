@@ -39,7 +39,7 @@ const CLASSIFY_MODEL: &str = "distilbert-sentiment";
 /// Never indexed by `search_folder`: build output, dependencies and virtual
 /// environments, which in a code repository outnumber the sources many times
 /// over. Hidden folders such as .git are skipped as well.
-const EXCLUDED: &[&str] = &[
+pub(crate) const EXCLUDED: &[&str] = &[
     "target",
     "node_modules",
     "dist",

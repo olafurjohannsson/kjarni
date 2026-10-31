@@ -219,6 +219,67 @@ mod tests {
         );
     }
 
+    /// whisper-large-v3 ships half-precision weights only. The expected text is
+    /// transformers' greedy output for this clip on the same weights, as f32.
+    #[tokio::test]
+    #[ignore = "needs a GPU and whisper-large-v3 (3 GB) in the local model cache"]
+    async fn large_v3_matches_transformers_on_both_devices() {
+        const EXPECTED: &str = " And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.";
+        let path = speech_fixture();
+        let on_cpu = Transcriber::builder("whisper-large-v3")
+            .language("en")
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap()
+            .transcribe_file(&path)
+            .unwrap();
+        assert_eq!(on_cpu.text, EXPECTED);
+
+        // Streaming decodes with timestamps off, which needs `<|notimestamps|>`.
+        let mut stream = Transcriber::builder("whisper-large-v3")
+            .language("en")
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap()
+            .stream_file(&path)
+            .await
+            .unwrap();
+        let mut streamed = String::new();
+        while let Some(token) = futures::StreamExt::next(&mut stream).await {
+            streamed.push_str(&token.unwrap().text);
+        }
+        assert_eq!(streamed, EXPECTED);
+
+        let on_gpu = Transcriber::builder("whisper-large-v3")
+            .language("en")
+            .gpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap()
+            .transcribe_file(&path)
+            .unwrap();
+        assert_eq!(on_gpu.text, EXPECTED);
+    }
+
+    #[tokio::test]
+    async fn a_panic_feeding_the_stream_reaches_the_reader_as_an_error() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TranscriberResult<u32>>(1);
+        let job = tokio::task::spawn_blocking(|| panic!("boom"));
+
+        super::super::model::report_panic(job, tx).await;
+
+        let error = rx.recv().await.expect("an error, not a closed channel");
+        assert!(matches!(
+            error,
+            Err(TranscriberError::TranscriptionFailed(_))
+        ));
+    }
+
     /// The whole path on each device: mel, encoder, decoder, timestamps and text. They
     /// differ only in the encoder and decoder kernels, so a transcript that changes
     /// means one of them does.
