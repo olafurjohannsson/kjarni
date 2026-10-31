@@ -942,9 +942,8 @@ mod tests {
     #[test]
     #[ignore = "needs whisper-small in the local model cache"]
     fn fallback_ids_match_the_whisper_small_tokenizer() {
-        let path = dirs::cache_dir()
-            .unwrap()
-            .join("kjarni/openai_whisper-small/tokenizer.json");
+        let path = kjarni_transformers::models::get_default_cache_dir()
+            .join("openai_whisper-small/tokenizer.json");
         let tokenizer = tokenizers::Tokenizer::from_file(path).unwrap();
         for (token, id) in [
             ("<|transcribe|>", TRANSCRIBE_TOKEN),
