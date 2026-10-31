@@ -185,6 +185,14 @@ bool stream_trampoline(const char* text, void* user_data) {
     return (*static_cast<F*>(user_data))(std::string_view{text ? text : ""});
 }
 
+/// Adopts a `char*` the C API allocated and hands back an owning string.
+inline std::string take_string(char* raw) {
+    if (!raw) return {};
+    std::string s{raw};
+    kjarni_string_free(raw);
+    return s;
+}
+
 }  // namespace detail
 
 // ─── Owned results ───────────────────────────────────────────────
@@ -556,6 +564,75 @@ struct ChatOptions {
     bool quantized = false;
 };
 
+/// A chat that remembers its earlier turns. Create one with `Chat::conversation`.
+///
+/// The `Chat` it came from has to outlive it, and serves one request at a time across
+/// all of its conversations.
+class Conversation {
+public:
+    /// Sends a message and returns the reply. Both join the history.
+    [[nodiscard]] Result<std::string> send(std::string_view message) {
+        return send_config(message, nullptr);
+    }
+
+    /// Sends a message with these generation settings and returns the reply.
+    [[nodiscard]] Result<std::string> send(std::string_view message, const Generation& gen) {
+        KjarniGenerationConfig cfg = gen.to_c();
+        return send_config(message, &cfg);
+    }
+
+    /// Streams a reply as `Chat::stream` does. The message and the text produced join
+    /// the history, including when `on_token` stops generation early.
+    template <typename F>
+    [[nodiscard]] std::expected<void, Error> stream(std::string_view message, F&& on_token) {
+        return stream_config(message, nullptr, std::forward<F>(on_token));
+    }
+
+    /// Streams a reply with these generation settings.
+    template <typename F>
+    [[nodiscard]] std::expected<void, Error> stream(std::string_view message, const Generation& gen,
+                                                    F&& on_token) {
+        KjarniGenerationConfig cfg = gen.to_c();
+        return stream_config(message, &cfg, std::forward<F>(on_token));
+    }
+
+    /// Forgets every turn. The system prompt stays unless `keep_system` is false.
+    void clear(bool keep_system = true) noexcept {
+        kjarni_chat_conversation_clear(handle_.get(), keep_system ? 1 : 0);
+    }
+
+    /// The number of messages in the history.
+    [[nodiscard]] std::size_t size() const noexcept {
+        return kjarni_chat_conversation_len(handle_.get());
+    }
+
+private:
+    friend class Chat;
+    explicit Conversation(KjarniChatConversation* raw) noexcept : handle_(raw) {}
+
+    Result<std::string> send_config(std::string_view message, const KjarniGenerationConfig* cfg) {
+        const std::string owned{message};
+        char* out = nullptr;
+        if (auto e = detail::check(
+                kjarni_chat_conversation_send(handle_.get(), owned.c_str(), cfg, &out));
+            !e) {
+            return std::unexpected(e.error());
+        }
+        return detail::take_string(out);
+    }
+
+    template <typename F>
+    std::expected<void, Error> stream_config(std::string_view message,
+                                             const KjarniGenerationConfig* cfg, F&& on_token) {
+        const std::string owned{message};
+        auto fn = std::forward<F>(on_token);
+        return detail::check(kjarni_chat_conversation_stream(
+            handle_.get(), owned.c_str(), cfg, &detail::stream_trampoline<decltype(fn)>, &fn, nullptr));
+    }
+
+    detail::Handle<KjarniChatConversation, kjarni_chat_conversation_free> handle_;
+};
+
 class Chat {
 public:
     using Options = ChatOptions;
@@ -585,7 +662,7 @@ public:
             !e) {
             return std::unexpected(e.error());
         }
-        return take(out);
+        return detail::take_string(out);
     }
 
     /// Sends one message with these generation settings and returns the reply.
@@ -599,7 +676,7 @@ public:
             !e) {
             return std::unexpected(e.error());
         }
-        return take(out);
+        return detail::take_string(out);
     }
 
     /// Streams tokens as they are produced.
@@ -630,6 +707,15 @@ public:
                                                 &fn, nullptr));
     }
 
+    /// Starts a conversation, which remembers its turns. `send` and `stream` above do not.
+    [[nodiscard]] Result<Conversation> conversation() const {
+        KjarniChatConversation* raw = nullptr;
+        if (auto e = detail::check(kjarni_chat_conversation_new(handle_.get(), &raw)); !e) {
+            return std::unexpected(e.error());
+        }
+        return Conversation{raw};
+    }
+
     /// The model's context window, in tokens.
     [[nodiscard]] std::size_t context_size() const noexcept {
         return kjarni_chat_context_size(handle_.get());
@@ -637,14 +723,6 @@ public:
 
 private:
     explicit Chat(KjarniChat* raw) noexcept : handle_(raw) {}
-
-    /// Adopts a `char*` the C API allocated and hands back an owning string.
-    static std::string take(char* raw) {
-        if (!raw) return {};
-        std::string s{raw};
-        kjarni_string_free(raw);
-        return s;
-    }
 
     detail::Handle<KjarniChat, kjarni_chat_free> handle_;
 };

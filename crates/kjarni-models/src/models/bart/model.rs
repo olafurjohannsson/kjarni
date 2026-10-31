@@ -117,8 +117,14 @@ impl EncoderDecoderModelFactory for BartModel {
         let mut cpu_dec = None;
         let mut gpu_enc = None;
         let mut gpu_dec = None;
-        let enc_config = Seq2SeqEncoderConfig::bart();
-        let dec_config = Seq2SeqDecoderConfig::bart();
+        let (enc_config, dec_config) = if config.is_marian() {
+            (
+                Seq2SeqEncoderConfig::marian(),
+                Seq2SeqDecoderConfig::marian(),
+            )
+        } else {
+            (Seq2SeqEncoderConfig::bart(), Seq2SeqDecoderConfig::bart())
+        };
 
         if device.is_cpu() || load_config.offload_embeddings {
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
@@ -464,7 +470,39 @@ impl EncoderDecoderLanguageModel for BartModel {
         self.config.decoder_start_token_id
     }
 
+    /// The GPU LM head stops at the projection, so `final_logits_bias` is added here;
+    /// the CPU head adds it itself. BART's bias is all zeros, Marian's is not. Marian's
+    /// generation config also bans the pad token and renormalizes, so the ban belongs
+    /// before the softmax.
+    fn adjust_logits(&self, logits: &mut ndarray::ArrayViewMut1<'_, f32>) {
+        if self.pipeline.plan().lm_head == Device::Wgpu
+            && let Some(bias) = &self.pipeline.lm_head().bias
+        {
+            *logits += &bias.row(0);
+        }
+        if self.config.is_marian() {
+            logits[self.config.pad_token_id as usize] = f32::NEG_INFINITY;
+        }
+    }
+
     fn get_default_generation_config(&self) -> GenerationConfig {
+        if self.config.is_marian() {
+            return GenerationConfig {
+                max_length: self.config.max_position_embeddings,
+                min_length: 0,
+                no_repeat_ngram_size: 0,
+                repetition_penalty: 1.0,
+                max_new_tokens: None,
+                add_bos_token: false,
+                strategy: DecodingStrategy::BeamSearch(BeamSearchParams {
+                    num_beams: 4,
+                    length_penalty: 1.0,
+                    early_stopping: false,
+                }),
+                speculation: None,
+            };
+        }
+
         // Try to load from task specific params in config
         if let Some(params) = &self.config.task_specific_params() {
             let summary_params = params.summarization.clone().unwrap();

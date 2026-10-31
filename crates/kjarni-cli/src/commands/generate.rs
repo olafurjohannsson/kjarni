@@ -343,6 +343,7 @@ mod tests {
                 | ModelArchitecture::Mpnet
                 | ModelArchitecture::T5
                 | ModelArchitecture::Bart
+                | ModelArchitecture::Marian
                 | ModelArchitecture::Whisper
                 | ModelArchitecture::Clip => false,
             };

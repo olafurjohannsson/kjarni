@@ -204,7 +204,7 @@ impl Seq2SeqGenerator {
                 Ok(Box::new(model) as Box<dyn EncoderDecoderLanguageModel>)
             }
 
-            ModelArchitecture::Bart => {
+            ModelArchitecture::Bart | ModelArchitecture::Marian => {
                 debug!("Loading BART model from {:?}", cache_dir);
                 let model = BartModel::from_registry(
                     model_type,

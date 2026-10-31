@@ -221,6 +221,9 @@ pub trait EncoderDecoderLanguageModel: EncoderLanguageModel {
     fn get_generation_config_for_input(&self, _input: &str) -> GenerationConfig {
         self.get_default_generation_config()
     }
+
+    /// Changes one row of raw logits before they are normalized into log-probabilities.
+    fn adjust_logits(&self, _logits: &mut ndarray::ArrayViewMut1<'_, f32>) {}
 }
 
 #[async_trait]
