@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 
-#include "kjarni.h"
 #include "kjarni.hpp"
 
 // Exposes a Kjarni index of the help centre to QML. The articles are indexed once

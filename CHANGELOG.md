@@ -18,8 +18,11 @@
 - **`kjarni index create` indexed hidden folders and build output**, unlike
   `search_folder`. It now skips the same folders. A file or folder named directly is
   always read.
+- **`kjarni.hpp` failed to compile after `kjarni.h`**, the order the Qt search example
+  used. It now compiles either way; image search is left out if `kjarni.h` came first
+  without `KJARNI_IMAGE_IO`.
 
-## 0.2.9
+## 0.2.8
 
 ### Faster GPU generation, and Whisper on the GPU
 

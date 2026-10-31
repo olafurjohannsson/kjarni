@@ -25,6 +25,11 @@
 
 // Image search is part of the library's default build. Define KJARNI_NO_IMAGE_IO
 // when linking a library built with --no-default-features, which leaves it out.
+// A kjarni.h included before this file, without KJARNI_IMAGE_IO, has already left out
+// the declarations the image wrapper needs, so the wrapper is left out too.
+#if defined(KJARNI_FFI_H) && !defined(KJARNI_IMAGE_IO) && !defined(KJARNI_NO_IMAGE_IO)
+#define KJARNI_NO_IMAGE_IO
+#endif
 #if !defined(KJARNI_NO_IMAGE_IO) && !defined(KJARNI_IMAGE_IO)
 #define KJARNI_IMAGE_IO
 #endif
