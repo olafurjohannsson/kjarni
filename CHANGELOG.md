@@ -19,7 +19,7 @@
   `search_folder`. It now skips the same folders. A file or folder named directly is
   always read.
 
-## 0.2.8
+## 0.2.9
 
 ### Faster GPU generation, and Whisper on the GPU
 

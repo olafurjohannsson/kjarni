@@ -6,7 +6,7 @@ without ever executing them, so a binary that crashed on load, or that computed
 different numbers on NEON than on AVX2, would have reached the release archive,
 the NuGet package and the wheel unnoticed. This runs the exact binary that ships.
 
-The expected values were recorded from a release build of v0.2.8 on x86_64 Linux.
+The expected values were recorded from a release build of v0.2.9 on x86_64 Linux.
 Tolerances allow for a different summation order across SIMD instruction sets,
 not for a different answer.
 
