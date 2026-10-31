@@ -42,7 +42,7 @@ pub fn validate_for_generation(model_type: ModelType) -> GeneratorResult<()> {
         }
 
         // Seq2seq models should use Seq2SeqGenerator
-        ModelArchitecture::T5 | ModelArchitecture::Bart => {
+        ModelArchitecture::T5 | ModelArchitecture::Bart | ModelArchitecture::Marian => {
             return Err(GeneratorError::InvalidModel(
                 cli_name.to_string(),
                 format!(

@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+</p>
+
 # Kjarni
 
 [![NuGet](https://img.shields.io/nuget/v/Kjarni?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Kjarni)

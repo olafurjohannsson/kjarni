@@ -91,7 +91,7 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
         }
 
         // Encoder-decoders could theoretically work but are designed for different tasks
-        ModelArchitecture::T5 | ModelArchitecture::Bart => {
+        ModelArchitecture::T5 | ModelArchitecture::Bart | ModelArchitecture::Marian => {
             return Err(ChatError::IncompatibleModel {
                 model: cli_name.to_string(),
                 reason: format!(

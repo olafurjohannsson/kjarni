@@ -25,8 +25,8 @@ pub fn validate_for_seq2seq(model_type: ModelType) -> Seq2SeqResult<Seq2SeqValid
         ModelArchitecture::T5 => {
             // T5/FLAN-T5 - ideal for seq2seq
         }
-        ModelArchitecture::Bart => {
-            // BART - also ideal for seq2seq
+        ModelArchitecture::Bart | ModelArchitecture::Marian => {
+            // BART and Marian - also ideal for seq2seq
         }
         ModelArchitecture::Whisper => {
             // Whisper is encoder-decoder but for speech

@@ -13,7 +13,7 @@ use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides
 use super::builder::TranslatorBuilder;
 use super::languages::normalize_language;
 use super::types::{TranslatorError, TranslatorResult};
-use super::validation::validate_for_translation;
+use super::validation::{translation_input, validate_for_translation};
 
 /// High-level translation API
 pub struct Translator {
@@ -120,7 +120,7 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from_normalized, to_normalized);
+        let prompt = self.format_prompt(text, from_normalized, to_normalized)?;
 
         debug!(
             "Translation prompt: '{}' ({} chars)",
@@ -165,7 +165,7 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from_normalized, to_normalized);
+        let prompt = self.format_prompt(text, from_normalized, to_normalized)?;
 
         debug!(
             "Translation with overrides: {} -> {}, {:?}",
@@ -188,7 +188,7 @@ impl Translator {
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
 
-        let prompt = self.format_prompt(text, from, to);
+        let prompt = self.format_prompt(text, from, to)?;
 
         debug!("Using default languages: {} -> {}", from, to);
 
@@ -207,7 +207,7 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from, to_normalized);
+        let prompt = self.format_prompt(text, from, to_normalized)?;
 
         debug!("Translate to: {} -> {}", from, to_normalized);
 
@@ -226,7 +226,7 @@ impl Translator {
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
 
-        let prompt = self.format_prompt(text, from_normalized, to);
+        let prompt = self.format_prompt(text, from_normalized, to)?;
 
         debug!("Translate from: {} -> {}", from_normalized, to);
 
@@ -249,7 +249,7 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from_normalized, to_normalized);
+        let prompt = self.format_prompt(text, from_normalized, to_normalized)?;
 
         info!(
             "Streaming translation {} -> {}: {} chars",
@@ -279,7 +279,7 @@ impl Translator {
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
 
-        let prompt = self.format_prompt(text, from, to);
+        let prompt = self.format_prompt(text, from, to)?;
 
         info!(
             "Streaming translation (defaults) {} -> {}: {} chars",
@@ -294,9 +294,9 @@ impl Translator {
         Ok(Box::pin(mapped))
     }
 
-    /// Format the translation prompt for T5.
-    fn format_prompt(&self, text: &str, from: &str, to: &str) -> String {
-        format!("translate {} to {}: {}", from, to, text)
+    /// Format what the model is given for this direction.
+    fn format_prompt(&self, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
+        translation_input(self.model_type, text, from, to)
     }
 
     /// Get the model type.

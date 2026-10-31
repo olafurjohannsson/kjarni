@@ -58,6 +58,7 @@ static_assert(std::is_move_constructible_v<kjarni::Embedder>);
 static_assert(std::is_move_constructible_v<kjarni::Classifier>);
 static_assert(std::is_move_constructible_v<kjarni::Reranker>);
 static_assert(std::is_move_constructible_v<kjarni::Chat>);
+static_assert(std::is_move_constructible_v<kjarni::Conversation>);
 static_assert(std::is_move_constructible_v<kjarni::Embedding>);
 static_assert(std::is_move_constructible_v<kjarni::Indexer>);
 static_assert(std::is_move_constructible_v<kjarni::Searcher>);
@@ -70,6 +71,7 @@ static_assert(!std::is_copy_constructible_v<kjarni::Embedder>);
 static_assert(!std::is_copy_constructible_v<kjarni::Classifier>);
 static_assert(!std::is_copy_constructible_v<kjarni::Reranker>);
 static_assert(!std::is_copy_constructible_v<kjarni::Chat>);
+static_assert(!std::is_copy_constructible_v<kjarni::Conversation>);
 static_assert(!std::is_copy_constructible_v<kjarni::Embedding>);
 static_assert(!std::is_copy_constructible_v<kjarni::Indexer>);
 static_assert(!std::is_copy_constructible_v<kjarni::Searcher>);
@@ -555,6 +557,39 @@ void test_quantized_chat() {
 
 // ─── Version ─────────────────────────────────────────────────────
 
+void test_conversation() {
+    section("conversation");
+
+    auto chat = kjarni::Chat::create({.model = "qwen2.5-0.5b-instruct", .quantized = true});
+    if (!chat) { ok(false, "quantized qwen loads"); return; }
+    auto convo = chat->conversation();
+    if (!convo) { ok(false, "conversation starts"); return; }
+    const auto gen = kjarni::Generation::greedy(24);
+
+    auto first = convo->send("The password is swordfish. Reply with OK.", gen);
+    ok(first.has_value(), "first turn replies");
+    ok(convo->size() == 2, "a turn adds the message and the reply");
+
+    auto recalled = convo->send("What is the password? Answer in one word.", gen);
+    ok(recalled && contains(*recalled, "swordfish"), "a later turn sees an earlier one");
+
+    auto stateless = chat->send("What is the password? Answer in one word.", gen);
+    ok(stateless && !contains(*stateless, "swordfish"), "Chat::send does not see the conversation");
+
+    convo->clear();
+    ok(convo->size() == 0, "clear forgets the turns");
+
+    std::string text;
+    int tokens = 0;
+    auto stopped = convo->stream("Count from one to fifty.", gen, [&](std::string_view token) {
+        text += token;
+        return ++tokens < 3;
+    });
+    ok(stopped.has_value(), "stopping a stream is not an error");
+    ok(tokens == 3, "returning false stops generation");
+    ok(convo->size() == 2, "a stopped reply joins the history");
+}
+
 void test_version() {
     section("version");
     ok(!kjarni::version().empty(), "version is reported");
@@ -576,6 +611,7 @@ int main() {
     test_translator();
     test_image_index();
     test_quantized_chat();
+    test_conversation();
     test_version();
 
     std::fprintf(stderr, "\n%d checks, %d failed\n", checks, failures);

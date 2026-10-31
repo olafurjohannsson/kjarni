@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- **`kjarni::Conversation` in `kjarni.hpp`.** `Chat::conversation()` starts a chat that
+  remembers its turns, with `send`, `stream`, `clear` and `size`. C++ callers previously
+  had to use the C API for this, because `Chat::send` and `Chat::stream` keep no history.
+
+- **Opus-MT translation models.** `opus-mt-en-de` and `opus-mt-de-en` add the Marian
+  architecture. Each is about 300 MB and translates one direction. On a set of 16
+  sentences, the output matches transformers exactly on CPU and GPU. The GPU path now
+  applies `final_logits_bias`, as the CPU path does, and the `swish` activation maps to
+  SiLU instead of falling back to GELU.
+
 ## 0.2.9
 
 ### whisper-large-v3 works, and `--translate` asks for a translation

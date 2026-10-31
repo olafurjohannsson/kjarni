@@ -1097,3 +1097,146 @@ mod concurrency_tests {
         }
     }
 }
+
+mod opus_mt {
+    use super::super::validation::translation_input;
+    use super::*;
+    use kjarni_transformers::models::ModelType;
+
+    /// From transformers' `MarianMTModel.generate` with the model's own generation config.
+    const EN_DE: &[(&str, &str)] = &[
+        ("Where is the station?", "Wo ist der Bahnhof?"),
+        ("Good morning, how are you?", "Guten Morgen, wie geht's?"),
+        (
+            "The maintenance team replaced the worn seal on the second pump.",
+            "Das Wartungsteam ersetzte die abgenutzte Dichtung an der zweiten Pumpe.",
+        ),
+        (
+            "Please restart the application after installing the update.",
+            "Bitte starten Sie die Anwendung nach der Installation des Updates neu.",
+        ),
+        (
+            "My grandmother grew up in a small village near the sea.",
+            "Meine Großmutter wuchs in einem kleinen Dorf am Meer auf.",
+        ),
+        (
+            "If the battery runs out, the device saves your work automatically.",
+            "Wenn die Batterie ausläuft, spart das Gerät Ihre Arbeit automatisch.",
+        ),
+        (
+            "We cannot guarantee delivery before Friday.",
+            "Wir können die Lieferung nicht vor Freitag garantieren.",
+        ),
+        (
+            "Translation models run locally on your own computer.",
+            "Übersetzungsmodelle laufen lokal auf Ihrem eigenen Computer.",
+        ),
+    ];
+    const DE_EN: &[(&str, &str)] = &[
+        ("Wo ist der Bahnhof?", "Where's the station?"),
+        (
+            "Guten Morgen, wie geht es dir?",
+            "Good morning, how are you?",
+        ),
+        (
+            "Das Wartungsteam hat die verschlissene Dichtung an der zweiten Pumpe ersetzt.",
+            "The maintenance team has replaced the worn seal on the second pump.",
+        ),
+        (
+            "Bitte starten Sie die Anwendung nach der Installation des Updates neu.",
+            "Please restart the application after installing the update.",
+        ),
+        (
+            "Meine Großmutter ist in einem kleinen Dorf am Meer aufgewachsen.",
+            "My grandmother grew up in a small village by the sea.",
+        ),
+        (
+            "Wenn der Akku leer ist, speichert das Gerät Ihre Arbeit automatisch.",
+            "When the battery is empty, the device stores your work automatically.",
+        ),
+        (
+            "Wir können die Lieferung vor Freitag nicht garantieren.",
+            "We can't guarantee delivery before Friday.",
+        ),
+        (
+            "Übersetzungsmodelle laufen lokal auf Ihrem eigenen Computer.",
+            "Translation models run locally on your own computer.",
+        ),
+    ];
+
+    async fn assert_matches_transformers(
+        model: &str,
+        from: &str,
+        to: &str,
+        pairs: &[(&str, &str)],
+    ) {
+        let translator = Translator::builder(model).quiet().build().await.unwrap();
+        for (source, expected) in pairs {
+            let translated = translator.translate(source, from, to).await.unwrap();
+            assert_eq!(translated.trim(), *expected, "{source}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs opus-mt-en-de in the local model cache"]
+    async fn en_de_matches_transformers() {
+        assert_matches_transformers("opus-mt-en-de", "en", "de", EN_DE).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs opus-mt-de-en in the local model cache"]
+    async fn de_en_matches_transformers() {
+        assert_matches_transformers("opus-mt-de-en", "de", "en", DE_EN).await;
+    }
+
+    async fn assert_gpu_matches_transformers(
+        model: &str,
+        from: &str,
+        to: &str,
+        pairs: &[(&str, &str)],
+    ) {
+        let translator = Translator::builder(model)
+            .gpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+        for (source, expected) in pairs {
+            let translated = translator.translate(source, from, to).await.unwrap();
+            assert_eq!(translated.trim(), *expected, "{source}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a GPU and opus-mt-en-de in the local model cache"]
+    async fn en_de_on_the_gpu_matches_transformers() {
+        assert_gpu_matches_transformers("opus-mt-en-de", "en", "de", EN_DE).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a GPU and opus-mt-de-en in the local model cache"]
+    async fn de_en_on_the_gpu_matches_transformers() {
+        assert_gpu_matches_transformers("opus-mt-de-en", "de", "en", DE_EN).await;
+    }
+
+    #[test]
+    fn opus_mt_gets_the_bare_text() {
+        let input = translation_input(ModelType::OpusMtEnDe, "Hello", "English", "German").unwrap();
+        assert_eq!(input, "Hello");
+    }
+
+    #[test]
+    fn opus_mt_refuses_the_other_direction() {
+        let err = translation_input(ModelType::OpusMtEnDe, "Hallo", "German", "English");
+        assert!(matches!(
+            err,
+            Err(TranslatorError::IncompatibleModel { .. })
+        ));
+    }
+
+    #[test]
+    fn flan_t5_keeps_its_prompt() {
+        let input = translation_input(ModelType::FlanT5Base, "Hello", "English", "German").unwrap();
+        assert_eq!(input, "translate English to German: Hello");
+    }
+}
