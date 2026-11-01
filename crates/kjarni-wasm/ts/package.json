@@ -1,6 +1,6 @@
 {
   "name": "kjarni-wasm",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Run transformer models inside your web page: embeddings, classification, reranking, semantic search and chat in a Web Worker. Same output as PyTorch, no server.",
   "type": "module",
   "main": "./dist/index.js",

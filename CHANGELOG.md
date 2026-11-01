@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - **Long text translates completely.** Translation models end early when given several
   sentences at once, which left out most of a long text with no error. `Translator` and
@@ -17,7 +17,8 @@
   and repetition penalties account for the proposed tokens, so greedy output equals plain
   decoding. The draft model continues from its cache instead of re-reading the whole text
   each round. `SpeculationParams::probabilistic` is removed, since the decoding strategy
-  decides.
+  decides, and `DecoderGenerationBackend` gains a required `forward_batch` method. A draft
+  model on the GPU can be slower than plain decoding, so measure before relying on one.
 
 - **Faster GPU batches of 2 to 10 rows.** Linear layers read each weight once for all the
   rows. A batch of 5 through a 28-layer decoder takes about half the time it did.
