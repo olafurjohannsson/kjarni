@@ -156,6 +156,12 @@ pub trait ChatTemplate: Send + Sync {
         None
     }
 
+    /// Text the generation prompt already opens the reply with, which the model therefore
+    /// does not generate but which belongs to the reply.
+    fn reply_prefix(&self) -> &str {
+        ""
+    }
+
     /// Validate if a conversation is properly formatted for this template
     fn validate(&self, _conversation: &Conversation) -> Result<(), String> {
         // Default: no validation

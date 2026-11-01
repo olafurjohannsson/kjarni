@@ -228,9 +228,11 @@ impl GpuLinearLayer {
         let is_q4k = weights.dtype() == DType::Q4_K;
         let is_q6k = weights.dtype() == DType::Q6_K;
         let is_q8 = weights.dtype() == DType::Q8_0;
-        let use_q4k_kernel = is_gemv && is_q4k;
-        let use_q6k_kernel = is_gemv && is_q6k;
-        let use_q8_kernel = is_gemv && is_q8;
+        // The GEMV kernels take a few rows as well, one set of workgroups per row.
+        let few_quantized_rows = m <= GEMM_WIDE_MAX_ROWS;
+        let use_q4k_kernel = few_quantized_rows && is_q4k;
+        let use_q6k_kernel = few_quantized_rows && is_q6k;
+        let use_q8_kernel = few_quantized_rows && is_q8;
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
 
         // Below this many rows the 128x128 GEMM tile is mostly empty and the
@@ -355,13 +357,13 @@ impl GpuLinearLayer {
                 pass.set_bind_group(0, &bind_group, &[]);
 
                 if use_q4k_kernel || use_q6k_kernel || use_q8_kernel {
-                    // Each workgroup produces 4 output rows.
-                    let rows = n.div_ceil(4);
+                    // Each workgroup produces 8 output rows for Q4_K and 4 otherwise.
+                    let rows = n.div_ceil(if use_q4k_kernel { 8 } else { 4 });
                     let max_dim = 65535;
                     if rows > max_dim {
-                        pass.dispatch_workgroups(max_dim, rows.div_ceil(max_dim), 1);
+                        pass.dispatch_workgroups(max_dim, rows.div_ceil(max_dim), m);
                     } else {
-                        pass.dispatch_workgroups(rows, 1, 1);
+                        pass.dispatch_workgroups(rows, 1, m);
                     }
                 } else if use_wide_kernel || wide_gemm {
                     // Dispatch 2D grid if N > 65535

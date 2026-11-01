@@ -23,6 +23,17 @@
 - **Faster GPU batches of 2 to 10 rows.** Linear layers read each weight once for all the
   rows. A batch of 5 through a 28-layer decoder takes about half the time it did.
 
+- **Faster quantized decode on the GPU.** GGUF models generate 10 to 22% faster: Llama 3.2 3B
+  from 33.5 to 40.9 tokens a second, 1B from 75 to 89, Qwen 2.5 1.5B from 48 to 52, on an RTX
+  A2000. Quantized batches of 2 to 10 rows use the same kernels, which makes speculation on a
+  GGUF model up to 3.4x faster, though it remains slower than plain decoding on the GPU.
+
+- **`--gguf --gpu` no longer refuses a model that fits.** With both formats cached, the VRAM
+  check added them together, so `deepseek-r1-8b` asked for 23.4 GB when its GGUF needs 5.5 GB.
+
+- **DeepSeek-R1 replies open with `<think>`.** The chat prompt supplies the tag, so replies
+  showed only the closing `</think>`. `Chat` now returns the whole reply, streamed or not.
+
 - **Prompt lookup.** `kjarni generate --prompt-lookup 3` and `.prompt_lookup(n)` propose tokens
   from earlier in the text, with no second model. This helps where the output repeats the
   input.

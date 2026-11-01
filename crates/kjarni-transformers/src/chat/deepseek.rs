@@ -68,6 +68,14 @@ impl ChatTemplate for DeepSeekR1ChatTemplate {
     fn stop_sequences(&self) -> Vec<String> {
         vec![Self::EOS.to_string()]
     }
+
+    fn reply_prefix(&self) -> &str {
+        if self.add_generation_prompt {
+            "<think>\n"
+        } else {
+            ""
+        }
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +93,15 @@ mod tests {
             "<｜begin▁of▁sentence｜>Be brief.<｜User｜>What is 2+2?<｜Assistant｜>\n\n4\
              <｜end▁of▁sentence｜><｜User｜>And 3+3?<｜Assistant｜><think>\n"
         );
+    }
+
+    #[test]
+    fn the_reply_opens_with_what_the_prompt_ends_with() {
+        let mut conv = Conversation::new();
+        conv.push_user("Hi");
+        let template = DeepSeekR1ChatTemplate::new();
+        assert_eq!(template.reply_prefix(), "<think>\n");
+        assert!(template.apply(&conv).ends_with(template.reply_prefix()));
     }
 
     #[test]

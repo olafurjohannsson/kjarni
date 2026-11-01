@@ -15,6 +15,7 @@ use kjarni_transformers::cpu::decoder::{
 use kjarni_transformers::decoder::backend::AnyDecoderBackend;
 use kjarni_transformers::decoder::generator::run_generation_loop;
 use kjarni_transformers::decoder::traits::DecoderLanguageModel;
+use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::registry::ModelType;
 use kjarni_transformers::{Device, LanguageModel};
 use std::sync::Arc;
@@ -563,11 +564,21 @@ fn bench_draft() -> String {
 
 async fn load_bench_model(name: &str, device: Device) -> DynModel {
     let model_type = ModelType::from_cli_name(name).expect("a model name from `kjarni model list`");
+    let config = std::env::var("KJARNI_BENCH_GGUF")
+        .is_ok()
+        .then(|| ModelLoadConfig {
+            use_gguf: true,
+            ..Default::default()
+        });
     if name.starts_with("qwen") {
-        load_qwen(model_type, device).await
+        Arc::new(
+            QwenModel::from_registry(model_type, None, device, None, config)
+                .await
+                .expect("load"),
+        )
     } else {
         Arc::new(
-            LlamaModel::from_registry(model_type, None, device, None, None)
+            LlamaModel::from_registry(model_type, None, device, None, config)
                 .await
                 .expect("load"),
         )
@@ -577,6 +588,7 @@ async fn load_bench_model(name: &str, device: Device) -> DynModel {
 /// Prints the table: `cargo test --profile ci -p kjarni-models --test speculative_decoding
 /// speculation_benchmark -- --ignored --nocapture`. `KJARNI_BENCH_DEVICE=cpu` picks the CPU,
 /// `KJARNI_BENCH_TARGET` and `KJARNI_BENCH_DRAFT` the models, `KJARNI_BENCH_TOKENS` the length.
+/// `KJARNI_BENCH_GGUF=1` loads the quantized weights.
 #[tokio::test]
 #[ignore = "benchmark over real models"]
 async fn speculation_benchmark() {

@@ -740,3 +740,29 @@ mod integration_tests {
         assert_send_sync::<History>();
     }
 }
+
+mod reply_prefix_tests {
+    use crate::chat::model::reply_prefix;
+    use kjarni_transformers::chat::deepseek::DeepSeekR1ChatTemplate;
+    use kjarni_transformers::chat::templates::RawTemplate;
+
+    #[test]
+    fn a_prompt_ending_in_the_prefix_has_it() {
+        let template = DeepSeekR1ChatTemplate::new();
+        assert_eq!(
+            reply_prefix(&template, "<｜Assistant｜><think>\n"),
+            "<think>\n"
+        );
+    }
+
+    #[test]
+    fn a_prompt_not_from_the_template_has_none() {
+        let template = DeepSeekR1ChatTemplate::new();
+        assert_eq!(reply_prefix(&template, "Just some text"), "");
+    }
+
+    #[test]
+    fn a_template_without_a_prefix_has_none() {
+        assert_eq!(reply_prefix(&RawTemplate, "<think>\n"), "");
+    }
+}

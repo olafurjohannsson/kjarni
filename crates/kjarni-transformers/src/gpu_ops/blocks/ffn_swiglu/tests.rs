@@ -103,7 +103,7 @@ async fn q4k_fused_gate_up_matches_cpu() -> Result<()> {
         Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
     })?;
 
-    for rows in [1usize, 4] {
+    for rows in [1usize, 2, 4, 10, 11] {
         let input = Array::random((rows, k), Uniform::new(-1.0f32, 1.0));
         let gpu_in = GpuTensor::from_ndarray(&context, &input.as_standard_layout().to_owned())?;
         let gpu_out = GpuTensor::uninitialized(&context, vec![rows, n], DType::F32, "fused_out");
@@ -151,5 +151,146 @@ async fn q4k_fused_gate_up_matches_cpu() -> Result<()> {
             "fused Q4_K gate/up disagrees with CPU at rows={rows}: {worst:.3e}"
         );
     }
+    Ok(())
+}
+
+/// The fused kernel when the output rows do not fill its last workgroup. Every tensor in
+/// the file has a row count divisible by 4, so these use the first rows of two.
+#[ignore = "GPU required"]
+#[tokio::test]
+async fn q4k_fused_rows_short_of_a_workgroup() -> Result<()> {
+    use crate::cpu::kernels::q_common::BlockQ4_K;
+    use crate::tensor::DType;
+    use crate::tensor::raw_tensor::TensorView;
+    use crate::weights::ModelWeights;
+
+    let path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let (gate, up) = ("blk.0.ffn_gate.weight", "blk.0.ffn_up.weight");
+    if weights.tensor_dtype(gate)? != DType::Q4_K || weights.tensor_dtype(up)? != DType::Q4_K {
+        println!("Skipping: gate or up is not Q4_K");
+        return Ok(());
+    }
+    let read = |name: &str| -> Result<Vec<BlockQ4_K>> {
+        weights.with_raw_tensor(name, |v| {
+            Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
+        })
+    };
+    let (gate_blocks, up_blocks) = (read(gate)?, read(up)?);
+    let k = 3072;
+
+    let context = WgpuContext::new().await?;
+    let ffn = GpuSwiGLUFFN::new(&context)?;
+    for (rows, n) in [(1usize, 1usize), (1, 3), (1, 7), (3, 5), (10, 6)] {
+        let blocks = n * k / 256;
+        let upload = |name: &str, b: &[BlockQ4_K]| {
+            let view = TensorView {
+                name: name.to_string(),
+                bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(b)),
+                shape: vec![n, k],
+                dtype: DType::Q4_K,
+            };
+            GpuTensor::from_raw(&context, &view, name)
+        };
+        let gate_g = upload(gate, &gate_blocks[..blocks])?;
+        let up_g = upload(up, &up_blocks[..blocks])?;
+        let w = GpuSwiGLUFFNWeights::new(gate_g.clone(), up_g, gate_g)?;
+
+        let input = ndarray::Array2::from_shape_fn((rows, k), |(r, c)| {
+            ((r * 31 + c * 7) % 97) as f32 / 48.0 - 1.0
+        });
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![rows, n], DType::F32, "o");
+        let mut enc = context.device.create_command_encoder(&Default::default());
+        ffn.encode_fused_gate_up(&mut enc, &gpu_in, &w, &out);
+        context.queue.submit(std::iter::once(enc.finish()));
+        let (got, _) = crate::tests::common::read_gpu_tensor_to_vec::<f32>(&out).await?;
+
+        let exact = |b: &[BlockQ4_K]| {
+            let mut o = ndarray::Array2::<f32>::zeros((rows, n));
+            for r in 0..rows {
+                let row = input.row(r).to_owned();
+                unsafe {
+                    crate::cpu::kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                        o.row_mut(r).as_slice_mut().unwrap(),
+                        row.as_ptr(),
+                        b,
+                        k,
+                    )
+                }
+            }
+            o
+        };
+        let g = exact(&gate_blocks[..blocks]);
+        let u = exact(&up_blocks[..blocks]);
+        let expected = g.mapv(|x| x / (1.0 + (-x).exp())) * &u;
+        for (a, b) in got.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-3, "rows={rows} n={n}: {a} against {b}");
+        }
+    }
+    Ok(())
+}
+
+/// Achieved bandwidth of the fused gate and up stage on packed Q4_K. Most of a decoder
+/// layer's weights go through this kernel, so it sets the decode speed of a GGUF model.
+#[ignore = "GPU required"]
+#[tokio::test]
+async fn q4k_fused_bandwidth() -> Result<()> {
+    use crate::tensor::DType;
+    use crate::weights::ModelWeights;
+
+    let path = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let (gate, up) = ("blk.0.ffn_gate.weight", "blk.0.ffn_up.weight");
+    if weights.tensor_dtype(gate)? != DType::Q4_K || weights.tensor_dtype(up)? != DType::Q4_K {
+        println!("Skipping: gate or up is not Q4_K");
+        return Ok(());
+    }
+
+    let context = WgpuContext::new().await?;
+    let ffn = GpuSwiGLUFFN::new(&context)?;
+    let gate_g = GpuTensor::from_model_weights(&context, &weights, gate, None, "gate")?;
+    let up_g = GpuTensor::from_model_weights(&context, &weights, up, None, "up")?;
+    let (n, k) = (gate_g.shape()[0], gate_g.shape()[1]);
+    let w = GpuSwiGLUFFNWeights::new(gate_g.clone(), up_g.clone(), gate_g.clone())?;
+
+    let input = ndarray::Array2::<f32>::zeros((1, k));
+    let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+    let out = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "o");
+
+    // 50 dispatches per submit so launch overhead is amortised away.
+    let reps = 50;
+    let mut best = f64::MAX;
+    for _ in 0..5 {
+        let t = std::time::Instant::now();
+        let mut enc = context.device.create_command_encoder(&Default::default());
+        for _ in 0..reps {
+            ffn.encode_fused_gate_up(&mut enc, &gpu_in, &w, &out);
+        }
+        context.queue.submit(std::iter::once(enc.finish()));
+        context.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })?;
+        best = best.min(t.elapsed().as_secs_f64());
+    }
+    let per_call = best / reps as f64;
+    let bytes = 2 * n * k * 144 / 256;
+    let gbps = bytes as f64 / per_call / 1e9;
+    println!(
+        "  fused gate+up [{n}x{k}] Q4_K: {:>7.3} ms  {gbps:>6.1} GB/s  ({:.0}% of 288)",
+        per_call * 1e3,
+        100.0 * gbps / 288.0
+    );
     Ok(())
 }

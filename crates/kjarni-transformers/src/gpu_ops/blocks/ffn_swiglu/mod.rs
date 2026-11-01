@@ -5,6 +5,10 @@ use crate::{WgpuContext, gpu_profile};
 use anyhow::Result;
 use std::sync::Arc;
 
+/// The most rows `fused_gemv_q4k` takes, one set of workgroups per row. Above this,
+/// `fused_bmm_q4k` runs.
+const FUSED_Q4K_GEMV_MAX_ROWS: u32 = 10;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct FusedInfo {
@@ -464,8 +468,9 @@ impl GpuSwiGLUFFN {
 
         let is_q4k = weights.gate_proj.dtype() == DType::Q4_K;
 
+        let q4k_gemv = is_q4k && m <= FUSED_Q4K_GEMV_MAX_ROWS;
         let (pipeline, bind_group) = if is_q4k {
-            let pipeline = if is_gemv {
+            let pipeline = if q4k_gemv {
                 &self.fused_gemv_q4k
             } else {
                 &self.fused_bmm_q4k
@@ -583,9 +588,9 @@ impl GpuSwiGLUFFN {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                if is_gemv && is_q4k {
-                    // Each workgroup produces 2 output rows.
-                    pass.dispatch_workgroups(n.div_ceil(4), 1, 1);
+                if q4k_gemv {
+                    // Each workgroup produces 4 output rows of one input row.
+                    pass.dispatch_workgroups(n.div_ceil(4), 1, m);
                 } else if is_gemv {
                     pass.dispatch_workgroups(n, 1, 1);
                 } else if is_q4k {

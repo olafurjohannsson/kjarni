@@ -41,7 +41,7 @@ pub async fn run(
     // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
     if gpu && let Some(mt) = ModelType::from_cli_name(model) {
-        super::util::check_gpu_capacity(mt)?;
+        super::util::check_gpu_capacity(mt, gguf)?;
     }
 
     let model_type = ModelType::from_cli_name(model)

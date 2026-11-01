@@ -134,8 +134,9 @@ async fn q4k_gemv_matches_cpu() -> Result<()> {
 #[ignore = "GPU required"]
 async fn q4k_batched_matches_cpu() -> Result<()> {
     // Prefill runs gemm_q4k, which dequantises 64x16 tiles: row counts that
-    // fill a tile, leave one partly empty, and span several.
-    for m in [8, 67, 300] {
+    // leave a tile partly empty and span several.
+    // Up to 10 rows run gemv_q4k once per row.
+    for m in [2, 3, 10, 11, 67, 300] {
         for t in [
             "blk.0.attn_q.weight",
             "blk.0.ffn_gate.weight",
@@ -145,6 +146,69 @@ async fn q4k_batched_matches_cpu() -> Result<()> {
                 None => println!("  skipping {t}"),
                 Some((gpu, cpu, shape)) => report(t, &gpu, &cpu, &shape),
             }
+        }
+    }
+    Ok(())
+}
+
+/// `gemv_q4k` when the output rows do not fill its last workgroup, for one row and for a
+/// few. Every tensor in the file has a row count divisible by 8, so these use the first
+/// rows of one.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q4k_gemv_rows_short_of_a_workgroup() -> Result<()> {
+    let path = gguf_path();
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let name = "blk.0.ffn_gate.weight";
+    if weights.tensor_dtype(name)? != DType::Q4_K {
+        println!("Skipping: {name} is not Q4_K");
+        return Ok(());
+    }
+    let blocks: Vec<BlockQ4_K> = weights.with_raw_tensor(name, |v| {
+        Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
+    })?;
+    let k = 3072;
+    let blocks_per_row = k / 256;
+
+    let context = WgpuContext::new().await?;
+    let linear = GpuLinearLayer::new(&context);
+    for (m, n) in [(1, 1), (1, 7), (1, 13), (3, 13), (10, 15)] {
+        let row_blocks = &blocks[..n * blocks_per_row];
+        let view = crate::tensor::raw_tensor::TensorView {
+            name: name.to_string(),
+            bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(row_blocks)),
+            shape: vec![n, k],
+            dtype: DType::Q4_K,
+        };
+        let w = GpuTensor::from_raw(&context, &view, "w")?;
+
+        let input =
+            Array2::from_shape_fn((m, k), |(r, c)| ((r * 31 + c * 7) % 97) as f32 / 48.0 - 1.0);
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
+        let mut enc = context.device.create_command_encoder(&Default::default());
+        linear.encode(&mut enc, &gpu_in, &w, &out);
+        context.queue.submit(std::iter::once(enc.finish()));
+        let (got, _) = read_gpu_tensor_to_vec::<f32>(&out).await?;
+
+        let mut expected = Array2::<f32>::zeros((m, n));
+        for r in 0..m {
+            let row = input.row(r).to_owned();
+            unsafe {
+                crate::cpu::kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                    expected.row_mut(r).as_slice_mut().unwrap(),
+                    row.as_ptr(),
+                    row_blocks,
+                    k,
+                )
+            }
+        }
+        for (a, b) in got.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-3, "m={m} n={n}: {a} against {b}");
         }
     }
     Ok(())
@@ -224,14 +288,14 @@ async fn q4k_packed_matches_expanded() -> Result<()> {
     Ok(())
 }
 
-/// Achieved bandwidth of a single GEMV, packed Q4_K against expanded BF16.
+/// Achieved bandwidth of a single GEMV, packed Q4_K or Q6_K against expanded BF16.
 ///
 /// Decode reads every weight once per token, so a GEMV kernel's only real figure of
 /// merit is how close it gets to the card's bandwidth. Timing one projection in
 /// isolation separates that from scheduling, RoPE, cache traffic and CPU overhead.
 #[tokio::test]
 #[ignore = "GPU required"]
-async fn q4k_gemv_bandwidth() -> Result<()> {
+async fn packed_gemv_bandwidth() -> Result<()> {
     let path = gguf_path();
     if !path.exists() {
         println!("Skipping: model not present");
@@ -241,10 +305,21 @@ async fn q4k_gemv_bandwidth() -> Result<()> {
     let context = WgpuContext::new().await?;
     let linear = GpuLinearLayer::new(&context);
 
-    for name in ["blk.0.ffn_gate.weight", "blk.0.attn_q.weight"] {
-        if weights.tensor_dtype(name).ok() != Some(DType::Q4_K) {
-            continue;
-        }
+    for name in [
+        "blk.0.ffn_gate.weight",
+        "blk.0.attn_q.weight",
+        "blk.0.attn_k.weight",
+        "blk.3.ffn_down.weight",
+        "blk.0.attn_v.weight",
+        "blk.5.ffn_down.weight",
+        "token_embd.weight",
+    ] {
+        let dtype = weights.tensor_dtype(name)?;
+        let block_bytes = match dtype {
+            DType::Q4_K => 144,
+            DType::Q6_K => 212,
+            _ => continue,
+        };
         let packed = GpuTensor::from_model_weights(&context, &weights, name, None, "p")?;
         let expanded =
             GpuTensor::from_model_weights(&context, &weights, name, Some(DType::BF16), "e")?;
@@ -255,7 +330,7 @@ async fn q4k_gemv_bandwidth() -> Result<()> {
         let out = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "o");
 
         for (label, w, bytes) in [
-            ("packed Q4_K", &packed, n * k * 144 / 256),
+            ("packed", &packed, n * k * block_bytes / 256),
             ("expanded BF16", &expanded, n * k * 2),
         ] {
             // 50 dispatches per submit so launch overhead is amortised away.
@@ -687,7 +762,7 @@ async fn q6k_batched_matches_expanded() -> Result<()> {
             GpuTensor::from_model_weights(&context, &weights, name, Some(DType::F32), "e")?;
         let (n, k) = (packed.shape()[0], packed.shape()[1]);
 
-        for m in [3usize, 67, 300] {
+        for m in [2usize, 3, 10, 11, 67, 300] {
             let input = Array2::from_shape_fn((m, k), |(i, j)| {
                 ((i * 37 + j * 11) % 29) as f32 / 29.0 - 0.5
             });
