@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
             gguf,
             draft,
             draft_tokens,
+            prompt_lookup,
         } => {
             commands::generate::run(
                 prompt.as_deref(),
@@ -59,6 +60,7 @@ async fn main() -> Result<()> {
                 gguf,
                 draft.as_deref(),
                 draft_tokens,
+                prompt_lookup,
             )
             .await
         }

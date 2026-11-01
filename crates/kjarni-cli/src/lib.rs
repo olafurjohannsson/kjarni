@@ -102,6 +102,11 @@ pub enum Commands {
         /// against fewer passes over the target's weights.
         #[arg(long, default_value_t = 4)]
         draft_tokens: usize,
+
+        /// Speculate from earlier in the text instead of with a draft model, matching
+        /// up to this many tokens. Helps where the output repeats the input.
+        #[arg(long, value_name = "NGRAM")]
+        prompt_lookup: Option<usize>,
     },
 
     /// Summarize text

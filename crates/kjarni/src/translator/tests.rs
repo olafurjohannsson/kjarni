@@ -1207,6 +1207,58 @@ mod opus_mt {
         }
     }
 
+    /// The sentences together, in one text, come out as they do one at a time.
+    #[tokio::test]
+    #[ignore = "needs opus-mt-en-de in the local model cache"]
+    async fn long_text_loses_no_sentences() {
+        let translator = Translator::builder("opus-mt-en-de")
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+        let join = |column: fn(&(&'static str, &'static str)) -> &'static str, gap: &str| {
+            let sentences: Vec<&str> = EN_DE.iter().chain(EN_DE).chain(EN_DE).map(column).collect();
+            sentences.join(gap)
+        };
+
+        let translated = translator
+            .translate(&join(|p| p.0, " "), "en", "de")
+            .await
+            .unwrap();
+        assert_eq!(translated, join(|p| p.1, " "));
+
+        let translated = translator
+            .translate(&join(|p| p.0, "\n\n"), "en", "de")
+            .await
+            .unwrap();
+        assert_eq!(translated, join(|p| p.1, "\n\n"));
+    }
+
+    /// Streaming produces the same text as `translate`.
+    #[tokio::test]
+    #[ignore = "needs opus-mt-en-de in the local model cache"]
+    async fn long_text_streams_every_sentence() {
+        use futures::StreamExt;
+
+        let translator = Translator::builder("opus-mt-en-de")
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+        let source: Vec<&str> = EN_DE.iter().map(|p| p.0).collect();
+        let expected: Vec<&str> = EN_DE.iter().map(|p| p.1).collect();
+
+        let mut stream = translator
+            .stream(&source.join("\n"), "en", "de")
+            .await
+            .unwrap();
+        let mut streamed = String::new();
+        while let Some(token) = stream.next().await {
+            streamed.push_str(&token.unwrap());
+        }
+        assert_eq!(streamed, expected.join("\n"));
+    }
+
     #[tokio::test]
     #[ignore = "needs a GPU and opus-mt-en-de in the local model cache"]
     async fn en_de_on_the_gpu_matches_transformers() {

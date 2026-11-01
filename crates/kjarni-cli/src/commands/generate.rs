@@ -33,6 +33,7 @@ pub async fn run(
     gguf: bool,
     draft: Option<&str>,
     draft_tokens: usize,
+    prompt_lookup: Option<usize>,
 ) -> Result<()> {
     // Resolve prompt
     let prompt_text = resolve_input(prompt)?;
@@ -40,7 +41,7 @@ pub async fn run(
     // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
     if gpu && let Some(mt) = ModelType::from_cli_name(model) {
-        super::util::check_gpu_capacity(mt)?;
+        super::util::check_gpu_capacity(mt, gguf)?;
     }
 
     let model_type = ModelType::from_cli_name(model)
@@ -144,7 +145,12 @@ pub async fn run(
         generator.load_draft_model(draft_model)?;
         Some(SpeculationParams {
             num_tokens: draft_tokens,
-            probabilistic: !greedy,
+            prompt_lookup,
+        })
+    } else if prompt_lookup.is_some() {
+        Some(SpeculationParams {
+            num_tokens: draft_tokens,
+            prompt_lookup,
         })
     } else {
         None

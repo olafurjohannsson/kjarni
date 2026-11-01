@@ -78,7 +78,7 @@ pub fn apply_repetition_penalty(
     logits
 }
 
-pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Result<u32> {
+pub fn sample_token(logits: Array1<f32>, strategy: &DecodingStrategy) -> Result<u32> {
     match strategy {
         // `partial_cmp` returns `None` for NaN, and unwrapping it turned any upstream
         // numerical fault into a bare panic with no clue where it came from. A GPU
@@ -100,31 +100,37 @@ pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Res
             best.map(|(i, _)| i as u32)
                 .ok_or_else(|| anyhow!("cannot sample from an empty logit vector"))
         }
-        DecodingStrategy::Sample(params) => {
-            // Apply filters sequentially
-            if let Some(k) = params.top_k {
-                logits = top_k_filtering(logits, k);
-            }
-            if let Some(p) = params.top_p {
-                logits = top_p_filtering(logits, p);
-            }
-            if let Some(mp) = params.min_p {
-                logits = min_p_filtering(logits, mp);
-            }
-            let temp = if params.temperature < 1e-5 {
-                1.0
-            } else {
-                params.temperature
-            };
-            logits /= temp;
-
-            softmax_1d_inplace(&mut logits);
-            sample_from_probs(&logits)
-        }
+        DecodingStrategy::Sample(params) => sample_from_probs(&sampling_probs(logits, params)),
         DecodingStrategy::BeamSearch(_) => {
             anyhow::bail!("Beam search is not supported in this generator.")
         }
     }
+}
+
+/// The distribution `sample_token` draws from: the filters, the temperature, then softmax.
+pub fn sampling_probs(
+    mut logits: Array1<f32>,
+    params: &crate::common::SamplingParams,
+) -> Array1<f32> {
+    // Apply filters sequentially
+    if let Some(k) = params.top_k {
+        logits = top_k_filtering(logits, k);
+    }
+    if let Some(p) = params.top_p {
+        logits = top_p_filtering(logits, p);
+    }
+    if let Some(mp) = params.min_p {
+        logits = min_p_filtering(logits, mp);
+    }
+    let temp = if params.temperature < 1e-5 {
+        1.0
+    } else {
+        params.temperature
+    };
+    logits /= temp;
+
+    softmax_1d_inplace(&mut logits);
+    logits
 }
 
 /// Get probability of a specific token after softmax.

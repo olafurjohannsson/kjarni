@@ -94,6 +94,7 @@ pub async fn run(
         if !quiet {
             eprintln!("{}", "No results found.".dimmed());
         }
+        print!("{}", format_no_results(format, query)?);
         return Ok(());
     }
 
@@ -173,6 +174,17 @@ async fn get_query_embedding(
 
     let embedding = embedder.embed(query).await.map_err(|e| anyhow!(e))?;
     Ok(embedding)
+}
+
+/// What goes to stdout for no results: valid output for machine formats, and nothing for
+/// text, where the message on stderr says it.
+fn format_no_results(format: &str, query: &str) -> Result<String> {
+    let output = format_results(&[], format, query)?;
+    Ok(if format == "text" {
+        String::new()
+    } else {
+        output
+    })
 }
 
 fn format_results(results: &[SearchResult], format: &str, query: &str) -> Result<String> {
@@ -287,6 +299,15 @@ fn bar_denominator(scores: impl Iterator<Item = f32>) -> f32 {
 #[cfg(test)]
 mod display_tests {
     use super::*;
+
+    #[test]
+    fn no_results_are_still_valid_output() {
+        assert_eq!(format_no_results("json", "q").unwrap(), "[]\n");
+        assert_eq!(format_no_results("jsonl", "q").unwrap(), "");
+        assert_eq!(format_no_results("docs", "q").unwrap(), "");
+        assert_eq!(format_no_results("text", "q").unwrap(), "");
+        assert!(format_no_results("yaml", "q").is_err());
+    }
 
     fn bars(scores: &[f32]) -> Vec<f32> {
         let d = bar_denominator(scores.iter().copied());

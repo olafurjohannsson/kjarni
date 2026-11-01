@@ -32,14 +32,6 @@ struct LinearInfo {
 // Reduction cache for Wide kernel
 var<workgroup> wg_sum: array<f32, 256>;
 
-// Four row accumulators per thread, reduced together in one barrier chain.
-//
-// The GEMV kernels run 64 threads rather than 256. At K=3072 a row is only 384 qs
-// words, so with 256 threads each one did about 1.5 words of work and then paid an
-// eight-step barrier reduction; the reduction cost as much as the arithmetic. Fewer,
-// busier threads move that ratio the right way.
-var<workgroup> wg_sum4: array<vec4<f32>, 64>;
-
 fn unpack_bf16(packed: u32) -> vec2<f32> {
     let x = bitcast<f32>(packed << 16u);
     let y = bitcast<f32>(packed & 0xFFFF0000u);
@@ -149,6 +141,89 @@ fn gemv_f32(@builtin(global_invocation_id) id: vec3<u32>) {
     Output[n] = sum;
 }
 
+
+// ---------------------------------------------------------------------------
+// Wide GEMM for a few rows: the wide GEMV with one accumulator per row.
+//
+// A workgroup computes one output column for every row, so the weights are read once
+// and the cost follows the row count. A tile costs the same from 2 to 48 rows. On an
+// RTX A2000, across a 28-layer decoder, this takes 47 ms at two rows, 96 at five and
+// 163 at nine, against 70, 169 and 187 for the tiles.
+// ---------------------------------------------------------------------------
+const WIDE_ROWS = 10u;
+const WIDE_THREADS = 64u;
+
+var<workgroup> wg_rows: array<array<f32, WIDE_ROWS>, WIDE_THREADS>;
+
+fn gemm_wide_finish(tid: u32, n: u32, acc: ptr<function, array<f32, WIDE_ROWS>>) {
+    for (var r = 0u; r < info.M; r++) {
+        wg_rows[tid][r] = (*acc)[r];
+    }
+    workgroupBarrier();
+
+    for (var s = WIDE_THREADS / 2u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            for (var r = 0u; r < info.M; r++) {
+                wg_rows[tid][r] += wg_rows[tid + s][r];
+            }
+        }
+        workgroupBarrier();
+    }
+
+    if (tid == 0u) {
+        for (var r = 0u; r < info.M; r++) {
+            Output[r * info.N + n] = wg_rows[0][r];
+        }
+    }
+}
+
+@compute @workgroup_size(64)
+fn gemm_wide_bf16(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let n = wg_id.y * grid.x + wg_id.x;
+    if (n >= info.N) { return; }
+
+    let tid = local_id.x;
+    let k_pairs = info.K / 2u;
+    let weight_base = n * k_pairs;
+    var acc: array<f32, WIDE_ROWS>;
+
+    for (var k = tid; k < k_pairs; k += WIDE_THREADS) {
+        let w = unpack_bf16(W_BF16[weight_base + k]);
+        for (var r = 0u; r < info.M; r++) {
+            let base = r * info.K + k * 2u;
+            acc[r] += Input[base] * w.x + Input[base + 1u] * w.y;
+        }
+    }
+
+    gemm_wide_finish(tid, n, &acc);
+}
+
+@compute @workgroup_size(64)
+fn gemm_wide_f32(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let n = wg_id.y * grid.x + wg_id.x;
+    if (n >= info.N) { return; }
+
+    let tid = local_id.x;
+    let weight_base = n * info.K;
+    var acc: array<f32, WIDE_ROWS>;
+
+    for (var k = tid; k < info.K; k += WIDE_THREADS) {
+        let w = W_F32[weight_base + k];
+        for (var r = 0u; r < info.M; r++) {
+            acc[r] += Input[r * info.K + k] * w;
+        }
+    }
+
+    gemm_wide_finish(tid, n, &acc);
+}
 
 // ---------------------------------------------------------------------------
 // GEMM for two rows: one thread per output, reading both operands directly.
@@ -291,7 +366,7 @@ fn gemm64_load_w_q8(tid: u32, col0: u32, k0: u32) {
 /// Loads the weight tile for k0..k0+16 from Q6_K blocks.
 ///
 /// A block is 256 weights as two halves of 128, each in four quarters of 32
-/// (see q6k_unit_weights). A 16-wide slice starting at a multiple of 16 lies in
+/// (see q6k_unit_values). A 16-wide slice starting at a multiple of 16 lies in
 /// one quarter and shares one scale: four (ql, qh) word positions, one per
 /// thread, each giving four weights.
 fn gemm64_load_w_q6k(tid: u32, col0: u32, k0: u32) {
@@ -314,7 +389,7 @@ fn gemm64_load_w_q6k(tid: u32, col0: u32, k0: u32) {
         let qlw = W_Q6K[base + i * 16u + jg + select(0u, 8u, (quarter & 1u) == 1u)];
         let qhw = W_Q6K[base + 32u + i * 8u + jg];
 
-        // As in q6k_unit_weights: quarters 0 and 1 take the low nibbles of
+        // As in q6k_unit_values: quarters 0 and 1 take the low nibbles of
         // their ql word, 2 and 3 the high, each with its two bits of qh.
         var low = qlw & 0x0F0F0F0Fu;
         if (quarter >= 2u) { low = (qlw >> 4u) & 0x0F0F0F0Fu; }
@@ -331,7 +406,7 @@ fn gemm64_load_w_q6k(tid: u32, col0: u32, k0: u32) {
 /// Loads the weight tile for k0..k0+16 from Q4_K blocks.
 ///
 /// A block is 256 weights of one row, and within it each run of 32 shares a
-/// sub-block scale and min (see q4k_word_weights). A 16-wide slice starting at
+/// sub-block scale and min (see q4k_chunk). A 16-wide slice starting at
 /// a multiple of 16 therefore sits inside one block and one sub-block, as four
 /// qs words. 64 rows x 4 words is one word per thread: each dequantises four
 /// weights with a single scale lookup.
@@ -544,7 +619,7 @@ fn gemm_load_w_q8(tid: u32, col0: u32, k0: u32) {
 /// Loads the weight tile for k0..k0+16 from Q6_K blocks.
 ///
 /// A block is 256 weights as two halves of 128, each in four quarters of 32
-/// (see q6k_unit_weights). A 16-wide slice starting at a multiple of 16 lies in
+/// (see q6k_unit_values). A 16-wide slice starting at a multiple of 16 lies in
 /// one quarter and shares one scale: four (ql, qh) word positions per row. 128
 /// rows x 4 words is two words per thread, each giving four weights.
 fn gemm_load_w_q6k(tid: u32, col0: u32, k0: u32) {
@@ -568,7 +643,7 @@ fn gemm_load_w_q6k(tid: u32, col0: u32, k0: u32) {
             let qlw = W_Q6K[base + i * 16u + jg + select(0u, 8u, (quarter & 1u) == 1u)];
             let qhw = W_Q6K[base + 32u + i * 8u + jg];
 
-            // As in q6k_unit_weights: quarters 0 and 1 take the low nibbles of
+            // As in q6k_unit_values: quarters 0 and 1 take the low nibbles of
             // their ql word, 2 and 3 the high, each with its two bits of qh.
             var low = qlw & 0x0F0F0F0Fu;
             if (quarter >= 2u) { low = (qlw >> 4u) & 0x0F0F0F0Fu; }
@@ -586,7 +661,7 @@ fn gemm_load_w_q6k(tid: u32, col0: u32, k0: u32) {
 /// Loads the weight tile for k0..k0+16 from Q4_K blocks.
 ///
 /// A block is 256 weights of one row, and within it each run of 32 shares a
-/// sub-block scale and min (see q4k_word_weights). A 16-wide slice starting at
+/// sub-block scale and min (see q4k_chunk). A 16-wide slice starting at
 /// a multiple of 16 therefore sits inside one block and one sub-block, as four
 /// qs words. 128 rows x 4 words is two words per thread, each dequantising four
 /// weights with a single scale lookup.
@@ -782,108 +857,195 @@ fn q4k_scale_min(s0: u32, s1: u32, s2: u32, j: u32) -> vec2<f32> {
     return vec2<f32>(f32(sc), f32(m));
 }
 
-// Dequantises one qs word (8 weights) into two vec4 lanes: the low nibbles and the
-// high nibbles, each already scaled and offset.
-//
-// It returns the weights rather than a dot product so the caller can load the input
-// activations once and reuse them across several output rows. That reuse is the
-// point: the kernel moves a quarter of the bytes the BF16 kernel does in the same
-// wall time, so it is ALU- and latency-bound, and giving each thread more rows is
-// the only change measured to help.
-struct Q4KPair {
-    lo: vec4<f32>,
-    hi: vec4<f32>,
-}
-
-fn q4k_word_weights(base: u32, wi: u32) -> Q4KPair {
-    let dd = unpack2x16float(W_Q4K[base]);
-    let s0 = W_Q4K[base + 1u];
-    let s1 = W_Q4K[base + 2u];
-    let s2 = W_Q4K[base + 3u];
-    let qword = W_Q4K[base + 4u + wi];
-
-    let j = wi / 8u;
-    let sm1 = q4k_scale_min(s0, s1, s2, j * 2u);
-    let sm2 = q4k_scale_min(s0, s1, s2, j * 2u + 1u);
-
-    // One mask over the whole word extracts four nibbles at once.
-    let lo_n = vec4<f32>(unpack4xU8(qword & 0x0F0F0F0Fu));
-    let hi_n = vec4<f32>(unpack4xU8((qword >> 4u) & 0x0F0F0F0Fu));
-
-    var out: Q4KPair;
-    out.lo = lo_n * (dd.x * sm1.x) - vec4<f32>(dd.y * sm1.y);
-    out.hi = hi_n * (dd.x * sm2.x) - vec4<f32>(dd.y * sm2.y);
-    return out;
-}
-
-// Output rows each GEMV workgroup computes. Shared by the Q4_K and Q6_K kernels:
+// Output rows each GEMV workgroup computes in the Q6_K and Q8_0 kernels:
 // the input activations are loaded once and reused across all of them, which is what
 // took these kernels from 12% of the card's bandwidth to competitive with BF16.
 // Measured: 4 beats 1, and 8 is no better than 4 once register pressure bites.
 const ROWS_PER_WG: u32 = 4u;
 
-@compute @workgroup_size(64)
+// Threads per Q4_K GEMV workgroup.
+const Q4K_THREADS: u32 = 32u;
+var<workgroup> wg_q4k_a: array<vec4<f32>, Q4K_THREADS>;
+var<workgroup> wg_q4k_b: array<vec4<f32>, Q4K_THREADS>;
+
+// d * scale and d * min for sub-blocks `2j` and `2j + 1`, as (scale_lo, min_lo, scale_hi,
+// min_hi).
+fn q4k_pair_scales(base: u32, j: u32) -> vec4<f32> {
+    let dd = unpack2x16float(W_Q4K[base]);
+    let s0 = W_Q4K[base + 1u];
+    let s1 = W_Q4K[base + 2u];
+    let s2 = W_Q4K[base + 3u];
+    let lo = q4k_scale_min(s0, s1, s2, j * 2u);
+    let hi = q4k_scale_min(s0, s1, s2, j * 2u + 1u);
+    return vec4<f32>(lo.x * dd.x, lo.y * dd.y, hi.x * dd.x, hi.y * dd.y);
+}
+
+fn q4k_lo_nibbles(q: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4xU8(q & 0x0F0F0F0Fu));
+}
+
+fn q4k_hi_nibbles(q: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4xU8((q >> 4u) & 0x0F0F0F0Fu));
+}
+
+// Output rows per Q4_K GEMV workgroup. They share their activations, so the more rows
+// per load the better.
+const Q4K_ROWS_PER_WG: u32 = 8u;
+
+// The sums of eight rows over one chunk: 4 consecutive qs words, which share one d, one
+// dmin and one pair of scales, so those are read once. Each weight is n * scale - min,
+// so a row's sum is scale * dot(activations, n) - min * sum(activations), and the
+// activations and their sum are common to every row. Only the dot product of the nibbles
+// is per word.
+struct Q4KRows {
+    a: vec4<f32>,
+    b: vec4<f32>,
+}
+
+fn q4k_scaled(
+    lo: vec4<f32>,
+    hi: vec4<f32>,
+    sum_lo: f32,
+    sum_hi: f32,
+    s0: vec4<f32>,
+    s1: vec4<f32>,
+    s2: vec4<f32>,
+    s3: vec4<f32>,
+) -> vec4<f32> {
+    return lo * vec4<f32>(s0.x, s1.x, s2.x, s3.x)
+         - sum_lo * vec4<f32>(s0.y, s1.y, s2.y, s3.y)
+         + hi * vec4<f32>(s0.z, s1.z, s2.z, s3.z)
+         - sum_hi * vec4<f32>(s0.w, s1.w, s2.w, s3.w);
+}
+
+fn q4k_dots(a: vec4<f32>, n0: vec4<f32>, n1: vec4<f32>, n2: vec4<f32>, n3: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(dot(a, n0), dot(a, n1), dot(a, n2), dot(a, n3));
+}
+
+fn q4k_chunk(row_a: vec4<u32>, row_b: vec4<u32>, chunk: u32, input_row: u32) -> Q4KRows {
+    let blk = chunk / 8u;
+    let j = (chunk % 8u) / 2u;
+    let block = vec4<u32>(blk * Q4K_WORDS);
+    let ba = row_a + block;
+    let bb = row_b + block;
+
+    let sa0 = q4k_pair_scales(ba.x, j);
+    let sa1 = q4k_pair_scales(ba.y, j);
+    let sa2 = q4k_pair_scales(ba.z, j);
+    let sa3 = q4k_pair_scales(ba.w, j);
+    let sb0 = q4k_pair_scales(bb.x, j);
+    let sb1 = q4k_pair_scales(bb.y, j);
+    let sb2 = q4k_pair_scales(bb.z, j);
+    let sb3 = q4k_pair_scales(bb.w, j);
+
+    let first_word = vec4<u32>(4u + (chunk % 8u) * 4u);
+    let wa = ba + first_word;
+    let wb = bb + first_word;
+    let l0 = input_row + blk * 256u + j * 64u + (chunk % 2u) * 16u;
+
+    var lo_a = vec4<f32>(0.0);
+    var hi_a = vec4<f32>(0.0);
+    var lo_b = vec4<f32>(0.0);
+    var hi_b = vec4<f32>(0.0);
+    var sum_lo = 0.0;
+    var sum_hi = 0.0;
+    for (var i = 0u; i < 4u; i++) {
+        let l = l0 + i * 4u;
+        let a_lo = vec4<f32>(Input[l], Input[l + 1u], Input[l + 2u], Input[l + 3u]);
+        let a_hi = vec4<f32>(Input[l + 32u], Input[l + 33u], Input[l + 34u], Input[l + 35u]);
+        sum_lo += a_lo.x + a_lo.y + a_lo.z + a_lo.w;
+        sum_hi += a_hi.x + a_hi.y + a_hi.z + a_hi.w;
+
+        let q0 = W_Q4K[wa.x + i];
+        let q1 = W_Q4K[wa.y + i];
+        let q2 = W_Q4K[wa.z + i];
+        let q3 = W_Q4K[wa.w + i];
+        let q4 = W_Q4K[wb.x + i];
+        let q5 = W_Q4K[wb.y + i];
+        let q6 = W_Q4K[wb.z + i];
+        let q7 = W_Q4K[wb.w + i];
+        lo_a += q4k_dots(
+            a_lo, q4k_lo_nibbles(q0), q4k_lo_nibbles(q1), q4k_lo_nibbles(q2), q4k_lo_nibbles(q3),
+        );
+        hi_a += q4k_dots(
+            a_hi, q4k_hi_nibbles(q0), q4k_hi_nibbles(q1), q4k_hi_nibbles(q2), q4k_hi_nibbles(q3),
+        );
+        lo_b += q4k_dots(
+            a_lo, q4k_lo_nibbles(q4), q4k_lo_nibbles(q5), q4k_lo_nibbles(q6), q4k_lo_nibbles(q7),
+        );
+        hi_b += q4k_dots(
+            a_hi, q4k_hi_nibbles(q4), q4k_hi_nibbles(q5), q4k_hi_nibbles(q6), q4k_hi_nibbles(q7),
+        );
+    }
+
+    var out: Q4KRows;
+    out.a = q4k_scaled(lo_a, hi_a, sum_lo, sum_hi, sa0, sa1, sa2, sa3);
+    out.b = q4k_scaled(lo_b, hi_b, sum_lo, sum_hi, sb0, sb1, sb2, sb3);
+    return out;
+}
+
+// A thread owns chunks rather than single words so its reads stay in order. 32 threads
+// fill the GPU's hardware thread groups, and split a row of 3072 or 8192 weights evenly.
+@compute @workgroup_size(Q4K_THREADS)
 fn gemv_q4k(
     @builtin(workgroup_id) wg_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
     @builtin(num_workgroups) grid: vec3<u32>
 ) {
-    let row0 = (wg_id.y * grid.x + wg_id.x) * ROWS_PER_WG;
+    let row0 = (wg_id.y * grid.x + wg_id.x) * Q4K_ROWS_PER_WG;
     let tid = local_id.x;
     if (row0 >= info.N) { return; }
+    let input_row = wg_id.z * info.K;
+    let out0 = wg_id.z * info.N + row0;
 
     let blocks_per_row = info.K / 256u;
     let words_per_row = blocks_per_row * Q4K_WORDS;
-    let total_words = blocks_per_row * 32u;
+    let total_chunks = blocks_per_row * 8u;
 
-    var p0 = 0.0;
-    var p1 = 0.0;
-    var p2 = 0.0;
-    var p3 = 0.0;
+    // Rows past the end repeat the last row, and are not written out.
+    let last = info.N - 1u;
+    let bases_a = vec4<u32>(
+        row0,
+        min(row0 + 1u, last),
+        min(row0 + 2u, last),
+        min(row0 + 3u, last),
+    ) * words_per_row;
+    let bases_b = vec4<u32>(
+        min(row0 + 4u, last),
+        min(row0 + 5u, last),
+        min(row0 + 6u, last),
+        min(row0 + 7u, last),
+    ) * words_per_row;
 
-    for (var w = tid; w < total_words; w = w + 64u) {
-        let blk = w / 32u;
-        let wi = w % 32u;
-        let l0 = blk * 256u + (wi / 8u) * 64u + (wi % 8u) * 4u;
-
-        // Loaded once, used by every row this workgroup owns.
-        let a_lo = vec4<f32>(Input[l0], Input[l0 + 1u], Input[l0 + 2u], Input[l0 + 3u]);
-        let a_hi = vec4<f32>(
-            Input[l0 + 32u], Input[l0 + 33u], Input[l0 + 34u], Input[l0 + 35u],
-        );
-        let blk_off = blk * Q4K_WORDS + wi;
-        let base = row0 * words_per_row + blk * Q4K_WORDS;
-
-        let w0 = q4k_word_weights(base, wi);
-        p0 += dot(a_lo, w0.lo) + dot(a_hi, w0.hi);
-        if (row0 + 1u < info.N) {
-            let w1 = q4k_word_weights(base + words_per_row, wi);
-            p1 += dot(a_lo, w1.lo) + dot(a_hi, w1.hi);
-        }
-        if (row0 + 2u < info.N) {
-            let w2 = q4k_word_weights(base + words_per_row * 2u, wi);
-            p2 += dot(a_lo, w2.lo) + dot(a_hi, w2.hi);
-        }
-        if (row0 + 3u < info.N) {
-            let w3 = q4k_word_weights(base + words_per_row * 3u, wi);
-            p3 += dot(a_lo, w3.lo) + dot(a_hi, w3.hi);
-        }
+    var acc_a = vec4<f32>(0.0);
+    var acc_b = vec4<f32>(0.0);
+    for (var chunk = tid; chunk < total_chunks; chunk += Q4K_THREADS) {
+        let rows = q4k_chunk(bases_a, bases_b, chunk, input_row);
+        acc_a += rows.a;
+        acc_b += rows.b;
     }
 
-    wg_sum4[tid] = vec4<f32>(p0, p1, p2, p3);
+    wg_q4k_a[tid] = acc_a;
+    wg_q4k_b[tid] = acc_b;
     workgroupBarrier();
-    for (var s = 32u; s > 0u; s >>= 1u) {
+    for (var s = Q4K_THREADS / 2u; s > 0u; s >>= 1u) {
         if (tid < s) {
-            wg_sum4[tid] += wg_sum4[tid + s];
+            wg_q4k_a[tid] += wg_q4k_a[tid + s];
+            wg_q4k_b[tid] += wg_q4k_b[tid + s];
         }
         workgroupBarrier();
     }
     if (tid == 0u) {
-        let r = wg_sum4[0];
-        Output[row0] = r.x;
-        if (row0 + 1u < info.N) { Output[row0 + 1u] = r.y; }
-        if (row0 + 2u < info.N) { Output[row0 + 2u] = r.z; }
-        if (row0 + 3u < info.N) { Output[row0 + 3u] = r.w; }
+        let a = wg_q4k_a[0];
+        let b = wg_q4k_b[0];
+        Output[out0 + 0u] = a.x;
+        if (row0 + 1u < info.N) { Output[out0 + 1u] = a.y; }
+        if (row0 + 2u < info.N) { Output[out0 + 2u] = a.z; }
+        if (row0 + 3u < info.N) { Output[out0 + 3u] = a.w; }
+        if (row0 + 4u < info.N) { Output[out0 + 4u] = b.x; }
+        if (row0 + 5u < info.N) { Output[out0 + 5u] = b.y; }
+        if (row0 + 6u < info.N) { Output[out0 + 6u] = b.z; }
+        if (row0 + 7u < info.N) { Output[out0 + 7u] = b.w; }
     }
 }
 
@@ -905,7 +1067,11 @@ fn q8_unit_weights(base: u32, jg: u32) -> vec4<f32> {
     return vec4<f32>(unpack4xI8(W_Q8[base + 1u + jg])) * d;
 }
 
-@compute @workgroup_size(64)
+// Threads per Q8_0 GEMV workgroup. 32 fill the GPU's hardware thread groups.
+const Q8_THREADS: u32 = 32u;
+var<workgroup> wg_q8: array<vec4<f32>, Q8_THREADS>;
+
+@compute @workgroup_size(Q8_THREADS)
 fn gemv_q8(
     @builtin(workgroup_id) wg_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
@@ -914,6 +1080,8 @@ fn gemv_q8(
     let row0 = (wg_id.y * grid.x + wg_id.x) * ROWS_PER_WG;
     let tid = local_id.x;
     if (row0 >= info.N) { return; }
+    let input_row = wg_id.z * info.K;
+    let out0 = wg_id.z * info.N + row0;
 
     let blocks_per_row = info.K / 32u;
     let words_per_row = blocks_per_row * Q8_WORDS;
@@ -924,10 +1092,10 @@ fn gemv_q8(
     var p2 = 0.0;
     var p3 = 0.0;
 
-    for (var u = tid; u < total_units; u = u + 64u) {
+    for (var u = tid; u < total_units; u = u + Q8_THREADS) {
         let blk = u / 8u;
         let jg = u % 8u;
-        let ob = blk * 32u + jg * 4u;
+        let ob = input_row + blk * 32u + jg * 4u;
 
         // Loaded once, reused by every row this workgroup owns.
         let a = vec4<f32>(Input[ob], Input[ob + 1u], Input[ob + 2u], Input[ob + 3u]);
@@ -945,20 +1113,20 @@ fn gemv_q8(
         }
     }
 
-    wg_sum4[tid] = vec4<f32>(p0, p1, p2, p3);
+    wg_q8[tid] = vec4<f32>(p0, p1, p2, p3);
     workgroupBarrier();
-    for (var s = 32u; s > 0u; s >>= 1u) {
+    for (var s = Q8_THREADS / 2u; s > 0u; s >>= 1u) {
         if (tid < s) {
-            wg_sum4[tid] += wg_sum4[tid + s];
+            wg_q8[tid] += wg_q8[tid + s];
         }
         workgroupBarrier();
     }
     if (tid == 0u) {
-        let r = wg_sum4[0];
-        Output[row0] = r.x;
-        if (row0 + 1u < info.N) { Output[row0 + 1u] = r.y; }
-        if (row0 + 2u < info.N) { Output[row0 + 2u] = r.z; }
-        if (row0 + 3u < info.N) { Output[row0 + 3u] = r.w; }
+        let r = wg_q8[0];
+        Output[out0 + 0u] = r.x;
+        if (row0 + 1u < info.N) { Output[out0 + 1u] = r.y; }
+        if (row0 + 2u < info.N) { Output[out0 + 2u] = r.z; }
+        if (row0 + 3u < info.N) { Output[out0 + 3u] = r.w; }
     }
 }
 
@@ -985,6 +1153,18 @@ fn q6k_scale(base: u32, idx: u32) -> f32 {
     return f32(i32(b << 24u) >> 24u); // scales are signed
 }
 
+// d * scale for the four quarters of the half-block `i`, for a unit at `jg`.
+fn q6k_quarter_scales(base: u32, i: u32, jg: u32) -> vec4<f32> {
+    let d = unpack2x16float(W_Q6K[base + 52u]).x;
+    let scb = i * 8u + jg / 4u;
+    return vec4<f32>(
+        q6k_scale(base, scb),
+        q6k_scale(base, scb + 2u),
+        q6k_scale(base, scb + 4u),
+        q6k_scale(base, scb + 6u),
+    ) * d;
+}
+
 struct Q6KQuad {
     a: vec4<f32>,
     b: vec4<f32>,
@@ -992,35 +1172,36 @@ struct Q6KQuad {
     d: vec4<f32>,
 }
 
-fn q6k_unit_weights(base: u32, i: u32, jg: u32) -> Q6KQuad {
-    let d = unpack2x16float(W_Q6K[base + 52u]).x;
-    let scb = i * 8u + jg / 4u;
-    let s0 = d * q6k_scale(base, scb);
-    let s1 = d * q6k_scale(base, scb + 2u);
-    let s2 = d * q6k_scale(base, scb + 4u);
-    let s3 = d * q6k_scale(base, scb + 6u);
-
+// The raw 6-bit values of one work unit, before the bias of 32 and the scale.
+fn q6k_unit_values(base: u32, i: u32, jg: u32) -> Q6KQuad {
     let qlw = W_Q6K[base + i * 16u + jg];
     let qlw2 = W_Q6K[base + i * 16u + jg + 8u];
     let qhw = W_Q6K[base + 32u + i * 8u + jg];
 
     // Each mask keeps the two high bits in place for its quarter, so the OR lands
     // them directly on top of the low nibble without any per-byte shifting.
-    let n0 = unpack4xU8((qlw & 0x0F0F0F0Fu) | ((qhw & 0x03030303u) << 4u));
-    let n1 = unpack4xU8((qlw2 & 0x0F0F0F0Fu) | ((qhw & 0x0C0C0C0Cu) << 2u));
-    let n2 = unpack4xU8(((qlw >> 4u) & 0x0F0F0F0Fu) | (qhw & 0x30303030u));
-    let n3 = unpack4xU8(((qlw2 >> 4u) & 0x0F0F0F0Fu) | ((qhw & 0xC0C0C0C0u) >> 2u));
-
-    let bias = vec4<f32>(32.0);
     var o: Q6KQuad;
-    o.a = (vec4<f32>(n0) - bias) * s0;
-    o.b = (vec4<f32>(n1) - bias) * s1;
-    o.c = (vec4<f32>(n2) - bias) * s2;
-    o.d = (vec4<f32>(n3) - bias) * s3;
+    o.a = vec4<f32>(unpack4xU8((qlw & 0x0F0F0F0Fu) | ((qhw & 0x03030303u) << 4u)));
+    o.b = vec4<f32>(unpack4xU8((qlw2 & 0x0F0F0F0Fu) | ((qhw & 0x0C0C0C0Cu) << 2u)));
+    o.c = vec4<f32>(unpack4xU8(((qlw >> 4u) & 0x0F0F0F0Fu) | (qhw & 0x30303030u)));
+    o.d = vec4<f32>(unpack4xU8(((qlw2 >> 4u) & 0x0F0F0F0Fu) | ((qhw & 0xC0C0C0C0u) >> 2u)));
     return o;
 }
 
-@compute @workgroup_size(64)
+fn q6k_dots(a: vec4<f32>, n0: vec4<f32>, n1: vec4<f32>, n2: vec4<f32>, n3: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(dot(a, n0), dot(a, n1), dot(a, n2), dot(a, n3));
+}
+
+// Threads per Q6_K GEMV workgroup. A chunk is 2 work units, which 32 threads split evenly
+// for a row of 3072 or 8192 weights.
+const Q6K_THREADS: u32 = 32u;
+var<workgroup> wg_q6k: array<vec4<f32>, Q6K_THREADS>;
+
+// A chunk's units share their scales, so those are read once. Each weight is
+// (n - 32) * scale, so a row's sum over one quarter is
+// scale * (dot(activations, n) - 32 * sum(activations)), and the activations and their
+// sum are common to every row.
+@compute @workgroup_size(Q6K_THREADS)
 fn gemv_q6k(
     @builtin(workgroup_id) wg_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
@@ -1029,60 +1210,84 @@ fn gemv_q6k(
     let row0 = (wg_id.y * grid.x + wg_id.x) * ROWS_PER_WG;
     let tid = local_id.x;
     if (row0 >= info.N) { return; }
+    let input_row = wg_id.z * info.K;
+    let out0 = wg_id.z * info.N + row0;
 
     let blocks_per_row = info.K / 256u;
     let words_per_row = blocks_per_row * Q6K_WORDS;
-    let total_units = blocks_per_row * 16u;
+    let total_chunks = blocks_per_row * 8u;
 
-    var p0 = 0.0;
-    var p1 = 0.0;
-    var p2 = 0.0;
-    var p3 = 0.0;
+    // Rows past the end repeat the last row, and are not written out.
+    let last = info.N - 1u;
+    let row_base = vec4<u32>(
+        row0,
+        min(row0 + 1u, last),
+        min(row0 + 2u, last),
+        min(row0 + 3u, last),
+    ) * words_per_row;
 
-    for (var u = tid; u < total_units; u = u + 64u) {
-        let blk = u / 16u;
-        let ub = u % 16u;
-        let i = ub / 8u;
-        let jg = ub % 8u;
-        let ob = blk * 256u + i * 128u + jg * 4u;
+    var acc = vec4<f32>(0.0);
+    for (var chunk = tid; chunk < total_chunks; chunk += Q6K_THREADS) {
+        let blk = chunk / 8u;
+        let unit0 = (chunk % 8u) * 2u;
+        let i = unit0 / 8u;
+        let jg0 = unit0 % 8u;
+        let bases = row_base + vec4<u32>(blk * Q6K_WORDS);
 
-        // Loaded once, reused by every row this workgroup owns.
-        let a0 = vec4<f32>(Input[ob], Input[ob + 1u], Input[ob + 2u], Input[ob + 3u]);
-        let a1 = vec4<f32>(Input[ob + 32u], Input[ob + 33u], Input[ob + 34u], Input[ob + 35u]);
-        let a2 = vec4<f32>(Input[ob + 64u], Input[ob + 65u], Input[ob + 66u], Input[ob + 67u]);
-        let a3 = vec4<f32>(Input[ob + 96u], Input[ob + 97u], Input[ob + 98u], Input[ob + 99u]);
+        let s0 = q6k_quarter_scales(bases.x, i, jg0);
+        let s1 = q6k_quarter_scales(bases.y, i, jg0);
+        let s2 = q6k_quarter_scales(bases.z, i, jg0);
+        let s3 = q6k_quarter_scales(bases.w, i, jg0);
 
-        let base = row0 * words_per_row + blk * Q6K_WORDS;
+        var dot_a = vec4<f32>(0.0);
+        var dot_b = vec4<f32>(0.0);
+        var dot_c = vec4<f32>(0.0);
+        var dot_d = vec4<f32>(0.0);
+        var sums = vec4<f32>(0.0);
+        for (var unit = 0u; unit < 2u; unit++) {
+            let jg = jg0 + unit;
+            let ob = input_row + blk * 256u + i * 128u + jg * 4u;
+            let a0 = vec4<f32>(Input[ob], Input[ob + 1u], Input[ob + 2u], Input[ob + 3u]);
+            let a1 = vec4<f32>(Input[ob + 32u], Input[ob + 33u], Input[ob + 34u], Input[ob + 35u]);
+            let a2 = vec4<f32>(Input[ob + 64u], Input[ob + 65u], Input[ob + 66u], Input[ob + 67u]);
+            let a3 = vec4<f32>(Input[ob + 96u], Input[ob + 97u], Input[ob + 98u], Input[ob + 99u]);
+            sums += vec4<f32>(
+                a0.x + a0.y + a0.z + a0.w,
+                a1.x + a1.y + a1.z + a1.w,
+                a2.x + a2.y + a2.z + a2.w,
+                a3.x + a3.y + a3.z + a3.w,
+            );
 
-        let w0 = q6k_unit_weights(base, i, jg);
-        p0 += dot(a0, w0.a) + dot(a1, w0.b) + dot(a2, w0.c) + dot(a3, w0.d);
-        if (row0 + 1u < info.N) {
-            let w1 = q6k_unit_weights(base + words_per_row, i, jg);
-            p1 += dot(a0, w1.a) + dot(a1, w1.b) + dot(a2, w1.c) + dot(a3, w1.d);
+            let n0 = q6k_unit_values(bases.x, i, jg);
+            let n1 = q6k_unit_values(bases.y, i, jg);
+            let n2 = q6k_unit_values(bases.z, i, jg);
+            let n3 = q6k_unit_values(bases.w, i, jg);
+            dot_a += q6k_dots(a0, n0.a, n1.a, n2.a, n3.a);
+            dot_b += q6k_dots(a1, n0.b, n1.b, n2.b, n3.b);
+            dot_c += q6k_dots(a2, n0.c, n1.c, n2.c, n3.c);
+            dot_d += q6k_dots(a3, n0.d, n1.d, n2.d, n3.d);
         }
-        if (row0 + 2u < info.N) {
-            let w2 = q6k_unit_weights(base + words_per_row * 2u, i, jg);
-            p2 += dot(a0, w2.a) + dot(a1, w2.b) + dot(a2, w2.c) + dot(a3, w2.d);
-        }
-        if (row0 + 3u < info.N) {
-            let w3 = q6k_unit_weights(base + words_per_row * 3u, i, jg);
-            p3 += dot(a0, w3.a) + dot(a1, w3.b) + dot(a2, w3.c) + dot(a3, w3.d);
-        }
+
+        let bias = sums * 32.0;
+        acc += (dot_a - vec4<f32>(bias.x)) * vec4<f32>(s0.x, s1.x, s2.x, s3.x)
+             + (dot_b - vec4<f32>(bias.y)) * vec4<f32>(s0.y, s1.y, s2.y, s3.y)
+             + (dot_c - vec4<f32>(bias.z)) * vec4<f32>(s0.z, s1.z, s2.z, s3.z)
+             + (dot_d - vec4<f32>(bias.w)) * vec4<f32>(s0.w, s1.w, s2.w, s3.w);
     }
 
-    wg_sum4[tid] = vec4<f32>(p0, p1, p2, p3);
+    wg_q6k[tid] = acc;
     workgroupBarrier();
-    for (var s = 32u; s > 0u; s >>= 1u) {
+    for (var s = Q6K_THREADS / 2u; s > 0u; s >>= 1u) {
         if (tid < s) {
-            wg_sum4[tid] += wg_sum4[tid + s];
+            wg_q6k[tid] += wg_q6k[tid + s];
         }
         workgroupBarrier();
     }
     if (tid == 0u) {
-        let r = wg_sum4[0];
-        Output[row0] = r.x;
-        if (row0 + 1u < info.N) { Output[row0 + 1u] = r.y; }
-        if (row0 + 2u < info.N) { Output[row0 + 2u] = r.z; }
-        if (row0 + 3u < info.N) { Output[row0 + 3u] = r.w; }
+        let r = wg_q6k[0];
+        Output[out0 + 0u] = r.x;
+        if (row0 + 1u < info.N) { Output[out0 + 1u] = r.y; }
+        if (row0 + 2u < info.N) { Output[out0 + 2u] = r.z; }
+        if (row0 + 3u < info.N) { Output[out0 + 3u] = r.w; }
     }
 }

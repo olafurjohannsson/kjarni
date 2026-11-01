@@ -6,8 +6,8 @@ pub use cancellation::{CancellationError, CancellationHandle, CancellationToken}
 pub use sampling::{
     apply_no_repeat_ngram, apply_no_repeat_ngram_inplace, apply_repetition_penalty,
     apply_repetition_penalty_inplace, apply_repetition_penalty_mut, get_top_k_from_log_probs,
-    log_softmax_1d, min_p_filtering, sample_from_probs, sample_token, top_k_filtering,
-    top_p_filtering,
+    log_softmax_1d, min_p_filtering, sample_from_probs, sample_token, sampling_probs,
+    top_k_filtering, top_p_filtering,
 };
 pub use stream::{StreamedToken, TokenType};
 
@@ -100,16 +100,16 @@ pub struct SpeculationParams {
     /// Number of tokens to speculate per iteration
     pub num_tokens: usize,
 
-    /// Use probability-based acceptance to preserve exact target distribution.
-    /// If false, uses greedy acceptance
-    pub probabilistic: bool,
+    /// Propose tokens from earlier in the text instead of with a draft model, matching
+    /// up to this many tokens at the end of it.
+    pub prompt_lookup: Option<usize>,
 }
 
 impl Default for SpeculationParams {
     fn default() -> Self {
         Self {
             num_tokens: 4,
-            probabilistic: false,
+            prompt_lookup: None,
         }
     }
 }

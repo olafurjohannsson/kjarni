@@ -39,25 +39,7 @@ impl DecoderGenerator {
     }
 
     pub fn new(model: Arc<dyn DecoderLanguageModel + Send + Sync>) -> Result<Self> {
-        let backend = match model.device() {
-            Device::Cpu => {
-                debug!("initializing cpu decoder backend");
-                AnyDecoderBackend::Cpu(CpuDecoderBackend)
-            }
-            #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
-            Device::Wgpu => {
-                debug!("initializing gpu decoder backend");
-                let context = model
-                    .context()
-                    .ok_or_else(|| anyhow!("gpu model requires WgpuContext"))?;
-                AnyDecoderBackend::Gpu(Arc::new(GpuDecoderBackend::new(context)?))
-            }
-            // No GPU backend is reachable in wasm: no context can be constructed.
-            #[cfg(all(target_arch = "wasm32", not(feature = "wasm-gpu")))]
-            Device::Wgpu => {
-                return Err(anyhow!("GPU generation is not available in WebAssembly"));
-            }
-        };
+        let backend = AnyDecoderBackend::for_model(model.as_ref())?;
 
         log::info!(
             "decoder generator initialized: device={:?}, vocab_size={}, context_size={}",
@@ -250,8 +232,12 @@ impl DecoderGenerator {
         // Speculation needs both halves: a draft model loaded on this generator,
         // and parameters asked for by the caller. Either alone falls through to
         // plain decoding, so loading a draft costs nothing until it is requested.
+        // Prompt lookup needs no draft model and takes precedence over one.
         let spec = match (&self.draft, &config.speculation) {
-            (Some(d), Some(params)) => Some((d.model.clone(), d.backend.clone(), params.clone())),
+            (_, Some(params)) if params.prompt_lookup.is_some() => Some((None, params.clone())),
+            (Some(d), Some(params)) => {
+                Some((Some((d.model.clone(), d.backend.clone())), params.clone()))
+            }
             _ => None,
         };
 
@@ -280,7 +266,7 @@ impl DecoderGenerator {
 
             local_rt.block_on(async {
                 let result = match spec {
-                    Some((draft_model, draft_backend, params)) => {
+                    Some((Some((draft_model, draft_backend)), params)) => {
                         crate::cpu::decoder::run_speculative_generation_loop(
                             model,
                             backend,
@@ -293,7 +279,20 @@ impl DecoderGenerator {
                             cancellation,
                         )
                         .await
+                        .map(|_| ())
                     }
+                    Some((None, params)) => crate::cpu::decoder::run_prompt_lookup_generation_loop(
+                        model,
+                        backend,
+                        input_tokens,
+                        config,
+                        &params,
+                        params.prompt_lookup.unwrap_or(1),
+                        tx.clone(),
+                        cancellation,
+                    )
+                    .await
+                    .map(|_| ()),
                     None => match prefix {
                         Some(pc) => {
                             let mut guard = pc.lock().await;

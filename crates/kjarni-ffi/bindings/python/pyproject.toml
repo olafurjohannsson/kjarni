@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kjarni"
-version = "0.3.0"
+version = "0.4.0"
 description = "Run transformer models inside your Python program: embeddings, classification, reranking, search, chat, speech-to-text, summarization and translation. Same output as PyTorch, no PyTorch needed."
 authors = [{name = "Ólafur Aron Jóhannsson"}]
 license = {text = "MIT OR Apache-2.0"}

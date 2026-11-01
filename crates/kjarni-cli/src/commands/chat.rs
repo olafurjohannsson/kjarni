@@ -62,7 +62,7 @@ pub async fn run(
         // Refuse before the loader starts uploading; an out-of-VRAM upload loses
         // the device and takes the terminal with it.
         if let Some(mt) = kjarni::ModelType::from_cli_name(model) {
-            super::util::check_gpu_capacity(mt)?;
+            super::util::check_gpu_capacity(mt, gguf)?;
         }
         builder = builder.gpu();
     } else {

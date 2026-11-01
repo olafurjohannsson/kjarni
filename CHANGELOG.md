@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.0
+
+- **Long text translates completely.** Translation models end early when given several
+  sentences at once, which left out most of a long text with no error. `Translator` and
+  `kjarni translate` now translate each sentence on its own and keep the line breaks.
+  A `max_length` setting applies to each sentence.
+
+- **`kjarni search --format json` prints `[]` when nothing matches.** It printed nothing,
+  which is not valid JSON. An unknown `--format` is an error in this case too.
+
+- **Speculative decoding runs on the GPU, and is exact.** A draft model runs on the device
+  it was loaded for, and the target checks a batch of tokens in one pass on the GPU too.
+  Sampling now uses speculative sampling and follows the target's distribution, where
+  it used to draft greedily and ignore temperature and top-k. Runs stop at `max_new_tokens`,
+  and repetition penalties account for the proposed tokens, so greedy output equals plain
+  decoding. The draft model continues from its cache instead of re-reading the whole text
+  each round. `SpeculationParams::probabilistic` is removed, since the decoding strategy
+  decides, and `DecoderGenerationBackend` gains a required `forward_batch` method. A draft
+  model on the GPU can be slower than plain decoding, so measure before relying on one.
+
+- **Faster GPU batches of 2 to 10 rows.** Linear layers read each weight once for all the
+  rows. A batch of 5 through a 28-layer decoder takes about half the time it did.
+
+- **Faster quantized decode on the GPU.** GGUF models generate 10 to 22% faster: Llama 3.2 3B
+  from 33.5 to 40.9 tokens a second, 1B from 75 to 89, Qwen 2.5 1.5B from 48 to 52, on an RTX
+  A2000. Quantized batches of 2 to 10 rows use the same kernels, which makes speculation on a
+  GGUF model up to 3.4x faster, though it remains slower than plain decoding on the GPU.
+
+- **`--gguf --gpu` no longer refuses a model that fits.** With both formats cached, the VRAM
+  check added them together, so `deepseek-r1-8b` asked for 23.4 GB when its GGUF needs 5.5 GB.
+
+- **DeepSeek-R1 replies open with `<think>`.** The chat prompt supplies the tag, so replies
+  showed only the closing `</think>`. `Chat` now returns the whole reply, streamed or not.
+
+- **Prompt lookup.** `kjarni generate --prompt-lookup 3` and `.prompt_lookup(n)` propose tokens
+  from earlier in the text, with no second model. This helps where the output repeats the
+  input.
+
 ## 0.3.0
 
 - **Index format 2, with correct updates.** Indexes from earlier versions must be

@@ -277,13 +277,53 @@ const Q4K_ROWS_PER_WG: u32 = 4u;
 
 // Two accumulators per row (gate and up) for the four rows a workgroup owns.
 //
-// 64 threads, not 256: at K=3072 a row is 384 qs words, so with 256 threads each one
-// did about 1.5 words and then paid an eight-step barrier reduction that cost as much
-// as the arithmetic. Fewer, busier threads shorten the reduction and lengthen the work.
-var<workgroup> wg_q4k: array<vec4<f32>, 64>;
-var<workgroup> wg_q4k_b: array<vec4<f32>, 64>;
+// Threads per fused Q4_K GEMV workgroup.
+const Q4K_THREADS: u32 = 32u;
+var<workgroup> wg_q4k_gate: array<vec4<f32>, Q4K_THREADS>;
+var<workgroup> wg_q4k_up: array<vec4<f32>, Q4K_THREADS>;
 
-@compute @workgroup_size(64)
+// d * scale and d * min for sub-blocks `2j` and `2j + 1`, as (scale_lo, min_lo, scale_hi,
+// min_hi).
+fn q4k_scales(d: u32, s0: u32, s1: u32, s2: u32, j: u32) -> vec4<f32> {
+    let dd = unpack2x16float(d);
+    let lo = q4k_sm(s0, s1, s2, j * 2u);
+    let hi = q4k_sm(s0, s1, s2, j * 2u + 1u);
+    return vec4<f32>(lo.x * dd.x, lo.y * dd.y, hi.x * dd.x, hi.y * dd.y);
+}
+
+fn q4k_gate_scales(base: u32, j: u32) -> vec4<f32> {
+    return q4k_scales(
+        gate_w_q4k[base], gate_w_q4k[base + 1u], gate_w_q4k[base + 2u], gate_w_q4k[base + 3u], j,
+    );
+}
+
+fn q4k_up_scales(base: u32, j: u32) -> vec4<f32> {
+    return q4k_scales(
+        up_w_q4k[base], up_w_q4k[base + 1u], up_w_q4k[base + 2u], up_w_q4k[base + 3u], j,
+    );
+}
+
+fn q4k_lo_nibbles(q: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4xU8(q & 0x0F0F0F0Fu));
+}
+
+fn q4k_hi_nibbles(q: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4xU8((q >> 4u) & 0x0F0F0F0Fu));
+}
+
+// One row's sum over a chunk, given the dot products of the two nibble lanes.
+fn q4k_chunk_sum(s: vec4<f32>, lo: f32, hi: f32, sum_lo: f32, sum_hi: f32) -> f32 {
+    return lo * s.x - sum_lo * s.y + hi * s.z - sum_hi * s.w;
+}
+
+// A thread owns chunks of 4 consecutive qs words, which share one d, one dmin and one
+// pair of scales, so those are read once a chunk and the reads stay in order. Each weight
+// is n * scale - min, so a row's sum over a chunk is
+// scale * dot(activations, n) - min * sum(activations), and the activations and their sum
+// are common to every row and both buffers. Only the dot product of the nibbles is per
+// word. 32 threads fill the GPU's hardware thread groups, and split a row of 3072 or 8192
+// weights evenly.
+@compute @workgroup_size(Q4K_THREADS)
 fn fused_gemv_q4k(
     @builtin(workgroup_id) wg_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>
@@ -291,70 +331,119 @@ fn fused_gemv_q4k(
     let row0 = wg_id.x * Q4K_ROWS_PER_WG;
     let tid = local_id.x;
     if (row0 >= info.N) { return; }
+    let input_row = wg_id.z * info.K;
+    let out0 = wg_id.z * info.N + row0;
 
     let blocks_per_row = info.K / 256u;
     let words_per_row = blocks_per_row * Q4K_WORDS;
-    let total_words = blocks_per_row * 32u;
-    // (gate0, up0, gate1, up1) and (gate2, up2, gate3, up3)
-    var acc = vec4<f32>(0.0);
-    var acc_b = vec4<f32>(0.0);
+    let total_chunks = blocks_per_row * 8u;
 
-    for (var w = tid; w < total_words; w = w + 64u) {
-        let blk = w / 32u;
-        let wi = w % 32u;
-        let l0 = blk * 256u + (wi / 8u) * 64u + (wi % 8u) * 4u;
+    // Rows past the end repeat the last row, and are not written out.
+    let last = info.N - 1u;
+    let row_base = vec4<u32>(
+        row0,
+        min(row0 + 1u, last),
+        min(row0 + 2u, last),
+        min(row0 + 3u, last),
+    ) * words_per_row;
 
-        let a_lo = vec4<f32>(input[l0], input[l0 + 1u], input[l0 + 2u], input[l0 + 3u]);
-        let a_hi = vec4<f32>(
-            input[l0 + 32u], input[l0 + 33u], input[l0 + 34u], input[l0 + 35u],
+    var acc_gate = vec4<f32>(0.0);
+    var acc_up = vec4<f32>(0.0);
+    for (var chunk = tid; chunk < total_chunks; chunk += Q4K_THREADS) {
+        let blk = chunk / 8u;
+        let j = (chunk % 8u) / 2u;
+        let bases = row_base + vec4<u32>(blk * Q4K_WORDS);
+
+        let g0 = q4k_gate_scales(bases.x, j);
+        let g1 = q4k_gate_scales(bases.y, j);
+        let g2 = q4k_gate_scales(bases.z, j);
+        let g3 = q4k_gate_scales(bases.w, j);
+        let u0 = q4k_up_scales(bases.x, j);
+        let u1 = q4k_up_scales(bases.y, j);
+        let u2 = q4k_up_scales(bases.z, j);
+        let u3 = q4k_up_scales(bases.w, j);
+
+        let words = bases + vec4<u32>(4u + (chunk % 8u) * 4u);
+        let l0 = input_row + blk * 256u + j * 64u + (chunk % 2u) * 16u;
+
+        var gate_lo = vec4<f32>(0.0);
+        var gate_hi = vec4<f32>(0.0);
+        var up_lo = vec4<f32>(0.0);
+        var up_hi = vec4<f32>(0.0);
+        var sum_lo = 0.0;
+        var sum_hi = 0.0;
+        for (var i = 0u; i < 4u; i++) {
+            let l = l0 + i * 4u;
+            let a_lo = vec4<f32>(input[l], input[l + 1u], input[l + 2u], input[l + 3u]);
+            let a_hi = vec4<f32>(input[l + 32u], input[l + 33u], input[l + 34u], input[l + 35u]);
+            sum_lo += a_lo.x + a_lo.y + a_lo.z + a_lo.w;
+            sum_hi += a_hi.x + a_hi.y + a_hi.z + a_hi.w;
+
+            let qg0 = gate_w_q4k[words.x + i];
+            let qg1 = gate_w_q4k[words.y + i];
+            let qg2 = gate_w_q4k[words.z + i];
+            let qg3 = gate_w_q4k[words.w + i];
+            let qu0 = up_w_q4k[words.x + i];
+            let qu1 = up_w_q4k[words.y + i];
+            let qu2 = up_w_q4k[words.z + i];
+            let qu3 = up_w_q4k[words.w + i];
+            gate_lo += vec4<f32>(
+                dot(a_lo, q4k_lo_nibbles(qg0)),
+                dot(a_lo, q4k_lo_nibbles(qg1)),
+                dot(a_lo, q4k_lo_nibbles(qg2)),
+                dot(a_lo, q4k_lo_nibbles(qg3)),
+            );
+            gate_hi += vec4<f32>(
+                dot(a_hi, q4k_hi_nibbles(qg0)),
+                dot(a_hi, q4k_hi_nibbles(qg1)),
+                dot(a_hi, q4k_hi_nibbles(qg2)),
+                dot(a_hi, q4k_hi_nibbles(qg3)),
+            );
+            up_lo += vec4<f32>(
+                dot(a_lo, q4k_lo_nibbles(qu0)),
+                dot(a_lo, q4k_lo_nibbles(qu1)),
+                dot(a_lo, q4k_lo_nibbles(qu2)),
+                dot(a_lo, q4k_lo_nibbles(qu3)),
+            );
+            up_hi += vec4<f32>(
+                dot(a_hi, q4k_hi_nibbles(qu0)),
+                dot(a_hi, q4k_hi_nibbles(qu1)),
+                dot(a_hi, q4k_hi_nibbles(qu2)),
+                dot(a_hi, q4k_hi_nibbles(qu3)),
+            );
+        }
+
+        acc_gate += vec4<f32>(
+            q4k_chunk_sum(g0, gate_lo.x, gate_hi.x, sum_lo, sum_hi),
+            q4k_chunk_sum(g1, gate_lo.y, gate_hi.y, sum_lo, sum_hi),
+            q4k_chunk_sum(g2, gate_lo.z, gate_hi.z, sum_lo, sum_hi),
+            q4k_chunk_sum(g3, gate_lo.w, gate_hi.w, sum_lo, sum_hi),
         );
-        let base = row0 * words_per_row + blk * Q4K_WORDS;
-
-        let g0 = q4k_word_weights(base, wi, true);
-        let u0 = q4k_word_weights(base, wi, false);
-        acc.x += dot(a_lo, g0.lo) + dot(a_hi, g0.hi);
-        acc.y += dot(a_lo, u0.lo) + dot(a_hi, u0.hi);
-
-        if (row0 + 1u < info.N) {
-            let b1 = base + words_per_row;
-            let g1 = q4k_word_weights(b1, wi, true);
-            let u1 = q4k_word_weights(b1, wi, false);
-            acc.z += dot(a_lo, g1.lo) + dot(a_hi, g1.hi);
-            acc.w += dot(a_lo, u1.lo) + dot(a_hi, u1.hi);
-        }
-        if (row0 + 2u < info.N) {
-            let b2 = base + words_per_row * 2u;
-            let g2 = q4k_word_weights(b2, wi, true);
-            let u2 = q4k_word_weights(b2, wi, false);
-            acc_b.x += dot(a_lo, g2.lo) + dot(a_hi, g2.hi);
-            acc_b.y += dot(a_lo, u2.lo) + dot(a_hi, u2.hi);
-        }
-        if (row0 + 3u < info.N) {
-            let b3 = base + words_per_row * 3u;
-            let g3 = q4k_word_weights(b3, wi, true);
-            let u3 = q4k_word_weights(b3, wi, false);
-            acc_b.z += dot(a_lo, g3.lo) + dot(a_hi, g3.hi);
-            acc_b.w += dot(a_lo, u3.lo) + dot(a_hi, u3.hi);
-        }
+        acc_up += vec4<f32>(
+            q4k_chunk_sum(u0, up_lo.x, up_hi.x, sum_lo, sum_hi),
+            q4k_chunk_sum(u1, up_lo.y, up_hi.y, sum_lo, sum_hi),
+            q4k_chunk_sum(u2, up_lo.z, up_hi.z, sum_lo, sum_hi),
+            q4k_chunk_sum(u3, up_lo.w, up_hi.w, sum_lo, sum_hi),
+        );
     }
 
-    wg_q4k[tid] = acc;
-    wg_q4k_b[tid] = acc_b;
+    wg_q4k_gate[tid] = acc_gate;
+    wg_q4k_up[tid] = acc_up;
     workgroupBarrier();
-    for (var s = 32u; s > 0u; s >>= 1u) {
+    for (var s = Q4K_THREADS / 2u; s > 0u; s >>= 1u) {
         if (tid < s) {
-            wg_q4k[tid] += wg_q4k[tid + s];
-            wg_q4k_b[tid] += wg_q4k_b[tid + s];
+            wg_q4k_gate[tid] += wg_q4k_gate[tid + s];
+            wg_q4k_up[tid] += wg_q4k_up[tid + s];
         }
         workgroupBarrier();
     }
     if (tid == 0u) {
-        let r = wg_q4k[0];
-        let rb = wg_q4k_b[0];
-        output[row0] = silu(r.x) * r.y;
-        if (row0 + 1u < info.N) { output[row0 + 1u] = silu(r.z) * r.w; }
-        if (row0 + 2u < info.N) { output[row0 + 2u] = silu(rb.x) * rb.y; }
-        if (row0 + 3u < info.N) { output[row0 + 3u] = silu(rb.z) * rb.w; }
+        let g = wg_q4k_gate[0];
+        let u = wg_q4k_up[0];
+        output[out0 + 0u] = silu(g.x) * u.x;
+        if (row0 + 1u < info.N) { output[out0 + 1u] = silu(g.y) * u.y; }
+        if (row0 + 2u < info.N) { output[out0 + 2u] = silu(g.z) * u.z; }
+        if (row0 + 3u < info.N) { output[out0 + 3u] = silu(g.w) * u.w; }
     }
 }
 

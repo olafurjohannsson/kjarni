@@ -347,6 +347,7 @@ impl Chat {
             .await
             .map_err(|e| ChatError::GenerationFailed(e.into()))?;
 
+        let prefix = reply_prefix(self.chat_template(), prompt).to_string();
         let mut cleaned = response.trim().to_string();
 
         // Strip stop sequences defined by the chat template
@@ -356,7 +357,7 @@ impl Chat {
             }
         }
 
-        Ok(cleaned)
+        Ok(prefix + &cleaned)
     }
 
     /// Generate streaming using channel approach.
@@ -365,6 +366,7 @@ impl Chat {
         prompt: String,
         runtime_overrides: GenerationOverrides,
     ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
+        let prefix = reply_prefix(self.chat_template(), &prompt).to_string();
         let inner_stream = self
             .generator
             .stream_with_config(&prompt, runtime_overrides)
@@ -378,7 +380,8 @@ impl Chat {
                 .map_err(|e| ChatError::GenerationFailed(e.into()))
         });
 
-        Ok(Box::pin(mapped))
+        let opening = (!prefix.is_empty()).then_some(Ok(prefix));
+        Ok(Box::pin(futures::stream::iter(opening).chain(mapped)))
     }
 
     /// Get the model type.
@@ -417,6 +420,13 @@ impl Chat {
     pub fn generator(&self) -> &Generator {
         &self.generator
     }
+}
+
+/// What the reply to `prompt` starts with that the model will not generate. A prompt not
+/// built by the template may not end with the prefix, and then has none.
+pub(crate) fn reply_prefix<'a>(template: &'a dyn ChatTemplate, prompt: &str) -> &'a str {
+    let prefix = template.reply_prefix();
+    if prompt.ends_with(prefix) { prefix } else { "" }
 }
 
 /// Send a single message with default settings.
