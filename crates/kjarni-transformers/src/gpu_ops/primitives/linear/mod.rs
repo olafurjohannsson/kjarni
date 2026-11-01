@@ -23,6 +23,13 @@ const GEMM_LARGE_TILE_MIN_ROWS: u32 = 128;
 /// 0.38 against 0.31 at four.
 const GEMM_FEW_ROWS: u32 = 3;
 
+/// The most rows the wide GEMMs take, which is `WIDE_ROWS` in the shader. Their cost
+/// rises with each row and a tile's does not, and the two meet about here.
+const GEMM_WIDE_MAX_ROWS: u32 = 10;
+
+/// The fewest outputs for a wide GEMM. Below this a workgroup per output is wasted.
+const GEMM_WIDE_MIN_OUTPUTS: u32 = 128;
+
 pub struct GpuLinearLayer {
     context: Arc<WgpuContext>,
     bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -44,6 +51,8 @@ pub struct GpuLinearLayer {
     gemm64_q6k: wgpu::ComputePipeline,
     gemm64_q8: wgpu::ComputePipeline,
     gemm_bf16: wgpu::ComputePipeline,
+    gemm_wide_f32: wgpu::ComputePipeline,
+    gemm_wide_bf16: wgpu::ComputePipeline,
     gemm_few_rows_f32: wgpu::ComputePipeline,
     gemm_few_rows_bf16: wgpu::ComputePipeline,
 
@@ -192,6 +201,8 @@ impl GpuLinearLayer {
             gemm64_q6k: make_pipeline("gemm64_q6k"),
             gemm64_q8: make_pipeline("gemm64_q8"),
             gemm_bf16: make_pipeline("gemm_bf16"),
+            gemm_wide_f32: make_pipeline("gemm_wide_f32"),
+            gemm_wide_bf16: make_pipeline("gemm_wide_bf16"),
             gemm_few_rows_f32: make_pipeline("gemm_few_rows_f32"),
             gemm_few_rows_bf16: make_pipeline("gemm_few_rows_bf16"),
             buffer,
@@ -226,7 +237,9 @@ impl GpuLinearLayer {
         // 64x64 one is faster; above it the larger tile reuses more.
         let small_tile = m < GEMM_LARGE_TILE_MIN_ROWS;
         let is_float = matches!(weights.dtype(), DType::F32 | DType::BF16);
-        let few_rows = is_float && !is_gemv && m < GEMM_FEW_ROWS;
+        let wide_gemm =
+            is_float && !is_gemv && m <= GEMM_WIDE_MAX_ROWS && n >= GEMM_WIDE_MIN_OUTPUTS;
+        let few_rows = is_float && !is_gemv && !wide_gemm && m < GEMM_FEW_ROWS;
 
         let pipeline = if use_q4k_kernel {
             &self.gemv_q4k
@@ -258,6 +271,8 @@ impl GpuLinearLayer {
             match (is_gemv, is_bf16) {
                 (true, true) => &self.gemv_bf16,
                 (true, false) => &self.gemv_f32,
+                (false, true) if wide_gemm => &self.gemm_wide_bf16,
+                (false, false) if wide_gemm => &self.gemm_wide_f32,
                 (false, true) if few_rows => &self.gemm_few_rows_bf16,
                 (false, false) if few_rows => &self.gemm_few_rows_f32,
                 (false, true) if small_tile => &self.gemm64_bf16,
@@ -348,7 +363,7 @@ impl GpuLinearLayer {
                     } else {
                         pass.dispatch_workgroups(rows, 1, 1);
                     }
-                } else if use_wide_kernel {
+                } else if use_wide_kernel || wide_gemm {
                     // Dispatch 2D grid if N > 65535
                     let max_dim = 65535;
                     if n > max_dim {

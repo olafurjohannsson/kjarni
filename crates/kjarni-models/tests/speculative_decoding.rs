@@ -4,10 +4,14 @@
 //! exercises `run_speculative_generation_loop`. Qwen2.5-0.5B and 1.5B share a
 //! vocabulary (151,936), which is what a draft model needs.
 
+use kjarni_models::models::llama::LlamaModel;
 use kjarni_models::models::qwen::QwenModel;
 use kjarni_transformers::common::stream::TokenType;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig, SpeculationParams};
-use kjarni_transformers::cpu::decoder::{CpuDecoderBackend, run_speculative_generation_loop};
+use kjarni_transformers::cpu::decoder::{
+    CpuDecoderBackend, SpeculationStats, run_prompt_lookup_generation_loop,
+    run_speculative_generation_loop,
+};
 use kjarni_transformers::decoder::backend::AnyDecoderBackend;
 use kjarni_transformers::decoder::generator::run_generation_loop;
 use kjarni_transformers::decoder::traits::DecoderLanguageModel;
@@ -15,6 +19,8 @@ use kjarni_transformers::models::registry::ModelType;
 use kjarni_transformers::{Device, LanguageModel};
 use std::sync::Arc;
 use std::time::Instant;
+
+type DynModel = Arc<dyn DecoderLanguageModel + Send + Sync>;
 
 async fn load(mt: ModelType) -> Arc<QwenModel> {
     Arc::new(
@@ -98,7 +104,7 @@ async fn speculative_matches_plain_greedy() {
     let (tx2, rx2) = tokio::sync::mpsc::channel(256);
     let spec = SpeculationParams {
         num_tokens: 4,
-        probabilistic: false,
+        prompt_lookup: None,
     };
     let t1 = Instant::now();
     let tm: Arc<dyn DecoderLanguageModel + Send + Sync> = target.clone();
@@ -174,7 +180,7 @@ async fn speculation_depth_sweep() {
         let (tx2, rx2) = tokio::sync::mpsc::channel(512);
         let spec = SpeculationParams {
             num_tokens: k,
-            probabilistic: false,
+            prompt_lookup: None,
         };
         let t1 = Instant::now();
         let tm: Arc<dyn DecoderLanguageModel + Send + Sync> = target.clone();
@@ -233,7 +239,7 @@ async fn speculation_respects_repetition_penalty() {
     let (tx2, rx2) = tokio::sync::mpsc::channel(256);
     let spec = SpeculationParams {
         num_tokens: 4,
-        probabilistic: false,
+        prompt_lookup: None,
     };
     let tm: Arc<dyn DecoderLanguageModel + Send + Sync> = target.clone();
     let dm: Arc<dyn DecoderLanguageModel + Send + Sync> = draft.clone();
@@ -282,7 +288,7 @@ async fn speculation_does_not_emit_stop_tokens() {
     let (tx, rx) = tokio::sync::mpsc::channel(256);
     let spec = SpeculationParams {
         num_tokens: 6,
-        probabilistic: false,
+        prompt_lookup: None,
     };
     let tm: Arc<dyn DecoderLanguageModel + Send + Sync> = target.clone();
     let dm: Arc<dyn DecoderLanguageModel + Send + Sync> = draft.clone();
@@ -310,4 +316,302 @@ async fn speculation_does_not_emit_stop_tokens() {
         );
     }
     assert!(!text.is_empty(), "generated nothing");
+}
+
+/// What a run produced and how long it took.
+struct Run {
+    text: String,
+    secs: f64,
+    stats: Option<SpeculationStats>,
+}
+
+fn print_run(name: &str, run: &Run, plain_secs: f64, tokens: usize) {
+    let (per_pass, accepted) = run.stats.map_or((1.0, String::from("-")), |s| {
+        (
+            s.tokens_per_pass(),
+            format!("{}/{}", s.accepted, s.proposed),
+        )
+    });
+    println!(
+        "  {name:<22} {:>7.2}s {:>7.1} tok/s {:>6.2}x {per_pass:>6.2} tok/pass  accepted {accepted}",
+        run.secs,
+        tokens as f64 / run.secs,
+        plain_secs / run.secs,
+    );
+}
+
+async fn run_plain(model: &DynModel, ids: &[u32], config: GenerationConfig) -> Run {
+    let (tx, rx) = tokio::sync::mpsc::channel(4096);
+    let start = Instant::now();
+    let run = run_generation_loop(
+        model.clone(),
+        AnyDecoderBackend::for_model(model.as_ref()).unwrap(),
+        ids.to_vec(),
+        config,
+        tx,
+        None,
+    );
+    let (result, text) = tokio::join!(run, collect(rx));
+    result.expect("plain generation");
+    Run {
+        text,
+        secs: start.elapsed().as_secs_f64(),
+        stats: None,
+    }
+}
+
+async fn run_draft(
+    model: &DynModel,
+    draft: &DynModel,
+    ids: &[u32],
+    config: GenerationConfig,
+    depth: usize,
+) -> Run {
+    let (tx, rx) = tokio::sync::mpsc::channel(4096);
+    let start = Instant::now();
+    let spec = SpeculationParams {
+        num_tokens: depth,
+        prompt_lookup: None,
+    };
+    let run = run_speculative_generation_loop(
+        model.clone(),
+        AnyDecoderBackend::for_model(model.as_ref()).unwrap(),
+        draft.clone(),
+        AnyDecoderBackend::for_model(draft.as_ref()).unwrap(),
+        ids.to_vec(),
+        config,
+        &spec,
+        tx,
+        None,
+    );
+    let (result, text) = tokio::join!(run, collect(rx));
+    Run {
+        text,
+        secs: start.elapsed().as_secs_f64(),
+        stats: Some(result.expect("speculative generation")),
+    }
+}
+
+async fn run_lookup(model: &DynModel, ids: &[u32], config: GenerationConfig, depth: usize) -> Run {
+    let (tx, rx) = tokio::sync::mpsc::channel(4096);
+    let start = Instant::now();
+    let spec = SpeculationParams {
+        num_tokens: depth,
+        prompt_lookup: Some(3),
+    };
+    let run = run_prompt_lookup_generation_loop(
+        model.clone(),
+        AnyDecoderBackend::for_model(model.as_ref()).unwrap(),
+        ids.to_vec(),
+        config,
+        &spec,
+        3,
+        tx,
+        None,
+    );
+    let (result, text) = tokio::join!(run, collect(rx));
+    Run {
+        text,
+        secs: start.elapsed().as_secs_f64(),
+        stats: Some(result.expect("prompt lookup generation")),
+    }
+}
+
+async fn load_qwen(mt: ModelType, device: Device) -> DynModel {
+    Arc::new(
+        QwenModel::from_registry(mt, None, device, None, None)
+            .await
+            .expect("load"),
+    )
+}
+
+fn encode(model: &DynModel, prompt: &str) -> Vec<u32> {
+    model
+        .tokenizer()
+        .encode(prompt, false)
+        .unwrap()
+        .get_ids()
+        .to_vec()
+}
+
+const FREE_PROMPT: &str = "The capital of France is Paris. The capital of Germany is";
+const COPY_PROMPT: &str = "Fix the typo in this sentence and repeat the rest exactly.\n\
+    Input: The maintenance team replaced the worn seal on the second pump, tested the \
+    pressure valve, and wrote the rezults in the log before the night shift arrived.\n\
+    Output: The maintenance team replaced";
+
+/// Plain greedy text is the reference: a speculative run must reproduce it exactly, at
+/// every depth, on the device under test. The penalised config covers the penalties that
+/// differ by row within one verifying pass.
+async fn assert_speculation_is_exact(device: Device) {
+    let target = load_qwen(ModelType::Qwen2_5_1_5B_Instruct, device).await;
+    let draft = load_qwen(ModelType::Qwen2_5_0_5B_Instruct, device).await;
+
+    for prompt in [FREE_PROMPT, COPY_PROMPT] {
+        let ids = encode(&target, prompt);
+        for config in [greedy(40), greedy_penalised(40)] {
+            let plain = run_plain(&target, &ids, config.clone()).await;
+            for depth in [1, 4, 8] {
+                let drafted = run_draft(&target, &draft, &ids, config.clone(), depth).await;
+                assert_eq!(drafted.text, plain.text, "draft, depth {depth}");
+                let looked_up = run_lookup(&target, &ids, config.clone(), depth).await;
+                assert_eq!(looked_up.text, plain.text, "lookup, depth {depth}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "loads two real models from the local cache"]
+async fn speculation_is_exact_on_the_cpu() {
+    assert_speculation_is_exact(Device::Cpu).await;
+}
+
+#[tokio::test]
+#[ignore = "needs a GPU and two real models in the local cache"]
+async fn speculation_is_exact_on_the_gpu() {
+    assert_speculation_is_exact(Device::Wgpu).await;
+}
+
+/// A draft on the CPU can serve a target on the GPU, which leaves GPU memory to the target.
+#[tokio::test]
+#[ignore = "needs a GPU and two real models in the local cache"]
+async fn a_cpu_draft_can_serve_a_gpu_target() {
+    let target = load_qwen(ModelType::Qwen2_5_1_5B_Instruct, Device::Wgpu).await;
+    let draft = load_qwen(ModelType::Qwen2_5_0_5B_Instruct, Device::Cpu).await;
+    let ids = encode(&target, FREE_PROMPT);
+    let plain = run_plain(&target, &ids, greedy(40)).await;
+    let drafted = run_draft(&target, &draft, &ids, greedy(40), 4).await;
+    assert_eq!(drafted.text, plain.text);
+}
+
+/// A run stops at `max_new_tokens` even when a round would have accepted more.
+#[tokio::test]
+#[ignore = "loads a real model from the local cache"]
+async fn speculation_stops_at_the_token_limit() {
+    let target = load_qwen(ModelType::Qwen2_5_0_5B_Instruct, Device::Cpu).await;
+    let ids = encode(&target, COPY_PROMPT);
+    for limit in [1, 2, 7, 10] {
+        let run = run_lookup(&target, &ids, greedy(limit), 8).await;
+        assert_eq!(run.stats.unwrap().generated, limit, "limit {limit}");
+    }
+}
+
+/// Prints what one pass costs by batch size, with the cache at a fixed length.
+#[tokio::test]
+#[ignore = "profile over a real model"]
+async fn speculation_pass_cost() {
+    use kjarni_transformers::decoder::traits::DecoderGenerationBackend;
+
+    let device = bench_device();
+    let target = load_bench_model(&bench_target(), device).await;
+    let backend = AnyDecoderBackend::for_model(target.as_ref()).unwrap();
+    let ids = encode(&target, COPY_PROMPT);
+    let mut cache = target.new_cache(1, 400, 1).unwrap();
+    let array = ndarray::Array2::from_shape_vec((1, ids.len()), ids.clone()).unwrap();
+    backend
+        .prefill(target.as_ref(), &array, cache.as_mut())
+        .await
+        .unwrap();
+    let len = ids.len();
+    let mut token = backend.new_decode_token().unwrap();
+    backend.update_decode_token(&mut token, ids[0]).unwrap();
+
+    for _ in 0..2 {
+        let start = Instant::now();
+        for _ in 0..5 {
+            cache.set_seq_length(len);
+            backend
+                .decode_one(target.as_ref(), &token, len + 1, cache.as_mut())
+                .await
+                .unwrap();
+        }
+        let one = start.elapsed().as_secs_f64() * 200.0;
+        println!("{device:?} decode_one        {one:>8.1} ms");
+        for n in [1usize, 2, 5, 9] {
+            let start = Instant::now();
+            for _ in 0..5 {
+                cache.set_seq_length(len);
+                backend
+                    .forward_batch(target.as_ref(), &ids[..n], cache.as_mut())
+                    .await
+                    .unwrap();
+            }
+            let ms = start.elapsed().as_secs_f64() * 200.0;
+            println!(
+                "{device:?} forward_batch {n}   {ms:>8.1} ms, {:>5.1} ms per row",
+                ms / n as f64
+            );
+        }
+    }
+}
+
+fn bench_device() -> Device {
+    match std::env::var("KJARNI_BENCH_DEVICE").as_deref() {
+        Ok("cpu") => Device::Cpu,
+        _ => Device::Wgpu,
+    }
+}
+
+fn bench_target() -> String {
+    std::env::var("KJARNI_BENCH_TARGET").unwrap_or_else(|_| "qwen2.5-1.5b-instruct".into())
+}
+
+fn bench_draft() -> String {
+    std::env::var("KJARNI_BENCH_DRAFT").unwrap_or_else(|_| "qwen2.5-0.5b-instruct".into())
+}
+
+async fn load_bench_model(name: &str, device: Device) -> DynModel {
+    let model_type = ModelType::from_cli_name(name).expect("a model name from `kjarni model list`");
+    if name.starts_with("qwen") {
+        load_qwen(model_type, device).await
+    } else {
+        Arc::new(
+            LlamaModel::from_registry(model_type, None, device, None, None)
+                .await
+                .expect("load"),
+        )
+    }
+}
+
+/// Prints the table: `cargo test --profile ci -p kjarni-models --test speculative_decoding
+/// speculation_benchmark -- --ignored --nocapture`. `KJARNI_BENCH_DEVICE=cpu` picks the CPU,
+/// `KJARNI_BENCH_TARGET` and `KJARNI_BENCH_DRAFT` the models, `KJARNI_BENCH_TOKENS` the length.
+#[tokio::test]
+#[ignore = "benchmark over real models"]
+async fn speculation_benchmark() {
+    let device = bench_device();
+    let tokens = std::env::var("KJARNI_BENCH_TOKENS").map_or(60, |t| t.parse().unwrap());
+    let target = load_bench_model(&bench_target(), device).await;
+    // "none" measures prompt lookup alone, for a target with no draft of its family.
+    let draft_name = bench_draft();
+    let draft = if draft_name == "none" {
+        None
+    } else {
+        Some(load_bench_model(&draft_name, device).await)
+    };
+
+    for (name, prompt) in [("free text", FREE_PROMPT), ("copying", COPY_PROMPT)] {
+        println!("\n{device:?}, {name}, {tokens} tokens");
+        let ids = encode(&target, prompt);
+
+        // The first runs warm up shaders and the page cache, and are not reported.
+        run_plain(&target, &ids, greedy(4)).await;
+
+        let plain = run_plain(&target, &ids, greedy(tokens)).await;
+        print_run("plain", &plain, plain.secs, tokens);
+        if let Some(draft) = &draft {
+            run_draft(&target, draft, &ids, greedy(4), 4).await;
+            for depth in [2, 4, 8] {
+                let run = run_draft(&target, draft, &ids, greedy(tokens), depth).await;
+                print_run(&format!("draft, depth {depth}"), &run, plain.secs, tokens);
+                assert_eq!(run.text, plain.text);
+            }
+        }
+        for depth in [4, 8] {
+            let run = run_lookup(&target, &ids, greedy(tokens), depth).await;
+            print_run(&format!("lookup, depth {depth}"), &run, plain.secs, tokens);
+            assert_eq!(run.text, plain.text);
+        }
+    }
 }

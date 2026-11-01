@@ -1,7 +1,10 @@
 //! Core Translator implementation.
 
+use std::sync::Arc;
 use std::time::Instant;
 
+use futures::future::ready;
+use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
 use log::{debug, info};
 
@@ -12,13 +15,14 @@ use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides
 
 use super::builder::TranslatorBuilder;
 use super::languages::normalize_language;
+use super::segment::{MAX_SEGMENT_TOKENS, segments};
 use super::types::{TranslatorError, TranslatorResult};
 use super::validation::{translation_input, validate_for_translation};
 
 /// High-level translation API
 pub struct Translator {
     /// Underlying seq2seq generator.
-    generator: Seq2SeqGenerator,
+    generator: Arc<Seq2SeqGenerator>,
 
     /// Model type.
     model_type: ModelType,
@@ -104,14 +108,17 @@ impl Translator {
         );
 
         Ok(Self {
-            generator,
+            generator: Arc::new(generator),
             model_type,
             default_from,
             default_to,
         })
     }
 
-    /// Translate text with explicit source and target languages
+    /// Translate text with explicit source and target languages.
+    ///
+    /// Each sentence is translated on its own, and line breaks are kept. A `max_length`
+    /// set on the builder applies to each sentence.
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
         let translate_start = Instant::now();
 
@@ -119,14 +126,6 @@ impl Translator {
             .ok_or_else(|| TranslatorError::UnknownLanguage(from.to_string()))?;
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
-
-        let prompt = self.format_prompt(text, from_normalized, to_normalized)?;
-
-        debug!(
-            "Translation prompt: '{}' ({} chars)",
-            &prompt[..prompt.len().min(80)],
-            prompt.len()
-        );
 
         info!(
             "Translating {} -> {}: {} chars",
@@ -136,10 +135,13 @@ impl Translator {
         );
 
         let result = self
-            .generator
-            .generate(&prompt)
-            .await
-            .map_err(TranslatorError::from)?;
+            .translate_segments(
+                text,
+                from_normalized,
+                to_normalized,
+                &Seq2SeqOverrides::default(),
+            )
+            .await?;
 
         let elapsed = translate_start.elapsed();
         info!(
@@ -152,7 +154,7 @@ impl Translator {
         Ok(result)
     }
 
-    /// Translate with custom generation overrides.
+    /// Translate with custom generation overrides, which apply to each sentence.
     pub async fn translate_with_config(
         &self,
         text: &str,
@@ -165,18 +167,15 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from_normalized, to_normalized)?;
-
         debug!(
             "Translation with overrides: {} -> {}, {:?}",
             from_normalized, to_normalized, overrides
         );
 
-        self.generator
-            .generate_with_config(&prompt, overrides)
+        self.translate_segments(text, from_normalized, to_normalized, overrides)
             .await
-            .map_err(TranslatorError::from)
     }
+
     /// Translate using default languages set via builder
     pub async fn translate_default(&self, text: &str) -> TranslatorResult<String> {
         let from = self
@@ -188,14 +187,10 @@ impl Translator {
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
 
-        let prompt = self.format_prompt(text, from, to)?;
-
         debug!("Using default languages: {} -> {}", from, to);
 
-        self.generator
-            .generate(&prompt)
+        self.translate_segments(text, from, to, &Seq2SeqOverrides::default())
             .await
-            .map_err(TranslatorError::from)
     }
 
     /// Translate to a specific language using default source language.
@@ -207,14 +202,10 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from, to_normalized)?;
-
         debug!("Translate to: {} -> {}", from, to_normalized);
 
-        self.generator
-            .generate(&prompt)
+        self.translate_segments(text, from, to_normalized, &Seq2SeqOverrides::default())
             .await
-            .map_err(TranslatorError::from)
     }
 
     /// Translate from a specific language using default target language.
@@ -226,14 +217,10 @@ impl Translator {
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
 
-        let prompt = self.format_prompt(text, from_normalized, to)?;
-
         debug!("Translate from: {} -> {}", from_normalized, to);
 
-        self.generator
-            .generate(&prompt)
+        self.translate_segments(text, from_normalized, to, &Seq2SeqOverrides::default())
             .await
-            .map_err(TranslatorError::from)
     }
 
     /// Stream translation with explicit languages.
@@ -249,8 +236,6 @@ impl Translator {
         let to_normalized = normalize_language(to)
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
-        let prompt = self.format_prompt(text, from_normalized, to_normalized)?;
-
         info!(
             "Streaming translation {} -> {}: {} chars",
             from_normalized,
@@ -258,10 +243,7 @@ impl Translator {
             text.len()
         );
 
-        let inner = self.generator.stream_text(&prompt).await?;
-
-        let mapped = inner.map(|r| r.map_err(TranslatorError::from));
-        Ok(Box::pin(mapped))
+        self.stream_segments(text, from_normalized, to_normalized)
     }
 
     /// Stream translation using default languages.
@@ -279,8 +261,6 @@ impl Translator {
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
 
-        let prompt = self.format_prompt(text, from, to)?;
-
         info!(
             "Streaming translation (defaults) {} -> {}: {} chars",
             from,
@@ -288,10 +268,83 @@ impl Translator {
             text.len()
         );
 
-        let inner = self.generator.stream_text(&prompt).await?;
+        self.stream_segments(text, from, to)
+    }
 
-        let mapped = inner.map(|r| r.map_err(TranslatorError::from));
-        Ok(Box::pin(mapped))
+    /// The model input and following whitespace of each segment of `text`.
+    fn prepare_segments(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+    ) -> TranslatorResult<Vec<(String, String)>> {
+        let tokenizer = self.generator.encoder_decoder().model.tokenizer();
+        let count_tokens = |piece: &str| {
+            tokenizer
+                .encode(piece, false)
+                .map_or(piece.len(), |encoding| encoding.len())
+        };
+        segments(text, MAX_SEGMENT_TOKENS, &count_tokens)
+            .into_iter()
+            .map(|segment| {
+                Ok((
+                    self.format_prompt(segment.text, from, to)?,
+                    segment.gap.to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    async fn translate_segments(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+        overrides: &Seq2SeqOverrides,
+    ) -> TranslatorResult<String> {
+        let mut result = String::new();
+        for (prompt, gap) in self.prepare_segments(text, from, to)? {
+            let translated = self
+                .generator
+                .generate_with_config(&prompt, overrides)
+                .await
+                .map_err(TranslatorError::from)?;
+            result.push_str(&translated);
+            result.push_str(&gap);
+        }
+        Ok(result)
+    }
+
+    /// Generates one segment at a time, as the stream is read.
+    fn stream_segments(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+    ) -> TranslatorResult<std::pin::Pin<Box<dyn Stream<Item = TranslatorResult<String>> + Send>>>
+    {
+        let parts = self.prepare_segments(text, from, to)?;
+        let generator = self.generator.clone();
+
+        let translated = stream::iter(parts)
+            .then(move |(prompt, gap)| {
+                let generator = generator.clone();
+                async move {
+                    let tokens: BoxStream<'static, TranslatorResult<String>> =
+                        match generator.stream_text(&prompt).await {
+                            Ok(tokens) => tokens.map(|r| r.map_err(TranslatorError::from)).boxed(),
+                            Err(e) => stream::once(ready(Err(TranslatorError::from(e)))).boxed(),
+                        };
+                    let gap: BoxStream<'static, TranslatorResult<String>> = if gap.is_empty() {
+                        stream::empty().boxed()
+                    } else {
+                        stream::once(ready(Ok(gap))).boxed()
+                    };
+                    tokens.chain(gap)
+                }
+            })
+            .flatten();
+        Ok(Box::pin(translated))
     }
 
     /// Format what the model is given for this direction.

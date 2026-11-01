@@ -123,6 +123,66 @@ impl GpuDecoderBackend {
         self.read_logits_from_staging(&staging).await
     }
 
+    async fn forward_all_positions(
+        &self,
+        model: &dyn DecoderLanguageModel,
+        tokens: &[u32],
+        cache: &mut dyn Cache,
+    ) -> Result<Array2<f32>> {
+        let ops = model
+            .decoder_gpu_ops()
+            .ok_or_else(|| anyhow!("model does not support gpu execution"))?;
+
+        let gpu_cache = cache
+            .as_any_mut()
+            .downcast_mut::<GpuKVCache>()
+            .ok_or_else(|| anyhow!("expected GpuKVCache for gpu backend"))?;
+
+        let tokens_array = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
+
+        let pool = self.context.get_inference_pool();
+        let pool_guard = pool.lock().await;
+        let mut frame = GpuFrameContext::new(&self.context, pool_guard);
+
+        let cache_len = gpu_cache.get_seq_length();
+        let logical_key_len = cache_len + tokens.len();
+
+        let mask_size = match model.autoregressive_loop() {
+            AutoregressiveLoop::Pipelined => logical_key_len,
+            AutoregressiveLoop::Legacy => gpu_cache.max_seq_len(),
+        };
+
+        let attention_mask = ops.get_attention_mask(&mut frame, logical_key_len, mask_size)?;
+
+        let (encoder, pool) = frame.resources();
+        let hidden_states = ops.decoder().forward(
+            encoder,
+            pool,
+            ModelInput::TokensCpu(tokens_array.view()),
+            &attention_mask,
+            cache_len,
+            Some(gpu_cache),
+            None,
+        )?;
+
+        let logits = ops.project_to_logits(&mut frame, &hidden_states)?;
+        let vocab = logits.shape()[2];
+
+        // A pooled buffer can be larger than the tensor it holds.
+        let size = (tokens.len() * vocab * std::mem::size_of::<f32>()) as u64;
+        let staging = self.get_or_create_staging_buffer(size as usize);
+
+        let (encoder, _pool) = frame.resources();
+        encoder.copy_buffer_to_buffer(logits.buffer(), 0, &staging, 0, size);
+
+        frame.finish();
+
+        gpu_cache.increment_len(tokens.len());
+
+        let flat = self.read_logits_from_staging(&staging).await?;
+        Ok(flat.into_shape_with_order((tokens.len(), vocab))?)
+    }
+
     async fn forward_only(
         &self,
         model: &dyn DecoderLanguageModel,
@@ -321,6 +381,15 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                 self.forward_and_project(model, last_input, cache).await
             }
         }
+    }
+
+    async fn forward_batch(
+        &self,
+        model: &dyn DecoderLanguageModel,
+        tokens: &[u32],
+        cache: &mut dyn Cache,
+    ) -> Result<Array2<f32>> {
+        self.forward_all_positions(model, tokens, cache).await
     }
 
     async fn decode_one(

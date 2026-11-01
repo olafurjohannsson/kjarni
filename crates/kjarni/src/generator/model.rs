@@ -162,7 +162,12 @@ impl Generator {
             })?;
             Some(kjarni_transformers::common::SpeculationParams {
                 num_tokens: builder.draft_tokens,
-                probabilistic: true,
+                prompt_lookup: builder.prompt_lookup,
+            })
+        } else if builder.prompt_lookup.is_some() {
+            Some(kjarni_transformers::common::SpeculationParams {
+                num_tokens: builder.draft_tokens,
+                prompt_lookup: builder.prompt_lookup,
             })
         } else {
             None

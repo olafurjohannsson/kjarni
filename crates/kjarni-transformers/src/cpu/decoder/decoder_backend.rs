@@ -103,6 +103,28 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
         }
     }
 
+    async fn forward_batch(
+        &self,
+        model: &dyn DecoderLanguageModel,
+        tokens: &[u32],
+        cache: &mut dyn Cache,
+    ) -> Result<Array2<f32>> {
+        let ops = model
+            .decoder_cpu_ops()
+            .ok_or_else(|| anyhow!("Model does not support CPU execution"))?;
+
+        let offset = cache.get_seq_length();
+        let tokens_array = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
+        let hidden = ops.embed(&tokens_array, offset)?;
+        let mask = ops.get_attention_mask(tokens.len(), offset)?;
+        let output = ops.decoder().forward(&hidden, &mask, offset, Some(cache))?;
+        cache.set_seq_length(offset + tokens.len());
+
+        let logits = ops.project_to_logits(&output)?;
+        let vocab = logits.shape()[2];
+        Ok(logits.into_shape_with_order((tokens.len(), vocab))?)
+    }
+
     /// Processes a single token and returns logits for the next token.
     async fn decode_one(
         &self,

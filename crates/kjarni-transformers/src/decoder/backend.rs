@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2};
 
+use crate::Device;
 use crate::cache::Cache;
 use crate::decoder::prelude::*;
 #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
@@ -23,6 +24,23 @@ pub enum AnyDecoderBackend {
 }
 
 impl AnyDecoderBackend {
+    /// The backend for the device `model` was loaded for.
+    pub fn for_model(model: &dyn DecoderLanguageModel) -> Result<Self> {
+        match model.device() {
+            Device::Cpu => Ok(Self::cpu()),
+            #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+            Device::Wgpu => {
+                let context = model
+                    .context()
+                    .ok_or_else(|| anyhow!("gpu model requires WgpuContext"))?;
+                Ok(Self::gpu(Arc::new(GpuDecoderBackend::new(context)?)))
+            }
+            // No GPU backend is reachable in wasm: no context can be constructed.
+            #[cfg(all(target_arch = "wasm32", not(feature = "wasm-gpu")))]
+            Device::Wgpu => Err(anyhow!("GPU generation is not available in WebAssembly")),
+        }
+    }
+
     pub fn cpu() -> Self {
         AnyDecoderBackend::Cpu(CpuDecoderBackend::new())
     }
@@ -118,6 +136,19 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
             AnyDecoderBackend::Gpu(backend) => {
                 backend.prefill_at(model, tokens, start_pos, cache).await
             }
+        }
+    }
+
+    async fn forward_batch(
+        &self,
+        model: &dyn DecoderLanguageModel,
+        tokens: &[u32],
+        cache: &mut dyn Cache,
+    ) -> Result<Array2<f32>> {
+        match self {
+            AnyDecoderBackend::Cpu(backend) => backend.forward_batch(model, tokens, cache).await,
+            #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+            AnyDecoderBackend::Gpu(backend) => backend.forward_batch(model, tokens, cache).await,
         }
     }
 

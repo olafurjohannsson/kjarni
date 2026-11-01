@@ -47,6 +47,7 @@ mod builder;
 mod languages;
 mod model;
 pub mod presets;
+mod segment;
 mod types;
 mod validation;
 

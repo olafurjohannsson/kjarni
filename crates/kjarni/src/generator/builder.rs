@@ -20,6 +20,9 @@ use super::types::GeneratorResult;
 /// to cover a real conversation or a RAG passage set.
 pub const DEFAULT_PREFIX_CACHE_TOKENS: usize = 4096;
 
+/// The longest match at the end of the text that prompt lookup searches for.
+const DEFAULT_PROMPT_LOOKUP_NGRAM: usize = 3;
+
 /// Builder for configuring a Generator.
 ///
 /// # Example
@@ -51,6 +54,7 @@ pub struct GeneratorBuilder {
     // target's weights once for k tokens instead of k times is the saving.
     pub(crate) draft_model: Option<String>,
     pub(crate) draft_tokens: usize,
+    pub(crate) prompt_lookup: Option<usize>,
 
     // Prefix reuse: keep one KV cache alive across calls so a prompt that shares
     // a head with the last one prefills only the new tail. `None` is off.
@@ -77,6 +81,7 @@ impl GeneratorBuilder {
             load_config: None,
             draft_model: None,
             draft_tokens: 4,
+            prompt_lookup: None,
             prefix_cache_tokens: None,
             generation_overrides: GenerationOverrides::default(),
             quiet: false,
@@ -148,6 +153,17 @@ impl GeneratorBuilder {
     /// draft work against fewer passes over the target's weights.
     pub fn draft(mut self, name: impl Into<String>, num_tokens: usize) -> Self {
         self.draft_model = Some(name.into());
+        self.draft_tokens = num_tokens.max(1);
+        self
+    }
+
+    /// Enables speculative decoding that proposes tokens from earlier in the text, with
+    /// no second model. It helps where the output repeats the input, as in editing and
+    /// extraction, and costs little otherwise. Takes precedence over a draft model.
+    ///
+    /// `num_tokens` is how many it proposes per round.
+    pub fn prompt_lookup(mut self, num_tokens: usize) -> Self {
+        self.prompt_lookup = Some(DEFAULT_PROMPT_LOOKUP_NGRAM);
         self.draft_tokens = num_tokens.max(1);
         self
     }

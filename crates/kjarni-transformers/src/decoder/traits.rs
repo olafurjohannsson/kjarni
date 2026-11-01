@@ -53,6 +53,15 @@ pub trait DecoderGenerationBackend: Send + Sync {
         self.prefill(model, tokens, cache).await
     }
 
+    /// Runs `tokens` from where the cache stands, advances the cache past them, and
+    /// returns the logits at every position as `[tokens, vocab]`.
+    async fn forward_batch(
+        &self,
+        model: &dyn DecoderLanguageModel,
+        tokens: &[u32],
+        cache: &mut dyn Cache,
+    ) -> Result<Array2<f32>>;
+
     /// Process single token, return next logits
     async fn decode_one(
         &self,
