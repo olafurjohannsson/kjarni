@@ -92,6 +92,10 @@ impl Gpt2Model {
             true,
         )
         .await?;
+        let context = match (device, context) {
+            (Device::Wgpu, None) => Some(WgpuContext::new().await?),
+            (_, context) => context,
+        };
         Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)
     }
 
@@ -368,6 +372,15 @@ mod tests {
     use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 
     use kjarni_transformers::prelude::LanguageModel;
+
+    #[tokio::test]
+    #[ignore = "needs a GPU and DistilGPT2 in the local model cache"]
+    async fn from_registry_builds_a_gpu_context_when_given_none() {
+        let model = Gpt2Model::from_registry(ModelType::DistilGpt2, None, Device::Wgpu, None, None)
+            .await
+            .unwrap();
+        assert!(model.context().is_some());
+    }
 
     /// Helper function to load the DistilGPT2 model for testing.
     async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {

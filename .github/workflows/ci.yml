@@ -99,6 +99,7 @@ jobs:
           $CLI model download minilm-l6-v2-cross-encoder
           $CLI model download distilbert-base
           $CLI model download flan-t5-base
+          $CLI model download opus-mt-en-de
           $CLI model download distilbart-cnn
           $CLI model download qwen2.5-0.5b-instruct
           $CLI model download qwen2.5-1.5b
@@ -287,6 +288,7 @@ jobs:
           $CLI model download whisper-small
           $CLI model download distilbart-cnn
           $CLI model download flan-t5-base
+          $CLI model download opus-mt-en-de
           $CLI model download clip-vit-base-32
           $CLI model download qwen2.5-0.5b-instruct --gguf
 
@@ -903,6 +905,49 @@ jobs:
             artifacts/kjarni-wasm.tar.gz
             artifacts/kjarni-reference/kjarni-reference.tar.gz
             artifacts/SHA256SUMS
+
+  # ─── Installed release ──────────────────────────────────────────
+  # The build jobs test a binary before it is packaged. This one takes the path a
+  # user takes: the install script from the website, the published archive, the
+  # checksum check, then the same smoke test on whatever landed on disk.
+  verify-install:
+    name: Verify install (${{ matrix.os }})
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache smoke-test models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kjarni-models
+          key: kjarni-models-smoke-${{ runner.os }}-install-v1
+      - name: Install (Linux, macOS)
+        if: runner.os != 'Windows'
+        env:
+          KJARNI_VERSION: ${{ github.ref_name }}
+        run: curl -fsSL https://kjarni.ai/install.sh | sh
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          KJARNI_VERSION: ${{ github.ref_name }}
+        run: irm https://kjarni.ai/install.ps1 | iex
+      - name: Smoke test
+        shell: bash
+        env:
+          KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
+        run: |
+          exe=kjarni
+          if [ "$RUNNER_OS" = "Windows" ]; then exe=kjarni.exe; fi
+          python scripts/smoke_test.py "$HOME/.local/bin/$exe"
 
   # ─── Publish to npm ─────────────────────────────────────────────
   #

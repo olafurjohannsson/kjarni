@@ -52,6 +52,13 @@ namespace Kjarni.Tests
         }
 
         [SkippableFact]
+        public void EnglishToGermanPicksARealTranslationModel()
+        {
+            Heavy.SkipIfSet();
+            Assert.Equal("Wo ist der Bahnhof?", _translator.Translate("Where is the station?"));
+        }
+
+        [SkippableFact]
         public void LanguagesCanBeNamedPerCall()
         {
             Heavy.SkipIfSet();

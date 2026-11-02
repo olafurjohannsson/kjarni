@@ -1068,7 +1068,8 @@ private:
 // ─── Translator ──────────────────────────────────────────────────
 
 struct TranslatorOptions {
-    std::string model = "flan-t5-base";
+    /// Empty picks by `from` and `to`: Opus-MT for English and German, otherwise flan-t5-base.
+    std::string model;
     std::string cache_dir;
     /// Default languages for `translate(text)`, e.g. "en" and "de".
     std::string from;
@@ -1085,7 +1086,7 @@ public:
     /// Loads the model, downloading it on first use.
     [[nodiscard]] static Result<Translator> create(const TranslatorOptions& opts = {}) {
         KjarniTranslatorConfig cfg = kjarni_translator_config_default();
-        cfg.model_name = opts.model.c_str();
+        cfg.model_name = detail::or_null(opts.model);
         cfg.cache_dir = detail::or_null(opts.cache_dir);
         cfg.from = detail::or_null(opts.from);
         cfg.to = detail::or_null(opts.to);

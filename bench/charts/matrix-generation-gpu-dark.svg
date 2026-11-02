@@ -12,23 +12,23 @@
 <text x="468.20000000000005" y="76" font-size="12.5" fill="#c3c2b7">PyTorch CUDA</text>
 <text x="176" y="131.5" text-anchor="end" font-size="13" fill="#f0efec">Qwen2.5 0.5B</text>
 <line x1="190" y1="89" x2="190" y2="165" stroke="#383835" stroke-width="1"/>
-<path d="M191,92 h129.09032994511657 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-129.09032994511657 z" fill="#3987e5"><title>Kjarni WebGPU: 91 tok/s</title></path>
-<text x="330.09032994511654" y="104.5" font-size="12" fill="#c3c2b7" font-weight="600">91 tok/s</text>
-<path d="M191,110 h337.193940776433 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-337.193940776433 z" fill="#c98500"><title>llama.cpp Vulkan: 233 tok/s</title></path>
-<text x="538.193940776433" y="122.5" font-size="12" fill="#c3c2b7">233 tok/s</text>
-<path d="M191,128 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#199e70"><title>llama.cpp CUDA: 328 tok/s</title></path>
-<text x="677.0" y="140.5" font-size="12" fill="#c3c2b7">328 tok/s</text>
-<path d="M191,146 h181.87916451963295 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-181.87916451963295 z" fill="#d95926"><title>PyTorch CUDA: 127 tok/s</title></path>
-<text x="382.8791645196329" y="158.5" font-size="12" fill="#c3c2b7">127 tok/s</text>
+<path d="M191,92 h115.49472488367074 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-115.49472488367074 z" fill="#3987e5"><title>Kjarni WebGPU: 82 tok/s</title></path>
+<text x="316.49472488367076" y="104.5" font-size="12" fill="#c3c2b7" font-weight="600">82 tok/s</text>
+<path d="M191,110 h336.4221287076533 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-336.4221287076533 z" fill="#c98500"><title>llama.cpp Vulkan: 235 tok/s</title></path>
+<text x="537.4221287076533" y="122.5" font-size="12" fill="#c3c2b7">235 tok/s</text>
+<path d="M191,128 h476.00000000000006 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.00000000000006 z" fill="#199e70"><title>llama.cpp CUDA: 331 tok/s</title></path>
+<text x="677.0" y="140.5" font-size="12" fill="#c3c2b7">331 tok/s</text>
+<path d="M191,146 h188.42984729504195 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-188.42984729504195 z" fill="#d95926"><title>PyTorch CUDA: 133 tok/s</title></path>
+<text x="389.42984729504195" y="158.5" font-size="12" fill="#c3c2b7">133 tok/s</text>
 <line x1="20" y1="170.0" x2="740" y2="170.0" stroke="#383835" stroke-width="0.5" stroke-dasharray="2 3"/>
 <text x="176" y="219.5" text-anchor="end" font-size="13" fill="#f0efec">Llama 3.2 1B</text>
 <line x1="190" y1="177" x2="190" y2="253" stroke="#383835" stroke-width="1"/>
-<path d="M191,180 h196.1765573025849 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-196.1765573025849 z" fill="#3987e5"><title>Kjarni WebGPU: 90 tok/s</title></path>
-<text x="397.1765573025849" y="192.5" font-size="12" fill="#c3c2b7" font-weight="600">90 tok/s</text>
-<path d="M191,198 h424.95021349249816 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-424.95021349249816 z" fill="#c98500"><title>llama.cpp Vulkan: 192 tok/s</title></path>
-<text x="625.9502134924982" y="210.5" font-size="12" fill="#c3c2b7">192 tok/s</text>
-<path d="M191,216 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#199e70"><title>llama.cpp CUDA: 215 tok/s</title></path>
-<text x="677.0" y="228.5" font-size="12" fill="#c3c2b7">215 tok/s</text>
-<path d="M191,234 h172.63512469718594 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-172.63512469718594 z" fill="#d95926"><title>PyTorch CUDA: 79 tok/s</title></path>
-<text x="373.6351246971859" y="246.5" font-size="12" fill="#c3c2b7">79 tok/s</text>
+<path d="M191,180 h229.1426575335485 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-229.1426575335485 z" fill="#3987e5"><title>Kjarni WebGPU: 105 tok/s</title></path>
+<text x="430.14265753354846" y="192.5" font-size="12" fill="#c3c2b7" font-weight="600">105 tok/s</text>
+<path d="M191,198 h427.01801550557497 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-427.01801550557497 z" fill="#c98500"><title>llama.cpp Vulkan: 194 tok/s</title></path>
+<text x="628.018015505575" y="210.5" font-size="12" fill="#c3c2b7">194 tok/s</text>
+<path d="M191,216 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#199e70"><title>llama.cpp CUDA: 216 tok/s</title></path>
+<text x="677.0" y="228.5" font-size="12" fill="#c3c2b7">216 tok/s</text>
+<path d="M191,234 h173.44080386978496 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-173.44080386978496 z" fill="#d95926"><title>PyTorch CUDA: 80 tok/s</title></path>
+<text x="374.440803869785" y="246.5" font-size="12" fill="#c3c2b7">80 tok/s</text>
 </svg>

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.1
+
+- **`kjarni translate` uses a real translation model by default.** English to German and
+  German to English now use Opus-MT, since the old default, `flan-t5-base`, returned
+  questions and many other inputs unchanged. Other pairs still use `flan-t5-base` and print a
+  warning on stderr. Choosing a model with `-m` works as before.
+
+- **The bindings pick the same model.** A Python, C#, Go or C++ `Translator` with no model
+  and default languages of English and German loads Opus-MT. It translates that pair only,
+  so another pair on the same instance is now an error rather than a poor translation. With
+  no default languages it still loads `flan-t5-base` and warns unless quiet.
+
+- **`kjarni embed` returns unit-length vectors by default.** This matches the library
+  bindings and sentence-transformers, so the same text gives the same vector from the CLI
+  and from code. **Output changes for existing scripts**: pass `--no-normalize` to get the
+  raw pooled vector. `--normalize` is still accepted.
+
+- **`kjarni generate -m gpt2 --gpu` loads.** GPT-2 failed with "GPU device requires context"
+  because its loader, unlike the other decoders', did not create one.
+
+- **Each release is installed and run after publishing.** CI runs the website's install
+  script on Linux, macOS and Windows, then checks the installed binary's embeddings,
+  similarity, reranking, classification and translation against pinned values.
+
 ## 0.4.0
 
 - **Long text translates completely.** Translation models end early when given several
@@ -23,9 +47,10 @@
 - **Faster GPU batches of 2 to 10 rows.** Linear layers read each weight once for all the
   rows. A batch of 5 through a 28-layer decoder takes about half the time it did.
 
-- **Faster quantized decode on the GPU.** GGUF models generate 10 to 22% faster: Llama 3.2 3B
-  from 33.5 to 40.9 tokens a second, 1B from 75 to 89, Qwen 2.5 1.5B from 48 to 52, on an RTX
-  A2000. Quantized batches of 2 to 10 rows use the same kernels, which makes speculation on a
+- **Faster quantized decode on the GPU for most GGUF models.** Measured against the previous
+  kernels on an RTX A2000, Llama 3.2 1B is about 14% faster and 3B up to 22%. Qwen 2.5 0.5B, whose
+  file is mostly Q5_0 weights, is about 9% slower. On a release build, Llama 3.2 3B generates 46
+  tokens a second and 1B 105, from a short prompt. Quantized batches of 2 to 10 rows use the same kernels, which makes speculation on a
   GGUF model up to 3.4x faster, though it remains slower than plain decoding on the GPU.
 
 - **`--gguf --gpu` no longer refuses a model that fits.** With both formats cached, the VRAM

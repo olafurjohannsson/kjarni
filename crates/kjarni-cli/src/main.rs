@@ -70,7 +70,8 @@ async fn main() -> Result<()> {
             model,
             model_path,
             format,
-            normalize,
+            no_normalize,
+            normalize: _,
             pooling,
             gpu,
             quiet,
@@ -80,7 +81,7 @@ async fn main() -> Result<()> {
                 &model,
                 model_path.as_deref(),
                 &format,
-                normalize,
+                !no_normalize,
                 &pooling,
                 gpu,
                 quiet,
@@ -136,7 +137,7 @@ async fn main() -> Result<()> {
         } => {
             commands::translate::run(
                 input.as_deref(),
-                &model,
+                model.as_deref(),
                 model_path.as_deref(),
                 src.as_deref(),
                 dst.as_deref(),

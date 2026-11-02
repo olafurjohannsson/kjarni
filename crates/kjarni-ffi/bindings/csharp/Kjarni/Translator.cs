@@ -20,7 +20,7 @@ namespace Kjarni
         /// <summary>
         /// Load a translation model, downloading it on first use.
         /// </summary>
-        /// <param name="model">Model name, e.g. "flan-t5-base" (the default) or "flan-t5-large".</param>
+        /// <param name="model">Model name. Picked from <paramref name="from"/> and <paramref name="to"/> when null: Opus-MT for English and German, otherwise "flan-t5-base", which often returns the input unchanged.</param>
         /// <param name="from">Default source language ("en", "english", ...), used when a call passes none.</param>
         /// <param name="to">Default target language, used when a call passes none.</param>
         /// <param name="device">Compute device - "cpu" or "gpu".</param>

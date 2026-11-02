@@ -19,7 +19,7 @@ use super::types::TranslatorResult;
 /// ```ignore
 /// use kjarni::translator::Translator;
 ///
-/// let translator = Translator::builder("flan-t5-base")
+/// let translator = Translator::builder("opus-mt-en-de")
 ///     .from("english")
 ///     .to("german")
 ///     .build()

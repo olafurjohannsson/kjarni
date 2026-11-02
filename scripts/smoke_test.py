@@ -26,6 +26,9 @@ EMBED_FIRST = [
 ]
 EMBED_NORM = 5.944001007953482
 
+TRANSLATE_TEXT = "Where is the station?"
+TRANSLATION = "Wo ist der Bahnhof?"
+
 SIMILARITY = 0.859813
 RERANK_SCORES = [9.58177, -11.100061]
 CLASSIFY_SCORE = 0.9998789
@@ -57,15 +60,19 @@ def main():
     cli = sys.argv[1]
 
     print(run(cli, "--version").strip())
-    for model in ("minilm-l6-v2", "minilm-l6-v2-cross-encoder", "distilbert-sentiment"):
+    for model in ("minilm-l6-v2", "minilm-l6-v2-cross-encoder", "distilbert-sentiment", "opus-mt-en-de"):
         run(cli, "model", "download", model)
 
-    vector = [float(x) for x in run(cli, "embed", "-q", EMBED_TEXT).split()]
+    vector = [float(x) for x in run(cli, "embed", "-q", "--no-normalize", EMBED_TEXT).split()]
     if len(vector) != EMBED_DIMS:
         sys.exit(f"embed returned {len(vector)} dimensions, expected {EMBED_DIMS}")
     for i, want in enumerate(EMBED_FIRST):
         close(f"embed[{i}]", vector[i], want)
     close("embed norm", math.sqrt(sum(x * x for x in vector)), EMBED_NORM)
+
+    unit = [float(x) for x in run(cli, "embed", "-q", EMBED_TEXT).split()]
+    close("embed default norm", math.sqrt(sum(x * x for x in unit)), 1.0)
+    close("embed default[0]", unit[0], EMBED_FIRST[0] / EMBED_NORM)
 
     close("similarity", float(run(cli, "similarity", "-q", "doctor", "physician")), SIMILARITY)
 
@@ -84,6 +91,15 @@ def main():
         failures.append("classify label")
         print(f"FAIL classify label: {label['label']}")
     close("classify score", label["score"], CLASSIFY_SCORE)
+
+    translation = run(
+        cli, "translate", "-q", "--no-stream", "--src", "en", "--dst", "de", "-i", TRANSLATE_TEXT
+    ).strip()
+    if translation != TRANSLATION:
+        failures.append("translate")
+        print(f"FAIL translate: {translation!r} (expected {TRANSLATION!r})")
+    else:
+        print(f"ok   translate: {translation}")
 
     if failures:
         sys.exit(f"\n{len(failures)} check(s) differ from the Linux build: {', '.join(failures)}")

@@ -671,7 +671,8 @@ typedef struct KjarniTranslatorConfig {
   enum KjarniDevice device;
   const char *cache_dir;
   /**
-   * Model name, e.g. "flan-t5-base" (the default) or "flan-t5-large".
+   * Model name. Null picks by the `from` and `to` below: Opus-MT for English and
+   * German, otherwise "flan-t5-base", which often returns the input unchanged.
    */
   const char *model_name;
   /**

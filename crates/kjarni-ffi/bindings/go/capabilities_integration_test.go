@@ -278,6 +278,9 @@ func TestTranslator(t *testing.T) {
 	if out, err := tr.Translate("The house is small."); err != nil || !strings.Contains(strings.ToLower(out), "haus") {
 		t.Errorf("Translate = %q, %v", out, err)
 	}
+	if out, err := tr.Translate("Where is the station?"); err != nil || out != "Wo ist der Bahnhof?" {
+		t.Errorf("Translate = %q, %v", out, err)
+	}
 	if out, err := tr.TranslateBetween("The house is small.", "English", "German"); err != nil ||
 		!strings.Contains(strings.ToLower(out), "haus") {
 		t.Errorf("TranslateBetween = %q, %v", out, err)

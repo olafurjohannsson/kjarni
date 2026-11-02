@@ -44,6 +44,9 @@ class TranslatorTest(unittest.TestCase):
     def test_default_languages(self):
         self.assertIn("haus", self.translator.translate("The house is small.").lower())
 
+    def test_english_to_german_picks_a_real_translation_model(self):
+        self.assertEqual(self.translator.translate("Where is the station?"), "Wo ist der Bahnhof?")
+
     def test_languages_per_call(self):
         out = self.translator.translate("The house is small.", source="English", target="German")
         self.assertIn("haus", out.lower())

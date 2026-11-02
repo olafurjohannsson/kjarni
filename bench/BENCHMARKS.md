@@ -171,24 +171,24 @@ Generation is from the same Q4_K_M GGUF, except PyTorch and the rows marked safe
 
 | Model | Device | Engine | Prompt | After a prompt | Short |
 |---|---|---|--:|--:|--:|
-| qwen2.5-0.5b-instruct | CPU | **Kjarni** | 608 | 33.1 | 34.6 |
-| qwen2.5-0.5b-instruct | GPU | **Kjarni** | 1,537 | 67.7 | 91.0 |
-| qwen2.5-0.5b-instruct | CPU | **Kjarni** safetensors | 589 | 18.9 | 19.3 |
-| qwen2.5-0.5b-instruct | GPU | **Kjarni** safetensors | 1,422 | 58.6 | 74.3 |
-| qwen2.5-0.5b-instruct | CPU | PyTorch | 625 | 9.0 | 9.2 |
-| qwen2.5-0.5b-instruct | GPU | PyTorch | 21,578 | 125.4 | 127.1 |
-| qwen2.5-0.5b-instruct | CPU | llama.cpp | 665 |  | 37.7 |
-| qwen2.5-0.5b-instruct | GPU | llama.cpp CUDA | 15,342 |  | 328.3 |
-| qwen2.5-0.5b-instruct | GPU | llama.cpp Vulkan | 9,530 |  | 233.3 |
-| llama3.2-1b-instruct | CPU | **Kjarni** | 296 | 19.1 | 20.4 |
-| llama3.2-1b-instruct | GPU | **Kjarni** | 712 | 71.5 | 89.8 |
-| llama3.2-1b-instruct | CPU | **Kjarni** safetensors | 283 | 8.3 | 8.4 |
-| llama3.2-1b-instruct | GPU | **Kjarni** safetensors | 643 | 52.2 | 60.9 |
-| llama3.2-1b-instruct | CPU | PyTorch | 242 | 4.1 | 4.2 |
-| llama3.2-1b-instruct | GPU | PyTorch | 9,267 | 78.2 | 79.2 |
-| llama3.2-1b-instruct | CPU | llama.cpp | 450 |  | 20.7 |
-| llama3.2-1b-instruct | GPU | llama.cpp CUDA | 8,557 |  | 215.3 |
-| llama3.2-1b-instruct | GPU | llama.cpp Vulkan | 7,496 |  | 192.4 |
+| qwen2.5-0.5b-instruct | CPU | **Kjarni** | 653 | 45.2 | 47.2 |
+| qwen2.5-0.5b-instruct | GPU | **Kjarni** | 1,565 | 62.5 | 82.4 |
+| qwen2.5-0.5b-instruct | CPU | **Kjarni** safetensors | 643 | 26.1 | 27.1 |
+| qwen2.5-0.5b-instruct | GPU | **Kjarni** safetensors | 1,438 | 59.6 | 75.3 |
+| qwen2.5-0.5b-instruct | CPU | PyTorch | 661 | 11.2 | 11.5 |
+| qwen2.5-0.5b-instruct | GPU | PyTorch | 21,890 | 130.8 | 132.7 |
+| qwen2.5-0.5b-instruct | CPU | llama.cpp | 693 |  | 67.0 |
+| qwen2.5-0.5b-instruct | GPU | llama.cpp CUDA | 14,529 |  | 331.1 |
+| qwen2.5-0.5b-instruct | GPU | llama.cpp Vulkan | 9,838 |  | 234.8 |
+| llama3.2-1b-instruct | CPU | **Kjarni** | 301 | 22.7 | 24.2 |
+| llama3.2-1b-instruct | GPU | **Kjarni** | 719 | 81.7 | 105.1 |
+| llama3.2-1b-instruct | CPU | **Kjarni** safetensors | 274 | 6.7 | 6.9 |
+| llama3.2-1b-instruct | GPU | **Kjarni** safetensors | 645 | 51.9 | 61.3 |
+| llama3.2-1b-instruct | CPU | PyTorch | 229 | 3.0 | 3.0 |
+| llama3.2-1b-instruct | GPU | PyTorch | 9,274 | 78.7 | 80.0 |
+| llama3.2-1b-instruct | CPU | llama.cpp | 481 |  | 28.8 |
+| llama3.2-1b-instruct | GPU | llama.cpp CUDA | 9,034 |  | 216.3 |
+| llama3.2-1b-instruct | GPU | llama.cpp Vulkan | 7,238 |  | 194.2 |
 
 ## Binding overhead
 
