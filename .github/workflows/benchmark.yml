@@ -1,0 +1,152 @@
+name: Benchmark
+
+# Speed estimates per platform, kept as a history on the `benchmarks` branch. This
+# never blocks a merge or a release: it warns on a regression and leaves the decision
+# to a person. Shared runners are noisy, so the numbers show a trend for one platform
+# and are not comparable across platforms. Published figures are in bench/BENCHMARKS.md.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: "1.91.1"
+  # Without LTO, since these are built twice per run. Set here rather than as a Cargo
+  # profile so that a baseline commit from before this workflow builds the same way.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Measure (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux-x64 }
+          - { os: macos-latest, platform: macos-arm64 }
+          - { os: windows-latest, platform: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: benchmark-${{ matrix.platform }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test the benchmark script
+        working-directory: scripts
+        run: python -m unittest test_ci_bench
+
+      - name: Build this commit
+        run: |
+          cargo build --release --package kjarni-cli
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          cp "target/release/kjarni$ext" "$RUNNER_TEMP/kjarni-head$ext"
+          echo "EXT=$ext" >> "$GITHUB_ENV"
+
+      # The previous tag for a release, otherwise the previous commit on main. A
+      # baseline that fails to build costs the comparison, not the measurement.
+      - name: Build the baseline
+        id: baseline
+        continue-on-error: true
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            base=$(git describe --tags --abbrev=0 --match 'v*' HEAD~1)
+          else
+            base=$(git rev-parse HEAD~1)
+          fi
+          echo "Baseline: $base"
+          git worktree add "$RUNNER_TEMP/base" "$base"
+          cp Cargo.lock "$RUNNER_TEMP/base/"
+          (cd "$RUNNER_TEMP/base" && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
+            cargo build --release --package kjarni-cli)
+          cp "target/release/kjarni$EXT" "$RUNNER_TEMP/kjarni-base$EXT"
+
+      - name: Cache benchmark models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kjarni-models
+          key: kjarni-models-benchmark-${{ matrix.platform }}-v1
+
+      - name: Download models
+        env:
+          KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
+        run: |
+          "$RUNNER_TEMP/kjarni-head$EXT" model download minilm-l6-v2
+          "$RUNNER_TEMP/kjarni-head$EXT" model download qwen2.5-0.5b-instruct --gguf
+
+      - name: Measure
+        env:
+          KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
+        run: |
+          base_args=()
+          if [ -f "$RUNNER_TEMP/kjarni-base$EXT" ]; then
+            base_args=(--base "$RUNNER_TEMP/kjarni-base$EXT")
+          fi
+          python scripts/ci_bench.py --platform "${{ matrix.platform }}" \
+            --head "$RUNNER_TEMP/kjarni-head$EXT" "${base_args[@]}" \
+            --out "bench-${{ matrix.platform }}.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.platform }}
+          path: bench-${{ matrix.platform }}.json
+
+  record:
+    name: Record history
+    needs: [measure]
+    # Keep what the other platforms measured when one of them fails.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+          pattern: bench-*
+          merge-multiple: true
+      - name: Merge results
+        run: jq -s 'add' results/*.json > results.json
+      - name: Create the history branch on the first run
+        run: |
+          git fetch origin benchmarks || {
+            tree=$(git mktree < /dev/null)
+            commit=$(git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+              commit-tree "$tree" -m "Start the benchmark history")
+            git push origin "$commit:refs/heads/benchmarks"
+          }
+      - uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
+        with:
+          tool: customBiggerIsBetter
+          output-file-path: results.json
+          gh-pages-branch: benchmarks
+          benchmark-data-dir-path: .
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          comment-on-alert: false
+          fail-on-alert: false
