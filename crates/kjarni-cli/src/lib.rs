@@ -12,7 +12,10 @@ pub const DEFAULT_GENERATE_MODEL: &str = "llama3.2-1b-instruct";
 
 #[derive(Parser)]
 #[command(name = "kjarni")]
-#[command(about = "Kjarni: The SQLite of AI", long_about = None)]
+#[command(
+    about = "Run transformer models on your own machine. Same output as PyTorch, no Python, no server.",
+    long_about = None
+)]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
@@ -167,9 +170,10 @@ pub enum Commands {
         #[arg(short, long)]
         input: Option<String>,
 
-        /// Model to use
-        #[arg(short, long, default_value = "flan-t5-base")]
-        model: String,
+        /// Model to use. By default opus-mt-en-de or opus-mt-de-en for those two
+        /// directions, and flan-t5-base, which is much less reliable, for the rest
+        #[arg(short, long)]
+        model: Option<String>,
 
         /// Path to local model
         /// Load weights from a local file or directory instead of the registry
@@ -240,8 +244,12 @@ pub enum Commands {
         #[arg(long, default_value = "raw")]
         format: String,
 
-        /// Scale each vector to unit length
+        /// Keep the raw pooled vector instead of scaling it to unit length
         #[arg(long)]
+        no_normalize: bool,
+
+        /// Scale each vector to unit length, which is the default
+        #[arg(long, hide = true, conflicts_with = "no_normalize")]
         normalize: bool,
 
         /// Pooling strategy: mean, cls, max
@@ -1646,12 +1654,24 @@ mod tests {
                 ..
             } => {
                 assert!(input.is_none());
-                assert_eq!(model, "flan-t5-base");
+                assert_eq!(model, None);
                 assert!(src.is_none());
                 assert!(dst.is_none());
             }
             _ => panic!("Expected Translate command"),
         }
+    }
+
+    #[test]
+    fn embed_normalizes_unless_told_not_to() {
+        let flag = |args: &[&str]| match parse_args(args).unwrap().command {
+            Commands::Embed { no_normalize, .. } => no_normalize,
+            _ => panic!("Expected Embed command"),
+        };
+        assert!(!flag(&["embed", "hello"]));
+        assert!(!flag(&["embed", "--normalize", "hello"]));
+        assert!(flag(&["embed", "--no-normalize", "hello"]));
+        assert!(parse_args(&["embed", "--normalize", "--no-normalize", "hello"]).is_err());
     }
 
     #[test]

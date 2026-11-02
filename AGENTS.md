@@ -58,7 +58,7 @@ Emits `{"label": "...", "label_index": N, "score": 0.98, ...}`. Use
 ### Embeddings and similarity
 
 ```bash
-kjarni embed -q "text to embed"                    # space-separated floats
+kjarni embed -q "text to embed"                    # unit-length vector, space-separated floats
 kjarni similarity -q "doctor" "physician"          # single float, e.g. 0.859813
 ```
 
@@ -96,6 +96,10 @@ cat long-report.txt | kjarni summarize -q
 kjarni translate -q --src en --dst de -i "Where is the station?"
 ```
 
+English to German and German to English use dedicated Opus-MT models. Other pairs
+fall back to `flan-t5-base`, which warns on stderr and often returns the input
+unchanged, so check that output before relying on it.
+
 ### Text generation and chat
 
 ```bash
@@ -120,10 +124,10 @@ kjarni classify -q --format json "$TEXT" | jq -r '.label'
 - Everything runs locally. No data leaves the machine, and no network is used
   after the model is cached.
 - Set `KJARNI_CACHE_DIR` to relocate the model cache; `HF_TOKEN` for gated models.
-- Add `--gpu` to use a GPU where supported. GPU is verified for the encoder
-  models (embeddings, classification, reranking). Decoder and encoder-decoder
-  models on GPU are less well tested — prefer CPU for `chat`, `generate` and
-  `transcribe` unless you have checked the output.
+- Add `--gpu` to use a GPU where supported, on any Vulkan, Metal or DirectX 12
+  card. It is much faster for `chat` and `generate` with a GGUF model; download one
+  with `kjarni model download <name> --gguf`. A run that does not fit in VRAM stops
+  with an error that gives the size needed, and dropping `--gpu` runs it on the CPU.
 - Model names come from `kjarni model list`; that is the authoritative registry.
 
 MIT licensed. Source: https://github.com/olafurjohannsson/kjarni

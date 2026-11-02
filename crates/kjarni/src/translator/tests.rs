@@ -1292,3 +1292,21 @@ mod opus_mt {
         assert_eq!(input, "translate English to German: Hello");
     }
 }
+
+mod default_model_tests {
+    use crate::translator::{FALLBACK_MODEL, default_model};
+
+    #[test]
+    fn english_and_german_get_their_dedicated_models() {
+        assert_eq!(default_model("en", "de"), "opus-mt-en-de");
+        assert_eq!(default_model("de", "en"), "opus-mt-de-en");
+        assert_eq!(default_model("English", "german"), "opus-mt-en-de");
+    }
+
+    #[test]
+    fn other_pairs_fall_back_to_the_general_model() {
+        assert_eq!(default_model("en", "fr"), FALLBACK_MODEL);
+        assert_eq!(default_model("de", "de"), FALLBACK_MODEL);
+        assert_eq!(default_model("not-a-language", "de"), FALLBACK_MODEL);
+    }
+}

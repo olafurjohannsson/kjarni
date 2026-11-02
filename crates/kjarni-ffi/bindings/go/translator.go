@@ -27,7 +27,9 @@ type Translator struct {
 }
 
 // NewTranslator loads a translation model, downloading it on first use. Pass ""
-// for flan-t5-base. WithLanguages sets the languages Translate uses by default.
+// to pick from WithLanguages, which sets the languages Translate uses by default:
+// Opus-MT for English and German, otherwise flan-t5-base, which often returns the
+// input unchanged.
 func NewTranslator(model string, opts ...Option) (*Translator, error) {
 	if err := ensureInit(); err != nil {
 		return nil, err

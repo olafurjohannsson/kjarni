@@ -4,13 +4,13 @@ use anyhow::{Result, anyhow};
 use futures::{StreamExt, pin_mut};
 use std::io::{self, Write};
 
-use kjarni::translator::Translator;
+use kjarni::translator::{FALLBACK_MODEL, Translator, default_model};
 
 use super::util::resolve_input;
 
 pub async fn run(
     input: Option<&str>,
-    model: &str,
+    model: Option<&str>,
     model_path: Option<&str>,
     src: Option<&str>,
     dst: Option<&str>,
@@ -25,7 +25,9 @@ pub async fn run(
 ) -> Result<()> {
     // Fail on an unknown model here, with suggestions, rather than letting the
     // builder report it without context.
-    let _ = crate::commands::util::resolve_model(model, Some("seq2seq"))?;
+    if let Some(model) = model {
+        let _ = crate::commands::util::resolve_model(model, Some("seq2seq"))?;
+    }
 
     // Resolve input
     let text = resolve_input(input)?;
@@ -40,6 +42,20 @@ pub async fn run(
     let target_lang = dst.ok_or_else(|| {
         anyhow!("Target language is required. Use --dst <language> (e.g., --dst de)")
     })?;
+
+    let model = match model {
+        Some(model) => model,
+        None => {
+            let model = default_model(source_lang, target_lang);
+            if model == FALLBACK_MODEL {
+                eprintln!(
+                    "Warning: only English and German have a dedicated translation model. \
+                     {FALLBACK_MODEL} is used here, and it often returns the input unchanged."
+                );
+            }
+            model
+        }
+    };
 
     // Build translator
     if model_path.is_some() {

@@ -4,7 +4,7 @@ use crate::error::set_last_error;
 use crate::{
     KjarniDevice, KjarniErrorCode, get_runtime, opt_str, owned_c_string, seq2seq_error_code,
 };
-use kjarni::translator::{Translator, TranslatorError};
+use kjarni::translator::{FALLBACK_MODEL, Translator, TranslatorError, default_model};
 use std::ffi::{CStr, c_char};
 use std::ptr;
 
@@ -13,7 +13,8 @@ use std::ptr;
 pub struct KjarniTranslatorConfig {
     pub device: KjarniDevice,
     pub cache_dir: *const c_char,
-    /// Model name, e.g. "flan-t5-base" (the default) or "flan-t5-large".
+    /// Model name. Null picks by the `from` and `to` below: Opus-MT for English and
+    /// German, otherwise "flan-t5-base", which often returns the input unchanged.
     pub model_name: *const c_char,
     /// Default source language ("english", "en", ...), used when a call passes
     /// none. Null for no default.
@@ -54,6 +55,15 @@ fn error_code(e: &TranslatorError) -> KjarniErrorCode {
     }
 }
 
+/// The model to load when the config names none. Default languages decide it, since
+/// a translator holds one model and calls may only name languages it can serve.
+fn model_for(from: Option<&str>, to: Option<&str>) -> &'static str {
+    match (from, to) {
+        (Some(from), Some(to)) => default_model(from, to),
+        _ => FALLBACK_MODEL,
+    }
+}
+
 /// Create a new Translator. Downloads the model on first use.
 ///
 /// # Safety
@@ -86,9 +96,20 @@ pub unsafe extern "C" fn kjarni_translator_new(
                     opt_str(config.from),
                     opt_str(config.to),
                 ) {
-                    (Ok(m), Ok(c), Ok(f), Ok(t)) => (m.unwrap_or("flan-t5-base"), c, f, t),
+                    (Ok(m), Ok(c), Ok(f), Ok(t)) => (m, c, f, t),
                     _ => return KjarniErrorCode::InvalidUtf8,
                 };
+                let model = model.unwrap_or_else(|| {
+                    let model = model_for(from, to);
+                    if model == FALLBACK_MODEL && config.quiet == 0 {
+                        eprintln!(
+                            "Warning: {FALLBACK_MODEL} often returns the input unchanged. \
+                             Set the default languages to get a dedicated model for \
+                             English and German."
+                        );
+                    }
+                    model
+                });
 
                 let mut builder = Translator::builder(model);
                 builder = match config.device {
@@ -197,6 +218,15 @@ pub unsafe extern "C" fn kjarni_translator_translate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_null_model_is_chosen_from_the_default_languages() {
+        assert_eq!(model_for(Some("en"), Some("de")), "opus-mt-en-de");
+        assert_eq!(model_for(Some("German"), Some("English")), "opus-mt-de-en");
+        assert_eq!(model_for(Some("en"), Some("fr")), FALLBACK_MODEL);
+        assert_eq!(model_for(None, Some("de")), FALLBACK_MODEL);
+        assert_eq!(model_for(None, None), FALLBACK_MODEL);
+    }
 
     #[test]
     fn null_arguments_are_errors_not_crashes() {

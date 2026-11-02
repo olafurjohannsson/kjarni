@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="Kjarni: run transformer models inside your program" width="600"></a>
 </p>
 
 # Kjarni
@@ -317,7 +317,7 @@ RTX A2000 12 GB.
 - **Same answers as PyTorch:** on the CPU, embeddings agree to within 1e-6 on MiniLM and bge-m3, and within 4e-6 across rerank scores, class probabilities and CLIP. On the GPU, embeddings agree to within 2.2e-6, closer than ONNX Runtime's CUDA path at 3.8e-4. Summaries, translations and greedy chat replies come out word for word the same on the CPU, and Whisper's transcript is the same on CPU and GPU on the test clips.
 - **Embeddings on the CPU:** level with ONNX Runtime on batches (10% behind on MiniLM, 10% ahead on bge-m3) and ahead of PyTorch. ONNX Runtime is faster on a single text: 1.4 ms against 2.3 ms on MiniLM.
 - **Speech to text on the CPU:** 8.6× real time, ahead of openai-whisper (7.3×) and faster-whisper at full precision (6.2×). faster-whisper's int8 mode is faster still (12.8×).
-- **Generation on the CPU:** 92 to 99% of llama.cpp's speed on the same GGUF files, and about four to five times PyTorch's. Prompt processing is 91% of llama.cpp's on Qwen2.5 0.5B and 66% on Llama 3.2 1B.
+- **Generation on the CPU:** behind llama.cpp on the same GGUF files, at about 87% of its speed on Llama 3.2 3B, 70 to 84% on 1B and 50 to 70% on Qwen2.5 0.5B, and four to eight times PyTorch's. Prompt processing is 94% of llama.cpp's on Qwen2.5 0.5B and 63% on Llama 3.2 1B.
 - **On the GPU, no CUDA, and slower than CUDA:** WebGPU runs on NVIDIA, AMD, Intel and Apple hardware with nothing to install. On this NVIDIA card, CUDA engines are well ahead: ONNX Runtime embeds 5 times as fast, faster-whisper transcribes 6 times as fast, and llama.cpp generates 2 to 4 times as fast. Kjarni's GPU beats its CPU on batches, generation and Whisper, by about 2 to 4.5 times; for one short MiniLM text the CPU is faster.
 - **Load time:** MiniLM loads in 91 ms against 495 ms for ONNX Runtime and 2.5 s for PyTorch. bge-m3 loads in 1.3 s against 1.5 s and 6.7 s.
 - **Memory:** after a batch on the CPU, MiniLM holds 272 MB against 419 MB in ONNX Runtime and 613 MB in PyTorch. bge-m3 is the other way round: 2.8 GB against 1.9 GB and 2.1 GB.
@@ -478,7 +478,7 @@ Or build it yourself: `cargo build --release -p kjarni-ffi` produces the same li
 
 ### Can I use it as a vector database?
 
-For small to medium corpora, yes — the built-in index handles storage, BM25, vector search, and hybrid fusion with no separate service. It is designed as the SQLite of local semantic search, not as a replacement for a distributed vector store at hundreds of millions of vectors.
+For small to medium corpora, yes — the built-in index handles storage, BM25, vector search, and hybrid fusion with no separate service. It is an embedded index inside your program, not a replacement for a distributed vector store at hundreds of millions of vectors.
 
 ### Does it run in the browser?
 
