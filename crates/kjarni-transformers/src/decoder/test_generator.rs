@@ -551,10 +551,7 @@ async fn test_character_split_over_two_tokens_streams_whole() {
         ..Default::default()
     };
 
-    let stream = generator
-        .generate_stream("H", &config, None)
-        .await
-        .unwrap();
+    let stream = generator.generate_stream("H", &config, None).await.unwrap();
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
     let generated: Vec<&StreamedToken> = tokens
         .iter()
