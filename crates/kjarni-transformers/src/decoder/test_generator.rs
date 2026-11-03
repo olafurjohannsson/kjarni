@@ -109,6 +109,12 @@ struct MockDecoderModel {
     decoder: MockCpuDecoder,
     #[expect(dead_code, reason = "test scaffolding for the suite in this module")]
     config: MockConfig,
+
+    /// Tokens to predict, one per forward pass, the last repeated once the script
+    /// runs out. `None` always predicts token 2. Counting forward passes rather than
+    /// sampled tokens is what lets a test see a step that skipped the model.
+    script: Option<Vec<u32>>,
+    forward_passes: std::sync::atomic::AtomicUsize,
 }
 
 impl MockDecoderModel {
@@ -159,6 +165,44 @@ impl MockDecoderModel {
                 num_layers: 1,
             },
             config,
+            script: None,
+            forward_passes: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// A byte-level BPE vocabulary, as Llama 3 and Qwen use, holding the two bytes
+    /// of "Ó" (0xC3 0x93) as separate tokens, so the character takes two steps to
+    /// generate. Byte-level BPE writes byte 0xC3 as "Ã" and 0x93 as "ĵ".
+    fn byte_level(script: Vec<u32>) -> Self {
+        let tokenizer_json = r#"{
+          "version": "1.0",
+          "truncation": null,
+          "padding": null,
+          "added_tokens": [
+            { "id": 0, "content": "[BOS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true },
+            { "id": 1, "content": "[EOS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true }
+          ],
+          "normalizer": null,
+          "pre_tokenizer": { "type": "ByteLevel", "add_prefix_space": false, "trim_offsets": true, "use_regex": true },
+          "post_processor": null,
+          "decoder": { "type": "ByteLevel", "add_prefix_space": false, "trim_offsets": true, "use_regex": true },
+          "model": {
+            "type": "BPE",
+            "dropout": null,
+            "unk_token": null,
+            "continuing_subword_prefix": null,
+            "end_of_word_suffix": null,
+            "fuse_unk": false,
+            "vocab": { "[BOS]": 0, "[EOS]": 1, "Ã": 2, "ĵ": 3, "!": 4, "H": 5 },
+            "merges": []
+          }
+        }"#;
+
+        Self {
+            tokenizer: Tokenizer::from_bytes(tokenizer_json.as_bytes())
+                .expect("Failed to create byte-level tokenizer"),
+            script: Some(script),
+            ..Self::new()
         }
     }
 }
@@ -256,9 +300,16 @@ impl CpuDecoderOps for MockDecoderModel {
 
         let mut logits = Array3::from_elem((batch, seq, self.vocab_size), -100.0);
 
-        // Force prediction of token ID 2 ("hello")
+        let pass = self
+            .forward_passes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let token = match &self.script {
+            Some(script) => script[pass.min(script.len() - 1)] as usize,
+            // "hello"
+            None => 2,
+        };
         use ndarray::s;
-        logits.slice_mut(s![.., .., 2]).fill(100.0);
+        logits.slice_mut(s![.., .., token]).fill(100.0);
 
         Ok(logits)
     }
@@ -485,4 +536,34 @@ async fn test_chat_formatting_fallback() {
 
     let prompt = generator.format_conversation(&conv).unwrap();
     assert_eq!(prompt, "Hello");
+}
+
+/// A character generated over two byte tokens must arrive whole, and generation must
+/// carry on after it. "HÓ!" is H, the two bytes of Ó, then "!", then end of sequence.
+#[tokio::test]
+async fn test_character_split_over_two_tokens_streams_whole() {
+    let model = Arc::new(MockDecoderModel::byte_level(vec![5, 2, 3, 4, 1]));
+    let generator = DecoderGenerator::new(model).unwrap();
+
+    let config = GenerationConfig {
+        max_new_tokens: Some(10),
+        strategy: crate::common::DecodingStrategy::Greedy,
+        ..Default::default()
+    };
+
+    let stream = generator
+        .generate_stream("H", &config, None)
+        .await
+        .unwrap();
+    let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
+    let generated: Vec<&StreamedToken> = tokens
+        .iter()
+        .filter(|t| t.token_type == TokenType::Generated)
+        .collect();
+
+    let texts: Vec<&str> = generated.iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(texts, ["H", "Ó", "!"]);
+    // The text for Ó is sent with the token that completed it.
+    assert_eq!(generated[1].id, 3);
+    assert!(!texts.concat().contains('\u{FFFD}'));
 }
