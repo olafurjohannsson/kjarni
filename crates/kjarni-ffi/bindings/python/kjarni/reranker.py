@@ -90,7 +90,7 @@ class Reranker:
         """Create a new Reranker.
         
         Args:
-            model: Model name (e.g., "cross-encoder-minilm")
+            model: Model name, e.g. "minilm-l6-v2-cross-encoder" (the default)
             device: "cpu" or "gpu"
             cache_dir: Directory to cache models
             quiet: Suppress progress output
