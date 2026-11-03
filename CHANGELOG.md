@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.3
+
+- **Transcription reads MP3, FLAC and Ogg Vorbis.** The documentation, the CLI help and
+  the bindings all listed these formats, but releases decoded only WAV and failed on the
+  rest with "requires the 'symphonia' feature". `TranscribeFile`, `transcribe_file`,
+  `kjarni transcribe` and the MCP tool now decode them, at any sample rate, mono or stereo.
+
+- **The Go module builds on Windows.** kjarni-go loaded its library through functions
+  purego provides only on Linux and macOS, so `go build` failed on Windows with
+  "undefined: purego.Dlsym". It now uses LoadLibrary there, and CI runs the Go tests
+  on Windows against the DLL the module embeds.
+
+- **`kjarni transcribe --timestamps` prints timestamps.** Without `--no-stream` the flag
+  was ignored. It now waits for the full transcript and prints each segment with its
+  start and end time.
+
+- **`kjarni index create` reports how many documents it indexed.** The progress line
+  counted documents before each batch was embedded, so a small index showed "Indexed 0
+  documents". It now counts documents written, in the CLI and in progress callbacks
+  from every binding.
+
+- The Python `Reranker` docstring named a model, "cross-encoder-minilm", that the
+  binding rejects; it now names the default, `minilm-l6-v2-cross-encoder`. The
+  `--model-path` help for `kjarni transcribe` says plainly that it is not supported yet.
+
 ## 0.4.2
 
 - **Chat replies no longer stop at accented letters and emoji.** A character the model
