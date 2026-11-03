@@ -5,7 +5,8 @@ use kjarni_transformers::models::{
     ModelArchitecture, ModelType, download_model_files, format_params, format_size,
     get_default_cache_dir, registry::WeightsFormat,
 };
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 /// Information about a model for display purposes
 #[derive(Debug, Clone)]
@@ -87,36 +88,67 @@ pub async fn download_model(name: &str, prefer_gguf: bool, quiet: bool) -> Resul
     let model_dir = model_type.cache_dir(&cache_dir);
     let info = model_type.info();
 
-    // Determine format
-    let format = if prefer_gguf && info.paths.gguf_url.is_some() {
+    let gguf_available = info.paths.gguf_url.is_some();
+    let format = if prefer_gguf && gguf_available {
         WeightsFormat::GGUF
     } else {
-        if prefer_gguf {
-            println!("! GGUF requested but not available for this model. Downloading SafeTensors.");
-        }
         WeightsFormat::SafeTensors
     };
 
-    println!("Downloading {}...", model_type.cli_name());
-    println!("  Repository: {}", model_type.repo_id());
-    println!(
-        "  Format:     {}",
-        if matches!(format, WeightsFormat::GGUF) {
-            "GGUF (Optimized)"
-        } else {
-            "SafeTensors (Standard)"
-        }
+    let banner = download_banner(
+        model_type,
+        &format,
+        prefer_gguf && !gguf_available,
+        &model_dir,
+        info.size_mb,
     );
-    println!("  Size:       ~{}", format_size(info.size_mb));
-    println!("  Destination: {}", model_dir.display());
-    println!();
+    announce(&mut std::io::stderr(), quiet, &banner)?;
 
     download_model_files(&model_dir, &info.paths, format, quiet).await?;
 
-    println!();
-    println!("✓ Download complete!");
+    announce(&mut std::io::stderr(), quiet, "\n✓ Download complete!\n")?;
 
     Ok(())
+}
+
+/// The lines printed before a model download starts.
+fn download_banner(
+    model_type: ModelType,
+    format: &WeightsFormat,
+    gguf_missing: bool,
+    model_dir: &Path,
+    size_mb: usize,
+) -> String {
+    let mut text = String::new();
+    if gguf_missing {
+        text.push_str(
+            "! GGUF requested but not available for this model. Downloading SafeTensors.\n",
+        );
+    }
+    let format = if matches!(format, WeightsFormat::GGUF) {
+        "GGUF (Optimized)"
+    } else {
+        "SafeTensors (Standard)"
+    };
+    text.push_str(&format!(
+        "Downloading {}...\n  Repository: {}\n  Format:     {}\n  Size:       ~{}\n  Destination: {}\n\n",
+        model_type.cli_name(),
+        model_type.repo_id(),
+        format,
+        format_size(size_mb),
+        model_dir.display()
+    ));
+    text
+}
+
+/// Writes download progress text to `out` unless `quiet` is set. Callers pass stderr,
+/// so that stdout carries only a command's result and `kjarni similarity -q` prints a
+/// bare number even on the run that downloads the model.
+fn announce(out: &mut impl Write, quiet: bool, text: &str) -> std::io::Result<()> {
+    if quiet {
+        return Ok(());
+    }
+    out.write_all(text.as_bytes())
 }
 
 /// Check if a model is downloaded
@@ -166,6 +198,41 @@ pub fn list_models_by_group(group: &str) -> Vec<ModelEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn announce_writes_nothing_when_quiet() {
+        let mut out = Vec::new();
+        announce(&mut out, true, "Downloading minilm-l6-v2...\n").unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn announce_writes_the_text_when_not_quiet() {
+        let mut out = Vec::new();
+        announce(&mut out, false, "Downloading minilm-l6-v2...\n").unwrap();
+        assert_eq!(out, b"Downloading minilm-l6-v2...\n");
+    }
+
+    #[test]
+    fn download_banner_for_minilm() {
+        let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
+        let banner = download_banner(
+            model_type,
+            &WeightsFormat::SafeTensors,
+            true,
+            Path::new("/cache/minilm"),
+            90,
+        );
+        assert_eq!(
+            banner,
+            "! GGUF requested but not available for this model. Downloading SafeTensors.\n\
+             Downloading minilm-l6-v2...\n  \
+             Repository: sentence-transformers/all-MiniLM-L6-v2\n  \
+             Format:     SafeTensors (Standard)\n  \
+             Size:       ~90 MB\n  \
+             Destination: /cache/minilm\n\n"
+        );
+    }
 
     #[test]
     fn test_list_models_returns_entries() {
