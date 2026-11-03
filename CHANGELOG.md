@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2
+
+- **Chat replies no longer stop at accented letters and emoji.** A character the model
+  writes as two or more byte tokens, such as the "Ó" in "Ólafur", ended the reply with
+  "�", and nothing after it was generated. `Chat`, conversations, streaming, the CLI and
+  the WebAssembly build were all affected. Speculative decoding printed such characters
+  as "��"; it now prints them whole.
+
+- **Image search indexes black-and-white JPEGs.** Greyscale JPEGs failed to decode and were
+  skipped by `ImageIndex.AddDirectory` and `kjarni image`.
+
+- **Faster on Apple Silicon and ARM Linux.** Quantized weights (Q8_0, Q4_K, Q6_K), RoPE and
+  the norm layers have NEON kernels, where they ran as plain scalar code before. Decoding
+  on the macOS CI runner went from 9.8 to 45.2 tokens per second. Embedding speed is
+  unchanged.
+
 ## 0.4.1
 
 - **`kjarni translate` uses a real translation model by default.** English to German and

@@ -13,6 +13,7 @@ use crate::{
     },
     decoder::{
         backend::AnyDecoderBackend,
+        generator::complete_tail,
         traits::{DecoderGenerationBackend, DecoderLanguageModel},
     },
     stats::GenerationStats,
@@ -314,6 +315,8 @@ async fn run_loop(
     let mut target_cache = target.new_cache(1, capacity, 1)?;
 
     let mut all_tokens = input_tokens.clone();
+    // Bytes of the generated text already sent.
+    let mut emitted = 0usize;
     let mut stats = GenerationStats::new();
 
     stats.start_prefill(prompt_len);
@@ -443,18 +446,22 @@ async fn run_loop(
             stats.record_token();
             speculation.generated += 1;
 
-            let text = tokenizer
-                .decode(&[token], false)
+            // The generated run is decoded as a whole, as in the plain loop, so word
+            // boundaries and characters split over byte tokens come out right.
+            let decoded = tokenizer
+                .decode(&all_tokens[prompt_len..], false)
                 .map_err(|e| anyhow!("Decode error: {}", e))?;
+            let text = complete_tail(&decoded, &mut emitted);
 
-            if tx
-                .send(Ok(StreamedToken {
-                    text,
-                    id: token,
-                    token_type: TokenType::Generated,
-                }))
-                .await
-                .is_err()
+            if !text.is_empty()
+                && tx
+                    .send(Ok(StreamedToken {
+                        text,
+                        id: token,
+                        token_type: TokenType::Generated,
+                    }))
+                    .await
+                    .is_err()
             {
                 break 'outer;
             }

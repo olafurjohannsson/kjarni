@@ -85,16 +85,22 @@ fn decode_jpeg(bytes: &[u8]) -> Result<RgbImage> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
 
-    // Forcing RGB out means greyscale and CMYK sources are converted for us
-    // rather than silently producing the wrong channel count.
+    // RGB is requested so that YCbCr and CMYK sources are converted, but the
+    // decoder still returns one channel for a single-component (greyscale) JPEG,
+    // so that case is expanded here.
     let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
     let mut decoder = JpegDecoder::new_with_options(bytes, options);
-    let pixels = decoder.decode().context("jpeg decode failed")?;
+    let mut pixels = decoder.decode().context("jpeg decode failed")?;
     let info = decoder.info().context("jpeg has no frame header")?;
+    let (width, height) = (info.width as usize, info.height as usize);
+
+    if pixels.len() == width * height {
+        pixels = pixels.iter().flat_map(|&g| [g, g, g]).collect();
+    }
 
     RgbImage {
-        width: info.width as usize,
-        height: info.height as usize,
+        width,
+        height,
         pixels,
     }
     .check()
@@ -223,6 +229,18 @@ mod tests {
         assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
         // Decoded despite nothing saying "png" but the bytes themselves.
         assert!(decode(&png).is_ok());
+    }
+
+    /// A single-component JPEG, as black-and-white photos are stored. Written at
+    /// quality 100 with a flat quantisation table, so the values decode exactly.
+    #[test]
+    fn grayscale_jpeg_expands_by_replication() {
+        let img = decode(include_bytes!("testdata/gray_8x2.jpg")).unwrap();
+        assert_eq!((img.width, img.height), (8, 2));
+        let row = [0u8, 32, 64, 96, 128, 160, 192, 255];
+        for (i, g) in row.iter().chain(&row).enumerate() {
+            assert_eq!(&img.pixels[i * 3..i * 3 + 3], &[*g, *g, *g], "pixel {i}");
+        }
     }
 
     #[test]

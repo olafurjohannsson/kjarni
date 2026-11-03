@@ -529,24 +529,19 @@ pub async fn run_generation_loop_with_cache(
         let decoded = tokenizer
             .decode(&all_tokens[prompt_len..], false)
             .map_err(|e| anyhow!("tokenizer decode error: {}", e))?;
-        // Multi-byte characters and multi-token emoji arrive in pieces, so only emit
-        // once the tail is valid UTF-8 on its own; otherwise wait for the next token.
-        let text = match decoded.get(emitted..) {
-            Some(tail) if !tail.is_empty() => {
-                emitted = decoded.len();
-                tail.to_string()
-            }
-            _ => continue,
-        };
+        let text = complete_tail(&decoded, &mut emitted);
 
-        if tx
-            .send(Ok(StreamedToken {
-                text,
-                id: next_token,
-                token_type: TokenType::Generated,
-            }))
-            .await
-            .is_err()
+        // A token that only starts a character sends nothing, but the model still has
+        // to see it before the next step.
+        if !text.is_empty()
+            && tx
+                .send(Ok(StreamedToken {
+                    text,
+                    id: next_token,
+                    token_type: TokenType::Generated,
+                }))
+                .await
+                .is_err()
         {
             debug!("receiver dropped at step {}", step);
             break;
@@ -573,6 +568,23 @@ pub async fn run_generation_loop_with_cache(
 
     stats.print_summary();
     Ok(())
+}
+
+/// The text in `decoded` after the first `emitted` bytes that is ready to send, and
+/// advances `emitted` past it.
+///
+/// A character spread over several byte tokens, as accented letters and emoji are in
+/// byte-level BPE, decodes to U+FFFD until its last byte arrives. A trailing U+FFFD is
+/// therefore held back until the next token completes it.
+pub(crate) fn complete_tail(decoded: &str, emitted: &mut usize) -> String {
+    let end = decoded.trim_end_matches('\u{FFFD}').len();
+    match decoded.get(*emitted..end) {
+        Some(tail) if !tail.is_empty() => {
+            *emitted = end;
+            tail.to_string()
+        }
+        _ => String::new(),
+    }
 }
 
 pub async fn generate_tokens(
@@ -627,6 +639,34 @@ mod tests {
         let debug_str = format!("{:?}", token);
         assert!(debug_str.contains("hello"));
         assert!(debug_str.contains("42"));
+    }
+
+    #[test]
+    fn complete_tail_holds_back_an_unfinished_character() {
+        let mut emitted = 0;
+        assert_eq!(complete_tail("Hall", &mut emitted), "Hall");
+        assert_eq!(emitted, 4);
+
+        // The first byte of "Ó" alone decodes to U+FFFD: nothing is sent yet.
+        assert_eq!(complete_tail("Hall \u{FFFD}", &mut emitted), " ");
+        assert_eq!(emitted, 5);
+
+        // The second byte completes it.
+        assert_eq!(complete_tail("Hall Ó", &mut emitted), "Ó");
+        assert_eq!(emitted, 7);
+        assert_eq!(complete_tail("Hall Ólafur", &mut emitted), "lafur");
+    }
+
+    #[test]
+    fn complete_tail_sends_nothing_when_nothing_is_new() {
+        let mut emitted = 5;
+        assert_eq!(complete_tail("hello", &mut emitted), "");
+        assert_eq!(emitted, 5);
+
+        // A four-byte emoji still waiting on bytes.
+        assert_eq!(complete_tail("hello\u{FFFD}\u{FFFD}", &mut emitted), "");
+        assert_eq!(emitted, 5);
+        assert_eq!(complete_tail("hello🙂", &mut emitted), "🙂");
     }
 
     #[test]
