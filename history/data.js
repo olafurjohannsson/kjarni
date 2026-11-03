@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793746298915,
+  "lastUpdate": 1793746353924,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -360,6 +360,66 @@ window.BENCHMARK_DATA = {
             "value": 25.33,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.000"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3b0ec58ffaadf1b7d9ddc964983b524b70f39d27",
+          "message": "Release/0.4.3 (#101)\n\n* Decode MP3, FLAC and Ogg Vorbis for transcription\n\nThe docs, CLI help and every binding listed these formats, but the symphonia\nfeature they needed was an empty placeholder, so release builds failed on\nanything but WAV. Decodes them with symphonia, pure Rust like hound, and shares\nthe WAV path's mixdown and resampling. Tested against a WAV tone written in all\nfour formats: FLAC matches sample for sample, MP3 and Vorbis keep length, rate\nand pitch.\n\n* Print timestamps from kjarni transcribe without --no-stream\n\nStreamed tokens carry no times, so --timestamps was ignored unless streaming\nwas also turned off. The flag now waits for the full result. The --model-path\nhelp, two sentences run together, now says the flag is not supported yet.\n\n* Count documents written in indexing progress\n\nEmbedding progress was reported before each batch was embedded, so the last\nreport was the count before the final batch, and a small index printed\n\"Indexed 0 documents\". It is now reported after each batch is written.\n\n* Name a model the Python Reranker accepts in its docstring\n\n\"cross-encoder-minilm\" is rejected as an unknown model. Adds the first\nReranker test, which loads the documented model and pins its scores.\n\n* Load the library on Windows in the Go binding\n\npurego has Dlopen and Dlsym only on Unix, so the module did not compile for\nWindows. Windows now uses LoadLibrary and GetProcAddress.\n\n* Test the Go binding on Windows in CI\n\ngo-test ran only on Linux, which is how a Windows build failure shipped. Every\npush now vets the module for Windows, and build-windows runs the Go unit and\nintegration tests against the DLL it built. The Python job downloads the\nreranker model its new test needs.\n\n* Release 0.4.3",
+          "timestamp": "2026-11-03T22:28:52Z",
+          "tree_id": "be2820876e93b30cdc6e7e00131ead3a235ff659",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/3b0ec58ffaadf1b7d9ddc964983b524b70f39d27"
+        },
+        "date": 1793746352717,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 666.4,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 0.994"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 41.21,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 0.986"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 362.48,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.984"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 20.16,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.943"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 469.69,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.995"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 20.55,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.026"
           }
         ]
       }
