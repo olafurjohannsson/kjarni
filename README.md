@@ -243,7 +243,7 @@ CLIP are native only for now.
 
 ## For AI agents (MCP)
 
-`kjarni mcp` serves Kjarni's capabilities to any MCP client (Claude Code, Cursor, Claude Desktop, VS Code) as tools that run on your machine: `search_folder` (semantic and hybrid search over a folder of documents or code, indexed on first use and kept up to date), `transcribe`, `classify`, `rerank` and `similarity`.
+`kjarni mcp` serves Kjarni's capabilities to any MCP client (Claude Code, Cursor, Claude Desktop, VS Code) as tools that run on your machine: `search_folder` (semantic and hybrid search over a folder of documents or code, indexed on first use and kept up to date), `search_images` (find photos in a folder by describing them, with CLIP), `transcribe`, `classify`, `rerank` and `similarity`.
 
 ```bash
 claude mcp add kjarni -- kjarni mcp          # Claude Code

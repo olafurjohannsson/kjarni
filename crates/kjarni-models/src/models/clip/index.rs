@@ -224,6 +224,13 @@ impl ImageIndex {
         std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))
     }
 
+    /// Forgets every indexed image, leaving the models loaded, so one loaded
+    /// index can serve several folders in turn.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.by_path.clear();
+    }
+
     /// Restores previously computed vectors, leaving the models as loaded.
     pub fn load_entries(&mut self, path: &Path) -> Result<usize> {
         let bytes =

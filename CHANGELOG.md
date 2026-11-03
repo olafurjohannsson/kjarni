@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **`kjarni mcp` finds photos by description.** The new `search_images` tool takes a
+  folder and a description such as "a dog on a beach" and returns the best matching
+  JPEG and PNG photos, with CLIP running locally. The first search of a folder embeds
+  every photo, about 20 ms each on a desktop CPU, and later searches reuse those
+  vectors until the folder changes. CLIP downloads on first use.
+
 ## 0.4.3
 
 - **Transcription reads MP3, FLAC and Ogg Vorbis.** The documentation, the CLI help and
