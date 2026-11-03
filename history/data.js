@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793712124552,
+  "lastUpdate": 1793712624525,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -180,6 +180,66 @@ window.BENCHMARK_DATA = {
             "value": 20.65,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.013"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8809fdeffa58e4492025366e42f083d46e7d6636",
+          "message": "Keep model download messages off stdout (#100)\n\nThe banner printed before a model download went to stdout and ignored\nquiet, so the first `kjarni similarity -q` on a machine printed the\nbanner ahead of the score, and library callers such as ImageIndex wrote\nit into the host program's stdout. It now goes to stderr and is skipped\nwhen quiet is set.",
+          "timestamp": "2026-11-03T13:12:40Z",
+          "tree_id": "ccef7f1bd1c3abd168ab6f9be284b080f336f32e",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/8809fdeffa58e4492025366e42f083d46e7d6636"
+        },
+        "date": 1793712623823,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 487.48,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.001"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 25.52,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.999"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 712.66,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M2 Pro (Virtual); vs previous commit: 1.024"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 39.91,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M2 Pro (Virtual); vs previous commit: 3.579"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 741.97,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 173 Stepping 1, GenuineIntel; vs previous commit: 0.987"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 19.69,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 173 Stepping 1, GenuineIntel; vs previous commit: 0.993"
           }
         ]
       }
