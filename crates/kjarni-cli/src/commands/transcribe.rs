@@ -29,9 +29,10 @@ pub async fn run(
         return Err(anyhow!("Path is not a file: {}", file));
     }
 
-    // Check model_path (not yet implemented)
     if model_path.is_some() {
-        return Err(anyhow!("--model-path not yet implemented."));
+        return Err(anyhow!(
+            "--model-path is not supported for transcription yet. Use --model whisper-small or whisper-large-v3."
+        ));
     }
 
     // Build transcriber
@@ -83,8 +84,7 @@ pub async fn run(
         eprintln!();
     }
 
-    // Transcribe
-    if no_stream {
+    if !streams(no_stream, timestamps) {
         // Full result mode
         let result = transcriber
             .transcribe_file(file)
@@ -141,6 +141,12 @@ pub async fn run(
     Ok(())
 }
 
+/// Whether to print tokens as they decode. Streamed tokens carry no times, so
+/// `--timestamps` waits for the full result, which has them per segment.
+fn streams(no_stream: bool, timestamps: bool) -> bool {
+    !no_stream && !timestamps
+}
+
 /// Format seconds as HH:MM:SS.mmm or MM:SS.mmm
 fn format_timestamp(seconds: f32) -> String {
     let total_ms = (seconds * 1000.0) as u64;
@@ -155,5 +161,25 @@ fn format_timestamp(seconds: f32) -> String {
         format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, ms)
     } else {
         format!("{:02}:{:02}.{:03}", mins, secs, ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamps_turn_off_streaming() {
+        assert!(streams(false, false));
+        assert!(!streams(false, true));
+        assert!(!streams(true, false));
+        assert!(!streams(true, true));
+    }
+
+    #[test]
+    fn timestamps_format_as_minutes_or_hours() {
+        assert_eq!(format_timestamp(0.0), "00:00.000");
+        assert_eq!(format_timestamp(29.54), "00:29.540");
+        assert_eq!(format_timestamp(3725.5), "01:02:05.500");
     }
 }

@@ -283,8 +283,7 @@ pub enum Commands {
         #[arg(short, long, default_value = "whisper-small")]
         model: String,
 
-        /// Path to local model directory (not yet implemented)
-        /// Load weights from a local file or directory instead of the registry
+        /// Not supported for transcription yet; use --model
         #[arg(long)]
         model_path: Option<String>,
 
@@ -296,7 +295,8 @@ pub enum Commands {
         #[arg(long)]
         translate: bool,
 
-        /// Include timestamps in output
+        /// Print each segment with its start and end time. Waits for the whole
+        /// transcript rather than streaming it.
         #[arg(short, long)]
         timestamps: bool,
 
