@@ -81,19 +81,15 @@ pub fn load_audio<P: AsRef<Path>>(path: P, config: &AudioLoaderConfig) -> Result
     match extension.as_str() {
         "wav" => load_wav(path, config),
         "mp3" | "flac" | "ogg" => {
-            #[cfg(feature = "symphonia")]
-            {
-                load_with_symphonia(path, config)
-            }
-            #[cfg(not(feature = "symphonia"))]
-            {
-                Err(anyhow!(
-                    "Format '{}' requires the 'symphonia' feature. Only WAV is supported by default.",
-                    extension
-                ))
-            }
+            let file = std::fs::File::open(path)
+                .map_err(|e| anyhow!("Failed to open {}: {}", path.display(), e))?;
+            let (samples, sample_rate, channels) = decode_compressed(Box::new(file), &extension)?;
+            finish_samples(samples, sample_rate, channels, config)
         }
-        _ => Err(anyhow!("Unsupported audio format: {}", extension)),
+        _ => Err(anyhow!(
+            "Unsupported audio format: '{}'. Use wav, mp3, flac or ogg.",
+            extension
+        )),
     }
 }
 
@@ -103,10 +99,89 @@ pub fn load_audio_bytes(
     format: &str,
     config: &AudioLoaderConfig,
 ) -> Result<AudioData> {
-    match format.to_lowercase().as_str() {
+    let format = format.to_lowercase();
+    match format.as_str() {
         "wav" => load_wav_bytes(bytes, config),
-        _ => Err(anyhow!("Unsupported format for bytes: {}", format)),
+        "mp3" | "flac" | "ogg" => {
+            let source = std::io::Cursor::new(bytes.to_vec());
+            let (samples, sample_rate, channels) = decode_compressed(Box::new(source), &format)?;
+            finish_samples(samples, sample_rate, channels, config)
+        }
+        _ => Err(anyhow!(
+            "Unsupported audio format: '{}'. Use wav, mp3, flac or ogg.",
+            format
+        )),
     }
+}
+
+/// Decodes MP3, FLAC or Ogg Vorbis to interleaved samples in [-1, 1], with the
+/// stream's sample rate and channel count.
+fn decode_compressed(
+    source: Box<dyn symphonia::core::io::MediaSource>,
+    extension: &str,
+) -> Result<(Vec<f32>, u32, u16)> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
+    use symphonia::core::errors::Error;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let stream = MediaSourceStream::new(source, Default::default());
+    let mut hint = Hint::new();
+    hint.with_extension(extension);
+    // Gapless trims the encoder's delay and padding, so an MP3 decodes to the
+    // length of the audio that was encoded rather than a few milliseconds more.
+    let format_options = FormatOptions {
+        enable_gapless: true,
+        ..Default::default()
+    };
+    let probed = symphonia::default::get_probe()
+        .format(&hint, stream, &format_options, &MetadataOptions::default())
+        .map_err(|e| anyhow!("Could not read {} audio: {}", extension, e))?;
+    let mut format = probed.format;
+
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| anyhow!("No audio track found in the {} file", extension))?;
+    let track_id = track.id;
+    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(0);
+    let mut channels = track.codec_params.channels.map_or(0, |c| c.count() as u16);
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| anyhow!("Cannot decode this {} file: {}", extension, e))?;
+
+    let mut samples = Vec::new();
+    loop {
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(anyhow!("Failed to read {} audio: {}", extension, e)),
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        let decoded = match decoder.decode(&packet) {
+            Ok(decoded) => decoded,
+            // A damaged frame is skipped, as players do, rather than failing the file.
+            Err(Error::DecodeError(_)) => continue,
+            Err(e) => return Err(anyhow!("Failed to decode {} audio: {}", extension, e)),
+        };
+        let spec = *decoded.spec();
+        sample_rate = spec.rate;
+        channels = spec.channels.count() as u16;
+        let mut buffer = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+        buffer.copy_interleaved_ref(decoded);
+        samples.extend_from_slice(buffer.samples());
+    }
+
+    if sample_rate == 0 || channels == 0 {
+        return Err(anyhow!("The {} file contains no audio", extension));
+    }
+    Ok((samples, sample_rate, channels))
 }
 
 /// Load WAV file using hound
@@ -132,8 +207,6 @@ fn load_wav_reader<R: std::io::Read>(
     config: &AudioLoaderConfig,
 ) -> Result<AudioData> {
     let spec = reader.spec();
-    let original_sample_rate = spec.sample_rate;
-    let channels = spec.channels;
     let sample_format = spec.sample_format;
     let bits_per_sample = spec.bits_per_sample;
 
@@ -166,6 +239,16 @@ fn load_wav_reader<R: std::io::Read>(
             .map_err(|e| anyhow!("Failed to read float samples: {}", e))?,
     };
 
+    finish_samples(samples, spec.sample_rate, spec.channels, config)
+}
+
+/// Mixes interleaved samples down, resamples and trims or pads them as the config asks.
+fn finish_samples(
+    samples: Vec<f32>,
+    original_sample_rate: u32,
+    channels: u16,
+    config: &AudioLoaderConfig,
+) -> Result<AudioData> {
     // Convert to mono if needed
     let samples = if config.mono && channels > 1 {
         convert_to_mono(&samples, channels as usize)
@@ -364,6 +447,90 @@ mod tests {
         let samples: Vec<f32> = (0..100).map(|i| i as f32).collect();
         let resampled = resample(&samples, 1000, 500).unwrap();
         assert_eq!(resampled.len(), 50);
+    }
+
+    /// The test clips are one quiet 0.5 s, 440 Hz sine, 44.1 kHz stereo,
+    /// written by ffmpeg as WAV, FLAC, MP3 (64 kb/s) and Ogg Vorbis.
+    fn testdata(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/audio/testdata")
+            .join(name)
+    }
+
+    fn whisper_input() -> AudioLoaderConfig {
+        AudioLoaderConfig {
+            target_sample_rate: 16000,
+            mono: true,
+            normalize: false,
+            max_duration_secs: None,
+            target_duration_secs: None,
+        }
+    }
+
+    fn rms(samples: &[f32]) -> f32 {
+        (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    /// Upward zero crossings per second over the middle of the clip.
+    fn frequency(samples: &[f32], rate: u32) -> f32 {
+        let middle = &samples[samples.len() / 5..samples.len() * 4 / 5];
+        let crossings = middle
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        crossings as f32 * rate as f32 / middle.len() as f32
+    }
+
+    #[test]
+    fn compressed_formats_decode_to_the_same_tone_as_wav() {
+        let wav = load_audio(testdata("tone.wav"), &whisper_input()).unwrap();
+        assert_eq!(wav.samples.len(), 8000);
+        assert!((rms(&wav.samples) - 0.03123).abs() < 1e-5);
+
+        // FLAC is lossless: the same samples as the WAV.
+        let flac = load_audio(testdata("tone.flac"), &whisper_input()).unwrap();
+        assert_eq!(flac.samples, wav.samples);
+
+        // MP3 and Vorbis are lossy, so the level moves a little; the length, rate
+        // and pitch must not. Vorbis ends on a block boundary, 11 samples late.
+        for (name, len, level) in [("tone.mp3", 8000, 0.02967), ("tone.ogg", 8011, 0.03137)] {
+            let audio = load_audio(testdata(name), &whisper_input()).unwrap();
+            assert_eq!(audio.original_sample_rate, 44100, "{name}");
+            assert_eq!(audio.sample_rate, 16000, "{name}");
+            assert_eq!(audio.channels, 1, "{name}");
+            assert_eq!(audio.samples.len(), len, "{name}");
+            assert!((rms(&audio.samples) - level).abs() < 1e-4, "{name}");
+            assert!(
+                (frequency(&audio.samples, 16000) - 440.0).abs() < 5.0,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn compressed_bytes_decode_like_files() {
+        for (name, format) in [
+            ("tone.mp3", "MP3"),
+            ("tone.flac", "flac"),
+            ("tone.ogg", "ogg"),
+        ] {
+            let from_file = load_audio(testdata(name), &whisper_input()).unwrap();
+            let bytes = std::fs::read(testdata(name)).unwrap();
+            let from_bytes = load_audio_bytes(&bytes, format, &whisper_input()).unwrap();
+            assert_eq!(from_bytes.samples, from_file.samples, "{name}");
+        }
+    }
+
+    #[test]
+    fn unsupported_formats_name_the_supported_ones() {
+        let err = load_audio(testdata("tone.aac"), &whisper_input()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Unsupported audio format: 'aac'. Use wav, mp3, flac or ogg."
+        );
+        // A WAV renamed to .mp3 is not MP3 data and fails rather than decoding noise.
+        let wav = std::fs::read(testdata("tone.wav")).unwrap();
+        assert!(load_audio_bytes(&wav[..2000], "mp3", &whisper_input()).is_err());
     }
 
     #[test]

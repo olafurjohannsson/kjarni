@@ -43,6 +43,9 @@ rand_chacha = "0.9.0"
 strum_macros = "0.26"
 
 hound = "3.5"           # WAV loading (simple, no dependencies)
+# MP3, FLAC and Ogg Vorbis decoding for transcription. Pure Rust, like hound, so it
+# builds for every target without a C toolchain.
+symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "flac", "ogg", "vorbis"] }
 ndarray = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -95,7 +98,6 @@ wasm-gpu = ["dep:wgpu", "dep:futures-intrusive"]
 default = []
 profiling = []
 rubato = []
-symphonia = []
 tokio = []   # Defines the feature flag "tokio" (maybe it doesnt make sense to not hae it)
 nvidia = []  # Defines the feature flag "nvidia"
 
