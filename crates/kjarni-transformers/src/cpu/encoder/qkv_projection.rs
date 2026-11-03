@@ -590,9 +590,11 @@ mod qkv_projection_tests {
         println!("K diff: {:.2e}", k_diff);
         println!("V diff: {:.2e}", v_diff);
 
-        assert!(q_diff < 1e-5, "Q mismatch: {}", q_diff);
-        assert!(k_diff < 1e-5, "K mismatch: {}", k_diff);
-        assert!(v_diff < 1e-5, "V mismatch: {}", v_diff);
+        // Fused and separate take different tiles, so sums round differently per CPU:
+        // 8e-6 on AVX2 and 1.2e-5 on NEON.
+        assert!(q_diff < 2e-5, "Q mismatch: {}", q_diff);
+        assert!(k_diff < 2e-5, "K mismatch: {}", k_diff);
+        assert!(v_diff < 2e-5, "V mismatch: {}", v_diff);
     }
 
     #[test]

@@ -26,6 +26,7 @@ fn gguf_path() -> std::path::PathBuf {
 
 /// Runs both paths over `m` rows of one real Q4_K tensor. `None` when the model or
 /// the tensor is unavailable, so the suite still runs on a machine without them.
+#[cfg(target_arch = "x86_64")]
 async fn run_q4k(m: usize, tensor: &str) -> Result<Option<(Array2<f32>, Array2<f32>, Vec<usize>)>> {
     let path = gguf_path();
     if !path.exists() {
@@ -109,6 +110,7 @@ fn report(label: &str, gpu: &Array2<f32>, cpu: &Array2<f32>, shape: &[usize]) {
     );
 }
 
+#[cfg(target_arch = "x86_64")]
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q4k_gemv_matches_cpu() -> Result<()> {
@@ -130,6 +132,7 @@ async fn q4k_gemv_matches_cpu() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q4k_batched_matches_cpu() -> Result<()> {
@@ -154,6 +157,7 @@ async fn q4k_batched_matches_cpu() -> Result<()> {
 /// `gemv_q4k` when the output rows do not fill its last workgroup, for one row and for a
 /// few. Every tensor in the file has a row count divisible by 8, so these use the first
 /// rows of one.
+#[cfg(target_arch = "x86_64")]
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q4k_gemv_rows_short_of_a_workgroup() -> Result<()> {

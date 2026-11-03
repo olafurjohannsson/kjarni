@@ -66,6 +66,12 @@ impl RMSNormSIMD {
             }
         }
 
+        #[cfg(target_arch = "aarch64")]
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            unsafe { crate::cpu::kernels::aarch64::rms_norm::rms_norm_neon(row, w, self.eps) };
+            return;
+        }
+
         // Scalar fallback
         let sum_sq: f32 = row.iter().map(|v| v * v).sum();
         let mean = sum_sq / row.len() as f32;

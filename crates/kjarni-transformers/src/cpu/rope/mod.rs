@@ -150,12 +150,9 @@ impl RoPE {
         (cos_cache, sin_cache)
     }
 
-    // The destructured dims and the cache slices below feed the x86_64 and
-    // aarch64 SIMD paths only; on any other target they are all unread.
-    #[cfg_attr(
-        not(any(target_arch = "x86_64", target_arch = "aarch64")),
-        allow(unused_variables)
-    )]
+    // Which destructured dims and cache slices are read depends on the SIMD path
+    // compiled in: all of them on x86_64, some on aarch64, none elsewhere.
+    #[cfg_attr(not(target_arch = "x86_64"), allow(unused_variables))]
     fn rotate_4d_in_place(&self, x: &mut Array4<f32>, position_offset: usize) {
         let (batch, num_heads, seq_len, head_dim) = x.dim();
 
@@ -179,6 +176,22 @@ impl RoPE {
                         sin_slice,
                         batch,
                         num_heads,
+                        seq_len,
+                        head_dim,
+                        self.cos_cache.ncols(),
+                        position_offset,
+                    );
+                }
+                return;
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            if seq_len > 0 && std::arch::is_aarch64_feature_detected!("neon") {
+                unsafe {
+                    crate::cpu::kernels::aarch64::rope::rotate_4d_neon(
+                        x_slice,
+                        cos_slice,
+                        sin_slice,
                         seq_len,
                         head_dim,
                         self.cos_cache.ncols(),

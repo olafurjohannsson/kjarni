@@ -160,6 +160,17 @@ mod tests {
 
     #[test]
     fn test_prefill_tps() {
+        let mut stats = GenerationStats::new();
+        stats.prefill_tokens = 100;
+        stats.prefill_duration = Duration::from_millis(250);
+        assert_eq!(stats.prefill_tps(), 400.0);
+
+        stats.prefill_duration = Duration::ZERO;
+        assert_eq!(stats.prefill_tps(), 0.0);
+    }
+
+    #[test]
+    fn test_prefill_tps_measures_elapsed_time() {
         GenerationStats::enable();
         let mut stats = GenerationStats::new();
 
@@ -167,8 +178,10 @@ mod tests {
         sleep(Duration::from_millis(100));
         stats.end_prefill();
 
+        // Sleep can overrun by any amount on a busy machine but never returns early,
+        // so only the upper bound is fixed.
         let tps = stats.prefill_tps();
-        assert!(tps > 500.0 && tps < 2000.0, "tps was {}", tps);
+        assert!(tps > 0.0 && tps <= 1000.0, "tps was {}", tps);
 
         GenerationStats::disable();
     }

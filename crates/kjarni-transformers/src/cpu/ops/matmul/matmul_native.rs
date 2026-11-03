@@ -9,6 +9,90 @@ use half::bf16;
 use ndarray::{Array2, ArrayView2};
 use rayon::prelude::*;
 
+/// One [4 x 3] tile, for callers that have already checked the CPU's features.
+///
+/// # Safety
+///
+/// On x86 the CPU must have AVX2 and FMA. See `matmul_block_4x3_f32` for the pointers.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline]
+unsafe fn block_4x3_simd(
+    out: *mut f32,
+    stride: usize,
+    a: *const f32,
+    b: *const f32,
+    k: usize,
+    bias: *const f32,
+) {
+    unsafe {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        kernels::x86::f32::matmul_block_4x3_f32(out, stride, a, b, k, bias);
+        #[cfg(target_arch = "aarch64")]
+        kernels::aarch64::f32::matmul_block_4x3_f32_neon(out, stride, a, b, k, bias);
+    }
+}
+
+/// One input row against `out.len()` weight rows, for callers that have already checked
+/// the CPU's features.
+///
+/// # Safety
+///
+/// On x86 the CPU must have AVX2 and FMA. `a` must point to `k` floats and `b` to
+/// `out.len()` rows of `k` floats.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline]
+unsafe fn vec_f32_simd(out: &mut [f32], a: *const f32, b: *const f32, k: usize) {
+    unsafe {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        kernels::x86::f32::matmul_vec_f32(out, a, b, k);
+        #[cfg(target_arch = "aarch64")]
+        kernels::aarch64::f32::matmul_vec_f32_neon(out, a, b, k);
+    }
+}
+
+/// One [4 x 3] tile on whatever this CPU has.
+///
+/// # Safety
+///
+/// `a` must point to 4 rows and `b` to 3 rows of `k` floats, and `out` must be able to
+/// take 3 values on each of 4 rows `stride` apart. `bias` is null or points to 3 floats.
+unsafe fn block_4x3_f32(
+    out: *mut f32,
+    stride: usize,
+    a: *const f32,
+    b: *const f32,
+    k: usize,
+    bias: *const f32,
+) {
+    unsafe {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            return kernels::x86::f32::matmul_block_4x3_f32(out, stride, a, b, k, bias);
+        }
+        #[cfg(target_arch = "aarch64")]
+        return kernels::aarch64::f32::matmul_block_4x3_f32_neon(out, stride, a, b, k, bias);
+
+        #[cfg(not(target_arch = "aarch64"))]
+        for row in 0..4 {
+            for col in 0..3 {
+                let mut sum = if bias.is_null() { 0.0 } else { *bias.add(col) };
+                for i in 0..k {
+                    sum += *a.add(row * k + i) * *b.add(col * k + i);
+                }
+                *out.add(row * stride + col) = sum;
+            }
+        }
+    }
+}
+
+/// Floats per cache line, so that bands of output never share one between threads.
+/// Apple's arm64 cores use 128-byte lines; 64 is the common size everywhere else.
+const FLOATS_PER_LINE: usize = if cfg!(target_arch = "aarch64") {
+    32
+} else {
+    16
+};
+
 /// Computes `C = A @ B^T` for F32 input `A` and Q8_0 quantized weight matrix `B`.
 pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array2<f32> {
     let (m, k) = a.dim();
@@ -60,6 +144,15 @@ pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array
                             k,
                         );
                     }
+                    #[cfg(target_arch = "aarch64")]
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        return kernels::aarch64::q8_0::matmul_vec_q8_0_neon(
+                            out_chunk,
+                            a_slice.as_ptr(),
+                            b_blocks_chunk,
+                            k,
+                        );
+                    }
                     kernels::scalar::matmul_vec_q8_0_scalar(out_chunk, a_slice, b_blocks_chunk, k);
                 }
             });
@@ -75,6 +168,15 @@ pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array
                     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
                     if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
                         return kernels::x86::q8_0::matmul_vec_q8_0_avx2(
+                            out_slice,
+                            a_row_slice.as_ptr(),
+                            b_weights,
+                            k,
+                        );
+                    }
+                    #[cfg(target_arch = "aarch64")]
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        return kernels::aarch64::q8_0::matmul_vec_q8_0_neon(
                             out_slice,
                             a_row_slice.as_ptr(),
                             b_weights,
@@ -434,14 +536,7 @@ pub fn matmul_2d_f32_batched_noalloc(
                         std::ptr::null()
                     };
 
-                    unsafe {
-                        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                            kernels::x86::f32::matmul_block_4x3_f32(
-                                out_ptr, n, in_ptr, w_ptr, k, b_ptr,
-                            );
-                        }
-                    }
+                    unsafe { block_4x3_f32(out_ptr, n, in_ptr, w_ptr, k, b_ptr) };
                     j += 3;
                 }
 
@@ -644,14 +739,7 @@ pub fn matmul_2d_cpu_f32_batched(
                         std::ptr::null()
                     };
 
-                    unsafe {
-                        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                            kernels::x86::f32::matmul_block_4x3_f32(
-                                out_ptr, n, in_ptr, w_ptr, k, b_ptr,
-                            );
-                        }
-                    }
+                    unsafe { block_4x3_f32(out_ptr, n, in_ptr, w_ptr, k, b_ptr) };
                     j += 3;
                 }
 
@@ -727,14 +815,18 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
     // Feature detection once, not once per output row.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     let has_avx2 = is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma");
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-    let has_avx2 = false;
+    #[cfg(target_arch = "aarch64")]
+    let has_neon = std::arch::is_aarch64_feature_detected!("neon");
 
     // One output row: the weight row against an already-quantised input row.
     let dot = |w_row: &[BlockQ4_K], a_q8: &[BlockQ8_K]| -> f32 {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if has_avx2 {
             return unsafe { kernels::x86::q4k_q8k::vec_dot_q4k_q8k_avx2(k, w_row, a_q8) };
+        }
+        #[cfg(target_arch = "aarch64")]
+        if has_neon {
+            return unsafe { kernels::aarch64::q4k_q8k::vec_dot_q4k_q8k_neon(k, w_row, a_q8) };
         }
         kernels::scalar::vec_dot_q4k_q8k_scalar(k, w_row, a_q8)
     };
@@ -834,6 +926,16 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
     output
 }
 
+/// One Q6_K weight row against a quantised activation row.
+#[inline]
+fn dot_q6k_q8k(k: usize, w_row: &[BlockQ6_K], a_q8: &[BlockQ8_K]) -> f32 {
+    // SAFETY: every aarch64 target Kjarni builds for has NEON enabled at compile time.
+    #[cfg(target_arch = "aarch64")]
+    return unsafe { kernels::aarch64::q6k_q8k::vec_dot_q6k_q8k_neon(k, w_row, a_q8) };
+    #[cfg(not(target_arch = "aarch64"))]
+    kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, a_q8)
+}
+
 /// Computes `C = A @ B^T` for F32 input `A` and Q6_K quantized weight matrix `B`.
 pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     let (m, k) = input.dim();
@@ -870,7 +972,7 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
                     let w_row = &weights[start..end];
 
                     // Compute Q6_K x Q8_K dot product
-                    *out_val = kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, &a_q8);
+                    *out_val = dot_q6k_q8k(k, w_row, &a_q8);
                 }
             });
     } else {
@@ -887,7 +989,7 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
                     let start = i * num_blocks_per_row;
                     let end = start + num_blocks_per_row;
                     let w_row = &weights[start..end];
-                    *out_val = kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, &a_q8);
+                    *out_val = dot_q6k_q8k(k, w_row, &a_q8);
                 }
             });
     }
@@ -949,8 +1051,8 @@ pub fn matmul_2d_f32_faer_noalloc(
 ///
 /// Splitting by column instead gives each thread its own band of weights, read
 /// once and reused across every row, and all threads get equal work regardless
-/// of m. Bands are multiples of the 16 floats in a cache line so that two
-/// threads never share a line of the output.
+/// of m. Bands are multiples of a cache line so that two threads never share a
+/// line of the output.
 ///
 /// Falls back to the row-parallel path where the AVX2 kernel is unavailable.
 pub fn matmul_2d_f32_noalloc_par_n(
@@ -959,11 +1061,12 @@ pub fn matmul_2d_f32_noalloc_par_n(
     bias: Option<&[f32]>,
     output: &mut Array2<f32>,
 ) {
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
     return matmul_2d_f32_noalloc(a, b_weights, bias, output);
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
     {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if !(is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")) {
             return matmul_2d_f32_noalloc(a, b_weights, bias, output);
         }
@@ -985,9 +1088,8 @@ pub fn matmul_2d_f32_noalloc_par_n(
         unsafe impl Sync for OutPtr {}
         let out = OutPtr(output.as_mut_ptr());
 
-        const LINE: usize = 16;
         let threads = rayon::current_num_threads();
-        let band = n.div_ceil(threads).div_ceil(LINE).max(1) * LINE;
+        let band = n.div_ceil(threads).div_ceil(FLOATS_PER_LINE).max(1) * FLOATS_PER_LINE;
 
         (0..n.div_ceil(band)).into_par_iter().for_each(|bi| {
             let out = &out;
@@ -999,7 +1101,7 @@ pub fn matmul_2d_f32_noalloc_par_n(
                 let b_band = b_slice.as_ptr().add(j0 * k);
                 for t in 0..m {
                     let dst = std::slice::from_raw_parts_mut(out.0.add(t * n + j0), width);
-                    kernels::x86::f32::matmul_vec_f32(dst, a_slice.as_ptr().add(t * k), b_band, k);
+                    vec_f32_simd(dst, a_slice.as_ptr().add(t * k), b_band, k);
                     if let Some(bs) = bias {
                         for (i, v) in dst.iter_mut().enumerate() {
                             *v += bs[j0 + i];
@@ -1027,11 +1129,12 @@ pub fn matmul_2d_f32_tile43_par_n(
     bias: Option<&[f32]>,
     output: &mut Array2<f32>,
 ) {
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
     return matmul_2d_f32_noalloc(a, b_weights, bias, output);
 
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
     {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if !(is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")) {
             return matmul_2d_f32_noalloc(a, b_weights, bias, output);
         }
@@ -1053,9 +1156,8 @@ pub fn matmul_2d_f32_tile43_par_n(
         unsafe impl Sync for OutPtr {}
         let out = OutPtr(output.as_mut_ptr());
 
-        const LINE: usize = 16;
         let threads = rayon::current_num_threads();
-        let band = n.div_ceil(threads).div_ceil(LINE).max(1) * LINE;
+        let band = n.div_ceil(threads).div_ceil(FLOATS_PER_LINE).max(1) * FLOATS_PER_LINE;
 
         (0..n.div_ceil(band)).into_par_iter().for_each(|bi| {
             let out = &out;
@@ -1072,7 +1174,7 @@ pub fn matmul_2d_f32_tile43_par_n(
                     let mut j = j0;
 
                     while j + 3 <= j_end {
-                        kernels::x86::f32::matmul_block_4x3_f32(
+                        block_4x3_simd(
                             base.add(t * n + j),
                             n,
                             in_ptr,
@@ -1093,12 +1195,7 @@ pub fn matmul_2d_f32_tile43_par_n(
                                 base.add((t + row) * n + j),
                                 j_end - j,
                             );
-                            kernels::x86::f32::matmul_vec_f32(
-                                dst,
-                                in_ptr.add(row * k),
-                                b_slice.as_ptr().add(j * k),
-                                k,
-                            );
+                            vec_f32_simd(dst, in_ptr.add(row * k), b_slice.as_ptr().add(j * k), k);
                             if !bias_ptr.is_null() {
                                 for (i, v) in dst.iter_mut().enumerate() {
                                     *v += *bias_ptr.add(j + i);
@@ -1111,7 +1208,7 @@ pub fn matmul_2d_f32_tile43_par_n(
 
                 while t < m {
                     let dst = std::slice::from_raw_parts_mut(base.add(t * n + j0), j_end - j0);
-                    kernels::x86::f32::matmul_vec_f32(
+                    vec_f32_simd(
                         dst,
                         a_slice.as_ptr().add(t * k),
                         b_slice.as_ptr().add(j0 * k),
@@ -2186,6 +2283,122 @@ mod dequant_tiled_tests {
         for r in 0..M {
             for c in 0..N {
                 assert!((with[[r, c]] - without[[r, c]] - bias[c]).abs() < 1e-3);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod quantized_dispatch_tests {
+    use super::*;
+    use half::f16;
+    use ndarray::Array2;
+
+    #[test]
+    fn q8_0_matches_hand_computed_values_on_both_paths() {
+        // Two rows of weights, 1 and -2, over one block of a = 0..32 (sum 496).
+        let weights = [
+            BlockQ8_0 {
+                d: f16::from_f32(0.5),
+                qs: [2; 32],
+            },
+            BlockQ8_0 {
+                d: f16::from_f32(1.0),
+                qs: [-2; 32],
+            },
+        ];
+        let row: Vec<f32> = (0..32).map(|i| i as f32).collect();
+
+        // One input row takes the column-parallel path, two take the row-parallel one.
+        let one = Array2::from_shape_vec((1, 32), row.clone()).unwrap();
+        let two = Array2::from_shape_vec((2, 32), [row.clone(), row].concat()).unwrap();
+
+        let out = matmul_2d_cpu_q8_0(&one.view(), &weights);
+        assert_eq!(out.as_slice().unwrap(), [496.0, -992.0]);
+        let out = matmul_2d_cpu_q8_0(&two.view(), &weights);
+        assert_eq!(out.as_slice().unwrap(), [496.0, -992.0, 496.0, -992.0]);
+    }
+
+    #[test]
+    fn q4_k_matches_hand_computed_value() {
+        // Sub-block scale 1 and min 0 throughout, with low nibbles 3 and high nibbles 5,
+        // so half of the 256 weights are 3 and half are 5: 128 * 3 + 128 * 5 = 1024.
+        let weights = [BlockQ4_K {
+            d: f16::from_f32(1.0),
+            dmin: f16::from_f32(1.0),
+            scales: [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+            qs: [0x53; 128],
+        }];
+        let a = Array2::from_elem((1, QK_K), 1.0f32);
+        let out = matmul_2d_cpu_q4_k(&a.view(), &weights);
+        assert!((out[[0, 0]] - 1024.0).abs() < 0.5, "got {}", out[[0, 0]]);
+    }
+
+    #[test]
+    fn q6_k_matches_hand_computed_value_on_both_paths() {
+        // Raw weight 0 centres to -32. With scale 1, d 1 and every activation 1 (which
+        // quantises to 127 at d 1/127), each row is 256 * -32 = -8192.
+        let weights = [BlockQ6_K {
+            ql: [0; 128],
+            qh: [0; 64],
+            scales: [1; 16],
+            d: f16::from_f32(1.0),
+        }];
+        for rows in [1, 2] {
+            let a = Array2::from_elem((rows, QK_K), 1.0f32);
+            let out = matmul_2d_cpu_q6_k(&a.view(), &weights);
+            for v in out.iter() {
+                assert!((v + 8192.0).abs() < 1.0, "{rows} rows: got {v}");
+            }
+        }
+    }
+
+    /// Every f32 path a linear layer can take, on whatever kernels this CPU has,
+    /// against a plain triple loop in f64. `n` of 7 and 64 leave tile remainders in the
+    /// bands, `k` of 19 leaves a tail in the kernels, and 1, 3, 5 and 9 rows reach both
+    /// the tile and the vector kernel.
+    #[test]
+    fn f32_paths_match_exact_product() {
+        let k = 19;
+        for n in [7, 64] {
+            for m in [1, 3, 5, 9] {
+                let a = Array2::from_shape_fn((m, k), |(i, j)| {
+                    ((i * 7 + j * 3) % 11) as f32 * 0.25 - 1.0
+                });
+                let w = Array2::from_shape_fn((n, k), |(i, j)| {
+                    ((i * 5 + j * 13) % 17) as f32 * 0.125 - 1.0
+                });
+                let bias: Vec<f32> = (0..n).map(|j| j as f32 * 0.5 - 1.0).collect();
+
+                let exact = Array2::from_shape_fn((m, n), |(i, j)| {
+                    let dot: f64 = (0..k).map(|l| a[[i, l]] as f64 * w[[j, l]] as f64).sum();
+                    dot + bias[j] as f64
+                });
+                let check = |name: &str, out: &Array2<f32>| {
+                    for ((i, j), e) in exact.indexed_iter() {
+                        let g = out[[i, j]] as f64;
+                        assert!(
+                            (e - g).abs() < 1e-4,
+                            "{name} m={m} n={n} [{i},{j}]: {e} vs {g}"
+                        );
+                    }
+                };
+
+                let (av, wv) = (a.view(), w.view());
+                let b = Some(bias.as_slice());
+                let mut out = Array2::zeros((m, n));
+                matmul_2d_f32_noalloc(&av, &wv, b, &mut out);
+                check("noalloc", &out);
+                let mut out = Array2::zeros((m, n));
+                matmul_2d_f32_batched_noalloc(&av, &wv, b, &mut out);
+                check("batched_noalloc", &out);
+                let mut out = Array2::zeros((m, n));
+                matmul_2d_f32_noalloc_par_n(&av, &wv, b, &mut out);
+                check("par_n", &out);
+                let mut out = Array2::zeros((m, n));
+                matmul_2d_f32_tile43_par_n(&av, &wv, b, &mut out);
+                check("tile43", &out);
+                check("cpu_batched", &matmul_2d_cpu_f32_batched(&av, &wv, b));
             }
         }
     }
