@@ -97,6 +97,61 @@ impl LayerNorm {
         }
     }
 
+    /// # Safety
+    ///
+    /// The caller must be running on a CPU with NEON. `output` must have the same shape
+    /// as `input`.
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    pub unsafe fn forward_2d_noalloc_simd(
+        &self,
+        input: &ArrayView2<f32>,
+        output: &mut ArrayViewMut2<f32>,
+    ) {
+        use std::arch::aarch64::*;
+
+        let tokens = input.shape()[0];
+        let hidden = input.shape()[1];
+
+        // Fall back to scalar for non-aligned or small hidden dims
+        if !hidden.is_multiple_of(8) || hidden < 64 {
+            return self.forward_2d_noalloc_scalar(input, output);
+        }
+
+        let weight = self.weight.as_slice().unwrap();
+        let bias = self.bias.as_slice().unwrap();
+
+        for t in 0..tokens {
+            let in_ptr = input.row(t).as_ptr();
+            let out_ptr = output.row_mut(t).as_mut_ptr();
+
+            unsafe {
+                let mut sum_vec = vdupq_n_f32(0.0);
+                for i in (0..hidden).step_by(4) {
+                    sum_vec = vaddq_f32(sum_vec, vld1q_f32(in_ptr.add(i)));
+                }
+                let mean = vaddvq_f32(sum_vec) / hidden as f32;
+                let mean_vec = vdupq_n_f32(mean);
+
+                let mut var_vec = vdupq_n_f32(0.0);
+                for i in (0..hidden).step_by(4) {
+                    let diff = vsubq_f32(vld1q_f32(in_ptr.add(i)), mean_vec);
+                    var_vec = vfmaq_f32(var_vec, diff, diff);
+                }
+                let var = vaddvq_f32(var_vec) / hidden as f32;
+                let inv_std_vec = vdupq_n_f32(1.0 / (var + self.eps).sqrt());
+
+                for i in (0..hidden).step_by(4) {
+                    let v = vld1q_f32(in_ptr.add(i));
+                    let w = vld1q_f32(weight.as_ptr().add(i));
+                    let b = vld1q_f32(bias.as_ptr().add(i));
+                    let normed = vmulq_f32(vsubq_f32(v, mean_vec), inv_std_vec);
+                    vst1q_f32(out_ptr.add(i), vfmaq_f32(b, normed, w));
+                }
+            }
+        }
+    }
+
     #[inline]
     pub fn forward_2d_noalloc_scalar(
         &self,
@@ -242,7 +297,11 @@ impl LayerNorm {
         unsafe {
             self.forward_2d_noalloc_simd(input, output);
         }
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            self.forward_2d_noalloc_simd(input, output);
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
             self.forward_2d_noalloc_scalar(input, output);
         }

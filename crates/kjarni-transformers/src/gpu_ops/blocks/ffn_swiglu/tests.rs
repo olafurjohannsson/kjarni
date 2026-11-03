@@ -66,6 +66,7 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
 /// fused path, which reads two packed weight buffers at once and applies SiLU in
 /// the shader. It is the only place the gate and up projections go, so an error
 /// here shows up as text that starts plausibly and then drifts.
+#[cfg(target_arch = "x86_64")]
 #[ignore = "GPU required"]
 #[tokio::test]
 async fn q4k_fused_gate_up_matches_cpu() -> Result<()> {
@@ -156,6 +157,7 @@ async fn q4k_fused_gate_up_matches_cpu() -> Result<()> {
 
 /// The fused kernel when the output rows do not fill its last workgroup. Every tensor in
 /// the file has a row count divisible by 4, so these use the first rows of two.
+#[cfg(target_arch = "x86_64")]
 #[ignore = "GPU required"]
 #[tokio::test]
 async fn q4k_fused_rows_short_of_a_workgroup() -> Result<()> {
