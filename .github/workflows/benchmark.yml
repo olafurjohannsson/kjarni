@@ -140,12 +140,12 @@ jobs:
               commit-tree "$tree" -m "Start the benchmark history")
             git push origin "$commit:refs/heads/benchmarks"
           }
-      - uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
+      - uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           tool: customBiggerIsBetter
           output-file-path: results.json
           gh-pages-branch: benchmarks
-          benchmark-data-dir-path: .
+          benchmark-data-dir-path: history
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           comment-on-alert: false
