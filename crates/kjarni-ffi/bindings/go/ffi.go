@@ -190,19 +190,19 @@ func initFFI() error {
 	purego.RegisterLibFunc(&_clearError, handle, "kjarni_clear_error")
 
 	// Classifier
-	_classifierNewSym, err = purego.Dlsym(handle, "kjarni_classifier_new")
+	_classifierNewSym, err = symbol(handle, "kjarni_classifier_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_classifierFree, handle, "kjarni_classifier_free")
-	_classifierClassifySym, err = purego.Dlsym(handle, "kjarni_classifier_classify")
+	_classifierClassifySym, err = symbol(handle, "kjarni_classifier_classify")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_classifierNumLabels, handle, "kjarni_classifier_num_labels")
 
 	// class_results_free takes the struct by value (2 fields: ptr + len)
-	_classResultsFreeSym, err := purego.Dlsym(handle, "kjarni_class_results_free")
+	_classResultsFreeSym, err := symbol(handle, "kjarni_class_results_free")
 	if err != nil {
 		return err
 	}
@@ -211,199 +211,199 @@ func initFFI() error {
 	_classResultsFreeSymGlobal = _classResultsFreeSym
 
 	// Embedder
-	_embedderNewSym, err = purego.Dlsym(handle, "kjarni_embedder_new")
+	_embedderNewSym, err = symbol(handle, "kjarni_embedder_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_embedderFree, handle, "kjarni_embedder_free")
-	_embedderEncodeSym, err = purego.Dlsym(handle, "kjarni_embedder_encode")
+	_embedderEncodeSym, err = symbol(handle, "kjarni_embedder_encode")
 	if err != nil {
 		return err
 	}
-	_embedderEncodeBatchSym, err = purego.Dlsym(handle, "kjarni_embedder_encode_batch")
+	_embedderEncodeBatchSym, err = symbol(handle, "kjarni_embedder_encode_batch")
 	if err != nil {
 		return err
 	}
-	_embedderSimilaritySym, err = purego.Dlsym(handle, "kjarni_embedder_similarity")
+	_embedderSimilaritySym, err = symbol(handle, "kjarni_embedder_similarity")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_embedderDim, handle, "kjarni_embedder_dim")
 
-	floatArrayFreeSym, err := purego.Dlsym(handle, "kjarni_float_array_free")
+	floatArrayFreeSym, err := symbol(handle, "kjarni_float_array_free")
 	if err != nil {
 		return err
 	}
 	_floatArrayFreeSym = floatArrayFreeSym
 
-	float2DArrayFreeSym, err := purego.Dlsym(handle, "kjarni_float_2d_array_free")
+	float2DArrayFreeSym, err := symbol(handle, "kjarni_float_2d_array_free")
 	if err != nil {
 		return err
 	}
 	_float2DArrayFreeSym = float2DArrayFreeSym
 
 	// Reranker
-	_rerankerNewSym, err = purego.Dlsym(handle, "kjarni_reranker_new")
+	_rerankerNewSym, err = symbol(handle, "kjarni_reranker_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_rerankerFree, handle, "kjarni_reranker_free")
-	_rerankerScoreSym, err = purego.Dlsym(handle, "kjarni_reranker_score")
+	_rerankerScoreSym, err = symbol(handle, "kjarni_reranker_score")
 	if err != nil {
 		return err
 	}
-	_rerankerRerankSym, err = purego.Dlsym(handle, "kjarni_reranker_rerank")
+	_rerankerRerankSym, err = symbol(handle, "kjarni_reranker_rerank")
 	if err != nil {
 		return err
 	}
-	_rerankerRerankTopKSym, err = purego.Dlsym(handle, "kjarni_reranker_rerank_top_k")
+	_rerankerRerankTopKSym, err = symbol(handle, "kjarni_reranker_rerank_top_k")
 	if err != nil {
 		return err
 	}
 
-	rerankResultsFreeSym, err := purego.Dlsym(handle, "kjarni_rerank_results_free")
+	rerankResultsFreeSym, err := symbol(handle, "kjarni_rerank_results_free")
 	if err != nil {
 		return err
 	}
 	_rerankResultsFreeSym = rerankResultsFreeSym
 
 	// Indexer
-	_indexerNewSym, err = purego.Dlsym(handle, "kjarni_indexer_new")
+	_indexerNewSym, err = symbol(handle, "kjarni_indexer_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_indexerFree, handle, "kjarni_indexer_free")
-	_indexerCreateSym, err = purego.Dlsym(handle, "kjarni_indexer_create")
+	_indexerCreateSym, err = symbol(handle, "kjarni_indexer_create")
 	if err != nil {
 		return err
 	}
 
 	// Searcher
-	_searcherNewSym, err = purego.Dlsym(handle, "kjarni_searcher_new")
+	_searcherNewSym, err = symbol(handle, "kjarni_searcher_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_searcherFree, handle, "kjarni_searcher_free")
-	_searcherSearchWithOptionsSym, err = purego.Dlsym(handle, "kjarni_searcher_search_with_options")
+	_searcherSearchWithOptionsSym, err = symbol(handle, "kjarni_searcher_search_with_options")
 	if err != nil {
 		return err
 	}
 
-	searchResultsFreeSym, err := purego.Dlsym(handle, "kjarni_search_results_free")
+	searchResultsFreeSym, err := symbol(handle, "kjarni_search_results_free")
 	if err != nil {
 		return err
 	}
 	_searchResultsFreeSym = searchResultsFreeSym
 
 	// Chat
-	_chatNewSym, err = purego.Dlsym(handle, "kjarni_chat_new")
+	_chatNewSym, err = symbol(handle, "kjarni_chat_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_chatFree, handle, "kjarni_chat_free")
-	_chatSendSym, err = purego.Dlsym(handle, "kjarni_chat_send")
+	_chatSendSym, err = symbol(handle, "kjarni_chat_send")
 	if err != nil {
 		return err
 	}
-	_chatStreamSym, err = purego.Dlsym(handle, "kjarni_chat_stream")
+	_chatStreamSym, err = symbol(handle, "kjarni_chat_stream")
 	if err != nil {
 		return err
 	}
-	_chatModelNameSym, err = purego.Dlsym(handle, "kjarni_chat_model_name")
+	_chatModelNameSym, err = symbol(handle, "kjarni_chat_model_name")
 	if err != nil {
 		return err
 	}
-	_chatContextSizeSym, err = purego.Dlsym(handle, "kjarni_chat_context_size")
+	_chatContextSizeSym, err = symbol(handle, "kjarni_chat_context_size")
 	if err != nil {
 		return err
 	}
-	_chatConversationNewSym, err = purego.Dlsym(handle, "kjarni_chat_conversation_new")
+	_chatConversationNewSym, err = symbol(handle, "kjarni_chat_conversation_new")
 	if err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_chatConversationFree, handle, "kjarni_chat_conversation_free")
-	_chatConversationSendSym, err = purego.Dlsym(handle, "kjarni_chat_conversation_send")
+	_chatConversationSendSym, err = symbol(handle, "kjarni_chat_conversation_send")
 	if err != nil {
 		return err
 	}
-	_chatConversationStreamSym, err = purego.Dlsym(handle, "kjarni_chat_conversation_stream")
+	_chatConversationStreamSym, err = symbol(handle, "kjarni_chat_conversation_stream")
 	if err != nil {
 		return err
 	}
-	_chatConversationLenSym, err = purego.Dlsym(handle, "kjarni_chat_conversation_len")
+	_chatConversationLenSym, err = symbol(handle, "kjarni_chat_conversation_len")
 	if err != nil {
 		return err
 	}
-	_chatConversationClearSym, err = purego.Dlsym(handle, "kjarni_chat_conversation_clear")
+	_chatConversationClearSym, err = symbol(handle, "kjarni_chat_conversation_clear")
 	if err != nil {
 		return err
 	}
 
 	// String free
-	_stringFreeSym, err = purego.Dlsym(handle, "kjarni_string_free")
+	_stringFreeSym, err = symbol(handle, "kjarni_string_free")
 	if err != nil {
 		return err
 	}
 
-	if _chatSendWithHistorySym, err = purego.Dlsym(handle, "kjarni_chat_send_with_history"); err != nil {
+	if _chatSendWithHistorySym, err = symbol(handle, "kjarni_chat_send_with_history"); err != nil {
 		return err
 	}
-	if _chatStreamWithHistorySym, err = purego.Dlsym(handle, "kjarni_chat_stream_with_history"); err != nil {
+	if _chatStreamWithHistorySym, err = symbol(handle, "kjarni_chat_stream_with_history"); err != nil {
 		return err
 	}
-	if _indexerAddSym, err = purego.Dlsym(handle, "kjarni_indexer_add"); err != nil {
+	if _indexerAddSym, err = symbol(handle, "kjarni_indexer_add"); err != nil {
 		return err
 	}
-	if _classifierClassifyBatchSym, err = purego.Dlsym(handle, "kjarni_classifier_classify_batch"); err != nil {
+	if _classifierClassifyBatchSym, err = symbol(handle, "kjarni_classifier_classify_batch"); err != nil {
 		return err
 	}
-	if _classBatchFreeSym, err = purego.Dlsym(handle, "kjarni_class_batch_free"); err != nil {
+	if _classBatchFreeSym, err = symbol(handle, "kjarni_class_batch_free"); err != nil {
 		return err
 	}
 
 	// Transcriber
-	if _transcriberNewSym, err = purego.Dlsym(handle, "kjarni_transcriber_new"); err != nil {
+	if _transcriberNewSym, err = symbol(handle, "kjarni_transcriber_new"); err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_transcriberFree, handle, "kjarni_transcriber_free")
-	if _transcriberTranscribeFileSym, err = purego.Dlsym(handle, "kjarni_transcriber_transcribe_file"); err != nil {
+	if _transcriberTranscribeFileSym, err = symbol(handle, "kjarni_transcriber_transcribe_file"); err != nil {
 		return err
 	}
-	if _transcriberTranscribePCMSym, err = purego.Dlsym(handle, "kjarni_transcriber_transcribe_pcm"); err != nil {
+	if _transcriberTranscribePCMSym, err = symbol(handle, "kjarni_transcriber_transcribe_pcm"); err != nil {
 		return err
 	}
-	if _transcriptionFreeSym, err = purego.Dlsym(handle, "kjarni_transcription_free"); err != nil {
+	if _transcriptionFreeSym, err = symbol(handle, "kjarni_transcription_free"); err != nil {
 		return err
 	}
 
 	// Summarizer
-	if _summarizerNewSym, err = purego.Dlsym(handle, "kjarni_summarizer_new"); err != nil {
+	if _summarizerNewSym, err = symbol(handle, "kjarni_summarizer_new"); err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_summarizerFree, handle, "kjarni_summarizer_free")
-	if _summarizerSummarizeSym, err = purego.Dlsym(handle, "kjarni_summarizer_summarize"); err != nil {
+	if _summarizerSummarizeSym, err = symbol(handle, "kjarni_summarizer_summarize"); err != nil {
 		return err
 	}
 
 	// Translator
-	if _translatorNewSym, err = purego.Dlsym(handle, "kjarni_translator_new"); err != nil {
+	if _translatorNewSym, err = symbol(handle, "kjarni_translator_new"); err != nil {
 		return err
 	}
 	purego.RegisterLibFunc(&_translatorFree, handle, "kjarni_translator_free")
-	if _translatorTranslateSym, err = purego.Dlsym(handle, "kjarni_translator_translate"); err != nil {
+	if _translatorTranslateSym, err = symbol(handle, "kjarni_translator_translate"); err != nil {
 		return err
 	}
 
 	// Image search: optional, so lookup failures are not errors.
-	_imageIndexNewSym, _ = purego.Dlsym(handle, "kjarni_image_index_new")
-	_imageIndexFreeSym, _ = purego.Dlsym(handle, "kjarni_image_index_free")
-	_imageIndexAddSym, _ = purego.Dlsym(handle, "kjarni_image_index_add")
-	_imageIndexAddDirectorySym, _ = purego.Dlsym(handle, "kjarni_image_index_add_directory")
-	_imageIndexSearchSym, _ = purego.Dlsym(handle, "kjarni_image_index_search")
-	_imageResultsFreeSym, _ = purego.Dlsym(handle, "kjarni_image_results_free")
-	_imageIndexSaveSym, _ = purego.Dlsym(handle, "kjarni_image_index_save")
-	_imageIndexLoadSym, _ = purego.Dlsym(handle, "kjarni_image_index_load")
-	_imageIndexLenSym, _ = purego.Dlsym(handle, "kjarni_image_index_len")
+	_imageIndexNewSym, _ = symbol(handle, "kjarni_image_index_new")
+	_imageIndexFreeSym, _ = symbol(handle, "kjarni_image_index_free")
+	_imageIndexAddSym, _ = symbol(handle, "kjarni_image_index_add")
+	_imageIndexAddDirectorySym, _ = symbol(handle, "kjarni_image_index_add_directory")
+	_imageIndexSearchSym, _ = symbol(handle, "kjarni_image_index_search")
+	_imageResultsFreeSym, _ = symbol(handle, "kjarni_image_results_free")
+	_imageIndexSaveSym, _ = symbol(handle, "kjarni_image_index_save")
+	_imageIndexLoadSym, _ = symbol(handle, "kjarni_image_index_load")
+	_imageIndexLenSym, _ = symbol(handle, "kjarni_image_index_len")
 
 	return nil
 }

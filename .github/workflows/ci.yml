@@ -431,9 +431,14 @@ jobs:
       # requires converting between uintptr and unsafe.Pointer at every call. The
       # check flags that pattern in seven places and cannot be satisfied without
       # abandoning purego.
+      # The module also ships for Windows, so it must compile there; Windows has
+      # its own file for loading the library. The tests themselves run on Windows
+      # in build-windows.
       - name: Vet
         working-directory: crates/kjarni-ffi/bindings/go
-        run: go vet -unsafeptr=false ./...
+        run: |
+          go vet -unsafeptr=false ./...
+          GOOS=windows GOARCH=amd64 go vet -unsafeptr=false ./...
 
       - name: Run Go tests
         working-directory: crates/kjarni-ffi/bindings/go
@@ -484,6 +489,7 @@ jobs:
         run: |
           ./target/release/kjarni model download minilm-l6-v2
           ./target/release/kjarni model download distilbert-sentiment
+          ./target/release/kjarni model download minilm-l6-v2-cross-encoder
 
       - name: Run Python tests
         working-directory: crates/kjarni-ffi/bindings/python
@@ -760,6 +766,26 @@ jobs:
         env:
           KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
         run: python scripts/smoke_test.py target/x86_64-pc-windows-msvc/release/kjarni.exe
+
+      # The Go module embeds this DLL for Windows users. Its tests load it and run
+      # the binding against it here, since go-test only covers Linux.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+      - name: Test the Go binding on Windows
+        shell: bash
+        env:
+          KJARNI_CACHE_DIR: ${{ runner.temp }}/kjarni-models
+          KJARNI_SKIP_HEAVY: "1"
+        run: |
+          ./target/x86_64-pc-windows-msvc/release/kjarni.exe model download minilm-l6-v2
+          ./target/x86_64-pc-windows-msvc/release/kjarni.exe model download distilbert-sentiment
+          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll \
+             crates/kjarni-ffi/bindings/go/lib/windows_amd64/
+          cd crates/kjarni-ffi/bindings/go
+          go vet -unsafeptr=false ./...
+          go test -v ./...
+          go test -tags integration -v ./...
 
       - name: Prepare artifacts
         shell: bash
@@ -1145,6 +1171,7 @@ jobs:
           # that mattered: the module stopped being published after v0.1.4 while the
           # tag, the release and every other package kept going out.
           go vet -unsafeptr=false ./...
+          GOOS=windows GOARCH=amd64 go vet -unsafeptr=false ./...
           go build ./...
           # The same tests go-test runs on every push, now against the module
           # exactly as assembled for publication: the libraries copied from the

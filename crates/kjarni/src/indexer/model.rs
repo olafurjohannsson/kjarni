@@ -379,12 +379,11 @@ impl Indexer {
                                 return Err(IndexerError::Cancelled);
                             }
 
-                            report(ProgressStage::Embedding, total_docs, 0, None);
-
                             let added = self
                                 .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                                 .await?;
                             total_docs += added;
+                            report(ProgressStage::Embedding, total_docs, 0, None);
                         }
                     }
                 }
@@ -399,11 +398,11 @@ impl Indexer {
 
         // Flush remaining
         if !batch_texts.is_empty() {
-            report(ProgressStage::Embedding, total_docs, 0, None);
             let added = self
                 .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                 .await?;
             total_docs += added;
+            report(ProgressStage::Embedding, total_docs, 0, None);
         }
 
         report(
@@ -551,12 +550,11 @@ impl Indexer {
                                 return Err(IndexerError::Cancelled);
                             }
 
-                            report(ProgressStage::Embedding, total_docs, 0, None);
-
                             let added = self
                                 .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                                 .await?;
                             total_docs += added;
+                            report(ProgressStage::Embedding, total_docs, 0, None);
                         }
                     }
                 }
@@ -569,11 +567,11 @@ impl Indexer {
         }
 
         if !batch_texts.is_empty() {
-            report(ProgressStage::Embedding, total_docs, 0, None);
             let added = self
                 .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                 .await?;
             total_docs += added;
+            report(ProgressStage::Embedding, total_docs, 0, None);
         }
 
         report(
@@ -1241,6 +1239,64 @@ mod indexer_tests {
             .map(|p| p.strip_prefix(dir.path()).unwrap().to_str().unwrap())
             .collect();
         assert_eq!(names, ["keep/note.md"]);
+    }
+
+    /// Embedding progress counts the documents written so far, so the last report
+    /// equals the total. Five documents in batches of two report 2, 4 and 5.
+    #[tokio::test]
+    async fn embedding_progress_counts_documents_written() {
+        let dir = TempDir::new().unwrap();
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        for i in 0..5 {
+            fs::write(
+                docs.join(format!("note{i}.txt")),
+                format!("note number {i}"),
+            )
+            .unwrap();
+        }
+        let indexer = Indexer::builder("minilm-l6-v2")
+            .batch_size(2)
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+
+        let reports = std::sync::Mutex::new(Vec::new());
+        let on_progress = |stage, current, _total, _msg: Option<&str>| {
+            if matches!(stage, ProgressStage::Embedding) {
+                reports.lock().unwrap().push(current);
+            }
+        };
+        let index = dir.path().join("notes.idx");
+        let stats = indexer
+            .create_with_callback(
+                index.to_str().unwrap(),
+                &[docs.to_str().unwrap()],
+                false,
+                Some(on_progress),
+                None::<fn() -> bool>,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(stats.documents_indexed, 5);
+        assert_eq!(*reports.lock().unwrap(), [2, 4, 5]);
+
+        let more = dir.path().join("more");
+        fs::create_dir_all(&more).unwrap();
+        fs::write(more.join("extra.txt"), "one more note").unwrap();
+        reports.lock().unwrap().clear();
+        indexer
+            .add_with_callback(
+                index.to_str().unwrap(),
+                &[more.to_str().unwrap()],
+                Some(on_progress),
+                None::<fn() -> bool>,
+            )
+            .await
+            .unwrap();
+        assert_eq!(*reports.lock().unwrap(), [1]);
     }
 
     #[test]
