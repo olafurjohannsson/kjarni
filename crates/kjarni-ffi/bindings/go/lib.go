@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/ebitengine/purego"
 )
 //go:embed lib/*
 var libFS embed.FS
@@ -55,7 +54,7 @@ func doLoadLibrary() (uintptr, error) {
 		return 0, fmt.Errorf("writing library: %w", err)
 	}
 
-	handle, err := purego.Dlopen(libPath, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+	handle, err := openLibrary(libPath)
 	if err != nil {
 		return 0, fmt.Errorf("loading library: %w", err)
 	}
