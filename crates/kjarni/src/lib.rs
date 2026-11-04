@@ -4,6 +4,7 @@ pub mod common;
 pub mod embedder;
 pub mod generation;
 pub mod indexer;
+pub mod ner;
 pub mod reranker;
 pub mod searcher;
 pub mod seq2seq;

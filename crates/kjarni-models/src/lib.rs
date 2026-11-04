@@ -3,6 +3,7 @@ pub mod models;
 pub use models::cross_encoder::CrossEncoder;
 pub use models::sentence_encoder::{BertConfig, DistilBertConfig, MpnetConfig, SentenceEncoder};
 pub use models::sequence_classifier::SequenceClassifier;
+pub use models::token_classifier::{Aggregation, Entity, TokenClassifier, TokenLabel};
 
 /// A callback for streaming generated tokens
 pub type TokenCallback<'a> = Box<dyn FnMut(u32, &str) -> bool + 'a>;

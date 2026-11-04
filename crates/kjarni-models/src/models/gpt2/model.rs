@@ -107,8 +107,7 @@ impl Gpt2Model {
         decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
-        let tokenizer =
-            Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
+        let tokenizer = kjarni_transformers::tokenizer::load_tokenizer(model_path)?;
 
         let config: Arc<Gpt2Config> = {
             let mut cfg = serde_json::from_str::<Gpt2Config>(weights.config_json())?;

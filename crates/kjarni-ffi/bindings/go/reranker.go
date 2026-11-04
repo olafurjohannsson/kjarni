@@ -34,8 +34,15 @@ func NewReranker(opts ...Option) (*Reranker, error) {
 
 	o := applyOptions(opts)
 
+	cacheDir, keepCacheDir := cStringOrNull(o.cacheDir)
+	defer keepCacheDir()
+	modelPath, keepModelPath := cStringOrNull(o.modelPath)
+	defer keepModelPath()
+
 	var config ffiRerankerConfig
 	config.Device = deviceCode(o.device)
+	config.CacheDir = cacheDir
+	config.ModelPath = modelPath
 	config.Quiet = boolToInt(o.quiet)
 
 	var handle uintptr

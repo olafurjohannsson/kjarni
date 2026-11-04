@@ -71,8 +71,15 @@ func NewClassifier(model string, opts ...Option) (*Classifier, error) {
 	modelStr, keepModel := cString(model)
 	defer keepModel()
 
+	cacheDir, keepCacheDir := cStringOrNull(o.cacheDir)
+	defer keepCacheDir()
+	modelPath, keepModelPath := cStringOrNull(o.modelPath)
+	defer keepModelPath()
+
 	var config ffiClassifierConfig
 	config.Device = deviceCode(o.device)
+	config.CacheDir = cacheDir
+	config.ModelPath = modelPath
 	config.ModelName = modelStr
 	config.Quiet = boolToInt(o.quiet)
 

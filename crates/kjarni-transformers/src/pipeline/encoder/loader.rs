@@ -209,12 +209,7 @@ impl EncoderLoader {
         let layout = config.layout();
 
         // Load tokenizer
-        let tokenizer_path = model_path.join("tokenizer.json");
-        if !tokenizer_path.exists() {
-            return Err(anyhow!("Tokenizer not found at {:?}", tokenizer_path));
-        }
-        let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        let mut tokenizer = crate::tokenizer::load_tokenizer(model_path)?;
         crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
 
         // Configure truncation and padding

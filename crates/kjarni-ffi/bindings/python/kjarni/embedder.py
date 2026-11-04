@@ -1,4 +1,5 @@
 """High-level Embedder API."""
+import os
 from typing import Optional, List, Sequence
 from ctypes import c_void_p, c_char_p, c_float, byref, POINTER
 
@@ -27,6 +28,7 @@ class Embedder:
         cache_dir: Optional[str] = None,
         normalize: bool = True,
         quiet: bool = False,
+        model_path: Optional[str] = None,
     ):
         """Create a new Embedder.
         
@@ -36,6 +38,8 @@ class Embedder:
             cache_dir: Directory to cache models
             normalize: L2-normalize embeddings
             quiet: Suppress progress output
+            model_path: A local model folder, such as one downloaded from the
+                Hugging Face Hub. Used instead of ``model`` when given.
         """
         config = _lib.kjarni_embedder_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
@@ -46,6 +50,8 @@ class Embedder:
             config.model_name = model.encode("utf-8")
         if cache_dir:
             config.cache_dir = cache_dir.encode("utf-8")
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
 
         self._handle = c_void_p()
         err = _lib.kjarni_embedder_new(byref(config), byref(self._handle))

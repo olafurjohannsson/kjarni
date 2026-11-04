@@ -81,13 +81,21 @@ namespace Kjarni
         /// <summary>
         /// Create a new Classifier.
         /// </summary>
+        /// <param name="model">Model name (e.g., "distilbert-sentiment", "roberta-sentiment")</param>
+        /// <param name="device">"cpu" or "gpu"</param>
+        /// <param name="cacheDir">Directory to cache models</param>
+        /// <param name="labels">Custom labels, overriding the model's</param>
+        /// <param name="multiLabel">Score each label on its own (sigmoid) instead of together (softmax)</param>
+        /// <param name="quiet">Suppress progress output</param>
+        /// <param name="modelPath">A local model folder, such as one downloaded from the Hugging Face Hub. Used instead of <paramref name="model"/> when given.</param>
         public Classifier(
             string model = "sentiment",
             string device = "cpu",
             string? cacheDir = null,
             string[]? labels = null,
             bool multiLabel = false,
-            bool quiet = false)
+            bool quiet = false,
+            string? modelPath = null)
         {
             var config = Native.kjarni_classifier_config_default();
             config.Device = device == "gpu" ? KjarniDevice.Gpu : KjarniDevice.Cpu;
@@ -97,6 +105,7 @@ namespace Kjarni
             IntPtr modelNamePtr = IntPtr.Zero;
             IntPtr cacheDirPtr = IntPtr.Zero;
             IntPtr labelsPtr = IntPtr.Zero;
+            IntPtr modelPathPtr = IntPtr.Zero;
             IntPtr[] labelPtrs = Array.Empty<IntPtr>();
 
             try
@@ -123,6 +132,12 @@ namespace Kjarni
                     config.NumLabels = (UIntPtr)labels.Length;
                 }
 
+                if (modelPath != null)
+                {
+                    modelPathPtr = Marshal.StringToCoTaskMemUTF8(modelPath);
+                    config.ModelPath = modelPathPtr;
+                }
+
                 var err = Native.kjarni_classifier_new(ref config, out _handle);
                 Native.CheckError(err);
             }
@@ -131,6 +146,7 @@ namespace Kjarni
                 if (modelNamePtr != IntPtr.Zero) Marshal.FreeCoTaskMem(modelNamePtr);
                 if (cacheDirPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(cacheDirPtr);
                 if (labelsPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(labelsPtr);
+                if (modelPathPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(modelPathPtr);
                 foreach (var ptr in labelPtrs)
                 {
                     if (ptr != IntPtr.Zero) Marshal.FreeCoTaskMem(ptr);

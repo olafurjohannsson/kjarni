@@ -32,8 +32,15 @@ func NewEmbedder(model string, opts ...Option) (*Embedder, error) {
 	modelStr, keepModel := cString(model)
 	defer keepModel()
 
+	cacheDir, keepCacheDir := cStringOrNull(o.cacheDir)
+	defer keepCacheDir()
+	modelPath, keepModelPath := cStringOrNull(o.modelPath)
+	defer keepModelPath()
+
 	var config ffiEmbedderConfig
 	config.Device = deviceCode(o.device)
+	config.CacheDir = cacheDir
+	config.ModelPath = modelPath
 	config.ModelName = modelStr
 	config.Normalize = 1
 	config.Quiet = boolToInt(o.quiet)

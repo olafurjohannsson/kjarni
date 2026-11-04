@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- **Named-entity recognition.** `kjarni ner`, `kjarni::ner::EntityRecognizer` and
+  `EntityRecognizer` in Python, C# and Go find people, places, organizations and other
+  entities. The default model is `distilbert-ner`, for English; `--model-path` (or
+  `model_path`) loads any `*ForTokenClassification` model, such as the Icelandic
+  `vesteinn/IceBERT-ner` or the multilingual
+  `Davlan/distilbert-base-multilingual-cased-ner-hrl`. Token labels match PyTorch, and
+  entities match transformers' `pipeline("ner")` for each `aggregation_strategy`:
+  `first` (the default, which keeps words whole), `simple`, `max` and `average`.
+  Spans count characters in Rust, Python and C, UTF-16 units in C# and bytes in Go, so
+  each language can slice its own string with them.
+
+- **Python, C# and Go load models from a folder.** `Embedder`, `Classifier` and
+  `Reranker` take `model_path` in Python, `modelPath` in C# and `WithModelPath` in Go,
+  as the CLI's `--model-path` already did. In Python, `Classifier` no longer needs a
+  model name when given a folder.
+
+- **`WithCacheDir` works for the Go `Embedder`, `Classifier` and `Reranker`.** They
+  did not pass it to the library, so models went to the default cache instead.
+
+- **Models without `tokenizer.json` load.** Many models on the Hugging Face Hub ship
+  only the files their Python tokenizer reads: `vocab.json` and `merges.txt` (GPT-2,
+  RoBERTa, BART, Longformer) or `vocab.txt` (BERT, DistilBERT, ELECTRA, MPNet).
+  Kjarni now builds the tokenizer transformers would build from them, with the same
+  token ids, so a folder such as IceBERT, `unitary/toxic-bert` or
+  `distilbert-base-uncased-finetuned-sst-2-english` works with `--model-path` and
+  `from_pretrained` as downloaded. A folder that has `tokenizer.json` uses it
+  exactly as before. Other tokenizers without one fail with a message saying how to
+  save it, rather than guessing.
+
 ## 0.4.4
 
 - **`kjarni mcp` finds photos by description.** The new `search_images` tool takes a

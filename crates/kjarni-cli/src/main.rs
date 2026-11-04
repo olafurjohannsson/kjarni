@@ -181,6 +181,27 @@ async fn main() -> Result<()> {
             .await
         }
 
+        Commands::Ner {
+            input,
+            model,
+            model_path,
+            aggregation,
+            format,
+            gpu,
+            quiet,
+        } => {
+            commands::ner::run(
+                &input,
+                &model,
+                model_path.as_deref(),
+                &aggregation,
+                &format,
+                gpu,
+                quiet,
+            )
+            .await
+        }
+
         Commands::Classify {
             input,
             model,

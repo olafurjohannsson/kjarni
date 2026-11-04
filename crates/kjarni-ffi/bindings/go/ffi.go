@@ -177,6 +177,13 @@ var (
 	_imageIndexSaveSym         uintptr
 	_imageIndexLoadSym         uintptr
 	_imageIndexLenSym          uintptr
+
+	// Named entities. Optional, as image search is: a library from before
+	// NER leaves these zero and NewEntityRecognizer reports it.
+	_nerNewSym       uintptr
+	_nerFreeSym      uintptr
+	_nerRecognizeSym uintptr
+	_entitiesFreeSym uintptr
 )
 
 func initFFI() error {
@@ -404,6 +411,11 @@ func initFFI() error {
 	_imageIndexSaveSym, _ = symbol(handle, "kjarni_image_index_save")
 	_imageIndexLoadSym, _ = symbol(handle, "kjarni_image_index_load")
 	_imageIndexLenSym, _ = symbol(handle, "kjarni_image_index_len")
+
+	_nerNewSym, _ = symbol(handle, "kjarni_ner_new")
+	_nerFreeSym, _ = symbol(handle, "kjarni_ner_free")
+	_nerRecognizeSym, _ = symbol(handle, "kjarni_ner_recognize")
+	_entitiesFreeSym, _ = symbol(handle, "kjarni_entities_free")
 
 	return nil
 }

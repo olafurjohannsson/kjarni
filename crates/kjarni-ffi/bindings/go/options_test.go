@@ -102,3 +102,16 @@ func TestBoolToInt(t *testing.T) {
 		t.Errorf("boolToInt(false) = %d, want 0", got)
 	}
 }
+
+func TestWithModelPathAndCacheDir(t *testing.T) {
+	o := applyOptions([]Option{WithModelPath("models/IceBERT"), WithCacheDir("/tmp/models")})
+	if o.modelPath != "models/IceBERT" {
+		t.Errorf("modelPath = %q, want \"models/IceBERT\"", o.modelPath)
+	}
+	if o.cacheDir != "/tmp/models" {
+		t.Errorf("cacheDir = %q, want \"/tmp/models\"", o.cacheDir)
+	}
+	if applyOptions(nil).modelPath != "" {
+		t.Error("default modelPath is not empty")
+	}
+}
