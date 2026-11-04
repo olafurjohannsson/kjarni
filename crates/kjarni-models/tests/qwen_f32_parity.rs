@@ -89,14 +89,9 @@ async fn matches_pytorch_on(device: Device) {
             .expect("load qwen as f32");
 
     let generator = DecoderGenerator::new(std::sync::Arc::new(model)).expect("generator");
-    // Qwen's tokenizer adds no BOS: its prompt is exactly the 5 tokens
-    // [785, 6722, 315, 38396, 374]. `GenerationConfig` defaults `add_bos_token`
-    // to true, which prepends one the model was not trained to expect there and
-    // changes the very first logits.
     let gen_cfg = GenerationConfig {
         max_new_tokens: Some(MAX_NEW_TOKENS),
         repetition_penalty: 1.0,
-        add_bos_token: false,
         // Explicitly greedy. `GenerationConfig::default()` is
         // `Sample { temperature: 0.7 }`, so leaving this out does not compare
         // against PyTorch's greedy run at all: it samples, and three runs of this

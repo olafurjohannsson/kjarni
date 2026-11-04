@@ -182,6 +182,7 @@ impl DecoderGenerator {
             .to_vec();
 
         if config.add_bos_token
+            && self.model.prepends_bos()
             && let Some(bos) = self.model.bos_token_id()
             && tokens.first() != Some(&bos)
         {

@@ -337,6 +337,14 @@ pub trait DecoderLanguageModel: LanguageModel {
         GenerationConfig::default()
     }
 
+    /// Whether the prompt starts with the BOS token, as the model was trained.
+    /// Llama and Mistral want it. Qwen, GPT-2 and Phi do not, even though their
+    /// config.json names a BOS id. `GenerationConfig::add_bos_token` can turn
+    /// it off but never adds it to a model that answers false here.
+    fn prepends_bos(&self) -> bool {
+        false
+    }
+
     /// Get the chat template for this model (if it's an instruct model)
     fn chat_template(&self) -> Option<&dyn ChatTemplate> {
         None // Default: no template (base model)

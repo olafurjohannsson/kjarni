@@ -244,6 +244,9 @@ impl LanguageModel for MistralModel {
 
 #[async_trait]
 impl DecoderLanguageModel for MistralModel {
+    fn prepends_bos(&self) -> bool {
+        true
+    }
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         if self.pipeline.cpu_decoder().is_some() {
             Some(self)

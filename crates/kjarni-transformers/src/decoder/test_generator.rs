@@ -271,6 +271,9 @@ impl InferenceModel for MockDecoderModel {
 }
 
 impl DecoderLanguageModel for MockDecoderModel {
+    fn prepends_bos(&self) -> bool {
+        true
+    }
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         Some(self)
     }
