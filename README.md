@@ -11,7 +11,7 @@
 [![CI](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-**Run transformer models inside your program, in any language. Same output as PyTorch, no Python, no server.**
+**Run transformer models inside your program, in any language. Same output as PyTorch.**
 
 Kjarni is a transformer inference library: local AI inference as one native engine for Python, C#, Go, C++, Rust and the browser. It runs embeddings, classification, reranking, semantic search, chat, speech to text, summarization, translation and image search on your CPU or GPU, downloads its own models, and works entirely on your machine. It is written from scratch in Rust and ships as a single shared library.
 

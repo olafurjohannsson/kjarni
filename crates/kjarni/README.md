@@ -4,8 +4,7 @@
 
 # Kjarni
 
-**Run transformer models inside your program, in any language. Same output as
-PyTorch, no Python, no server.**
+**Run transformer models inside your program, in any language. Same output as PyTorch.**
 
 Kjarni is a transformer inference library written in Rust: embeddings,
 classification, reranking, search, chat, speech to text, summarization and
