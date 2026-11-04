@@ -382,8 +382,10 @@ fn chat_generates_a_factual_completion() {
     // a broken KV cache or sampler actually gives.
     let Some(chat) = chat() else { return };
 
+    // A question puts the answer first; a bare "The capital of Iceland is" makes
+    // even PyTorch continue as a quiz before naming the city.
     let out = chat
-        .generate_core("The capital of Iceland is", 16, 0.0)
+        .generate_core("Q: What is the capital of Iceland?\nA:", 16, 0.0)
         .unwrap();
     assert!(
         out.to_lowercase().contains("reykjav"),
