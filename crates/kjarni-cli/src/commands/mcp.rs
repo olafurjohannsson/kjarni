@@ -196,7 +196,7 @@ impl Server {
             .clamp(1, 50) as usize;
         let rerank = args.get("rerank").and_then(Value::as_bool).unwrap_or(false);
 
-        let (index, rebuilt) = self.index_for(&folder).await?;
+        let (index, note) = self.index_for(&folder).await?;
         let index = index.to_string_lossy().into_owned();
         let options = SearchOptions::new().mode(mode).top_k(top_k).rerank(rerank);
         let searcher = if rerank {
@@ -220,11 +220,8 @@ impl Server {
             .await?;
 
         let mut text = String::new();
-        if rebuilt {
-            text.push_str(&format!(
-                "(Indexed {} for this search.)\n\n",
-                folder.display()
-            ));
+        if let Some(note) = note {
+            text.push_str(&format!("({note} for this search.)\n\n"));
         }
         if results.is_empty() {
             text.push_str("No matching passages.");
@@ -241,9 +238,11 @@ impl Server {
         Ok(text.trim_end().to_string())
     }
 
-    /// The index for a folder, built when there is none or the folder's files
-    /// have changed since. Indexes live in Kjarni's cache, never in the folder.
-    async fn index_for(&mut self, folder: &Path) -> Result<(PathBuf, bool)> {
+    /// The index for a folder, and a note on what was updated if anything was.
+    /// Built on first use, then kept in step with the folder: only new and
+    /// changed files are embedded. Indexes live in Kjarni's cache, never in the
+    /// folder.
+    async fn index_for(&mut self, folder: &Path) -> Result<(PathBuf, Option<String>)> {
         let root = kjarni::registry::cache_dir().join("mcp-indexes");
         let index = root.join(format!(
             "{:016x}",
@@ -254,7 +253,7 @@ impl Server {
 
         let current = std::fs::read_to_string(&stamp_file).ok();
         if index.exists() && current.as_deref() == Some(stamp.as_str()) {
-            return Ok((index, false));
+            return Ok((index, None));
         }
         if self.indexer.is_none() {
             let mut builder = Indexer::builder(SEARCH_MODEL).quiet(true);
@@ -263,19 +262,39 @@ impl Server {
             }
             self.indexer = Some(builder.build().await?);
         }
+        let indexer = self.indexer.as_ref().expect("built above");
         std::fs::create_dir_all(&root)?;
-        if index.exists() {
-            std::fs::remove_dir_all(&index).context("removing the outdated index")?;
-        }
         let index_str = index.to_string_lossy().into_owned();
         let folder_str = folder.to_string_lossy().into_owned();
-        self.indexer
-            .as_ref()
-            .expect("built above")
-            .create(&index_str, &[folder_str.as_str()])
-            .await?;
+        let existed = index.exists();
+        let stats = match indexer.sync(&index_str, &[folder_str.as_str()]).await {
+            Ok(stats) => stats,
+            // An index this version cannot update, such as one from another
+            // model, is rebuilt.
+            Err(_) if existed => {
+                std::fs::remove_dir_all(&index).context("removing the outdated index")?;
+                indexer.sync(&index_str, &[folder_str.as_str()]).await?
+            }
+            Err(e) => return Err(e.into()),
+        };
         std::fs::write(&stamp_file, stamp)?;
-        Ok((index, true))
+
+        let note = if !existed {
+            format!("Indexed {} ({} files)", folder.display(), stats.files_added)
+        } else {
+            let changed = stats.files_added + stats.files_updated + stats.files_removed;
+            if changed == 0 {
+                return Ok((index, None));
+            }
+            format!(
+                "Updated the index of {}: {} new, {} changed, {} removed",
+                folder.display(),
+                stats.files_added,
+                stats.files_updated,
+                stats.files_removed
+            )
+        };
+        Ok((index, Some(note)))
     }
 
     async fn search_images(&mut self, args: &Value) -> Result<String> {
@@ -751,6 +770,36 @@ mod tests {
         )
         .await;
         assert_eq!(r["result"]["isError"], true);
+    }
+
+    /// A second search after files change updates the index rather than
+    /// rebuilding it, and finds what was written since.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn search_folder_follows_edits_to_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().canonicalize().unwrap();
+        std::fs::write(notes.join("boat.md"), "The ferry leaves the harbour at nine.").unwrap();
+        std::fs::write(notes.join("bread.md"), "Knead the dough and let it rise.").unwrap();
+        let mut server = Server::default();
+        let search = |q: &str| json!({ "path": notes, "query": q, "top_k": 1 });
+
+        let first = server.search_folder(&search("when does the ferry go")).await.unwrap();
+        assert!(first.starts_with("(Indexed "), "{first}");
+        assert!(first.contains("boat.md"), "{first}");
+
+        let unchanged = server.search_folder(&search("baking")).await.unwrap();
+        assert!(unchanged.starts_with("1. "), "{unchanged}");
+
+        std::fs::write(notes.join("bread.md"), "Rye bread needs a sourdough starter.").unwrap();
+        std::fs::write(notes.join("bike.md"), "Pump the bicycle tyres every week.").unwrap();
+        let updated = server.search_folder(&search("sourdough starter")).await.unwrap();
+        assert!(updated.contains("1 new, 1 changed, 0 removed"), "{updated}");
+        assert!(updated.contains("bread.md") && updated.contains("Rye bread"), "{updated}");
+
+        std::fs::remove_file(notes.join("boat.md")).unwrap();
+        let removed = server.search_folder(&search("ferry harbour")).await.unwrap();
+        assert!(removed.contains("0 new, 0 changed, 1 removed"), "{removed}");
+        assert!(!removed.contains("boat.md"), "{removed}");
     }
 
     /// Four test photos, one subject each. Each description must put its own
