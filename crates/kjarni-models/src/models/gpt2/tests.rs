@@ -28,7 +28,8 @@ async fn test_distilgpt2_generation_parity() -> Result<()> {
     let generator = DecoderGenerator::new(Arc::new(model))?;
 
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
-    let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
+    // HuggingFace transformers, greedy, repetition_penalty 1.1, 20 new tokens.
+    let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much we can expect from AI.";
 
     let config = GenerationConfig {
         max_new_tokens: Some(20),
@@ -73,7 +74,8 @@ async fn test_distilgpt2_generation_parity_2() -> Result<()> {
     let model_type = ModelType::DistilGpt2;
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
-    let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
+    // HuggingFace transformers, greedy, repetition_penalty 1.1, 20 new tokens.
+    let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much we can expect from AI.";
 
     let config = GenerationConfig {
         max_new_tokens: Some(20),
