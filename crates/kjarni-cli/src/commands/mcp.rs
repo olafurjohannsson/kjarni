@@ -778,26 +778,46 @@ mod tests {
     async fn search_folder_follows_edits_to_the_folder() {
         let dir = tempfile::tempdir().unwrap();
         let notes = dir.path().canonicalize().unwrap();
-        std::fs::write(notes.join("boat.md"), "The ferry leaves the harbour at nine.").unwrap();
+        std::fs::write(
+            notes.join("boat.md"),
+            "The ferry leaves the harbour at nine.",
+        )
+        .unwrap();
         std::fs::write(notes.join("bread.md"), "Knead the dough and let it rise.").unwrap();
         let mut server = Server::default();
         let search = |q: &str| json!({ "path": notes, "query": q, "top_k": 1 });
 
-        let first = server.search_folder(&search("when does the ferry go")).await.unwrap();
+        let first = server
+            .search_folder(&search("when does the ferry go"))
+            .await
+            .unwrap();
         assert!(first.starts_with("(Indexed "), "{first}");
         assert!(first.contains("boat.md"), "{first}");
 
         let unchanged = server.search_folder(&search("baking")).await.unwrap();
         assert!(unchanged.starts_with("1. "), "{unchanged}");
 
-        std::fs::write(notes.join("bread.md"), "Rye bread needs a sourdough starter.").unwrap();
+        std::fs::write(
+            notes.join("bread.md"),
+            "Rye bread needs a sourdough starter.",
+        )
+        .unwrap();
         std::fs::write(notes.join("bike.md"), "Pump the bicycle tyres every week.").unwrap();
-        let updated = server.search_folder(&search("sourdough starter")).await.unwrap();
+        let updated = server
+            .search_folder(&search("sourdough starter"))
+            .await
+            .unwrap();
         assert!(updated.contains("1 new, 1 changed, 0 removed"), "{updated}");
-        assert!(updated.contains("bread.md") && updated.contains("Rye bread"), "{updated}");
+        assert!(
+            updated.contains("bread.md") && updated.contains("Rye bread"),
+            "{updated}"
+        );
 
         std::fs::remove_file(notes.join("boat.md")).unwrap();
-        let removed = server.search_folder(&search("ferry harbour")).await.unwrap();
+        let removed = server
+            .search_folder(&search("ferry harbour"))
+            .await
+            .unwrap();
         assert!(removed.contains("0 new, 0 changed, 1 removed"), "{removed}");
         assert!(!removed.contains("boat.md"), "{removed}");
     }

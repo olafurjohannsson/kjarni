@@ -772,7 +772,6 @@ impl Indexer {
     }
 }
 
-
 /// Chunk metadata key holding the size and modification time of the file the
 /// chunk came from, as it was when indexed.
 pub const FILE_STAMP_KEY: &str = "file_stamp";
@@ -801,7 +800,9 @@ fn indexed_stamps(index_path: &str) -> IndexerResult<HashMap<String, Option<Stri
     let reader = IndexReader::open(index_path).map_err(IndexerError::IndexingFailed)?;
     let mut stamps = HashMap::new();
     for id in 0..reader.len() {
-        let meta = reader.get_metadata(id).map_err(IndexerError::IndexingFailed)?;
+        let meta = reader
+            .get_metadata(id)
+            .map_err(IndexerError::IndexingFailed)?;
         if let Some(source) = meta.get(SOURCE_PATH_KEY) {
             stamps
                 .entry(source.clone())
@@ -814,10 +815,10 @@ fn indexed_stamps(index_path: &str) -> IndexerResult<HashMap<String, Option<Stri
 #[cfg(test)]
 mod indexer_tests {
 
-    use std::fs::{self, File};
-    use std::io::Write;
     use crate::indexer::SyncStats;
     use kjarni_rag::IndexReader;
+    use std::fs::{self, File};
+    use std::io::Write;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -1353,13 +1354,20 @@ mod indexer_tests {
         fs::write(docs.join("b.txt"), "bananas are yellow").unwrap();
         fs::write(docs.join("c.txt"), "cherries are small").unwrap();
         fs::write(other.join("o.txt"), "oranges are round").unwrap();
-        let indexer = Indexer::builder("minilm-l6-v2").quiet(true).build().await.unwrap();
+        let indexer = Indexer::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
         let index = dir.path().join("fruit.idx");
         let (index, docs_str) = (index.to_str().unwrap(), docs.to_str().unwrap());
 
         let first = indexer.sync(index, &[docs_str]).await.unwrap();
         assert_eq!((first.files_added, first.chunks_added), (3, 3));
-        indexer.add(index, &[other.to_str().unwrap()]).await.unwrap();
+        indexer
+            .add(index, &[other.to_str().unwrap()])
+            .await
+            .unwrap();
 
         let again = indexer.sync(index, &[docs_str]).await.unwrap();
         assert_eq!(
