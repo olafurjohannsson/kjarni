@@ -1,5 +1,7 @@
 use crate::embedder::Embedder;
-use crate::indexer::{IndexInfo, IndexStats, IndexerBuilder, IndexerError, IndexerResult};
+use crate::indexer::{
+    IndexInfo, IndexStats, IndexerBuilder, IndexerError, IndexerResult, SyncStats,
+};
 use anyhow::Result;
 use kjarni_rag::{
     DocumentLoader, IndexBuild, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
@@ -369,10 +371,11 @@ impl Indexer {
                 Ok(chunks) => {
                     total_chunks += chunks.len();
                     files_processed += 1;
+                    let stamp = file_stamp(file_path);
 
                     for chunk in chunks {
                         batch_texts.push(chunk.text);
-                        batch_metadata.push(chunk.metadata.to_hashmap());
+                        batch_metadata.push(stamped(chunk.metadata.to_hashmap(), &stamp));
 
                         if batch_texts.len() >= self.batch_size {
                             if check_cancelled() {
@@ -541,9 +544,10 @@ impl Indexer {
             match loader.load_file(file_path) {
                 Ok(chunks) => {
                     replaced.insert(source_path(file_path));
+                    let stamp = file_stamp(file_path);
                     for chunk in chunks {
                         batch_texts.push(chunk.text);
-                        batch_metadata.push(chunk.metadata.to_hashmap());
+                        batch_metadata.push(stamped(chunk.metadata.to_hashmap(), &stamp));
 
                         if batch_texts.len() >= self.batch_size {
                             if check_cancelled() {
@@ -689,6 +693,60 @@ impl Indexer {
             .unwrap_or(false)
     }
 
+    /// Brings an index up to date with its files: embeds new and changed ones,
+    /// drops the chunks of files that are gone, and leaves unchanged files alone.
+    /// A file counts as changed when its size or modification time differs from
+    /// when it was indexed. Creates the index when there is none.
+    pub async fn sync(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<SyncStats> {
+        if !Path::new(index_path).exists() {
+            let stats = self.create(index_path, inputs).await?;
+            return Ok(SyncStats {
+                files_added: stats.files_processed,
+                chunks_added: stats.chunks_created,
+                ..Default::default()
+            });
+        }
+
+        let indexed = indexed_stamps(index_path)?;
+        let files = self.collect_files(inputs)?;
+        let on_disk: HashSet<String> = files.iter().map(|f| source_path(f)).collect();
+
+        let mut stats = SyncStats::default();
+        let mut to_embed = Vec::new();
+        for file in &files {
+            match indexed.get(&source_path(file)) {
+                None => stats.files_added += 1,
+                Some(stamp) if stamp.is_some() && *stamp == file_stamp(file) => {
+                    stats.files_unchanged += 1;
+                    continue;
+                }
+                Some(_) => stats.files_updated += 1,
+            }
+            to_embed.push(file.to_string_lossy().into_owned());
+        }
+
+        // Only sources under the given inputs: an index can hold other folders too.
+        let roots: Vec<PathBuf> = inputs
+            .iter()
+            .map(|p| PathBuf::from(source_path(Path::new(p))))
+            .collect();
+        let gone: Vec<&str> = indexed
+            .keys()
+            .filter(|s| !on_disk.contains(*s) && roots.iter().any(|r| Path::new(s).starts_with(r)))
+            .map(String::as_str)
+            .collect();
+        if !gone.is_empty() {
+            stats.files_removed = gone.len();
+            Self::remove(index_path, &gone)?;
+        }
+
+        if !to_embed.is_empty() {
+            let refs: Vec<&str> = to_embed.iter().map(String::as_str).collect();
+            stats.chunks_added = self.add(index_path, &refs).await?;
+        }
+        Ok(stats)
+    }
+
     pub fn model_name(&self) -> &str {
         self.embedder.model_name()
     }
@@ -714,11 +772,52 @@ impl Indexer {
     }
 }
 
+
+/// Chunk metadata key holding the size and modification time of the file the
+/// chunk came from, as it was when indexed.
+pub const FILE_STAMP_KEY: &str = "file_stamp";
+
+/// `"<bytes>:<mtime in ns>"`, or `None` when the file cannot be read.
+fn file_stamp(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(format!("{}:{}", meta.len(), mtime.as_nanos()))
+}
+
+fn stamped(mut meta: HashMap<String, String>, stamp: &Option<String>) -> HashMap<String, String> {
+    if let Some(stamp) = stamp {
+        meta.insert(FILE_STAMP_KEY.to_string(), stamp.clone());
+    }
+    meta
+}
+
+/// Every source in an index with the stamp it was indexed at. `None` for chunks
+/// written without one, which `sync` treats as changed.
+fn indexed_stamps(index_path: &str) -> IndexerResult<HashMap<String, Option<String>>> {
+    let reader = IndexReader::open(index_path).map_err(IndexerError::IndexingFailed)?;
+    let mut stamps = HashMap::new();
+    for id in 0..reader.len() {
+        let meta = reader.get_metadata(id).map_err(IndexerError::IndexingFailed)?;
+        if let Some(source) = meta.get(SOURCE_PATH_KEY) {
+            stamps
+                .entry(source.clone())
+                .or_insert_with(|| meta.get(FILE_STAMP_KEY).cloned());
+        }
+    }
+    Ok(stamps)
+}
+
 #[cfg(test)]
 mod indexer_tests {
 
     use std::fs::{self, File};
     use std::io::Write;
+    use crate::indexer::SyncStats;
+    use kjarni_rag::IndexReader;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -1239,6 +1338,67 @@ mod indexer_tests {
             .map(|p| p.strip_prefix(dir.path()).unwrap().to_str().unwrap())
             .collect();
         assert_eq!(names, ["keep/note.md"]);
+    }
+
+    /// `sync` embeds only what changed and drops files that are gone, leaving
+    /// sources outside its inputs alone.
+    #[tokio::test]
+    async fn sync_updates_only_what_changed() {
+        let dir = TempDir::new().unwrap();
+        let docs = dir.path().join("docs");
+        let other = dir.path().join("other");
+        fs::create_dir_all(&docs).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(docs.join("a.txt"), "apples grow on trees").unwrap();
+        fs::write(docs.join("b.txt"), "bananas are yellow").unwrap();
+        fs::write(docs.join("c.txt"), "cherries are small").unwrap();
+        fs::write(other.join("o.txt"), "oranges are round").unwrap();
+        let indexer = Indexer::builder("minilm-l6-v2").quiet(true).build().await.unwrap();
+        let index = dir.path().join("fruit.idx");
+        let (index, docs_str) = (index.to_str().unwrap(), docs.to_str().unwrap());
+
+        let first = indexer.sync(index, &[docs_str]).await.unwrap();
+        assert_eq!((first.files_added, first.chunks_added), (3, 3));
+        indexer.add(index, &[other.to_str().unwrap()]).await.unwrap();
+
+        let again = indexer.sync(index, &[docs_str]).await.unwrap();
+        assert_eq!(
+            again,
+            SyncStats {
+                files_unchanged: 3,
+                ..Default::default()
+            }
+        );
+
+        fs::write(docs.join("a.txt"), "apples are red or green").unwrap();
+        fs::remove_file(docs.join("b.txt")).unwrap();
+        fs::write(docs.join("d.txt"), "dates are sweet").unwrap();
+        let changed = indexer.sync(index, &[docs_str]).await.unwrap();
+        assert_eq!(
+            changed,
+            SyncStats {
+                files_added: 1,
+                files_updated: 1,
+                files_removed: 1,
+                files_unchanged: 1,
+                chunks_added: 2,
+            }
+        );
+
+        let reader = IndexReader::open(index).unwrap();
+        let mut texts: Vec<String> = (0..reader.len())
+            .map(|i| reader.get_document(i).unwrap())
+            .collect();
+        texts.sort();
+        assert_eq!(
+            texts,
+            [
+                "apples are red or green",
+                "cherries are small",
+                "dates are sweet",
+                "oranges are round"
+            ]
+        );
     }
 
     /// Embedding progress counts the documents written so far, so the last report
