@@ -240,8 +240,11 @@ async fn decoder_loads_from_kjq_bytes_and_generates() {
         ..Default::default()
     };
 
+    // A question puts the answer first. Completing "The capital of Iceland is"
+    // instead, PyTorch's own greedy output does not name the city within 12
+    // tokens, so that prompt cannot tell a working model from a broken one.
     let out = generator
-        .generate("The capital of Iceland is", &config, None)
+        .generate("Q: What is the capital of Iceland?\nA:", &config, None)
         .await
         .expect("generation succeeds");
 
