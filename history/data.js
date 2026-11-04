@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793789558371,
+  "lastUpdate": 1793793496958,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -480,6 +480,66 @@ window.BENCHMARK_DATA = {
             "value": 19.36,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 106 Stepping 6, GenuineIntel; vs previous commit: 1.021"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8fa0d68a24cbfe189082adafbe3ff20534fbe62a",
+          "message": "Release 0.4.4 (#104)",
+          "timestamp": "2026-11-04T11:36:38Z",
+          "tree_id": "d0fa8543f928ab04ae6714dc8af316b49336f12f",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/8fa0d68a24cbfe189082adafbe3ff20534fbe62a"
+        },
+        "date": 1793793496158,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 434.99,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.001"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 31.18,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.002"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 500.22,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.035"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 29.04,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.756"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 468.71,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.994"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 20.61,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.993"
           }
         ]
       }
