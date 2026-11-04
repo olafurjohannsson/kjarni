@@ -4,7 +4,7 @@
 
 # Kjarni
 
-**Run transformer models inside your .NET program. Same output as PyTorch, no Python, no server.**
+**Run transformer models inside your .NET program. Same output as PyTorch.**
 
 Kjarni is a transformer inference library: sentiment analysis, embeddings, semantic search,
 reranking, local LLM chat, speech to text, summarization, translation and photo search, on

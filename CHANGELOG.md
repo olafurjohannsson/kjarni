@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **`kjarni mcp` finds photos by description.** The new `search_images` tool takes a
+  folder and a description such as "a dog on a beach" and returns the best matching
+  JPEG and PNG photos, with CLIP running locally. The first search of a folder embeds
+  every photo, about 20 ms each on a desktop CPU, and later searches reuse those
+  vectors until the folder changes. CLIP downloads on first use.
+
+- **Folder search updates its index instead of rebuilding it.** `search_folder` in
+  `kjarni mcp` embedded the whole folder again whenever any file changed. It now
+  embeds only new and changed files and drops deleted ones. The library exposes this
+  as `Indexer::sync`, which records each file's size and modification time per chunk.
+  Indexes built by earlier versions have no such record and are re-embedded once.
+
+- **Qwen prompts no longer start with a stray `<|endoftext|>`.** `GenerationConfig`
+  defaults to adding a BOS token, and the CLI and the browser build on that default,
+  so Qwen got one its tokenizer never adds, which changed its first logits. Whether a
+  prompt starts with BOS is now the model's call: Llama and Mistral yes, Qwen, GPT-2
+  and Phi no. `add_bos_token: false` still turns it off.
+
+- **GPT-2 on the CPU matches HuggingFace.** The CPU prefill fed the last prompt token
+  to the model twice, so CPU output differed from both transformers and Kjarni's own
+  GPU path. Greedy gpt2 and distilgpt2 now match transformers token for token.
+
 ## 0.4.3
 
 - **Transcription reads MP3, FLAC and Ogg Vorbis.** The documentation, the CLI help and

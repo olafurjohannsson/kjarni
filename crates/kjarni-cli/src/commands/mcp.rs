@@ -2,8 +2,9 @@
 //! Context Protocol on stdio.
 //!
 //! An agent (Claude Code, Cursor, Claude Desktop, any MCP client) starts this
-//! as a subprocess and calls tools: semantic search over a folder, speech to
-//! text, classification, reranking and similarity, all on the user's machine.
+//! as a subprocess and calls tools: semantic search over a folder of documents
+//! or of photos, speech to text, classification, reranking and similarity, all
+//! on the user's machine.
 //!
 //! The protocol is newline-delimited JSON-RPC 2.0. Only the part of MCP a tool
 //! server needs is implemented: initialize, ping, tools/list and tools/call.
@@ -17,11 +18,12 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, anyhow, bail};
 use kjarni::classifier::Classifier;
+use kjarni::common::{DownloadPolicy, ensure_model_downloaded};
 use kjarni::embedder::Embedder;
 use kjarni::reranker::Reranker;
 use kjarni::searcher::{SearchOptions, Searcher};
 use kjarni::transcriber::Transcriber;
-use kjarni::{Indexer, SearchMode};
+use kjarni::{ImageIndex, Indexer, ModelType, SearchMode};
 use serde_json::{Value, json};
 use tokio::io::AsyncBufReadExt;
 
@@ -35,6 +37,8 @@ const SEARCH_MODEL: &str = "minilm-l6-v2";
 const RERANK_MODEL: &str = "minilm-l6-v2-cross-encoder";
 const TRANSCRIBE_MODEL: &str = "whisper-small";
 const CLASSIFY_MODEL: &str = "distilbert-sentiment";
+/// CLIP, which puts photos and descriptions in one space for `search_images`.
+const IMAGE_MODEL: ModelType = ModelType::ClipVitBase32;
 
 /// Never indexed by `search_folder`: build output, dependencies and virtual
 /// environments, which in a code repository outnumber the sources many times
@@ -56,7 +60,7 @@ pub(crate) const EXCLUDED: &[&str] = &[
 const INSTRUCTIONS: &str = "Kjarni runs AI models locally on the user's machine; nothing leaves it. \
 Use search_folder to find passages in a folder of documents or code by meaning, not just by \
 exact words; the first search of a folder builds an index, later ones reuse it until files \
-change. Use transcribe for audio or video files, classify for sentiment, emotion or toxicity, \
+change. Use search_images to find photos in a folder by describing what is in them. Use transcribe for audio or video files, classify for sentiment, emotion or toxicity, \
 rerank to order candidate passages by relevance to a query, and similarity to compare two \
 texts. Models download once on first use.";
 
@@ -117,6 +121,7 @@ struct Server {
     embedder: Option<Embedder>,
     reranker: Option<Reranker>,
     transcriber: Option<Transcriber>,
+    images: Option<ImageIndex>,
     classifiers: HashMap<String, Classifier>,
 }
 
@@ -156,6 +161,7 @@ impl Server {
             .unwrap_or_else(|| json!({}));
         let outcome = match name {
             "search_folder" => self.search_folder(&args).await,
+            "search_images" => self.search_images(&args).await,
             "transcribe" => self.transcribe(&args).await,
             "classify" => self.classify(&args).await,
             "rerank" => self.rerank(&args).await,
@@ -190,7 +196,7 @@ impl Server {
             .clamp(1, 50) as usize;
         let rerank = args.get("rerank").and_then(Value::as_bool).unwrap_or(false);
 
-        let (index, rebuilt) = self.index_for(&folder).await?;
+        let (index, note) = self.index_for(&folder).await?;
         let index = index.to_string_lossy().into_owned();
         let options = SearchOptions::new().mode(mode).top_k(top_k).rerank(rerank);
         let searcher = if rerank {
@@ -214,11 +220,8 @@ impl Server {
             .await?;
 
         let mut text = String::new();
-        if rebuilt {
-            text.push_str(&format!(
-                "(Indexed {} for this search.)\n\n",
-                folder.display()
-            ));
+        if let Some(note) = note {
+            text.push_str(&format!("({note} for this search.)\n\n"));
         }
         if results.is_empty() {
             text.push_str("No matching passages.");
@@ -235,20 +238,22 @@ impl Server {
         Ok(text.trim_end().to_string())
     }
 
-    /// The index for a folder, built when there is none or the folder's files
-    /// have changed since. Indexes live in Kjarni's cache, never in the folder.
-    async fn index_for(&mut self, folder: &Path) -> Result<(PathBuf, bool)> {
+    /// The index for a folder, and a note on what was updated if anything was.
+    /// Built on first use, then kept in step with the folder: only new and
+    /// changed files are embedded. Indexes live in Kjarni's cache, never in the
+    /// folder.
+    async fn index_for(&mut self, folder: &Path) -> Result<(PathBuf, Option<String>)> {
         let root = kjarni::registry::cache_dir().join("mcp-indexes");
         let index = root.join(format!(
             "{:016x}",
             fnv1a(folder.as_os_str().as_encoded_bytes())
         ));
         let stamp_file = index.with_extension("stamp");
-        let stamp = fingerprint(folder);
+        let stamp = fingerprint(folder, SEARCH_MODEL);
 
         let current = std::fs::read_to_string(&stamp_file).ok();
         if index.exists() && current.as_deref() == Some(stamp.as_str()) {
-            return Ok((index, false));
+            return Ok((index, None));
         }
         if self.indexer.is_none() {
             let mut builder = Indexer::builder(SEARCH_MODEL).quiet(true);
@@ -257,19 +262,122 @@ impl Server {
             }
             self.indexer = Some(builder.build().await?);
         }
+        let indexer = self.indexer.as_ref().expect("built above");
         std::fs::create_dir_all(&root)?;
-        if index.exists() {
-            std::fs::remove_dir_all(&index).context("removing the outdated index")?;
-        }
         let index_str = index.to_string_lossy().into_owned();
         let folder_str = folder.to_string_lossy().into_owned();
-        self.indexer
-            .as_ref()
-            .expect("built above")
-            .create(&index_str, &[folder_str.as_str()])
-            .await?;
+        let existed = index.exists();
+        let stats = match indexer.sync(&index_str, &[folder_str.as_str()]).await {
+            Ok(stats) => stats,
+            // An index this version cannot update, such as one from another
+            // model, is rebuilt.
+            Err(_) if existed => {
+                std::fs::remove_dir_all(&index).context("removing the outdated index")?;
+                indexer.sync(&index_str, &[folder_str.as_str()]).await?
+            }
+            Err(e) => return Err(e.into()),
+        };
         std::fs::write(&stamp_file, stamp)?;
-        Ok((index, true))
+
+        let note = if !existed {
+            format!("Indexed {} ({} files)", folder.display(), stats.files_added)
+        } else {
+            let changed = stats.files_added + stats.files_updated + stats.files_removed;
+            if changed == 0 {
+                return Ok((index, None));
+            }
+            format!(
+                "Updated the index of {}: {} new, {} changed, {} removed",
+                folder.display(),
+                stats.files_added,
+                stats.files_updated,
+                stats.files_removed
+            )
+        };
+        Ok((index, Some(note)))
+    }
+
+    async fn search_images(&mut self, args: &Value) -> Result<String> {
+        let folder = PathBuf::from(string(args, "path")?);
+        let folder = folder
+            .canonicalize()
+            .with_context(|| format!("cannot open {}", folder.display()))?;
+        if !folder.is_dir() {
+            bail!("{} is not a folder", folder.display());
+        }
+        let query = string(args, "query")?;
+        let top_k = args
+            .get("top_k")
+            .and_then(Value::as_u64)
+            .unwrap_or(5)
+            .clamp(1, 50) as usize;
+
+        if self.images.is_none() {
+            let dir = ensure_model_downloaded(IMAGE_MODEL, None, DownloadPolicy::IfMissing, true)
+                .await
+                .context("downloading CLIP")?;
+            self.images = Some(ImageIndex::load(&dir).context("loading CLIP")?);
+        }
+        let images = self.images.as_mut().expect("loaded above");
+
+        // Vectors are cached per folder like search_folder's indexes, and
+        // recomputed when the folder's files change.
+        let root = kjarni::registry::cache_dir().join("mcp-image-indexes");
+        let saved = root.join(format!(
+            "{:016x}.json",
+            fnv1a(folder.as_os_str().as_encoded_bytes())
+        ));
+        let stamp_file = saved.with_extension("stamp");
+        let stamp = fingerprint(&folder, IMAGE_MODEL.cli_name());
+        let current = std::fs::read_to_string(&stamp_file).ok();
+
+        let mut text = String::new();
+        if saved.exists() && current.as_deref() == Some(stamp.as_str()) {
+            images.load_entries(&saved)?;
+        } else {
+            images.clear();
+            // Seconds per hundred photos on the CPU: keep it off the runtime's
+            // other threads, as transcribe does.
+            let report = tokio::task::block_in_place(|| images.add_directory(&folder))?;
+            std::fs::create_dir_all(&root)?;
+            images.save(&saved)?;
+            std::fs::write(&stamp_file, stamp)?;
+            text.push_str(&format!(
+                "(Indexed {} photos in {} for this search.",
+                report.added,
+                folder.display()
+            ));
+            if report.skipped > 0 {
+                text.push_str(&format!(" {} could not be read.", report.skipped));
+            }
+            let unsupported: usize = report.unsupported.values().sum();
+            if unsupported > 0 {
+                let kinds: Vec<String> = report
+                    .unsupported
+                    .iter()
+                    .map(|(ext, n)| format!("{n} .{ext}"))
+                    .collect();
+                text.push_str(&format!(
+                    " Skipped, format not supported: {}.",
+                    kinds.join(", ")
+                ));
+            }
+            text.push_str(")\n\n");
+        }
+
+        let hits = images.search(query, top_k)?;
+        if hits.is_empty() {
+            text.push_str("No JPEG or PNG photos in this folder.");
+        }
+        for (i, hit) in hits.iter().enumerate() {
+            text.push_str(&format!(
+                "{}. {}  (score {:.3})\n",
+                i + 1,
+                hit.path.display(),
+                hit.score
+            ));
+        }
+        Ok(text.trim_end().to_string())
     }
 
     async fn transcribe(&mut self, args: &Value) -> Result<String> {
@@ -424,6 +532,21 @@ fn tools() -> Value {
             "annotations": { "readOnlyHint": true, "openWorldHint": false }
         },
         {
+            "name": "search_images",
+            "title": "Find photos by description",
+            "description": "Find the photos in a folder that best match a description, such as \"a dog on a beach\" or \"receipt from a restaurant\", with CLIP, locally. Photos are never uploaded. JPEG and PNG, subfolders included; iPhone HEIC photos are not read. The first search of a folder embeds every photo, about 20 ms each on a desktop CPU; later searches reuse that until files change. Scores are only meaningful as a ranking.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path of the folder of photos." },
+                    "query": { "type": "string", "description": "What the photo shows, in natural language." },
+                    "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many photos to return. Default 5." }
+                },
+                "required": ["path", "query"]
+            },
+            "annotations": { "readOnlyHint": true, "openWorldHint": false }
+        },
+        {
             "name": "transcribe",
             "title": "Transcribe audio or video",
             "description": "Speech to text with Whisper, locally. Detects the language. Returns timestamped segments. Takes roughly a tenth of the recording's length on a desktop CPU.",
@@ -495,7 +618,7 @@ fn optional_string<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 /// What says a folder has changed since it was indexed: how many files it
 /// has outside the excluded and hidden folders, their total size, and the
 /// newest modification time.
-fn fingerprint(folder: &Path) -> String {
+fn fingerprint(folder: &Path, model: &str) -> String {
     let (mut files, mut bytes, mut newest) = (0u64, 0u64, 0u128);
     let walker = walkdir::WalkDir::new(folder).into_iter().filter_entry(|e| {
         e.depth() == 0 || {
@@ -516,7 +639,7 @@ fn fingerprint(folder: &Path) -> String {
             newest = newest.max(mtime.map_or(0, |d| d.as_nanos()));
         }
     }
-    format!("{SEARCH_MODEL} {files} {bytes} {newest}")
+    format!("{model} {files} {bytes} {newest}")
 }
 
 /// `*` matches any run of characters, as in the indexer's own exclusions.
@@ -614,6 +737,7 @@ mod tests {
             names,
             [
                 "search_folder",
+                "search_images",
                 "transcribe",
                 "classify",
                 "rerank",
@@ -648,21 +772,102 @@ mod tests {
         assert_eq!(r["result"]["isError"], true);
     }
 
+    /// A second search after files change updates the index rather than
+    /// rebuilding it, and finds what was written since.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn search_folder_follows_edits_to_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().canonicalize().unwrap();
+        std::fs::write(
+            notes.join("boat.md"),
+            "The ferry leaves the harbour at nine.",
+        )
+        .unwrap();
+        std::fs::write(notes.join("bread.md"), "Knead the dough and let it rise.").unwrap();
+        let mut server = Server::default();
+        let search = |q: &str| json!({ "path": notes, "query": q, "top_k": 1 });
+
+        let first = server
+            .search_folder(&search("when does the ferry go"))
+            .await
+            .unwrap();
+        assert!(first.starts_with("(Indexed "), "{first}");
+        assert!(first.contains("boat.md"), "{first}");
+
+        let unchanged = server.search_folder(&search("baking")).await.unwrap();
+        assert!(unchanged.starts_with("1. "), "{unchanged}");
+
+        std::fs::write(
+            notes.join("bread.md"),
+            "Rye bread needs a sourdough starter.",
+        )
+        .unwrap();
+        std::fs::write(notes.join("bike.md"), "Pump the bicycle tyres every week.").unwrap();
+        let updated = server
+            .search_folder(&search("sourdough starter"))
+            .await
+            .unwrap();
+        assert!(updated.contains("1 new, 1 changed, 0 removed"), "{updated}");
+        assert!(
+            updated.contains("bread.md") && updated.contains("Rye bread"),
+            "{updated}"
+        );
+
+        std::fs::remove_file(notes.join("boat.md")).unwrap();
+        let removed = server
+            .search_folder(&search("ferry harbour"))
+            .await
+            .unwrap();
+        assert!(removed.contains("0 new, 0 changed, 1 removed"), "{removed}");
+        assert!(!removed.contains("boat.md"), "{removed}");
+    }
+
+    /// Four test photos, one subject each. Each description must put its own
+    /// photo first, and a second search reuses the saved vectors.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn search_images_finds_photos_by_description() {
+        let photos = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/clip/photos");
+        let photos = photos.canonicalize().unwrap();
+        let mut server = Server::default();
+        for (query, expected) in [
+            ("a red car", "red_car.png"),
+            ("snow on a mountain", "snowy_mountain.png"),
+            ("a sunny beach", "beach_holiday.png"),
+            ("trees in a forest", "deep_forest.png"),
+        ] {
+            let text = server
+                .search_images(&json!({ "path": photos, "query": query, "top_k": 1 }))
+                .await
+                .unwrap();
+            let first = text.lines().last().unwrap();
+            assert!(
+                first.starts_with("1. ") && first.contains(expected),
+                "{query}: {text}"
+            );
+        }
+        let again = server
+            .search_images(&json!({ "path": photos, "query": "a red car" }))
+            .await
+            .unwrap();
+        assert!(!again.contains("Indexed"), "{again}");
+        assert_eq!(again.lines().count(), 4, "{again}");
+    }
+
     #[test]
     fn fingerprint_follows_the_files_that_would_be_indexed() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
         std::fs::write(d.join("a.md"), "one").unwrap();
-        let before = fingerprint(d);
+        let before = fingerprint(d, SEARCH_MODEL);
         // Excluded and hidden folders do not count.
         std::fs::create_dir_all(d.join("target/debug")).unwrap();
         std::fs::write(d.join("target/debug/x.rs"), "generated").unwrap();
         std::fs::create_dir_all(d.join(".git")).unwrap();
         std::fs::write(d.join(".git/HEAD"), "ref").unwrap();
-        assert_eq!(fingerprint(d), before);
+        assert_eq!(fingerprint(d, SEARCH_MODEL), before);
         // A new real file does.
         std::fs::write(d.join("b.md"), "two").unwrap();
-        assert_ne!(fingerprint(d), before);
+        assert_ne!(fingerprint(d, SEARCH_MODEL), before);
     }
 
     #[test]

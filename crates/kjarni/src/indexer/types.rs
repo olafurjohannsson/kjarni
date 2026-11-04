@@ -17,6 +17,21 @@ pub struct IndexStats {
     pub elapsed_ms: u64,
 }
 
+/// What [`Indexer::sync`](crate::Indexer::sync) changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncStats {
+    /// Files not in the index before
+    pub files_added: usize,
+    /// Files whose size or modification time changed, embedded again
+    pub files_updated: usize,
+    /// Indexed files no longer found, their chunks removed
+    pub files_removed: usize,
+    /// Files left as they were
+    pub files_unchanged: usize,
+    /// Chunks embedded
+    pub chunks_added: usize,
+}
+
 /// Information about an existing index
 #[derive(Debug, Clone)]
 pub struct IndexInfo {

@@ -143,19 +143,12 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
         // Embed the single token
         let hidden_states: Array3<f32> = ops.embed(token_tensor, past_len)?;
 
-        // Build attention mask
-        let mask_len = match model.autoregressive_loop() {
-            AutoregressiveLoop::Pipelined => seq_len,
-            AutoregressiveLoop::Legacy => seq_len + 1,
-        };
-
-        let attention_mask = ops.get_attention_mask(1, mask_len - 1)?;
+        let attention_mask = ops.get_attention_mask(1, past_len)?;
 
         trace!(
-            "CPU decode: token={}, seq_len={}, mask_len={}, past_len={}",
+            "CPU decode: token={}, seq_len={}, past_len={}",
             token_tensor[[0, 0]],
             seq_len,
-            mask_len,
             past_len
         );
 
@@ -256,18 +249,23 @@ impl CpuDecoderBackend {
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         let prompt_len = tokens.shape()[1];
+        let last_idx = prompt_len - 1;
 
-        let hidden_states = ops.embed(tokens, 0)?;
-        let mask_full = Array2::ones((1, prompt_len));
-        ops.decoder()
-            .forward(&hidden_states, &mask_full, 0, Some(cache))?;
-        let last_token = tokens[[0, prompt_len - 1]];
-        let last_token_array = Array2::from_elem((1, 1), last_token);
-        let hidden_states = ops.embed(&last_token_array, prompt_len - 1)?;
-        let mask_step = ops.get_attention_mask(1, prompt_len)?;
+        // Context first, then the last token alone for its logits. Each prompt
+        // token enters the cache exactly once, as on the GPU.
+        if last_idx > 0 {
+            let context = tokens.slice(s![.., 0..last_idx]).to_owned();
+            let hidden_states = ops.embed(&context, 0)?;
+            let mask = Array2::ones((1, last_idx));
+            ops.decoder()
+                .forward(&hidden_states, &mask, 0, Some(cache))?;
+        }
+        let last_token_array = tokens.slice(s![.., last_idx..]).to_owned();
+        let hidden_states = ops.embed(&last_token_array, last_idx)?;
+        let mask_step = ops.get_attention_mask(1, last_idx)?;
         let decoder_output =
             ops.decoder()
-                .forward(&hidden_states, &mask_step, prompt_len, Some(cache))?;
+                .forward(&hidden_states, &mask_step, last_idx, Some(cache))?;
         let logits_3d = ops.project_to_logits(&decoder_output)?;
         Ok(logits_3d.slice(s![0, 0, ..]).to_owned())
     }

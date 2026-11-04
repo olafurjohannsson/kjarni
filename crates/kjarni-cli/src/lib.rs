@@ -13,7 +13,7 @@ pub const DEFAULT_GENERATE_MODEL: &str = "llama3.2-1b-instruct";
 #[derive(Parser)]
 #[command(name = "kjarni")]
 #[command(
-    about = "Run transformer models on your own machine. Same output as PyTorch, no Python, no server.",
+    about = "Run transformer models on your own machine. Same output as PyTorch.",
     long_about = None
 )]
 #[command(version)]

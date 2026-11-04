@@ -4,7 +4,7 @@
 
 # Kjarni CLI
 
-**Run transformer models from your shell. Same output as PyTorch, no Python, no server.**
+**Run transformer models from your shell. Same output as PyTorch.**
 
 `kjarni` is the command-line build of Kjarni, a transformer inference library:
 classification, embeddings, similarity, reranking, indexing and search, chat,
