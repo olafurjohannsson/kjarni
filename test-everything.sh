@@ -252,13 +252,13 @@ stage_clip_fixtures() {
 
 # Debug: `debug_assert!` is live here
 stage_test_debug() {
-    cargo test --workspace --features kjarni-models/image-io -- --test-threads=1
+    cargo test --workspace --no-fail-fast --features kjarni-models/image-io -- --test-threads=1
 }
 
 # Release: the same tests at usable speed, and the only place release-only
 # behaviour (overflow wrapping, elided bounds checks) can show itself.
 stage_test_release() {
-    cargo test --workspace --release --features kjarni-models/image-io -- \
+    cargo test --workspace --release --no-fail-fast --features kjarni-models/image-io -- \
         --include-ignored --test-threads=1
 }
 
