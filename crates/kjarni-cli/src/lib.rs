@@ -270,8 +270,8 @@ pub enum Commands {
         quiet: bool,
     },
 
-    /// Serve Kjarni's tools to AI agents over MCP (stdio): folder search,
-    /// transcription, classification, reranking and similarity
+    /// Serve Kjarni's tools to AI agents over MCP (stdio): folder search, photo
+    /// search, transcription, classification, reranking and similarity
     Mcp,
 
     /// Transcribe audio to text
