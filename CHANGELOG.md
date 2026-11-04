@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.4
 
 - **`kjarni mcp` finds photos by description.** The new `search_images` tool takes a
   folder and a description such as "a dog on a beach" and returns the best matching
