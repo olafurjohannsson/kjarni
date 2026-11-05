@@ -237,8 +237,9 @@ typedef struct KjarniChatConfig {
    */
   const char *model_name;
   /**
-   * Reserved; must be NULL. Loading from a local path is not supported
-   * through the C API yet, and a value here is rejected rather than ignored.
+   * A folder with a Hugging Face decoder model (config.json, safetensors
+   * weights, tokenizer files and a chat template). When set, model_name may
+   * be NULL and the model's own chat template formats the conversation.
    */
   const char *model_path;
   /**
