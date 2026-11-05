@@ -50,8 +50,11 @@ impl Seq2SeqGeneratorBuilder {
         }
     }
 
-    /// Load model from a local path instead of registry.
-    pub fn from_path(mut self, path: impl Into<PathBuf>) -> Self {
+    /// Load the model from a folder in the Hugging Face layout (config.json, the
+    /// weights as safetensors or pytorch_model.bin, and the tokenizer files)
+    /// instead of the registry. The family comes from the `model_type` in
+    /// config.json: `t5`, `bart` or `marian`. The model name is then not used.
+    pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.model_path = Some(path.into());
         self
     }

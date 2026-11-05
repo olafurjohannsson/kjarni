@@ -17,6 +17,7 @@ type ffiSummarizerConfig struct {
 	MaxLength uintptr
 	Quiet     int32
 	_2        int32 // padding
+	ModelPath uintptr
 }
 
 // Summarizer summarizes article-length text.
@@ -41,6 +42,8 @@ func NewSummarizer(model string, opts ...Option) (*Summarizer, error) {
 	defer keepModel()
 	cacheDir, keepCacheDir := cStringOrNull(o.cacheDir)
 	defer keepCacheDir()
+	modelPath, keepModelPath := cStringOrNull(o.modelPath)
+	defer keepModelPath()
 
 	config := ffiSummarizerConfig{
 		Device:    deviceCode(o.device),
@@ -49,6 +52,7 @@ func NewSummarizer(model string, opts ...Option) (*Summarizer, error) {
 		MinLength: uintptr(o.minLength),
 		MaxLength: uintptr(o.maxLength),
 		Quiet:     boolToInt(o.quiet),
+		ModelPath: modelPath,
 	}
 	var handle uintptr
 	r1, _, _ := purego.SyscallN(_summarizerNewSym, uintptr(unsafe.Pointer(&config)), uintptr(unsafe.Pointer(&handle)))

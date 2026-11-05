@@ -43,6 +43,24 @@ pub fn validate_for_summarization(model_type: ModelType) -> SummarizerResult<()>
     Ok(())
 }
 
+/// Check that a model loaded from a folder can summarize: BART and T5 can,
+/// Marian only translates.
+pub fn validate_folder_for_summarization(
+    name: &str,
+    architecture: ModelArchitecture,
+) -> SummarizerResult<()> {
+    match architecture {
+        ModelArchitecture::Bart | ModelArchitecture::T5 => Ok(()),
+        other => Err(SummarizerError::IncompatibleModel {
+            model: name.to_string(),
+            reason: format!(
+                "Architecture '{}' cannot perform summarization. Use BART or T5 models.",
+                other.display_name()
+            ),
+        }),
+    }
+}
+
 /// Get all available summarization models.
 pub fn get_summarization_models() -> Vec<&'static str> {
     ModelType::all()

@@ -163,6 +163,17 @@ kjarni summarize large_doc.txt --model bart-large-cnn --gpu
 cat article.txt | kjarni summarize -q > summary.txt
 ```
 
+### With a model folder
+```bash
+kjarni summarize -i article.txt --model-path ./distilbart-cnn-12-6
+kjarni translate -i "Where is the library?" --model-path ./opus-mt-en-ROMANCE --src en --dst es
+kjarni transcribe meeting.wav --model-path ./whisper-base.en
+```
+A BART or T5 folder summarizes, a Marian (`Helsinki-NLP/opus-mt-*`) or T5 folder
+translates, and a Whisper folder transcribes. Weights may be safetensors or
+`pytorch_model.bin`. A Marian folder translates the languages its
+`tokenizer_config.json` names.
+
 ---
 
 ## Text Encoding (Embeddings)

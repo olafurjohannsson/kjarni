@@ -319,3 +319,51 @@ mod seq2seq_tests {
         }
     }
 }
+
+mod folder_architecture_tests {
+    use kjarni_transformers::models::ModelArchitecture;
+
+    use crate::seq2seq::{Seq2SeqError, folder_architecture};
+
+    fn folder(config: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json"), config).unwrap();
+        dir
+    }
+
+    #[test]
+    fn family_comes_from_model_type() {
+        for (model_type, want) in [
+            ("t5", ModelArchitecture::T5),
+            ("bart", ModelArchitecture::Bart),
+            ("marian", ModelArchitecture::Marian),
+        ] {
+            let dir = folder(&format!(r#"{{"model_type": "{model_type}"}}"#));
+            assert_eq!(folder_architecture(dir.path()).unwrap(), want);
+        }
+    }
+
+    #[test]
+    fn whisper_is_sent_to_the_transcriber() {
+        let dir = folder(r#"{"model_type": "whisper"}"#);
+        let err = folder_architecture(dir.path()).unwrap_err();
+        assert!(
+            matches!(&err, Seq2SeqError::IncompatibleModel { reason, .. } if reason.contains("Transcriber")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn other_families_are_named_in_the_error() {
+        let dir = folder(r#"{"model_type": "llama"}"#);
+        let err = folder_architecture(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("\"llama\""), "{err}");
+    }
+
+    #[test]
+    fn a_folder_without_config_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = folder_architecture(dir.path()).unwrap_err();
+        assert!(matches!(err, Seq2SeqError::InvalidConfig(_)), "{err}");
+    }
+}

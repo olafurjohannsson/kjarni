@@ -26,13 +26,15 @@ namespace Kjarni
         /// <param name="device">Compute device - "cpu" or "gpu".</param>
         /// <param name="cacheDir">Directory to cache downloaded models.</param>
         /// <param name="quiet">Suppress progress output.</param>
+        /// <param name="modelPath">A local folder holding a Marian (opus-mt) or T5 model in the Hugging Face layout. Used instead of <paramref name="model"/> when given. A Marian model translates the languages its tokenizer_config.json names.</param>
         public Translator(
             string? model = null,
             string? from = null,
             string? to = null,
             string device = "cpu",
             string? cacheDir = null,
-            bool quiet = false)
+            bool quiet = false,
+            string? modelPath = null)
         {
             var config = Native.kjarni_translator_config_default();
             config.Device = device == "gpu" ? KjarniDevice.Gpu : KjarniDevice.Cpu;
@@ -42,8 +44,10 @@ namespace Kjarni
             var cacheDirPtr = Native.Utf8OrNull(cacheDir);
             var fromPtr = Native.Utf8OrNull(from);
             var toPtr = Native.Utf8OrNull(to);
+            var modelPathPtr = Native.Utf8OrNull(modelPath);
             try
             {
+                config.ModelPath = modelPathPtr;
                 if (modelPtr != IntPtr.Zero) config.ModelName = modelPtr;
                 config.CacheDir = cacheDirPtr;
                 config.From = fromPtr;
@@ -56,6 +60,7 @@ namespace Kjarni
                 Marshal.FreeCoTaskMem(cacheDirPtr);
                 Marshal.FreeCoTaskMem(fromPtr);
                 Marshal.FreeCoTaskMem(toPtr);
+                Marshal.FreeCoTaskMem(modelPathPtr);
             }
         }
 

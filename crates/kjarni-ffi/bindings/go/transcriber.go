@@ -32,6 +32,7 @@ type ffiTranscriberConfig struct {
 	Language  uintptr
 	Translate int32
 	Quiet     int32
+	ModelPath uintptr
 }
 
 type ffiTranscriptionSegment struct {
@@ -68,6 +69,8 @@ func NewTranscriber(model string, opts ...Option) (*Transcriber, error) {
 	defer keepModel()
 	languagePtr, keepLanguage := cStringOrNull(o.language)
 	defer keepLanguage()
+	modelPath, keepModelPath := cStringOrNull(o.modelPath)
+	defer keepModelPath()
 
 	config := ffiTranscriberConfig{
 		Device:    deviceCode(o.device),
@@ -75,6 +78,7 @@ func NewTranscriber(model string, opts ...Option) (*Transcriber, error) {
 		Language:  languagePtr,
 		Translate: boolToInt(o.translate),
 		Quiet:     boolToInt(o.quiet),
+		ModelPath: modelPath,
 	}
 	var handle uintptr
 	r1, _, _ := purego.SyscallN(_transcriberNewSym, uintptr(unsafe.Pointer(&config)), uintptr(unsafe.Pointer(&handle)))

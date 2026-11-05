@@ -122,9 +122,8 @@ pub enum Commands {
         #[arg(short, long, default_value = "distilbart-cnn")]
         model: String,
 
-        /// Path to local model
-        /// Load weights from a local file or directory instead of the registry
-        #[arg(long)]
+        /// Load a BART or T5 model from a Hugging Face folder instead of the registry
+        #[arg(long, value_name = "DIR")]
         model_path: Option<String>,
 
         /// Minimum summary length
@@ -175,9 +174,9 @@ pub enum Commands {
         #[arg(short, long)]
         model: Option<String>,
 
-        /// Path to local model
-        /// Load weights from a local file or directory instead of the registry
-        #[arg(long)]
+        /// Load a Marian (opus-mt) or T5 model from a Hugging Face folder instead
+        /// of the registry
+        #[arg(long, value_name = "DIR")]
         model_path: Option<String>,
 
         /// Source language (e.g., en, de, fr)
@@ -283,8 +282,8 @@ pub enum Commands {
         #[arg(short, long, default_value = "whisper-small")]
         model: String,
 
-        /// Not supported for transcription yet; use --model
-        #[arg(long)]
+        /// Load a Whisper model from a Hugging Face folder instead of the registry
+        #[arg(long, value_name = "DIR")]
         model_path: Option<String>,
 
         /// Language code (e.g., en, fr, de). Omit for auto-detect.
@@ -418,8 +417,8 @@ pub enum Commands {
         #[arg(short, long, default_value = "minilm-l6-v2-cross-encoder")]
         model: String,
 
-        /// Load weights from a local file or directory instead of the registry
-        #[arg(long)]
+        /// Load a cross-encoder from a Hugging Face folder instead of the registry
+        #[arg(long, value_name = "DIR")]
         model_path: Option<String>,
 
         /// Return only top K results

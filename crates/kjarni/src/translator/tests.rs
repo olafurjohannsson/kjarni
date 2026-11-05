@@ -1099,7 +1099,7 @@ mod concurrency_tests {
 }
 
 mod opus_mt {
-    use super::super::validation::translation_input;
+    use super::super::validation::{Directions, translation_input};
     use super::*;
     use kjarni_transformers::models::ModelType;
 
@@ -1273,13 +1273,26 @@ mod opus_mt {
 
     #[test]
     fn opus_mt_gets_the_bare_text() {
-        let input = translation_input(ModelType::OpusMtEnDe, "Hello", "English", "German").unwrap();
+        let input = translation_input(
+            &Directions::of(ModelType::OpusMtEnDe),
+            "opus-mt-en-de",
+            "Hello",
+            "English",
+            "German",
+        )
+        .unwrap();
         assert_eq!(input, "Hello");
     }
 
     #[test]
     fn opus_mt_refuses_the_other_direction() {
-        let err = translation_input(ModelType::OpusMtEnDe, "Hallo", "German", "English");
+        let err = translation_input(
+            &Directions::of(ModelType::OpusMtEnDe),
+            "opus-mt-en-de",
+            "Hallo",
+            "German",
+            "English",
+        );
         assert!(matches!(
             err,
             Err(TranslatorError::IncompatibleModel { .. })
@@ -1288,8 +1301,114 @@ mod opus_mt {
 
     #[test]
     fn flan_t5_keeps_its_prompt() {
-        let input = translation_input(ModelType::FlanT5Base, "Hello", "English", "German").unwrap();
+        let input = translation_input(
+            &Directions::of(ModelType::FlanT5Base),
+            "flan-t5-base",
+            "Hello",
+            "English",
+            "German",
+        )
+        .unwrap();
         assert_eq!(input, "translate English to German: Hello");
+    }
+}
+
+mod fail_fast {
+    use crate::translator::{Translator, TranslatorError};
+
+    /// An unknown default language is reported before the model is looked
+    /// for: here the cache is empty and downloads are off.
+    #[tokio::test]
+    async fn an_unknown_default_language_fails_before_loading() {
+        let empty = tempfile::tempdir().unwrap();
+        let err = Translator::builder("opus-mt-en-de")
+            .from("klingon")
+            .to("de")
+            .cache_dir(empty.path())
+            .offline()
+            .quiet()
+            .build()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, TranslatorError::UnknownLanguage(ref l) if l == "klingon"),
+            "{err}"
+        );
+    }
+}
+
+mod marian_folder_directions {
+    use super::super::validation::{Directions, translation_input};
+    use crate::translator::TranslatorError;
+
+    /// A folder with a tokenizer_config.json naming these languages, as the
+    /// Helsinki-NLP repos have.
+    fn directions(source: &str, target: &str, tokens: &[&str]) -> Directions {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("tokenizer_config.json"),
+            format!(r#"{{"source_lang": "{source}", "target_lang": "{target}"}}"#),
+        )
+        .unwrap();
+        Directions::of_marian_folder(dir.path(), |t| tokens.contains(&t))
+    }
+
+    fn input(d: &Directions, from: &str, to: &str) -> Result<String, TranslatorError> {
+        let (from, to) = (d.language(from).unwrap(), d.language(to).unwrap());
+        translation_input(d, "model", "Hello", &from, &to)
+    }
+
+    #[test]
+    fn one_target_gets_the_bare_text() {
+        let d = directions("en", "is", &[]);
+        assert_eq!(input(&d, "en", "is").unwrap(), "Hello");
+        assert_eq!(input(&d, "English", "Icelandic").unwrap(), "Hello");
+        let err = input(&d, "is", "en").unwrap_err().to_string();
+        assert!(
+            err.contains("only translates English to Icelandic"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn several_targets_get_the_target_token() {
+        let d = directions(
+            "en",
+            "fr+fr_BE+es+wa",
+            &[">>fr<<", ">>fr_BE<<", ">>es<<", ">>wa<<"],
+        );
+        assert_eq!(input(&d, "en", "fr").unwrap(), ">>fr<< Hello");
+        assert_eq!(input(&d, "en", "French").unwrap(), ">>fr<< Hello");
+        assert_eq!(input(&d, "en", "Spanish").unwrap(), ">>es<< Hello");
+        // Codes the language table does not know are the model's own.
+        assert_eq!(input(&d, "en", "fr_BE").unwrap(), ">>fr_BE<< Hello");
+        assert_eq!(input(&d, "en", "wa").unwrap(), ">>wa<< Hello");
+        let err = input(&d, "en", "de").unwrap_err().to_string();
+        assert!(err.contains("English to French, Spanish, wa"), "{err}");
+    }
+
+    #[test]
+    fn targets_without_a_token_are_left_out() {
+        let d = directions("en", "fr+es", &[">>fr<<"]);
+        assert_eq!(input(&d, "en", "fr").unwrap(), ">>fr<< Hello");
+        assert!(input(&d, "en", "es").is_err());
+    }
+
+    #[test]
+    fn unknown_codes_are_unknown_languages() {
+        let d = directions("en", "de", &[]);
+        assert_eq!(d.language("xx"), None);
+    }
+
+    #[test]
+    fn without_languages_the_text_goes_in_as_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = Directions::of_marian_folder(dir.path(), |_| false);
+        assert_eq!(d, Directions::Unchecked);
+        assert_eq!(
+            translation_input(&d, "m", "Hello", "xx", "yy").unwrap(),
+            "Hello"
+        );
     }
 }
 

@@ -95,8 +95,7 @@ impl WhisperModel {
         let layout = config.layout();
 
         // Load tokenizer
-        let tokenizer_path = model_path.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
+        let tokenizer = kjarni_transformers::tokenizer::load_model_tokenizer(model_path)?;
 
         // Load audio frontend (Whisper-specific)
         let audio_frontend = AudioConvFrontend::from_weights(

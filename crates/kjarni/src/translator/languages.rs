@@ -165,6 +165,13 @@ static LANGUAGE_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("romanian", "Romanian");
     m.insert("română", "Romanian");
 
+    // Icelandic
+    m.insert("is", "Icelandic");
+    m.insert("isl", "Icelandic");
+    m.insert("ice", "Icelandic");
+    m.insert("icelandic", "Icelandic");
+    m.insert("íslenska", "Icelandic");
+
     m
 });
 
@@ -190,6 +197,7 @@ static LANGUAGE_CODES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| 
     m.insert("Turkish", "tr");
     m.insert("Polish", "pl");
     m.insert("Romanian", "ro");
+    m.insert("Icelandic", "is");
     m
 });
 
@@ -226,6 +234,13 @@ mod tests {
     fn test_unknown_language() {
         assert_eq!(normalize_language("klingon"), None);
         assert_eq!(normalize_language("xyz"), None);
+    }
+
+    #[test]
+    fn icelandic_by_code_and_name() {
+        assert_eq!(normalize_language("is"), Some("Icelandic"));
+        assert_eq!(normalize_language("Íslenska"), Some("Icelandic"));
+        assert_eq!(language_code("Icelandic"), Some("is"));
     }
 
     #[test]

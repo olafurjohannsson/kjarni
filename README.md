@@ -438,10 +438,21 @@ Referenced by short name; the underlying HuggingFace model is listed for searcha
 | Speech-to-text | `whisper-large-v3` | `openai/whisper-large-v3` | 3.1 GB |
 | Summarization | `distilbart-cnn` | `sshleifer/distilbart-cnn-12-6` \* | 306 MB |
 | Summarization | `bart-large-cnn` | `facebook/bart-large-cnn` | 406 MB |
+| Translation (English to German) | `opus-mt-en-de` | `Helsinki-NLP/opus-mt-en-de` \* | 285 MB |
+| Translation (German to English) | `opus-mt-de-en` | `Helsinki-NLP/opus-mt-de-en` \* | 285 MB |
+| Named entities | `distilbert-ner` | `dslim/distilbert-NER` | 66 MB |
 | Instruction / seq2seq | `flan-t5-base` | `google/flan-t5-base` | 250 MB |
 | Instruction / seq2seq | `flan-t5-large` | `google/flan-t5-large` | 780 MB |
 
-\* Downloaded from a safetensors conversion mirrored under [`olafuraron`](https://huggingface.co/olafuraron); the upstream model and its license are unchanged.
+\* Downloaded from a safetensors conversion mirrored under [`olafuraron`](https://huggingface.co/olafuraron) or [`kjarni-ai`](https://huggingface.co/kjarni-ai); the upstream model and its license are unchanged.
+
+### Models from the Hugging Face Hub
+
+Any folder in the Hugging Face layout loads with `--model-path` in the CLI, `model_path` in Rust, Python and C, `modelPath` in C# and `WithModelPath` in Go: sentence encoders and classifiers (BERT, RoBERTa, XLM-RoBERTa, DistilBERT, MPNet), cross-encoders, token classifiers for named entities, decoder chat models (Llama, Qwen2, Mistral, Phi-3, GPT-2), BART and T5 for summarization, Marian (`Helsinki-NLP/opus-mt-*`) and T5 for translation, and Whisper for speech. Weights can be safetensors or `pytorch_model.bin`, and the tokenizer can be `tokenizer.json` or the files the Python tokenizer reads (`vocab.txt`, `vocab.json` with `merges.txt`, or a SentencePiece model).
+
+```bash
+kjarni translate --model-path ./opus-mt-is-en --src is --dst en -i "Veðrið er gott í dag."
+```
 
 `kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation runs through the same engine in every language binding, the CLI and the browser. If raw single-model generation throughput is what you are optimising for, [llama.cpp](https://github.com/ggerganov/llama.cpp) is more specialised. Kjarni's lane is breadth of language and deployment rather than raw generation speed: the same engine behind a NuGet package, a Go module, a C header, a CLI binary and a WASM bundle.
 
