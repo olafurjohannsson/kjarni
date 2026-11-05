@@ -16,6 +16,10 @@ class RanToLengthTest(unittest.TestCase):
     def test_a_full_output_passes(self):
         check_ran_to_length("word " * 123)
 
+    def test_the_99_words_of_a_full_linux_run_pass(self):
+        # qwen2.5-0.5b-instruct, greedy, 129 tokens on linux-x64 at b60b812.
+        check_ran_to_length("word " * 99)
+
     def test_the_39_words_of_an_early_stop_fail(self):
         with self.assertRaises(ValueError):
             check_ran_to_length("word " * 39)
