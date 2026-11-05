@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793867450471,
+  "lastUpdate": 1793870250095,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -720,6 +720,54 @@ window.BENCHMARK_DATA = {
             "value": 27.14,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 0.981"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b60b812ba8bcab94fc9802da38b8b45cf63af64b",
+          "message": "Chat with model folders and load SentencePiece tokenizers (#107)",
+          "timestamp": "2026-11-05T08:53:14Z",
+          "tree_id": "1b656fec6125a0716115d1a5a941dfbe22cac99e",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/b60b812ba8bcab94fc9802da38b8b45cf63af64b"
+        },
+        "date": 1793870249297,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "macos-arm64 embed",
+            "value": 496.7,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.918"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 35.72,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.980"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 468.58,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 20.45,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.013"
           }
         ]
       }
