@@ -83,7 +83,7 @@ namespace Kjarni
         Reranking = 6,
     }
 
-    internal static class Native
+    internal static partial class Native
     {
         private const string LibName = "kjarni_ffi";
 

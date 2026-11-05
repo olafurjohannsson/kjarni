@@ -134,6 +134,7 @@ fn list(
         "Image Embedding",
         "Re-Ranker",
         "Classifier",
+        "Named Entities",
     ];
 
     // Calculate totals
@@ -191,6 +192,7 @@ fn list(
                         "embedding" | "embed" | "encoder" => m_group == "Embedding",
                         "classification" | "classify" | "classifier" => m_group == "Classifier",
                         "rerank" | "reranker" | "re-ranker" => m_group == "Re-Ranker",
+                        "ner" | "entities" | "named-entities" => m_group == "Named Entities",
                         "seq2seq" | "summarization" | "translation" | "summarize" => {
                             m_group == "Seq2Seq"
                         }

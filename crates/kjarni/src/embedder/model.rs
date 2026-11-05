@@ -136,13 +136,17 @@ impl Embedder {
                 model_path.display()
             )));
         }
-        for required in ["config.json", "tokenizer.json"] {
-            if !model_path.join(required).exists() {
-                return Err(EmbedderError::InvalidConfig(format!(
-                    "{required} not found in {}",
-                    model_path.display()
-                )));
-            }
+        if !model_path.join("config.json").exists() {
+            return Err(EmbedderError::InvalidConfig(format!(
+                "config.json not found in {}",
+                model_path.display()
+            )));
+        }
+        if !kjarni_transformers::tokenizer::has_tokenizer(&model_path) {
+            return Err(EmbedderError::InvalidConfig(format!(
+                "no tokenizer in {}: it needs tokenizer.json, vocab.json with merges.txt, or vocab.txt",
+                model_path.display()
+            )));
         }
 
         let model_type = Self::detect_model_type(&model_path)?;

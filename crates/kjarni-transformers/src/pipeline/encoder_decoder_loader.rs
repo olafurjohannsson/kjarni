@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -91,9 +91,7 @@ impl Seq2SeqLoader {
         let meta: ModelMetadata = config.metadata();
         let layout: ModelLayout = config.layout();
 
-        let tokenizer_path: PathBuf = model_path.join("tokenizer.json");
-        let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        let mut tokenizer = crate::tokenizer::load_tokenizer(model_path)?;
         crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
 
         // Build Backends

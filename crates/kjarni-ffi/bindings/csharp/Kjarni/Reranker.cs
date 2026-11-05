@@ -55,11 +55,17 @@ namespace Kjarni
         /// <summary>
         /// Create a new Reranker with default settings.
         /// </summary>
+        /// <param name="model">Model name; the default is "minilm-l6-v2-cross-encoder"</param>
+        /// <param name="device">"cpu" or "gpu"</param>
+        /// <param name="cacheDir">Directory to cache models</param>
+        /// <param name="quiet">Suppress progress output</param>
+        /// <param name="modelPath">A local model folder, such as one downloaded from the Hugging Face Hub. Used instead of <paramref name="model"/> when given.</param>
         public Reranker(
             string? model = null,
             string device = "cpu",
             string? cacheDir = null,
-            bool quiet = false)
+            bool quiet = false,
+            string? modelPath = null)
         {
             var config = Native.kjarni_reranker_config_default();
             config.Device = device == "gpu" ? KjarniDevice.Gpu : KjarniDevice.Cpu;
@@ -67,6 +73,7 @@ namespace Kjarni
 
             IntPtr modelNamePtr = IntPtr.Zero;
             IntPtr cacheDirPtr = IntPtr.Zero;
+            IntPtr modelPathPtr = IntPtr.Zero;
 
             try
             {
@@ -82,6 +89,12 @@ namespace Kjarni
                     config.CacheDir = cacheDirPtr;
                 }
 
+                if (modelPath != null)
+                {
+                    modelPathPtr = Marshal.StringToCoTaskMemUTF8(modelPath);
+                    config.ModelPath = modelPathPtr;
+                }
+
                 var err = Native.kjarni_reranker_new(ref config, out _handle);
                 Native.CheckError(err);
             }
@@ -89,6 +102,7 @@ namespace Kjarni
             {
                 if (modelNamePtr != IntPtr.Zero) Marshal.FreeCoTaskMem(modelNamePtr);
                 if (cacheDirPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(cacheDirPtr);
+                if (modelPathPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(modelPathPtr);
             }
         }
 

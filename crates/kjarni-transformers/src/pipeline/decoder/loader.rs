@@ -130,15 +130,12 @@ impl DecoderLoader {
         let layout = config.layout();
 
         // Load Tokenizer
-        let tokenizer_path = if model_path.is_file() {
-            model_path.parent().unwrap().join("tokenizer.json")
+        let tokenizer_dir = if model_path.is_file() {
+            model_path.parent().unwrap()
         } else {
-            model_path.join("tokenizer.json")
+            model_path
         };
-        if !tokenizer_path.exists() {
-            return Err(anyhow!("Tokenizer not found at {:?}", tokenizer_path));
-        }
-        let mut tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
+        let mut tokenizer = crate::tokenizer::load_tokenizer(tokenizer_dir)?;
         crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams {

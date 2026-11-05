@@ -7,6 +7,7 @@ mod error;
 #[cfg(feature = "image-io")]
 mod image_index;
 mod indexer;
+mod ner;
 mod panic;
 mod reranker;
 mod searcher;
@@ -20,6 +21,7 @@ pub use embedder::*;
 pub use error::*;
 pub use indexer::*;
 use kjarni::cosine_similarity;
+pub use ner::*;
 pub use reranker::*;
 pub use searcher::*;
 pub use summarizer::*;

@@ -228,10 +228,9 @@ impl Reranker {
             )));
         }
 
-        let tokenizer_path = path.join("tokenizer.json");
-        if !tokenizer_path.exists() {
+        if !kjarni_transformers::tokenizer::has_tokenizer(path) {
             return Err(RerankerError::InvalidConfig(format!(
-                "tokenizer.json not found in {}",
+                "no tokenizer in {}: it needs tokenizer.json, vocab.json with merges.txt, or vocab.txt",
                 path.display()
             )));
         }

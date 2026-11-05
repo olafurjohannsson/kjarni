@@ -1,5 +1,6 @@
 """High-level Reranker API."""
 
+import os
 from typing import Optional, List, NamedTuple
 from ctypes import c_void_p, c_char_p, c_float, c_size_t, byref, POINTER, Structure
 from ctypes import c_int, c_int32
@@ -86,6 +87,7 @@ class Reranker:
         device: str = "cpu",
         cache_dir: Optional[str] = None,
         quiet: bool = False,
+        model_path: Optional[str] = None,
     ):
         """Create a new Reranker.
         
@@ -94,6 +96,8 @@ class Reranker:
             device: "cpu" or "gpu"
             cache_dir: Directory to cache models
             quiet: Suppress progress output
+            model_path: A local model folder, such as one downloaded from the
+                Hugging Face Hub. Used instead of ``model`` when given.
         """
         config = _lib.kjarni_reranker_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
@@ -103,6 +107,8 @@ class Reranker:
             config.model_name = model.encode("utf-8")
         if cache_dir:
             config.cache_dir = cache_dir.encode("utf-8")
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
 
         self._handle = c_void_p()
         err = _lib.kjarni_reranker_new(byref(config), byref(self._handle))

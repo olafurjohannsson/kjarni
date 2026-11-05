@@ -14,6 +14,7 @@ after that works offline.
 from .embedder import Embedder
 from .classifier import Classifier
 from .reranker import Reranker, RerankResult
+from .ner import EntityRecognizer, Entity
 from .indexer import Indexer, IndexStats, IndexInfo, Progress, CancelToken
 from .searcher import Searcher, SearchResult, SearchMode
 from .chat import Chat, Conversation, Turn
@@ -29,6 +30,8 @@ __all__ = [
     "Classifier",
     "Reranker",
     "RerankResult",
+    "EntityRecognizer",
+    "Entity",
     # RAG
     "Indexer",
     "IndexStats",

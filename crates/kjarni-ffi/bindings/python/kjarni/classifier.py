@@ -1,5 +1,6 @@
 """High-level Classifier API."""
 
+import os
 from typing import Optional, List, Tuple
 from ctypes import c_void_p, c_char_p, byref
 from dataclasses import dataclass
@@ -56,12 +57,13 @@ class Classifier:
 
     def __init__(
         self,
-        model: str,
+        model: Optional[str] = None,
         device: str = "cpu",
         cache_dir: Optional[str] = None,
         labels: Optional[List[str]] = None,
         multi_label: bool = False,
         quiet: bool = False,
+        model_path: Optional[str] = None,
     ):
         """Create a new Classifier.
         
@@ -72,13 +74,20 @@ class Classifier:
             labels: Custom labels (overrides model defaults)
             multi_label: Enable multi-label classification (sigmoid vs softmax)
             quiet: Suppress progress output
+            model_path: A local model folder, such as one downloaded from the
+                Hugging Face Hub. Used instead of ``model`` when given.
         """
-        self._model = model
+        if model is None and model_path is None:
+            raise ValueError("Classifier needs a model name or a model_path")
+        self._model = model or os.fspath(model_path)
         self._device = device
         
         config = _lib.kjarni_classifier_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
-        config.model_name = model.encode("utf-8")
+        if model:
+            config.model_name = model.encode("utf-8")
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
         config.multi_label = 1 if multi_label else 0
         config.quiet = 1 if quiet else 0
 

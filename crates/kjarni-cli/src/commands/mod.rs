@@ -9,6 +9,7 @@ pub mod index;
 pub mod inspect;
 pub mod mcp;
 pub mod model;
+pub mod ner;
 pub mod rerank;
 pub mod search;
 pub mod similarity;

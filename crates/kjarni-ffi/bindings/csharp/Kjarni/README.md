@@ -156,6 +156,21 @@ This is markedly more accurate than comparing embeddings, and slow enough that y
 shortlist rather than a whole corpus. Applying it to the top 50 results is the usual pattern, and
 it works just as well on results from Elasticsearch or a SQL query as on Kjarni's own.
 
+## Named entities
+
+```csharp
+using var ner = new EntityRecognizer();  // distilbert-ner, English
+foreach (var e in ner.Recognize("Sarah Connor met Apple's CEO in San Francisco on Tuesday."))
+    Console.WriteLine($"{e.Label} {e.Text} {e.Score:F3}");
+// PER Sarah Connor 0.999
+// ORG Apple 0.997
+// LOC San Francisco 0.998
+```
+
+`modelPath` loads any `*ForTokenClassification` model from the Hugging Face Hub, such as
+`vesteinn/IceBERT-ner` for Icelandic. The entities are those transformers' `pipeline("ner")`
+gives, and `Start` and `End` index the .NET string.
+
 ## Index and search your own documents
 
 Point it at a directory, then query by keyword, by meaning, or both. The index is a folder on
@@ -237,6 +252,16 @@ results match the CPU's. `Translator` runs on the CPU only for now.
 ```csharp
 using var embedder = new Embedder("minilm-l6-v2", cacheDir: "/my/models");
 using var quiet    = new Embedder("minilm-l6-v2", quiet: true);
+```
+
+`Embedder`, `Classifier` and `Reranker` also load a model you have on disk, such as one
+downloaded from the Hugging Face Hub, with `modelPath`. The folder needs `config.json`, the
+weights as `model.safetensors`, and a tokenizer: `tokenizer.json`, or the older `vocab.json`
+with `merges.txt` (RoBERTa, GPT-2, BART) or `vocab.txt` (BERT, DistilBERT, MPNet).
+
+```csharp
+using var embedder   = new Embedder(modelPath: "IceBERT");
+using var classifier = new Classifier(modelPath: "models/my-finetuned-bert");
 ```
 
 The `cacheDir` parameter is the reliable way to relocate model storage; pass it per

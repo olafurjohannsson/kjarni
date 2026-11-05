@@ -111,6 +111,9 @@ pub enum ModelTask {
     /// Text -> Class label
     Classification,
 
+    /// Text -> a label for each token, as in named-entity recognition
+    TokenClassification,
+
     /// Interactive chat and instruction following
     Chat,
 
@@ -166,6 +169,8 @@ pub enum ModelType {
     ToxicBertMultilingual,
     RobertaGoEmotions,
     DistilRobertaEmotion,
+
+    DistilBertNer,
 
     Qwen2_5_0_5B_Instruct,
     Qwen2_5_1_5B_Instruct,
@@ -300,6 +305,9 @@ impl ModelType {
             // Toxicity
             Self::ToxicBertMultilingual => "toxic-bert",
 
+            // Named entities
+            Self::DistilBertNer => "distilbert-ner",
+
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b-instruct",
             Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b-instruct",
@@ -357,6 +365,8 @@ impl ModelType {
             ModelTask::SentimentAnalysis
             | ModelTask::ZeroShotClassification
             | ModelTask::Classification => "Classifier",
+
+            ModelTask::TokenClassification => "Named Entities",
 
             ModelTask::Generation => "Generation (Decoder)",
         }
@@ -569,6 +579,22 @@ impl ModelType {
                 description: "7 emotions: anger, disgust, fear, joy, neutral, sadness, surprise.",
                 size_mb: 329,
                 params_millions: 82,
+            },
+            Self::DistilBertNer => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::TokenClassification,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/dslim/distilbert-NER/resolve/main/model.safetensors",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/dslim/distilbert-NER/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/dslim/distilbert-NER/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Names of people, organizations, places and other entities in English text.",
+                size_mb: 261,
+                params_millions: 66,
             },
             Self::ToxicBertMultilingual => ModelInfo {
                 architecture: ModelArchitecture::Bert,
@@ -998,6 +1024,7 @@ impl ModelType {
                 Some(Self::RobertaGoEmotions)
             }
             "emotion-english-distilroberta-base" => Some(Self::DistilRobertaEmotion),
+            "distilbert-ner" | "dslim/distilbert-ner" => Some(Self::DistilBertNer),
 
             "distilbart-cnn" | "olafuraron/distilbart-cnn-12-6" | "distilbart-cnn-12-6" => {
                 Some(Self::DistilBartCnn)

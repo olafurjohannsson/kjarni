@@ -372,6 +372,41 @@ pub enum Commands {
         quiet: bool,
     },
 
+    /// Find names of people, places, organizations and other entities
+    ///
+    /// Several texts go one per line on stdin. --model-path takes any
+    /// *ForTokenClassification model from the Hugging Face Hub, such as an
+    /// Icelandic or a medical one.
+    Ner {
+        /// Text to read. Words without quotes are one text. Reads stdin if empty.
+        input: Vec<String>,
+
+        /// Model name from registry
+        #[arg(short, long, default_value = "distilbert-ner")]
+        model: String,
+
+        /// Load model from local path instead of registry
+        #[arg(long, value_name = "PATH")]
+        model_path: Option<String>,
+
+        /// How tokens become entities, as in transformers: first (keeps words
+        /// whole), simple, max or average
+        #[arg(long, default_value = "first")]
+        aggregation: String,
+
+        /// Output format: text, json, jsonl
+        #[arg(short, long, default_value = "text")]
+        format: String,
+
+        /// Run on GPU
+        #[arg(long)]
+        gpu: bool,
+
+        /// Suppress progress output
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
     /// Rerank documents by relevance to a query
     Rerank {
         /// The query to rank against

@@ -211,6 +211,22 @@ impl CpuSequenceClassificationHead {
     }
 
     /// Forward pass: hidden_states -> logits.
+    /// Logits for every token: the final linear layer applied to each hidden
+    /// state, with no pooling, as `*ForTokenClassification` models do. A pooler
+    /// or pre-classifier the weights also hold is not used.
+    pub fn forward_tokens(&self, encoder_hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        let (batch, seq_len, hidden) = encoder_hidden_states.dim();
+        if batch == 0 || seq_len == 0 {
+            return Ok(Array3::zeros((batch, seq_len, self.num_classes())));
+        }
+        let rows = encoder_hidden_states
+            .as_standard_layout()
+            .into_shape_with_order((batch * seq_len, hidden))?
+            .to_owned();
+        let logits = self.classifier.matmul(&rows.view());
+        Ok(logits.into_shape_with_order((batch, seq_len, self.num_classes()))?)
+    }
+
     pub fn forward(
         &self,
         encoder_hidden_states: &Array3<f32>,

@@ -718,6 +718,7 @@ mod tests {
             "Re-Ranker",
             "Classifier",
             "Generation (Decoder)",
+            "Named Entities",
         ];
 
         for model in &all_models {

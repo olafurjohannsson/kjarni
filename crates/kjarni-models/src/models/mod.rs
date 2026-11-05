@@ -22,3 +22,4 @@ pub mod clip;
 pub mod cross_encoder;
 pub mod sentence_encoder;
 pub mod sequence_classifier;
+pub mod token_classifier;

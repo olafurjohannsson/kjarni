@@ -121,6 +121,7 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
         | ModelTask::ImageEmbedding
         | ModelTask::ReRanking
         | ModelTask::Classification
+        | ModelTask::TokenClassification
         | ModelTask::SentimentAnalysis
         | ModelTask::ZeroShotClassification => Err(ChatError::IncompatibleModel {
             model: cli_name.to_string(),

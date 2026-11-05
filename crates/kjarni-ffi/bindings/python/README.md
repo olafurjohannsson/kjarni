@@ -158,6 +158,23 @@ whatever IDs and permissions came with your documents stay attached to them.
 [Build a Document Search Engine in C#](https://kjarni.ai/blog/documentsearchengine/)
 walks through combining keyword search, embeddings and reranking into one pipeline.
 
+## Named entities
+
+```python
+from kjarni import EntityRecognizer
+
+ner = EntityRecognizer()  # distilbert-ner, English
+for e in ner.recognize("Sarah Connor met Apple's CEO in San Francisco on Tuesday."):
+    print(e.label, e.text, round(e.score, 3))
+# PER Sarah Connor 0.999
+# ORG Apple 0.997
+# LOC San Francisco 0.998
+```
+
+`model_path` loads any `*ForTokenClassification` model from the Hugging Face Hub,
+such as `vesteinn/IceBERT-ner` for Icelandic. The entities are those transformers'
+`pipeline("ner")` gives, and `text[e.start:e.end] == e.text`.
+
 ## Indexing and search
 
 For a corpus that outlives the process, `Indexer` builds an on-disk index and
@@ -231,6 +248,20 @@ silently drops the rest: no error, no warning, just a vector computed from the f
 part of your text. If your documents are longer, chunk them or pick a longer window.
 The cost is measured in
 [Your MiniLM Embeddings Are Probably Truncating at 256 Tokens](https://kjarni.ai/blog/embedding-truncation/).
+
+### A model from a folder
+
+`Embedder`, `Classifier` and `Reranker` also load a model you have on disk, such as one
+downloaded from the Hugging Face Hub. The folder needs `config.json`, the weights as
+`model.safetensors`, and a tokenizer: `tokenizer.json`, or the older `vocab.json` with
+`merges.txt` (RoBERTa, GPT-2, BART) or `vocab.txt` (BERT, DistilBERT, MPNet).
+
+```python
+from kjarni import Classifier, Embedder
+
+embedder = Embedder(model_path="IceBERT")
+classifier = Classifier(model_path="models/my-finetuned-bert")
+```
 
 ## Notes
 
