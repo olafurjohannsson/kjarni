@@ -98,6 +98,28 @@ typedef enum KjarniProgressStage {
   KJARNI_PROGRESS_STAGE_RERANKING = 6,
 } KjarniProgressStage;
 
+/**
+ * How tokens become entities, as transformers' `aggregation_strategy`.
+ */
+typedef enum KjarniAggregation {
+  /**
+   * A word takes the label of its first token, so it is never split.
+   */
+  KJARNI_AGGREGATION_FIRST = 0,
+  /**
+   * Each token keeps its own label; neighbours with the same tag join.
+   */
+  KJARNI_AGGREGATION_SIMPLE = 1,
+  /**
+   * A word takes the label of its most confident token.
+   */
+  KJARNI_AGGREGATION_MAX = 2,
+  /**
+   * A word takes the label with the highest probability averaged over it.
+   */
+  KJARNI_AGGREGATION_AVERAGE = 3,
+} KjarniAggregation;
+
 typedef enum KjarniSearchMode {
   KJARNI_SEARCH_MODE_KEYWORD = 0,
   KJARNI_SEARCH_MODE_SEMANTIC = 1,
@@ -145,6 +167,11 @@ typedef struct KjarniImageIndex KjarniImageIndex;
  * Created via `kjarni_indexer_new`, must be freed via `kjarni_indexer_free`
  */
 typedef struct KjarniIndexer KjarniIndexer;
+
+/**
+ * Opaque handle to an entity recognizer.
+ */
+typedef struct KjarniNer KjarniNer;
 
 /**
  * Opaque handle to a Reranker
@@ -522,6 +549,64 @@ typedef struct KjarniProgress {
  * Generic callback function pointer type for progress
  */
 typedef void (*KjarniProgressCallbackFn)(struct KjarniProgress progress, void *user_data);
+
+/**
+ * One entity found in a text.
+ */
+typedef struct KjarniEntity {
+  /**
+   * The entity type, such as `PER` or `Location`.
+   */
+  char *label;
+  /**
+   * The entity's text, exactly as it appears in the input.
+   */
+  char *text;
+  /**
+   * Where the entity starts in the input, in Unicode code points (not bytes).
+   */
+  uintptr_t start;
+  /**
+   * Where it ends, in code points, exclusive.
+   */
+  uintptr_t end;
+  /**
+   * The mean probability of its tokens' labels.
+   */
+  float score;
+} KjarniEntity;
+
+typedef struct KjarniEntities {
+  struct KjarniEntity *entities;
+  uintptr_t len;
+} KjarniEntities;
+
+typedef struct KjarniNerConfig {
+  /**
+   * Device to use
+   */
+  enum KjarniDevice device;
+  /**
+   * Cache directory (NULL = default)
+   */
+  const char *cache_dir;
+  /**
+   * Model name (NULL = distilbert-ner)
+   */
+  const char *model_name;
+  /**
+   * Model folder (NULL = use the registry)
+   */
+  const char *model_path;
+  /**
+   * How tokens become entities
+   */
+  enum KjarniAggregation aggregation;
+  /**
+   * Suppress output
+   */
+  int32_t quiet;
+} KjarniNerConfig;
 
 /**
  * Single rerank result
@@ -1487,6 +1572,56 @@ uintptr_t kjarni_indexer_dimension(const struct KjarniIndexer *indexer);
  *   been freed.
  */
 uintptr_t kjarni_indexer_chunk_size(const struct KjarniIndexer *indexer);
+
+/**
+ * Free the entities `kjarni_ner_recognize` returned.
+ *
+ * # Safety
+ *
+ * - `entities` must be a value returned by `kjarni_ner_recognize`, passed here exactly
+ *   once. Its buffers are invalid to read afterwards.
+ */
+void kjarni_entities_free(struct KjarniEntities entities);
+
+/**
+ * Get the default entity recognizer configuration.
+ */
+struct KjarniNerConfig kjarni_ner_config_default(void);
+
+/**
+ * Create an entity recognizer.
+ *
+ * # Safety
+ * - `config` must be valid or NULL
+ * - `out` must be a valid pointer
+ * - The returned handle must be freed with `kjarni_ner_free`
+ */
+enum KjarniErrorCode kjarni_ner_new(const struct KjarniNerConfig *config, struct KjarniNer **out);
+
+/**
+ * Free an entity recognizer.
+ *
+ * # Safety
+ *
+ * - `ner` must be null, or a handle returned by `kjarni_ner_new` that has not already
+ *   been passed to this function. It is invalid to use afterwards.
+ */
+void kjarni_ner_free(struct KjarniNer *ner);
+
+/**
+ * Find the entities in a text.
+ *
+ * # Safety
+ *
+ * - `ner` must be null, or a live handle returned by `kjarni_ner_new`.
+ * - `text` must be null, or a valid pointer to a nul-terminated C string.
+ * - `out` must be a valid, writable pointer to a `KjarniEntities`. On `KJARNI_OK` it
+ *   receives a value the caller owns and must release with `kjarni_entities_free`; on
+ *   failure it is cleared and must not be read.
+ */
+enum KjarniErrorCode kjarni_ner_recognize(struct KjarniNer *ner,
+                                          const char *text,
+                                          struct KjarniEntities *out);
 
 /**
  * Puts a cross-encoder logit on a 0..1 scale.
