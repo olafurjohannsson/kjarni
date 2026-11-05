@@ -11,7 +11,7 @@ namespace Kjarni.Tests
     /// </summary>
     public class EntityRecognizerTests
     {
-        [Fact]
+        [SkippableFact]
         public void Recognize_MatchesTransformers()
         {
             Heavy.SkipIfSet();
@@ -35,7 +35,7 @@ namespace Kjarni.Tests
             }
         }
 
-        [Fact]
+        [SkippableFact]
         public void Spans_IndexTheDotNetString_EvenAfterAnEmoji()
         {
             Heavy.SkipIfSet();
