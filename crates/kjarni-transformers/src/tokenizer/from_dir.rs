@@ -2,10 +2,12 @@
 //!
 //! Many models on the Hugging Face Hub predate `tokenizer.json` and ship only
 //! the files their Python tokenizer reads: `vocab.json` and `merges.txt` for the
-//! byte-level BPE of GPT-2, RoBERTa and BART, or `vocab.txt` for the WordPiece
-//! of BERT. transformers builds a fast tokenizer from those files with its
-//! `convert_slow_tokenizer` converters; [`load_tokenizer`] builds the same one,
-//! so the token ids match `AutoTokenizer` for the same folder.
+//! byte-level BPE of GPT-2, RoBERTa and BART, `vocab.txt` for the WordPiece of
+//! BERT, or a SentencePiece `.model` file for XLM-RoBERTa, CamemBERT, T5 and
+//! Llama 2 style tokenizers. transformers builds a fast tokenizer from those
+//! files with its `convert_slow_tokenizer` converters; [`load_tokenizer`] builds
+//! the same one, so the token ids match `AutoTokenizer` (4.57) for the same
+//! folder.
 //!
 //! When `tokenizer.json` exists it is used exactly as written. The other files
 //! are read only when it is missing.
@@ -15,26 +17,66 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::Value;
+use tokenizers::decoders::DecoderWrapper;
+use tokenizers::decoders::byte_fallback::ByteFallback;
 use tokenizers::decoders::byte_level::ByteLevel as ByteLevelDecoder;
+use tokenizers::decoders::fuse::Fuse;
+use tokenizers::decoders::sequence::Sequence as DecoderSequence;
+use tokenizers::decoders::strip::Strip as StripDecoder;
 use tokenizers::decoders::wordpiece::WordPiece as WordPieceDecoder;
 use tokenizers::models::bpe::BPE;
+use tokenizers::models::unigram::Unigram;
 use tokenizers::models::wordpiece::WordPiece;
 use tokenizers::normalizers::bert::BertNormalizer;
+use tokenizers::normalizers::{
+    NormalizerWrapper, Precompiled, Prepend, Replace, Sequence as NormalizerSequence, Strip,
+};
 use tokenizers::pre_tokenizers::bert::BertPreTokenizer;
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
+use tokenizers::pre_tokenizers::metaspace::{Metaspace, PrependScheme};
 use tokenizers::processors::byte_level::ByteLevel as ByteLevelProcessor;
 use tokenizers::processors::roberta::RobertaProcessing;
 use tokenizers::processors::template::TemplateProcessing;
 use tokenizers::{AddedToken, Tokenizer};
 
+use super::sentencepiece::{self, PieceType, SpmModel};
+
 /// The tokenizer files a model folder can have, `tokenizer.json` first.
-pub const TOKENIZER_FILES: [&str; 3] = ["tokenizer.json", "vocab.json", "vocab.txt"];
+/// `vocab.json` is used together with `merges.txt`.
+pub const TOKENIZER_FILES: &[&str] = &[
+    "tokenizer.json",
+    "vocab.json",
+    "vocab.txt",
+    "sentencepiece.bpe.model",
+    "spiece.model",
+    "tokenizer.model",
+];
+
+/// The SentencePiece files, by the name each Python tokenizer class gives it.
+const SPM_FILES: [&str; 3] = ["sentencepiece.bpe.model", "spiece.model", "tokenizer.model"];
 
 /// Whether `dir` has a file a tokenizer can be loaded from.
 pub fn has_tokenizer(dir: &Path) -> bool {
     dir.join("tokenizer.json").exists()
         || (dir.join("vocab.json").exists() && dir.join("merges.txt").exists())
         || dir.join("vocab.txt").exists()
+        || spm_file(dir).is_some()
+}
+
+fn spm_file(dir: &Path) -> Option<std::path::PathBuf> {
+    SPM_FILES.iter().map(|f| dir.join(f)).find(|p| p.exists())
+}
+
+/// The tokenizer a model loader uses: [`load_tokenizer`], with a published
+/// Unigram `tokenizer.json` made to drop whitespace as transformers does (see
+/// [`super::match_sentencepiece_whitespace`]). A tokenizer built from a
+/// `.model` file already matches transformers and is used as built.
+pub fn load_model_tokenizer(dir: &Path) -> Result<Tokenizer> {
+    let mut tokenizer = load_tokenizer(dir)?;
+    if dir.join("tokenizer.json").exists() {
+        super::match_sentencepiece_whitespace(&mut tokenizer);
+    }
+    Ok(tokenizer)
 }
 
 /// Load the tokenizer of the model in `dir`.
@@ -55,10 +97,11 @@ pub fn load_tokenizer(dir: &Path) -> Result<Tokenizer> {
     let settings = Settings::read(dir)?;
     let has_bpe = dir.join("vocab.json").exists() && dir.join("merges.txt").exists();
     let has_wordpiece = dir.join("vocab.txt").exists();
-    if !has_bpe && !has_wordpiece {
+    let spm = spm_file(dir);
+    if !has_bpe && !has_wordpiece && spm.is_none() {
         bail!(
             "No tokenizer in {}: it needs tokenizer.json, vocab.json with merges.txt, \
-             or vocab.txt",
+             vocab.txt, or a SentencePiece .model file",
             dir.display()
         );
     }
@@ -66,17 +109,20 @@ pub fn load_tokenizer(dir: &Path) -> Result<Tokenizer> {
     let kind = settings.kind().ok_or_else(|| {
         anyhow!(
             "{} has no tokenizer.json, and Kjarni can only build one for GPT-2, RoBERTa, \
-             BART, Longformer, BERT, DistilBERT, ELECTRA and MPNet tokenizers, not {}. \
-             Save one with transformers: \
+             BART, Longformer, BERT, DistilBERT, ELECTRA, MPNet, XLM-RoBERTa, CamemBERT, \
+             T5 and Llama tokenizers, not {}. Save one with transformers: \
              AutoTokenizer.from_pretrained(path).save_pretrained(path)",
             dir.display(),
             settings.describe()
         )
     })?;
 
-    let mut tokenizer = match kind {
-        Kind::Gpt2 | Kind::Roberta if has_bpe => build_bpe(dir, kind, &settings)?,
-        Kind::Bert | Kind::MpNet if has_wordpiece => build_wordpiece(dir, kind, &settings)?,
+    let mut tokenizer = match (kind, &spm) {
+        (Kind::Gpt2 | Kind::Roberta, _) if has_bpe => build_bpe(dir, kind, &settings)?,
+        (Kind::Bert | Kind::MpNet, _) if has_wordpiece => build_wordpiece(dir, kind, &settings)?,
+        (Kind::XlmRoberta | Kind::Camembert | Kind::T5 | Kind::Llama, Some(file)) => {
+            build_sentencepiece(file, kind, &settings)?
+        }
         _ => bail!(
             "{} has no tokenizer.json, and the files a {} tokenizer is built from are missing",
             dir.display(),
@@ -99,6 +145,14 @@ enum Kind {
     Bert,
     /// `MPNetConverter`.
     MpNet,
+    /// `XLMRobertaConverter`: Unigram SentencePiece.
+    XlmRoberta,
+    /// `CamembertConverter`: Unigram SentencePiece.
+    Camembert,
+    /// `T5Converter`, which mT5 uses too: Unigram SentencePiece.
+    T5,
+    /// `LlamaConverter`, which Mistral and Phi-3 use too: SentencePiece BPE.
+    Llama,
 }
 
 impl Kind {
@@ -108,6 +162,10 @@ impl Kind {
             "RobertaTokenizer" | "BartTokenizer" | "LongformerTokenizer" => Some(Self::Roberta),
             "BertTokenizer" | "DistilBertTokenizer" | "ElectraTokenizer" => Some(Self::Bert),
             "MPNetTokenizer" => Some(Self::MpNet),
+            "XLMRobertaTokenizer" => Some(Self::XlmRoberta),
+            "CamembertTokenizer" => Some(Self::Camembert),
+            "T5Tokenizer" | "MT5Tokenizer" => Some(Self::T5),
+            "LlamaTokenizer" => Some(Self::Llama),
             _ => None,
         }
     }
@@ -118,6 +176,10 @@ impl Kind {
             "roberta" | "bart" | "longformer" => Some(Self::Roberta),
             "bert" | "distilbert" | "electra" => Some(Self::Bert),
             "mpnet" => Some(Self::MpNet),
+            "xlm-roberta" => Some(Self::XlmRoberta),
+            "camembert" => Some(Self::Camembert),
+            "t5" | "mt5" => Some(Self::T5),
+            "llama" | "mistral" | "phi3" => Some(Self::Llama),
             _ => None,
         }
     }
@@ -142,6 +204,17 @@ impl Kind {
             (Self::MpNet, "unk_token") => Some("[UNK]"),
             (Self::MpNet, "pad_token") => Some("<pad>"),
             (Self::MpNet, "mask_token") => Some("<mask>"),
+            (Self::XlmRoberta | Self::Camembert, "bos_token" | "cls_token") => Some("<s>"),
+            (Self::XlmRoberta | Self::Camembert, "eos_token" | "sep_token") => Some("</s>"),
+            (Self::XlmRoberta | Self::Camembert, "unk_token") => Some("<unk>"),
+            (Self::XlmRoberta | Self::Camembert, "pad_token") => Some("<pad>"),
+            (Self::XlmRoberta | Self::Camembert, "mask_token") => Some("<mask>"),
+            (Self::T5, "eos_token") => Some("</s>"),
+            (Self::T5, "unk_token") => Some("<unk>"),
+            (Self::T5, "pad_token") => Some("<pad>"),
+            (Self::Llama, "bos_token") => Some("<s>"),
+            (Self::Llama, "eos_token") => Some("</s>"),
+            (Self::Llama, "unk_token") => Some("<unk>"),
             _ => None,
         }
     }
@@ -223,10 +296,14 @@ impl Settings {
             Some(v) => added_token(v, true)?,
             None => AddedToken::from(kind.default_special(name)?, true),
         };
-        // RoBERTa, BART, Longformer and MPNet make a mask token given as a plain
+        // RoBERTa, BART, Longformer, MPNet, XLM-RoBERTa and CamemBERT make a
+        // mask token given as a plain
         // string strip the space before it, so "a <mask>" ends in one token.
         if name == "mask_token"
-            && matches!(kind, Kind::Roberta | Kind::MpNet)
+            && matches!(
+                kind,
+                Kind::Roberta | Kind::MpNet | Kind::XlmRoberta | Kind::Camembert
+            )
             && !matches!(self.tokenizer.get(name), Some(Value::Object(_)))
         {
             token = token.lstrip(true);
@@ -236,6 +313,57 @@ impl Settings {
 
     fn special_content(&self, kind: Kind, name: &str) -> Option<String> {
         self.special(kind, name).map(|t| t.content)
+    }
+
+    /// A flag of the Python tokenizer that `null` in the config turns off,
+    /// where leaving it out keeps `default`.
+    fn nullable_flag(&self, key: &str, default: bool) -> bool {
+        match self.tokenizer.get(key) {
+            None => default,
+            Some(v) => v.as_bool().unwrap_or(false),
+        }
+    }
+
+    /// `legacy`, which only T5 and Llama tokenizers have; unset or null means
+    /// true, the behaviour from before the setting existed.
+    fn legacy(&self, kind: Kind) -> bool {
+        match kind {
+            Kind::T5 | Kind::Llama => self
+                .tokenizer
+                .get("legacy")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            _ => true,
+        }
+    }
+
+    /// `add_prefix_space` as the converter reads it from the Python tokenizer:
+    /// XLM-RoBERTa and CamemBERT have no such attribute and always add it.
+    fn spm_add_prefix_space(&self, kind: Kind) -> bool {
+        match kind {
+            Kind::T5 | Kind::Llama => self.nullable_flag("add_prefix_space", true),
+            _ => true,
+        }
+    }
+
+    /// The special tokens the Python class adds when the config lists none.
+    fn default_additional_special(&self, kind: Kind) -> Vec<String> {
+        match kind {
+            Kind::Camembert => ["<s>NOTUSED", "</s>NOTUSED", "<unk>NOTUSED"]
+                .map(String::from)
+                .to_vec(),
+            Kind::T5 => (0..self.t5_extra_ids())
+                .map(|i| format!("<extra_id_{i}>"))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn t5_extra_ids(&self) -> usize {
+        self.tokenizer
+            .get("extra_ids")
+            .and_then(Value::as_u64)
+            .unwrap_or(100) as usize
     }
 }
 
@@ -380,6 +508,212 @@ fn build_wordpiece(dir: &Path, kind: Kind, settings: &Settings) -> Result<Tokeni
     Ok(tokenizer)
 }
 
+/// The tokenizer transformers' `SpmConverter` subclasses build from a
+/// SentencePiece `.model` file, with the post-processor the fast tokenizer
+/// class sets.
+fn build_sentencepiece(file: &Path, kind: Kind, settings: &Settings) -> Result<Tokenizer> {
+    let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+    let spm = SpmModel::parse(&bytes).with_context(|| format!("parsing {}", file.display()))?;
+    let pieces = &spm.pieces;
+    let scored_piece = |p: &sentencepiece::Piece| (p.piece.clone(), f64::from(p.score));
+    let from = |n: usize| pieces.get(n..).unwrap_or(&[]).iter().map(scored_piece);
+    let zero = |t: &str| (t.to_owned(), 0.0);
+
+    // Each converter's `vocab()`: the fairseq models put their own special
+    // tokens first, so their ids differ from the .model file's.
+    let (scored, unk_id): (Vec<(String, f64)>, usize) = match kind {
+        Kind::XlmRoberta => {
+            let mut v: Vec<_> = ["<s>", "<pad>", "</s>", "<unk>"].map(zero).to_vec();
+            v.extend(from(3));
+            v.push(zero("<mask>"));
+            (v, 3)
+        }
+        Kind::Camembert => {
+            let mut v: Vec<_> = ["<s>NOTUSED", "<pad>", "</s>NOTUSED", "<unk>"]
+                .map(zero)
+                .to_vec();
+            v.push(("<unk>NOTUSED".into(), -100.0));
+            v.extend(from(1));
+            v.push(zero("<mask>"));
+            (v, 3)
+        }
+        Kind::T5 => {
+            let mut v: Vec<_> = from(0).collect();
+            v.extend(
+                (0..settings.t5_extra_ids())
+                    .rev()
+                    .map(|i| (format!("<extra_id_{i}>"), 0.0)),
+            );
+            (v, usize::try_from(spm.unk_id).unwrap_or(0))
+        }
+        Kind::Llama => {
+            let mut v: Vec<_> = pieces.iter().take(3).map(|p| zero(&p.piece)).collect();
+            v.extend(from(3));
+            (v, 0)
+        }
+        _ => unreachable!("not a SentencePiece kind"),
+    };
+
+    let byte_fallback = kind == Kind::Llama;
+    let mut tokenizer = match spm.model_type {
+        sentencepiece::ModelType::Unigram => Tokenizer::new(
+            Unigram::from(scored, Some(unk_id), byte_fallback).map_err(|e| anyhow!(e))?,
+        ),
+        sentencepiece::ModelType::Bpe => {
+            let file_vocab: HashMap<String, u32> = pieces
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (p.piece.clone(), i as u32))
+                .collect();
+            let merges = sentencepiece::generate_merges(&file_vocab, &scored);
+            let vocab: HashMap<&str, u32> = scored
+                .iter()
+                .enumerate()
+                .map(|(i, (w, _))| (w.as_str(), i as u32))
+                .collect();
+            // Through serde, since the builder takes the crate's own map type.
+            let bpe: BPE = serde_json::from_value(serde_json::json!({
+                "vocab": vocab,
+                "merges": merges,
+                "unk_token": spm.unk_piece,
+                "fuse_unk": true,
+                "byte_fallback": byte_fallback,
+            }))
+            .context("building BPE from the SentencePiece model")?;
+            Tokenizer::new(bpe)
+        }
+        sentencepiece::ModelType::Other(t) => bail!(
+            "{} is a SentencePiece model of type {t}; only Unigram and BPE models can be read",
+            file.display()
+        ),
+    };
+
+    // Control and user-defined pieces become added tokens, so text holding
+    // them is never split; control pieces are special.
+    let file_tokens: Vec<AddedToken> = pieces
+        .iter()
+        .filter(|p| matches!(p.kind, PieceType::Control | PieceType::UserDefined))
+        .map(|p| AddedToken::from(p.piece.clone(), p.kind == PieceType::Control).normalized(false))
+        .collect();
+    tokenizer.add_tokens(&file_tokens);
+
+    let add_prefix_space = settings.spm_add_prefix_space(kind);
+    let legacy = settings.legacy(kind);
+    let prepend_scheme = match (add_prefix_space, legacy) {
+        (false, _) => PrependScheme::Never,
+        (true, true) => PrependScheme::Always,
+        (true, false) => PrependScheme::First,
+    };
+
+    if kind == Kind::Llama {
+        if legacy {
+            let mut seq: Vec<NormalizerWrapper> = Vec::new();
+            if add_prefix_space {
+                seq.push(Prepend::new("▁".into()).into());
+            }
+            seq.push(Replace::new(" ", "▁").map_err(|e| anyhow!(e))?.into());
+            tokenizer.with_normalizer(Some(NormalizerSequence::new(seq)));
+        } else {
+            tokenizer.with_pre_tokenizer(Some(Metaspace::new('▁', prepend_scheme, false)));
+        }
+        let mut decoders: Vec<DecoderWrapper> = vec![
+            DecoderWrapper::Replace(Replace::new("▁", " ").map_err(|e| anyhow!(e))?),
+            ByteFallback::new().into(),
+            Fuse::new().into(),
+        ];
+        if add_prefix_space {
+            decoders.push(StripDecoder::new(' ', 1, 0).into());
+        }
+        tokenizer.with_decoder(Some(DecoderSequence::new(decoders)));
+    } else {
+        let mut seq: Vec<NormalizerWrapper> = Vec::new();
+        if !spm.precompiled_charsmap.is_empty() {
+            let precompiled = Precompiled::from(&spm.precompiled_charsmap).map_err(|e| {
+                anyhow!("reading the normalization table of {}: {e}", file.display())
+            })?;
+            seq.push(precompiled.into());
+        }
+        seq.push(Strip::new(false, true).into());
+        seq.push(
+            Replace::new(
+                tokenizers::normalizers::replace::ReplacePattern::Regex(" {2,}".into()),
+                "▁",
+            )
+            .map_err(|e| anyhow!(e))?
+            .into(),
+        );
+        tokenizer.with_normalizer(Some(NormalizerSequence::new(seq)));
+        tokenizer.with_pre_tokenizer(Some(Metaspace::new('▁', prepend_scheme, true)));
+        tokenizer.with_decoder(Some(Metaspace::new('▁', prepend_scheme, true)));
+    }
+
+    let template = |single: String, pair: String, specials: Vec<(String, u32)>| {
+        TemplateProcessing::builder()
+            .try_single(single)
+            .map_err(|e| anyhow!(e))?
+            .try_pair(pair)
+            .map_err(|e| anyhow!(e))?
+            .special_tokens(specials)
+            .build()
+            .map_err(anyhow::Error::from)
+    };
+    let post = match kind {
+        Kind::XlmRoberta | Kind::Camembert => {
+            let s = vocab_id(&tokenizer, "<s>")?;
+            let e = vocab_id(&tokenizer, "</s>")?;
+            template(
+                "<s> $A </s>".into(),
+                "<s> $A </s> </s> $B </s>".into(),
+                vec![("<s>".into(), s), ("</s>".into(), e)],
+            )?
+        }
+        Kind::T5 => {
+            let e = vocab_id(&tokenizer, "</s>")?;
+            template(
+                "$A </s>".into(),
+                "$A </s> $B </s>".into(),
+                vec![("</s>".into(), e)],
+            )?
+        }
+        _ => {
+            // LlamaTokenizerFast.update_post_processor.
+            let add_bos = settings.flag("add_bos_token", true);
+            let add_eos = settings.flag("add_eos_token", false);
+            let mut specials = Vec::new();
+            let mut wrap = |name: &str, on: bool| -> Result<Option<String>> {
+                if !on {
+                    return Ok(None);
+                }
+                let token = settings
+                    .special_content(kind, name)
+                    .ok_or_else(|| anyhow!("{name} is null, but the tokenizer is set to add it"))?;
+                specials.push((token.clone(), vocab_id(&tokenizer, &token)?));
+                Ok(Some(token))
+            };
+            let bos = wrap("bos_token", add_bos)?;
+            let eos = wrap("eos_token", add_eos)?;
+            let part = |t: usize| {
+                let pre = bos
+                    .as_ref()
+                    .map(|b| format!("{b}:{t} "))
+                    .unwrap_or_default();
+                let post = eos
+                    .as_ref()
+                    .map(|e| format!(" {e}:{t}"))
+                    .unwrap_or_default();
+                (pre, post)
+            };
+            let ((b0, e0), (b1, e1)) = (part(0), part(1));
+            let single = format!("{b0}$A:0{e0}");
+            let pair = format!("{single} {b1}$B:1{e1}");
+            specials.dedup();
+            template(single, pair, specials)?
+        }
+    };
+    tokenizer.with_post_processor(Some(post));
+    Ok(tokenizer)
+}
+
 /// `vocab.txt` as BERT's Python `load_vocab` reads it: one token per line, its
 /// id the line number. Only the line break is removed; the `tokenizers` crate's
 /// own reader trims all trailing whitespace, which would turn a vocabulary
@@ -408,30 +742,43 @@ fn add_tokens(
         .iter()
         .filter_map(|name| settings.special(kind, name))
         .collect();
-    if let Some(Value::Array(extra)) = settings.tokenizer.get("additional_special_tokens") {
-        specials.extend(extra.iter().filter_map(|v| added_token(v, true)));
+    match settings.tokenizer.get("additional_special_tokens") {
+        Some(Value::Array(extra)) => {
+            specials.extend(extra.iter().filter_map(|v| added_token(v, true)))
+        }
+        _ => specials.extend(
+            settings
+                .default_additional_special(kind)
+                .into_iter()
+                .map(|t| AddedToken::from(t, true)),
+        ),
     }
 
     // added_tokens_decoder maps ids to tokens; added_tokens.json maps tokens to
-    // ids. Either way, the ids say the order they were added in.
-    let mut by_id: Vec<(u32, AddedToken)> = Vec::new();
+    // ids. Either way, the ids say the order they were added in. The older
+    // added_tokens.json only fills ids the decoder leaves out, and makes a token
+    // special when it is one of the special tokens.
+    let mut by_id: std::collections::BTreeMap<u32, AddedToken> = Default::default();
     if let Some(Value::Object(decoder)) = settings.tokenizer.get("added_tokens_decoder") {
         for (id, v) in decoder {
             if let (Ok(id), Some(t)) = (id.parse::<u32>(), added_token(v, false)) {
-                by_id.push((id, t));
+                by_id.insert(id, t);
             }
         }
     }
     for (content, id) in read_object(&dir.join("added_tokens.json"))? {
-        if let Some(id) = id.as_u64() {
-            by_id.push((id as u32, AddedToken::from(content, false)));
+        let Some(id) = id.as_u64().map(|id| id as u32) else {
+            continue;
+        };
+        if by_id.contains_key(&id) || by_id.values().any(|t| t.content == content) {
+            continue;
         }
+        let special = specials.iter().any(|t| t.content == content);
+        by_id.insert(id, AddedToken::from(content, special));
     }
-    by_id.sort_by_key(|(id, _)| *id);
 
     tokenizer.add_special_tokens(&specials);
-    let (special, normal): (Vec<_>, Vec<_>) =
-        by_id.into_iter().map(|(_, t)| t).partition(|t| t.special);
+    let (special, normal): (Vec<_>, Vec<_>) = by_id.into_values().partition(|t| t.special);
     tokenizer.add_special_tokens(&special);
     tokenizer.add_tokens(&normal);
     Ok(())
@@ -453,6 +800,7 @@ fn path_str(path: &Path) -> Result<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tokenizers::PreTokenizerWrapper;
 
     /// The expected ids are what transformers 4.57's `AutoTokenizer` gives for
     /// the same files.
@@ -484,6 +832,71 @@ mod tests {
                "r":10,"d":11,"He":12,"ll":13,"Hell":14,"Hello":15,"Ġw":16,"or":17,
                "Ġwor":18,"ld":19,"Ġworld":20,"!":21,"<mask>":22})
         .to_string()
+    }
+
+    /// An XLM-RoBERTa folder with only `sentencepiece.bpe.model`.
+    fn xlmr_spm_folder() -> tempfile::TempDir {
+        use super::super::sentencepiece::proto::unigram_model;
+        let model = unigram_model(&[
+            ("<unk>", 0.0, 2),
+            ("<s>", 0.0, 3),
+            ("</s>", 0.0, 3),
+            ("▁hello", -1.0, 1),
+            ("▁world", -1.0, 1),
+            ("▁", -2.0, 1),
+            ("h", -3.0, 1),
+            ("e", -3.0, 1),
+            ("l", -3.0, 1),
+            ("o", -3.0, 1),
+            ("w", -3.0, 1),
+            ("r", -3.0, 1),
+            ("d", -3.0, 1),
+        ]);
+        let dir = folder(&[(
+            "tokenizer_config.json",
+            json!({"tokenizer_class": "XLMRobertaTokenizer"}).to_string(),
+        )]);
+        std::fs::write(dir.path().join("sentencepiece.bpe.model"), model).unwrap();
+        dir
+    }
+
+    /// A converted tokenizer is already what transformers builds, so
+    /// `load_model_tokenizer` leaves it alone; the whitespace patch is for a
+    /// published tokenizer.json only. Patched, a converted XLM-R tokenizer gave
+    /// NER spans one character off.
+    #[test]
+    fn load_model_tokenizer_patches_only_a_published_tokenizer_json() {
+        let spm = xlmr_spm_folder();
+        let converted = load_model_tokenizer(spm.path()).unwrap();
+        assert_eq!(
+            converted.to_string(false).unwrap(),
+            load_tokenizer(spm.path())
+                .unwrap()
+                .to_string(false)
+                .unwrap()
+        );
+        assert!(matches!(
+            converted.get_pre_tokenizer(),
+            Some(PreTokenizerWrapper::Metaspace(_))
+        ));
+        // fairseq ids: <s> <pad> </s> <unk>, then the file's pieces shifted by
+        // one. As in transformers, "▁world" spans the space it stands for.
+        let enc = converted.encode("hello world", true).unwrap();
+        assert_eq!(enc.get_ids(), [0, 4, 5, 2]);
+        assert_eq!(enc.get_offsets(), [(0, 0), (0, 5), (5, 11), (0, 0)]);
+
+        let published = folder(&[("tokenizer.json", converted.to_string(false).unwrap())]);
+        let patched = load_model_tokenizer(published.path()).unwrap();
+        assert!(matches!(
+            patched.get_pre_tokenizer(),
+            Some(PreTokenizerWrapper::Sequence(_))
+        ));
+        assert!(matches!(
+            load_tokenizer(published.path())
+                .unwrap()
+                .get_pre_tokenizer(),
+            Some(PreTokenizerWrapper::Metaspace(_))
+        ));
     }
 
     #[test]
@@ -599,7 +1012,9 @@ mod tests {
         assert!(!has_tokenizer(dir.path()));
         let err = load_tokenizer(dir.path()).unwrap_err().to_string();
         assert!(
-            err.contains("tokenizer.json, vocab.json with merges.txt, or vocab.txt"),
+            err.contains(
+                "tokenizer.json, vocab.json with merges.txt, vocab.txt, or a SentencePiece .model file"
+            ),
             "{err}"
         );
     }

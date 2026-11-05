@@ -78,6 +78,11 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.18"
 reqwest = { workspace = true }
 memmap2 = { workspace = true }
+# Renders a model folder's own chat_template, as transformers does.
+minijinja = { version = "2", default-features = false, features = ["builtins", "serde", "json", "loop_controls", "debug", "macros", "multi_template", "preserve_order"] }
+# Local time for the templates' strftime_now, as Python's datetime.now().
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+minijinja-contrib = { version = "2", default-features = false, features = ["pycompat"] }
 pollster = { workspace = true }
 dirs = { workspace = true }
 wgpu = { workspace = true }

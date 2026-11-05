@@ -15,7 +15,7 @@ pub fn apply_repetition_penalty_inplace<S>(
     if penalty == 1.0 {
         return;
     }
-    for &token in tokens {
+    for token in distinct(tokens) {
         let idx = token as usize;
         if idx < logits.len() {
             let score = logits[idx];
@@ -26,6 +26,14 @@ pub fn apply_repetition_penalty_inplace<S>(
             }
         }
     }
+}
+
+/// Each token once, in first-seen order. transformers' repetition penalty
+/// gathers and scatters by id, so a token seen three times is penalised once,
+/// not three times over.
+fn distinct(tokens: &[u32]) -> impl Iterator<Item = u32> + '_ {
+    let mut seen = std::collections::HashSet::with_capacity(tokens.len());
+    tokens.iter().copied().filter(move |t| seen.insert(*t))
 }
 
 /// Apply no-repeat n-gram blocking in-place - works with both Array1 and ArrayViewMut1
@@ -65,8 +73,7 @@ pub fn apply_repetition_penalty(
         return logits;
     }
 
-    for &token_id in past_tokens {
-        // log::info!("Applying repetition penalty to token {}: logits: {} logits: {:?}", token_id, logits.len(), logits);
+    for token_id in distinct(past_tokens) {
         let score = logits[token_id as usize];
 
         if score > 0.0 {
@@ -264,7 +271,7 @@ pub fn log_softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
 }
 
 pub fn apply_repetition_penalty_mut(logits: &mut Array1<f32>, tokens: &[u32], penalty: f32) {
-    for &token in tokens {
+    for token in distinct(tokens) {
         let idx = token as usize;
         if idx < logits.len() {
             let score = logits[idx];
@@ -295,6 +302,31 @@ pub fn apply_no_repeat_ngram(logits: &mut Array1<f32>, tokens: &[u32], ngram_siz
 
 #[cfg(test)]
 mod tests {
+
+    /// A token repeated in the history is penalised once. Expected values are
+    /// transformers' RepetitionPenaltyLogitsProcessor on the same scores and
+    /// input_ids [0, 0, 0, 1, 1, 2].
+    #[test]
+    fn repetition_penalty_counts_each_token_once_like_transformers() {
+        let history = [0, 0, 0, 1, 1, 2];
+        let scores = || Array1::from(vec![2.0f32, -1.0, 0.5, 3.0]);
+        let close = |got: &Array1<f32>, want: [f32; 4]| {
+            for (g, w) in got.iter().zip(want) {
+                assert!((g - w).abs() < 1e-6, "{got:?} vs {want:?}");
+            }
+        };
+        let want_1_1 = [1.8181818, -1.1, 0.45454544, 3.0];
+
+        close(&apply_repetition_penalty(scores(), &history, 1.1), want_1_1);
+
+        let mut l = scores();
+        apply_repetition_penalty_mut(&mut l, &history, 1.1);
+        close(&l, want_1_1);
+
+        let mut l = scores();
+        apply_repetition_penalty_inplace(&mut l, &history, 2.0);
+        close(&l, [1.0, -2.0, 0.25, 3.0]);
+    }
     use super::*;
     use ndarray::array;
 

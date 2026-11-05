@@ -46,8 +46,11 @@ pub struct Chat {
     /// Inner generator for text generation.
     generator: Generator,
 
-    /// Model type from registry.
-    model_type: ModelType,
+    /// The registry model, or `None` for one loaded from a folder.
+    model_type: Option<ModelType>,
+
+    /// The registry name, or the folder's.
+    model_name: String,
 
     /// Default system prompt.
     system_prompt: Option<String>,
@@ -83,24 +86,30 @@ impl Chat {
 
     /// Internal: construct from builder.
     pub async fn from_builder(builder: ChatBuilder) -> ChatResult<Self> {
-        // Resolve model type
-        let model_type = ModelType::from_cli_name(&builder.model)
-            .ok_or_else(|| ChatError::UnknownModel(builder.model.clone()))?;
-
-        // Validate model for chat
-        let validation = validate_for_chat(model_type)?;
-
-        // Emit warnings if not suppressed
-        if !builder.quiet && !builder.allow_suboptimal {
-            for warning in &validation.warnings {
-                eprintln!("Warning: {}", warning);
+        // A folder is checked by loading it: whether it can chat is whether
+        // it brings a chat template.
+        let model_type = match &builder.model_path {
+            Some(_) => None,
+            None => {
+                let model_type = ModelType::from_cli_name(&builder.model)
+                    .ok_or_else(|| ChatError::UnknownModel(builder.model.clone()))?;
+                let validation = validate_for_chat(model_type)?;
+                if !builder.quiet && !builder.allow_suboptimal {
+                    for warning in &validation.warnings {
+                        eprintln!("Warning: {}", warning);
+                    }
+                }
+                Some(model_type)
             }
-        }
+        };
 
         // Build the inner generator
         let mut gen_builder = GeneratorBuilder::new(&builder.model)
             .device(builder.device)
             .download_policy(builder.download_policy);
+        if let Some(path) = &builder.model_path {
+            gen_builder = gen_builder.model_path(path);
+        }
 
         if builder.quiet {
             gen_builder = gen_builder.quiet();
@@ -157,9 +166,14 @@ impl Chat {
             crate::generator::GeneratorError::InvalidConfig(s) => ChatError::InvalidConfig(s),
         })?;
 
-        // Verify chat template exists
-        if generator.decoder().model.chat_template().is_none() {
-            return Err(ChatError::NoChatTemplate(builder.model));
+        let mut generator = generator;
+        let model_name = generator.model_name().to_string();
+        let renders_special = match generator.decoder().model.chat_template() {
+            Some(t) => t.renders_special_tokens(),
+            None => return Err(ChatError::NoChatTemplate(model_name)),
+        };
+        if renders_special {
+            generator.set_add_bos_token(false);
         }
 
         // Get resolved generation config
@@ -168,6 +182,7 @@ impl Chat {
         Ok(Self {
             generator,
             model_type,
+            model_name,
             system_prompt: builder.system_prompt,
             generation_config,
             user_overrides: builder.generation_overrides,
@@ -187,6 +202,14 @@ impl Chat {
     /// Format a conversation using the chat template.
     pub fn format_prompt(&self, conversation: &Conversation) -> String {
         self.chat_template().apply(conversation)
+    }
+
+    /// [`format_prompt`](Self::format_prompt), or why the model's template
+    /// refuses the conversation.
+    pub(crate) fn render_prompt(&self, conversation: &Conversation) -> ChatResult<String> {
+        self.chat_template()
+            .try_apply(conversation)
+            .map_err(ChatError::InvalidConfig)
     }
 
     /// Create a Conversation with the configured system prompt.
@@ -242,7 +265,7 @@ impl Chat {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
 
-        let prompt = self.format_prompt(&conversation);
+        let prompt = self.render_prompt(&conversation)?;
         self.generate(&prompt, &GenerationOverrides::default())
             .await
     }
@@ -254,7 +277,7 @@ impl Chat {
         let mut conversation = self.history_to_conversation(history);
         conversation.push_user(message);
 
-        let prompt = self.format_prompt(&conversation);
+        let prompt = self.render_prompt(&conversation)?;
         self.generate(&prompt, &GenerationOverrides::default())
             .await
     }
@@ -268,7 +291,7 @@ impl Chat {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
 
-        let prompt = self.format_prompt(&conversation);
+        let prompt = self.render_prompt(&conversation)?;
         self.generate(&prompt, overrides).await
     }
 
@@ -291,7 +314,7 @@ impl Chat {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
 
-        let prompt = self.format_prompt(&conversation);
+        let prompt = self.render_prompt(&conversation)?;
         self.generate_stream(prompt, GenerationOverrides::default())
             .await
     }
@@ -305,7 +328,7 @@ impl Chat {
         let mut conversation = self.history_to_conversation(history);
         conversation.push_user(message);
 
-        let prompt = self.format_prompt(&conversation);
+        let prompt = self.render_prompt(&conversation)?;
         self.generate_stream(prompt, GenerationOverrides::default())
             .await
     }
@@ -319,7 +342,7 @@ impl Chat {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
 
-        let prompt = self.format_prompt(&conversation);
+        let prompt = self.render_prompt(&conversation)?;
         self.generate_stream(prompt, overrides).await
     }
 
@@ -384,14 +407,14 @@ impl Chat {
         Ok(Box::pin(futures::stream::iter(opening).chain(mapped)))
     }
 
-    /// Get the model type.
-    pub fn model_type(&self) -> ModelType {
+    /// The registry model, or `None` for one loaded from a folder.
+    pub fn model_type(&self) -> Option<ModelType> {
         self.model_type
     }
 
-    /// Get the model's CLI name.
+    /// The model's registry name, or its folder's name.
     pub fn model_name(&self) -> &str {
-        self.model_type.cli_name()
+        &self.model_name
     }
 
     /// Get the current chat mode.

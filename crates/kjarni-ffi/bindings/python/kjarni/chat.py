@@ -1,5 +1,6 @@
 """High-level Chat API."""
 
+import os
 from typing import Callable, Iterable, List, NamedTuple, Optional, Tuple
 from ctypes import (
     c_void_p, c_char_p, c_int, c_int32, c_float, c_size_t, c_bool, byref, POINTER, Structure,
@@ -182,13 +183,14 @@ class Chat:
 
     def __init__(
         self,
-        model: str,
+        model: Optional[str] = None,
         system_prompt: Optional[str] = None,
         mode: str = "default",
         device: str = "cpu",
         cache_dir: Optional[str] = None,
         quiet: bool = False,
         quantized: bool = False,
+        model_path: Optional[str] = None,
     ):
         """Load a chat model, downloading it on first use.
 
@@ -201,12 +203,20 @@ class Chat:
             quiet: Suppress progress output
             quantized: Load the 4-bit GGUF weights instead of full precision: a
                 fraction of the memory and several times faster to generate on a CPU
+            model_path: A local model folder, such as one downloaded from the
+                Hugging Face Hub, used instead of ``model``. The conversation is
+                formatted with the chat template in the folder's tokenizer files.
         """
+        if model is None and model_path is None:
+            raise ValueError("Chat needs a model name or a model_path")
         if mode not in _MODES:
             raise ValueError(f"unknown mode {mode!r}; expected default, creative or reasoning")
         config = _lib.kjarni_chat_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
-        config.model_name = model.encode("utf-8")
+        if model:
+            config.model_name = model.encode("utf-8")
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
         config.system_prompt = encode_or_none(system_prompt)
         config.cache_dir = encode_or_none(cache_dir)
         config.mode = _MODES[mode]

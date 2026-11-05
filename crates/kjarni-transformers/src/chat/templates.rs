@@ -146,9 +146,24 @@ pub trait ChatTemplate: Send + Sync {
     /// Format a conversation into a prompt string for the model
     fn apply(&self, conversation: &Conversation) -> String;
 
+    /// [`apply`](Self::apply), or why the conversation cannot be formatted:
+    /// a model's own Jinja template can refuse one, such as one whose roles do
+    /// not alternate.
+    fn try_apply(&self, conversation: &Conversation) -> Result<String, String> {
+        Ok(self.apply(conversation))
+    }
+
     /// Get stop tokens/sequences that indicate end of assistant response
     fn stop_sequences(&self) -> Vec<String> {
         vec![]
+    }
+
+    /// Whether the prompt is complete as rendered, special tokens included,
+    /// so that nothing is added when it is tokenized. True of a model's own
+    /// Jinja template, which transformers tokenizes with
+    /// `add_special_tokens=False`: a template that writes no BOS gets none.
+    fn renders_special_tokens(&self) -> bool {
+        false
     }
 
     /// Get the model's default system prompt (if any)

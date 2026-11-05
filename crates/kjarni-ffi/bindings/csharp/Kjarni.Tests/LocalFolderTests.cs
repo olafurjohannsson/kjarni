@@ -87,5 +87,42 @@ namespace Kjarni.Tests
                 Directory.Delete(empty, true);
             }
         }
+
+        private const string Question = "What is the capital of Iceland?";
+
+        private static string SendGreedy(Chat chat)
+        {
+            var config = GenerationConfig.Greedy();
+            config.MaxNewTokens = 24;
+            return chat.Send(Question, config);
+        }
+
+        [SkippableFact]
+        public void Chat_FromFolder_MatchesByName()
+        {
+            Heavy.SkipIfSet();
+            string want;
+            using (var byName = new Chat("qwen2.5-0.5b-instruct", quiet: true))
+                want = SendGreedy(byName);
+            Assert.Contains("Reykjav", want);
+
+            var folder = Path.Combine(CacheDir(), "Qwen_Qwen2.5-0.5B-Instruct");
+            using (var byPath = new Chat(null, modelPath: folder, quiet: true))
+                Assert.Equal(want, SendGreedy(byPath));
+        }
+
+        [Fact]
+        public void Chat_NeedsANameOrAFolder()
+        {
+            Assert.Throws<ArgumentException>(() => new Chat(null));
+        }
+
+        [Fact]
+        public void Chat_FromAnEncoderFolder_SaysItIsNotAChatModel()
+        {
+            var folder = Path.Combine(CacheDir(), "distilbert_distilbert-base-uncased-finetuned-sst-2-english");
+            var ex = Assert.ThrowsAny<Exception>(() => new Chat(null, modelPath: folder, quiet: true));
+            Assert.Contains("not suitable for chat", ex.Message);
+        }
     }
 }

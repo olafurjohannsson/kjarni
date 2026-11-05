@@ -55,8 +55,8 @@ pub async fn run(
         ));
     }
 
-    // Check if downloaded
-    if !registry::is_model_downloaded(model)? {
+    // A path is loaded as it is; the registry copy would go unread.
+    if model_path.is_none() && !registry::is_model_downloaded(model)? {
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }
@@ -67,7 +67,7 @@ pub async fn run(
     }
 
     // Load model
-    if !quiet {
+    if !quiet && model_path.is_none() {
         eprintln!("Loading model '{}'...", model);
     }
 
@@ -85,7 +85,14 @@ pub async fn run(
             .into_inner()
     });
 
-    let loaded_model: Arc<dyn DecoderLanguageModel> = if let Some(path) = model_path {
+    let folder = model_path.map(std::path::Path::new).filter(|p| p.is_dir());
+    let loaded_model: Arc<dyn DecoderLanguageModel> = if let Some(dir) = folder {
+        // A model folder names its own architecture in config.json.
+        if !quiet {
+            eprintln!("Loading weights from {}...", dir.display());
+        }
+        kjarni::generator::load_decoder(dir, device, load_cfg).await?
+    } else if let Some(path) = model_path {
         let p = std::path::Path::new(path);
         if !p.exists() {
             return Err(anyhow!("--model-path not found: {path}"));

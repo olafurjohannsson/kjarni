@@ -141,7 +141,7 @@ impl BertConfig {
         self.model_type.as_deref() == Some("nomic_bert")
     }
 
-    /// RoBERTa and XLM-RoBERTa reuse the BERT layout but number positions from
+    /// RoBERTa, XLM-RoBERTa and CamemBERT reuse the BERT layout but number positions from
     /// `pad_token_id + 1` rather than from zero, so their tables are two rows
     /// longer than the context they serve: bge-m3 declares 8194 positions for an
     /// 8192 token window. Reading from row zero shifts every position embedding
@@ -149,7 +149,7 @@ impl BertConfig {
     fn is_roberta_family(&self) -> bool {
         matches!(
             self.model_type.as_deref(),
-            Some("roberta") | Some("xlm-roberta") | Some("xlm_roberta")
+            Some("roberta") | Some("xlm-roberta") | Some("xlm_roberta") | Some("camembert")
         )
     }
 
@@ -849,7 +849,7 @@ mod parity_tests {
     fn roberta_family_serves_two_fewer_tokens_than_its_position_table() {
         // A 514-row table starts at offset 2, so 512 tokens fit. Allowing 514 read
         // past the end of the table, which PyTorch refuses outright.
-        for model_type in ["roberta", "xlm-roberta"] {
+        for model_type in ["roberta", "xlm-roberta", "camembert"] {
             let cfg = BertConfig::from_json(&bert_json(model_type, 514)).unwrap();
             assert_eq!(cfg.metadata().max_seq_len, 512, "{model_type}");
         }

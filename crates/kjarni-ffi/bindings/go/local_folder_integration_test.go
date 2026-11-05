@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -130,5 +131,68 @@ func TestEmbedderDownloadsIntoCacheDir(t *testing.T) {
 	weights := filepath.Join(dir, "sentence-transformers_all-MiniLM-L6-v2", "model.safetensors")
 	if _, err := os.Stat(weights); err != nil {
 		t.Errorf("model not in the cache dir given: %v", err)
+	}
+}
+
+// hfSnapshot is the folder of repo in the Hugging Face cache, or "" when it
+// is not there.
+func hfSnapshot(repo string) string {
+	home := os.Getenv("HF_HOME")
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		home = filepath.Join(h, ".cache", "huggingface")
+	}
+	found, _ := filepath.Glob(filepath.Join(home, "hub", "models--"+strings.ReplaceAll(repo, "/", "--"), "snapshots", "*", "config.json"))
+	if len(found) == 0 {
+		return ""
+	}
+	return filepath.Dir(found[0])
+}
+
+func TestChatFromFolderMatchesByName(t *testing.T) {
+	skipHeavy(t)
+	const question = "What is the capital of Iceland?"
+	greedy := GreedyGenerationConfig()
+	greedy.MaxNewTokens = 24
+	send := func(c *Chat, err error) string {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("NewChat: %v", err)
+		}
+		defer c.Close()
+		reply, err := c.SendWithConfig(question, &greedy)
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		return reply
+	}
+
+	want := send(NewChat("qwen2.5-0.5b-instruct", WithQuiet(true)))
+	if !strings.Contains(want, "Reykjav") {
+		t.Fatalf("by name: %q", want)
+	}
+	folder := filepath.Join(kjarniCacheDir(t), "Qwen_Qwen2.5-0.5B-Instruct")
+	if got := send(NewChat("", WithModelPath(folder), WithQuiet(true))); got != want {
+		t.Errorf("from %s: %q, want %q", folder, got, want)
+	}
+	// A Hub folder brings its own Jinja chat template.
+	if hub := hfSnapshot("Qwen/Qwen2.5-0.5B-Instruct"); hub != "" {
+		if got := send(NewChat("", WithModelPath(hub), WithQuiet(true))); got != want {
+			t.Errorf("from %s: %q, want %q", hub, got, want)
+		}
+	}
+}
+
+func TestChatNeedsANameOrAFolder(t *testing.T) {
+	if _, err := NewChat(""); err == nil {
+		t.Fatal("NewChat with neither a name nor a folder succeeded")
+	}
+	folder := filepath.Join(kjarniCacheDir(t), "distilbert_distilbert-base-uncased-finetuned-sst-2-english")
+	_, err := NewChat("", WithModelPath(folder), WithQuiet(true))
+	if err == nil || !strings.Contains(err.Error(), "not suitable for chat") {
+		t.Fatalf("NewChat on an encoder folder: %v", err)
 	}
 }

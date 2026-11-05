@@ -209,8 +209,7 @@ impl EncoderLoader {
         let layout = config.layout();
 
         // Load tokenizer
-        let mut tokenizer = crate::tokenizer::load_tokenizer(model_path)?;
-        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
+        let mut tokenizer = crate::tokenizer::load_model_tokenizer(model_path)?;
 
         // Configure truncation and padding
         let max_seq_len = resolve_max_seq_len(

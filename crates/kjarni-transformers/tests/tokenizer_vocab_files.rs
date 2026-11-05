@@ -229,3 +229,113 @@ fn matches_transformers_on_every_reference_model() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// SentencePiece tokenizers against transformers 4.57's conversion of the same
+/// `.model` files. `KJARNI_SPM_REFERENCE` names the file the reference script
+/// writes; each model's folder is `KJARNI_SPM_MODELS/<name>`, and is used
+/// without its tokenizer.json. Besides ids and offsets, the tokenizer itself
+/// must equal transformers', section by section.
+#[test]
+fn sentencepiece_matches_transformers_on_every_reference_model() {
+    let (Ok(path), Ok(models)) = (
+        std::env::var("KJARNI_SPM_REFERENCE"),
+        std::env::var("KJARNI_SPM_MODELS"),
+    ) else {
+        eprintln!("skipping: KJARNI_SPM_REFERENCE and KJARNI_SPM_MODELS not set");
+        return;
+    };
+    let reference: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let texts: Vec<&str> = reference["texts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    let pair = (
+        reference["pair"][0].as_str().unwrap(),
+        reference["pair"][1].as_str().unwrap(),
+    );
+
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for (name, want) in reference["models"].as_object().unwrap() {
+        let src = Path::new(&models).join(name);
+        let dir = tempfile::tempdir().unwrap();
+        for entry in std::fs::read_dir(&src).unwrap().flatten() {
+            if entry.file_name() != "tokenizer.json" && entry.path().is_file() {
+                std::fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+            }
+        }
+        let loaded = load_tokenizer(dir.path());
+        if want.get("error").is_some() {
+            if loaded.is_ok() {
+                failures.push(format!("{name}: transformers fails, Kjarni loaded it"));
+            }
+            continue;
+        }
+        let tok = match loaded {
+            Ok(t) => t,
+            Err(e) => {
+                failures.push(format!("{name}: {e:#}"));
+                continue;
+            }
+        };
+        checked += 1;
+
+        let got: Value = serde_json::from_str(&tok.to_string(false).unwrap()).unwrap();
+        for section in [
+            "model",
+            "normalizer",
+            "pre_tokenizer",
+            "post_processor",
+            "decoder",
+            "added_tokens",
+        ] {
+            if got[section] != want["backend"][section] {
+                let g = got[section].to_string();
+                let w = want["backend"][section].to_string();
+                let at = g.chars().zip(w.chars()).take_while(|(a, b)| a == b).count();
+                let around = |s: &str| {
+                    s.chars()
+                        .skip(at.saturating_sub(60))
+                        .take(160)
+                        .collect::<String>()
+                };
+                failures.push(format!(
+                    "{name}: {section} differs at char {at}\n  kjarni: {}\n  hf:     {}",
+                    around(&g),
+                    around(&w)
+                ));
+            }
+        }
+
+        for (special, key) in [(true, "with_special"), (false, "without_special")] {
+            for (i, text) in texts.iter().enumerate() {
+                let enc = tok.encode_char_offsets(*text, special).unwrap();
+                let ids = enc.get_ids().to_vec();
+                let offsets: Vec<Vec<usize>> =
+                    enc.get_offsets().iter().map(|&(a, b)| vec![a, b]).collect();
+                let w = &want[key][i];
+                let want_ids: Vec<u32> = serde_json::from_value(w["ids"].clone()).unwrap();
+                let want_offsets: Vec<Vec<usize>> =
+                    serde_json::from_value(w["offsets"].clone()).unwrap();
+                if ids != want_ids {
+                    failures.push(format!(
+                        "{name} {key} {text:?}: ids {ids:?} want {want_ids:?}"
+                    ));
+                } else if offsets != want_offsets {
+                    failures.push(format!(
+                        "{name} {key} {text:?}: offsets {offsets:?} want {want_offsets:?}"
+                    ));
+                }
+            }
+        }
+        let ids = tok.encode(pair, true).unwrap().get_ids().to_vec();
+        let want_pair: Vec<u32> = serde_json::from_value(want["pair"].clone()).unwrap();
+        if ids != want_pair {
+            failures.push(format!("{name} pair: {ids:?} want {want_pair:?}"));
+        }
+    }
+    eprintln!("checked {checked} SentencePiece tokenizers");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

@@ -91,8 +91,7 @@ impl Seq2SeqLoader {
         let meta: ModelMetadata = config.metadata();
         let layout: ModelLayout = config.layout();
 
-        let mut tokenizer = crate::tokenizer::load_tokenizer(model_path)?;
-        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
+        let tokenizer = crate::tokenizer::load_model_tokenizer(model_path)?;
 
         // Build Backends
         let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = M::build_backends(

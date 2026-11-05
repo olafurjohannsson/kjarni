@@ -19,8 +19,9 @@ pub struct KjarniChatConfig {
     pub cache_dir: *const c_char,
     /// Model name (required) - e.g. "llama3.2-1b-instruct"
     pub model_name: *const c_char,
-    /// Reserved; must be NULL. Loading from a local path is not supported
-    /// through the C API yet, and a value here is rejected rather than ignored.
+    /// A folder with a Hugging Face decoder model (config.json, safetensors
+    /// weights, tokenizer files and a chat template). When set, model_name may
+    /// be NULL and the model's own chat template formats the conversation.
     pub model_path: *const c_char,
     /// System prompt (NULL = use model default)
     pub system_prompt: *const c_char,
@@ -232,24 +233,27 @@ pub unsafe extern "C" fn kjarni_chat_new_with_draft(
                     &*config
                 };
 
-                if !config.model_path.is_null() {
-                    set_last_error(
-                        "model_path is not supported by the C API yet; pass model_name, \
-                         and quantized = 1 for the GGUF weights"
-                            .to_string(),
-                    );
-                    return KjarniErrorCode::InvalidConfig;
-                }
+                let model_path = if config.model_path.is_null() {
+                    None
+                } else {
+                    match CStr::from_ptr(config.model_path).to_str() {
+                        Ok(s) => Some(s),
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    }
+                };
 
-                // Model name is required
-                if config.model_name.is_null() {
-                    set_last_error("model_name is required".to_string());
-                    return KjarniErrorCode::InvalidConfig;
-                }
-
-                let model_name = match CStr::from_ptr(config.model_name).to_str() {
-                    Ok(s) => s,
-                    Err(_) => return KjarniErrorCode::InvalidUtf8,
+                // A model name is required unless a folder is given.
+                let model_name = if config.model_name.is_null() {
+                    if model_path.is_none() {
+                        set_last_error("model_name or model_path is required".to_string());
+                        return KjarniErrorCode::InvalidConfig;
+                    }
+                    "custom"
+                } else {
+                    match CStr::from_ptr(config.model_name).to_str() {
+                        Ok(s) => s,
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    }
                 };
 
                 let draft_name = if draft_model_name.is_null() {
@@ -263,6 +267,9 @@ pub unsafe extern "C" fn kjarni_chat_new_with_draft(
 
                 let result = get_runtime().block_on(async {
                     let mut builder = Chat::builder(model_name);
+                    if let Some(path) = model_path {
+                        builder = builder.model_path(path);
+                    }
 
                     if let Some(d) = draft_name {
                         builder =
@@ -1016,17 +1023,78 @@ mod quantized_tests {
     use super::*;
     use std::ffi::CString;
 
+    fn last_error() -> String {
+        unsafe {
+            let p = crate::error::kjarni_last_error_message();
+            if p.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(p).to_string_lossy().into_owned()
+            }
+        }
+    }
+
     #[test]
-    fn model_path_is_rejected_not_ignored() {
+    fn a_missing_model_folder_is_an_invalid_config() {
         let mut config = kjarni_chat_config_default();
-        let name = CString::new("qwen2.5-0.5b-instruct").unwrap();
-        let path = CString::new("/some/model.gguf").unwrap();
-        config.model_name = name.as_ptr();
+        let path = CString::new("/no/such/model/folder").unwrap();
         config.model_path = path.as_ptr();
+        config.quiet = 1;
         let mut out = ptr::null_mut();
         let code = unsafe { kjarni_chat_new(&config, &mut out) };
         assert_eq!(code, KjarniErrorCode::InvalidConfig);
         assert!(out.is_null());
+        assert!(
+            last_error().contains("/no/such/model/folder"),
+            "{}",
+            last_error()
+        );
+    }
+
+    #[test]
+    fn neither_name_nor_path_is_an_invalid_config() {
+        let config = kjarni_chat_config_default();
+        let mut out = ptr::null_mut();
+        let code = unsafe { kjarni_chat_new(&config, &mut out) };
+        assert_eq!(code, KjarniErrorCode::InvalidConfig);
+        assert!(out.is_null());
+        assert_eq!(last_error(), "model_name or model_path is required");
+    }
+
+    /// Real model: Qwen2.5-0.5B-Instruct from its folder, without a model name,
+    /// chats with the folder's own chat template.
+    #[test]
+    fn chat_from_a_model_folder_generates() {
+        let dir = kjarni::common::default_cache_dir().join("Qwen_Qwen2.5-0.5B-Instruct");
+        if !dir.join("config.json").exists() {
+            eprintln!("skipping: run `kjarni model download qwen2.5-0.5b-instruct`");
+            return;
+        }
+        let mut config = kjarni_chat_config_default();
+        let path = CString::new(dir.to_str().unwrap()).unwrap();
+        config.model_path = path.as_ptr();
+        config.quiet = 1;
+        let mut chat = ptr::null_mut();
+        let code = unsafe { kjarni_chat_new(&config, &mut chat) };
+        assert_eq!(code, KjarniErrorCode::Ok, "{}", last_error());
+        let mut gen_config = kjarni_generation_config_default();
+        gen_config.temperature = 0.0;
+        gen_config.do_sample = 0;
+        gen_config.max_new_tokens = 16;
+        let msg = CString::new("What is the capital of Iceland?").unwrap();
+        let mut reply = ptr::null_mut();
+        unsafe {
+            assert_eq!(
+                kjarni_chat_send(chat, msg.as_ptr(), &gen_config, &mut reply),
+                KjarniErrorCode::Ok,
+                "{}",
+                last_error()
+            );
+            let text = CStr::from_ptr(reply).to_string_lossy().into_owned();
+            assert!(text.contains("Reykjav"), "got {text:?}");
+            crate::kjarni_string_free(reply);
+            kjarni_chat_free(chat);
+        }
     }
 
     #[test]

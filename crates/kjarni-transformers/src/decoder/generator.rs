@@ -200,7 +200,7 @@ impl DecoderGenerator {
 
     pub fn format_conversation(&self, conversation: &Conversation) -> Result<String> {
         if let Some(template) = self.model.chat_template() {
-            Ok(template.apply(conversation))
+            template.try_apply(conversation).map_err(|e| anyhow!(e))
         } else {
             conversation
                 .last()
