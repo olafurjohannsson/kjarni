@@ -251,17 +251,23 @@ The cost is measured in
 
 ### A model from a folder
 
-`Embedder`, `Classifier` and `Reranker` also load a model you have on disk, such as one
-downloaded from the Hugging Face Hub. The folder needs `config.json`, the weights as
-`model.safetensors`, and a tokenizer: `tokenizer.json`, or the older `vocab.json` with
-`merges.txt` (RoBERTa, GPT-2, BART) or `vocab.txt` (BERT, DistilBERT, MPNet).
+`Embedder`, `Classifier`, `Reranker` and `Chat` also load a model you have on disk, such
+as one downloaded from the Hugging Face Hub. The folder needs `config.json`, the weights
+as `model.safetensors`, and a tokenizer: `tokenizer.json`, or the older `vocab.json` with
+`merges.txt` (RoBERTa, GPT-2, BART), `vocab.txt` (BERT, DistilBERT, MPNet) or a
+SentencePiece `.model` file (XLM-RoBERTa, CamemBERT, T5, Llama 2, Mistral, Phi-3).
 
 ```python
-from kjarni import Classifier, Embedder
+from kjarni import Chat, Classifier, Embedder
 
 embedder = Embedder(model_path="IceBERT")
 classifier = Classifier(model_path="models/my-finetuned-bert")
+chat = Chat(model_path="Qwen2.5-0.5B-Instruct")
 ```
+
+`Chat` takes a Llama, Qwen2, Mistral, Phi-3 or GPT-2 folder and formats the conversation
+with the model's own chat template, from `chat_template.jinja` or `tokenizer_config.json`,
+as transformers does.
 
 ## Notes
 

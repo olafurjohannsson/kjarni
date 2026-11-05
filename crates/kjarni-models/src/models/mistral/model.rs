@@ -144,13 +144,14 @@ impl MistralModel {
         device: Device,
         context: Option<Arc<WgpuContext>>,
         decoder_config: Option<ModelLoadConfig>,
+        model_type: Option<ModelType>,
     ) -> Result<Self> {
         kjarni_transformers::pipeline::DecoderLoader::load_from_pretrained::<Self>(
             model_path,
             device,
             context,
             decoder_config,
-            Some(ModelType::Mistral7B_v0_3_Instruct),
+            model_type,
         )
     }
     pub fn config(&self) -> &Arc<MistralConfig> {

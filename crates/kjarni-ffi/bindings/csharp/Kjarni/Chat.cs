@@ -161,36 +161,49 @@ namespace Kjarni
         /// <param name="device">Device: "cpu" or "gpu"</param>
         /// <param name="quantized">Load the 4-bit GGUF weights instead of full precision:
         /// a fraction of the memory and several times faster to generate on a CPU.</param>
-        public Chat(string model, string? systemPrompt = null, ChatMode mode = ChatMode.Default,
-                     bool quiet = false, string? device = null, bool quantized = false)
+        /// <param name="modelPath">A local model folder, such as one downloaded from the Hugging Face Hub,
+        /// used instead of <paramref name="model"/>. The conversation is formatted with the chat
+        /// template in the folder's tokenizer files.</param>
+        public Chat(string? model, string? systemPrompt = null, ChatMode mode = ChatMode.Default,
+                     bool quiet = false, string? device = null, bool quantized = false,
+                     string? modelPath = null)
         {
-            var config = Native.kjarni_chat_config_default();
+            if (model == null && modelPath == null)
+                throw new ArgumentException("Chat needs a model name or a modelPath");
 
-            var modelBytes = Encoding.UTF8.GetBytes(model + '\0');
-            var modelPin = GCHandle.Alloc(modelBytes, GCHandleType.Pinned);
-            config.ModelName = modelPin.AddrOfPinnedObject();
+            var config = Native.kjarni_chat_config_default();
             config.Device = device == "gpu" ? KjarniDevice.Gpu : KjarniDevice.Cpu;
             config.Mode = (int)mode;
             config.Quiet = quiet ? 1 : 0;
             config.Quantized = quantized ? 1 : 0;
 
-            GCHandle systemPin = default;
-            if (systemPrompt != null)
-            {
-                var systemBytes = Encoding.UTF8.GetBytes(systemPrompt + '\0');
-                systemPin = GCHandle.Alloc(systemBytes, GCHandleType.Pinned);
-                config.SystemPrompt = systemPin.AddrOfPinnedObject();
-            }
-
+            IntPtr modelPtr = IntPtr.Zero;
+            IntPtr modelPathPtr = IntPtr.Zero;
+            IntPtr systemPtr = IntPtr.Zero;
             try
             {
+                if (model != null)
+                {
+                    modelPtr = Marshal.StringToCoTaskMemUTF8(model);
+                    config.ModelName = modelPtr;
+                }
+                if (modelPath != null)
+                {
+                    modelPathPtr = Marshal.StringToCoTaskMemUTF8(modelPath);
+                    config.ModelPath = modelPathPtr;
+                }
+                if (systemPrompt != null)
+                {
+                    systemPtr = Marshal.StringToCoTaskMemUTF8(systemPrompt);
+                    config.SystemPrompt = systemPtr;
+                }
                 Native.CheckError(Native.kjarni_chat_new(ref config, out _handle));
             }
             finally
             {
-                modelPin.Free();
-                if (systemPin.IsAllocated)
-                    systemPin.Free();
+                if (modelPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(modelPtr);
+                if (modelPathPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(modelPathPtr);
+                if (systemPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(systemPtr);
             }
         }
 

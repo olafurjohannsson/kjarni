@@ -60,7 +60,7 @@ impl<'a> ChatConversation<'a> {
 
         // Convert full history to conversation and generate
         let conversation = self.chat.history_to_conversation(&self.history);
-        let prompt = self.chat.format_prompt(&conversation);
+        let prompt = self.chat.render_prompt(&conversation)?;
 
         let response = self
             .chat
@@ -82,7 +82,7 @@ impl<'a> ChatConversation<'a> {
         self.history.push_user(message);
 
         let conversation = self.chat.history_to_conversation(&self.history);
-        let prompt = self.chat.format_prompt(&conversation);
+        let prompt = self.chat.render_prompt(&conversation)?;
         let response = self.chat.generate(&prompt, overrides).await?;
 
         self.history.push_assistant(&response);
@@ -121,7 +121,7 @@ impl<'a> ChatConversation<'a> {
     ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>> {
         // Format prompt from current history
         let conversation = self.chat.history_to_conversation(&self.history);
-        let prompt = self.chat.format_prompt(&conversation);
+        let prompt = self.chat.render_prompt(&conversation)?;
 
         // Get stream from chat (internal method)
         self.chat

@@ -58,6 +58,16 @@ pub struct SequenceClassifier {
     labels: Option<Vec<String>>,
 }
 
+/// XLM-RoBERTa and CamemBERT classifiers are RoBERTa underneath: the same
+/// layers under a `roberta.` prefix, and positions that start after the
+/// padding index.
+fn is_roberta_like(weights: &ModelWeights) -> bool {
+    matches!(
+        weights.model_type().as_deref(),
+        Some("xlm-roberta" | "xlm_roberta" | "camembert")
+    )
+}
+
 impl EncoderModelFactory for SequenceClassifier {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
         // Auto-detect config type
@@ -65,7 +75,7 @@ impl EncoderModelFactory for SequenceClassifier {
             Ok(Arc::new(DistilBertConfig::from_json(
                 weights.config_json(),
             )?))
-        } else if weights.is_roberta() || weights.is_distilroberta() {
+        } else if weights.is_roberta() || weights.is_distilroberta() || is_roberta_like(weights) {
             Ok(Arc::new(RobertaConfig::from_json(weights.config_json())?))
         } else {
             // Default to BERT

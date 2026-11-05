@@ -28,10 +28,6 @@ use super::types::{ChatMode, ChatResult};
 pub struct ChatBuilder {
     // Model selection
     pub(crate) model: String,
-    #[expect(
-        dead_code,
-        reason = "not referenced yet; kept until the path that needs it lands"
-    )]
     pub(crate) model_path: Option<PathBuf>,
 
     // Chat-specific
@@ -101,6 +97,15 @@ impl ChatBuilder {
         }
 
         builder
+    }
+
+    /// Load the model from a local folder instead of the registry: a
+    /// Llama, Qwen2, Mistral, Phi-3 or GPT-2 model with its `config.json`,
+    /// weights, tokenizer and the `chat_template` it was tuned with. A Kjarni
+    /// download folder, which keeps no template, uses its registry model's.
+    pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.model_path = Some(path.into());
+        self
     }
 
     /// Set the system prompt.

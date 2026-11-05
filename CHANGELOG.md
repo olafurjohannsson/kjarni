@@ -31,6 +31,41 @@
   exactly as before. Other tokenizers without one fail with a message saying how to
   save it, rather than guessing.
 
+- **SentencePiece tokenizers load from their `.model` file.** XLM-RoBERTa, CamemBERT,
+  T5 and mT5 (`sentencepiece.bpe.model`, `spiece.model`) and Llama 2 style models
+  such as TinyLlama, Mistral and Phi-3 (`tokenizer.model`) work without
+  `tokenizer.json`. The tokenizer is built as transformers 4.57 converts these files,
+  following `legacy`, `add_prefix_space`, `add_bos_token` and `add_eos_token` in
+  `tokenizer_config.json`, and gives the same ids and offsets. This covers models
+  such as `intfloat/multilingual-e5-small`, `BAAI/bge-m3` and `google/flan-t5-base`.
+
+- **XLM-RoBERTa and CamemBERT classifiers and NER models load.** They were read as
+  BERT and failed with a missing `bert.embeddings` tensor. Models such as
+  `Davlan/xlm-roberta-large-ner-hrl` now match PyTorch, and CamemBERT sentence
+  encoders pool like RoBERTa ones.
+
+- **Chat with any decoder model folder.** `kjarni chat --model-path`,
+  `Chat::builder(..).model_path(..)`, `model_path` on the Python `Chat`, `modelPath`
+  in C#, `WithModelPath` in Go and `model_path` in the C `KjarniChatConfig` load a
+  Llama, Qwen2, Mistral, Phi-3 or GPT-2 folder from the Hugging Face Hub. The
+  conversation is formatted by the folder's own Jinja `chat_template` (from
+  `chat_template.jinja` or `tokenizer_config.json`), rendered as transformers
+  renders it; a Kjarni download folder, which keeps no template file, uses the
+  template of the registry model it holds. `kjarni generate --model-path` accepts
+  such a folder too, as well as a `.gguf` file. A folder without a chat template, or
+  of a model that does not generate text, is reported by name. In the C API the
+  field was reserved and rejected; `model_name` may now be NULL when it is set.
+
+- **Repetition penalty counts each token once.** A token seen several times was
+  penalized once per occurrence; transformers penalizes it once. This changed the
+  output of every model whose generation defaults set a penalty, such as Qwen 2.5.
+
+- **Breaking: `Chat::model_type()` and `Generator::model_type()` return
+  `Option<ModelType>`.** A model loaded from a folder has none.
+
+- **Debug builds no longer print "Encoder buffers allocated" to stdout.** It is a
+  debug log message now, so it no longer corrupts JSON output.
+
 ## 0.4.4
 
 - **`kjarni mcp` finds photos by description.** The new `search_images` tool takes a

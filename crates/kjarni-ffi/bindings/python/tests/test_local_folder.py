@@ -9,8 +9,8 @@ import sys
 import unittest
 from pathlib import Path
 
-from _support import TempDir  # noqa: F401  (puts the package on sys.path)
-from kjarni import Classifier, Embedder, Reranker
+from _support import TempDir, heavy  # noqa: F401  (puts the package on sys.path)
+from kjarni import Chat, Classifier, Embedder, Reranker
 
 
 def cache_dir() -> Path:
@@ -61,3 +61,44 @@ class LocalFolderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def hf_snapshot(repo: str):
+    """The folder of `repo` in the Hugging Face cache, if it is there."""
+    home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+    snapshots = home / "hub" / ("models--" + repo.replace("/", "--")) / "snapshots"
+    found = sorted(snapshots.glob("*/config.json")) if snapshots.exists() else []
+    return found[0].parent if found else None
+
+
+@heavy
+class ChatFromFolderTest(unittest.TestCase):
+    QUESTION = "What is the capital of Iceland?"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.by_name = Chat("qwen2.5-0.5b-instruct", quiet=True).send(
+            cls.QUESTION, do_sample=False, max_new_tokens=24)
+
+    def test_chat_from_the_download_folder_matches_by_name(self):
+        folder = cache_dir() / "Qwen_Qwen2.5-0.5B-Instruct"
+        chat = Chat(model_path=folder, quiet=True)
+        self.assertIn("Reykjav", self.by_name)
+        self.assertEqual(chat.send(self.QUESTION, do_sample=False, max_new_tokens=24), self.by_name)
+
+    def test_chat_from_a_hub_folder_uses_its_template_and_matches_by_name(self):
+        folder = hf_snapshot("Qwen/Qwen2.5-0.5B-Instruct")
+        if folder is None:
+            self.skipTest("Qwen/Qwen2.5-0.5B-Instruct is not in the Hugging Face cache")
+        chat = Chat(model_path=str(folder), quiet=True)
+        self.assertEqual(chat.send(self.QUESTION, do_sample=False, max_new_tokens=24), self.by_name)
+
+    def test_chat_needs_a_name_or_a_folder(self):
+        with self.assertRaises(ValueError):
+            Chat()
+
+    def test_chat_from_an_encoder_folder_is_an_error(self):
+        folder = cache_dir() / "distilbert_distilbert-base-uncased-finetuned-sst-2-english"
+        with self.assertRaises(Exception) as ctx:
+            Chat(model_path=folder, quiet=True)
+        self.assertIn("not suitable for chat", str(ctx.exception))

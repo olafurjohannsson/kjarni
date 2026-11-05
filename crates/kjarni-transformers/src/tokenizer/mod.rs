@@ -2,9 +2,10 @@
 
 pub mod bpe;
 pub mod from_dir;
+mod sentencepiece;
 pub mod wordpiece;
 
-pub use from_dir::{TOKENIZER_FILES, has_tokenizer, load_tokenizer};
+pub use from_dir::{TOKENIZER_FILES, has_tokenizer, load_model_tokenizer, load_tokenizer};
 
 use tokenizers::models::ModelWrapper;
 use tokenizers::pre_tokenizers::PreTokenizerWrapper;

@@ -135,8 +135,7 @@ impl DecoderLoader {
         } else {
             model_path
         };
-        let mut tokenizer = crate::tokenizer::load_tokenizer(tokenizer_dir)?;
-        crate::tokenizer::match_sentencepiece_whitespace(&mut tokenizer);
+        let mut tokenizer = crate::tokenizer::load_model_tokenizer(tokenizer_dir)?;
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams {
                 max_length: meta.max_seq_len,
@@ -167,8 +166,15 @@ impl DecoderLoader {
             .with_backends(cpu_decoder, gpu_decoder)
             .with_context_opt(context)
             .build()?;
-        // Auto-detect template based on ModelType
-        let chat_template = model_type.and_then(chat_template_for);
+        // A registry model has its template written out; any other folder
+        // brings its own, the Jinja chat_template of its tokenizer config. A
+        // registry download keeps no template file, so a folder without one
+        // that is a registry model's cache folder gets that model's template.
+        let chat_template = match model_type {
+            Some(mt) => chat_template_for(mt),
+            None => folder_chat_template(tokenizer_dir)
+                .or_else(|| registry_model_of_folder(tokenizer_dir).and_then(chat_template_for)),
+        };
         Ok(M::new_from_pipeline(
             pipeline,
             tokenizer,
@@ -331,6 +337,27 @@ impl DecoderLoader {
     }
 }
 
+/// The Jinja chat template of the model in `dir`, if it has one. One that does
+/// not parse is reported and left out, so the model still generates text.
+#[cfg(not(target_arch = "wasm32"))]
+fn folder_chat_template(dir: &Path) -> Option<Box<dyn ChatTemplate>> {
+    match crate::chat::jinja::JinjaChatTemplate::from_dir(dir) {
+        Ok(t) => t.map(|t| Box::new(t) as Box<dyn ChatTemplate>),
+        Err(e) => {
+            log::warn!("ignoring the chat template in {}: {e:#}", dir.display());
+            None
+        }
+    }
+}
+
+/// The registry model whose cache folder `dir` is, by folder name: the
+/// name Kjarni downloads that model to.
+#[cfg(not(target_arch = "wasm32"))]
+fn registry_model_of_folder(dir: &Path) -> Option<ModelType> {
+    let name = dir.file_name()?.to_str()?;
+    ModelType::all().find(|mt| mt.repo_id().replace('/', "_") == name)
+}
+
 /// The chat template a model was tuned on, as its own `chat_template` renders
 /// it. Chosen per model, not per architecture: the R1 distills are Llama
 /// underneath with a format of their own, and Llama 3.1 and 3.2 date their
@@ -357,4 +384,46 @@ fn chat_template_for(mt: ModelType) -> Option<Box<dyn ChatTemplate>> {
         },
     };
     Some(template)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_registry_cache_folder_is_recognized_by_name() {
+        let cache = Path::new("/home/me/.cache/kjarni");
+        assert_eq!(
+            registry_model_of_folder(&cache.join("Qwen_Qwen2.5-0.5B-Instruct")),
+            Some(ModelType::Qwen2_5_0_5B_Instruct)
+        );
+        assert_eq!(
+            registry_model_of_folder(&cache.join("meta-llama_Llama-3.2-1B-Instruct")),
+            Some(ModelType::Llama3_2_1B_Instruct)
+        );
+        assert_eq!(registry_model_of_folder(&cache.join("my-finetune")), None);
+        // Case matters: this is a folder name, not a model name.
+        assert_eq!(
+            registry_model_of_folder(&cache.join("qwen_qwen2.5-0.5b-instruct")),
+            None
+        );
+    }
+
+    #[test]
+    fn registry_models_sharing_a_cache_folder_share_a_chat_template() {
+        let rendered = |mt: ModelType| {
+            chat_template_for(mt).map(|t| {
+                let mut c = crate::chat::templates::Conversation::new();
+                c.push(crate::chat::templates::Message::user("hi"));
+                t.apply(&c)
+            })
+        };
+        for a in ModelType::all() {
+            for b in ModelType::all() {
+                if a != b && a.repo_id() == b.repo_id() {
+                    assert_eq!(rendered(a), rendered(b), "{a:?} and {b:?}");
+                }
+            }
+        }
+    }
 }

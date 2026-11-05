@@ -95,12 +95,12 @@ pub trait EncoderLanguageModel: LanguageModel {
 
             {
                 let mut buffers = encoder.create_buffers(batch_size, seq_len);
-                #[cfg(debug_assertions)]
-                {
-                    let buf_desc: String = buffers.memory_breakdown();
-                    println!(
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
                         "Encoder buffers allocated for batch_size={}, seq_len={}: {}",
-                        batch_size, seq_len, buf_desc
+                        batch_size,
+                        seq_len,
+                        buffers.memory_breakdown()
                     );
                 }
                 let out = encoder

@@ -116,6 +116,8 @@ type chatOptions struct {
 	systemPrompt string
 	mode         ChatMode
 	quantized    bool
+	cacheDir     string
+	modelPath    string
 }
 
 // WithSystemPrompt sets the instructions the model sees before every message.
@@ -149,10 +151,13 @@ type Chat struct {
 }
 
 // NewChat loads a chat model by registry name, for example
-// "llama3.2-3b-instruct", downloading it on first use.
+// "llama3.2-3b-instruct", downloading it on first use. With WithModelPath it
+// loads a local Hugging Face model folder instead, model may be empty, and the
+// conversation is formatted with the folder's own chat template.
 //
 // opts takes ChatOption values (WithSystemPrompt, WithChatMode, WithQuantized)
-// and, of the shared options, WithQuiet and WithDevice.
+// and, of the shared options, WithQuiet, WithDevice, WithCacheDir and
+// WithModelPath.
 func NewChat(model string, opts ...interface{}) (*Chat, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })
@@ -173,17 +178,32 @@ func NewChat(model string, opts ...interface{}) (*Chat, error) {
 			if stdOpts.device != "" {
 				co.device = stdOpts.device
 			}
+			if stdOpts.cacheDir != "" {
+				co.cacheDir = stdOpts.cacheDir
+			}
+			if stdOpts.modelPath != "" {
+				co.modelPath = stdOpts.modelPath
+			}
 		case ChatOption:
 			o(&co)
 		}
 	}
 
-	modelStr, keepModel := cString(model)
+	if model == "" && co.modelPath == "" {
+		return nil, fmt.Errorf("NewChat needs a model name or WithModelPath")
+	}
+	modelStr, keepModel := cStringOrNull(model)
 	defer keepModel()
+	modelPath, keepModelPath := cStringOrNull(co.modelPath)
+	defer keepModelPath()
+	cacheDir, keepCacheDir := cStringOrNull(co.cacheDir)
+	defer keepCacheDir()
 
 	var config ffiChatConfig
 	config.Device = deviceCode(co.device)
 	config.ModelName = modelStr
+	config.ModelPath = modelPath
+	config.CacheDir = cacheDir
 	config.Mode = int32(co.mode)
 	config.Quiet = boolToInt(co.quiet)
 	config.Quantized = boolToInt(co.quantized)

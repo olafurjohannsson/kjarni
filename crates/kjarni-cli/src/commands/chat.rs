@@ -35,7 +35,7 @@ pub enum CommandResult {
 
 pub async fn run(
     model: &str,
-    _model_path: Option<&str>, // TODO: Handle custom model paths
+    model_path: Option<&str>,
     system_prompt: Option<&str>,
     temperature: f32,
     max_tokens: usize,
@@ -46,13 +46,18 @@ pub async fn run(
     draft_tokens: usize,
 ) -> Result<()> {
     // Fail on an unknown model here, with suggestions, rather than letting the
-    // builder report it without context.
-    let _ = crate::commands::util::resolve_model(model, Some("decoder"))?;
+    // builder report it without context. A folder is checked by loading it.
+    if model_path.is_none() {
+        let _ = crate::commands::util::resolve_model(model, Some("decoder"))?;
+    }
 
     // Initialize the Chat instance using the Builder
     let mut builder = Chat::builder(model)
         .temperature(temperature)
         .max_tokens(max_tokens);
+    if let Some(path) = model_path {
+        builder = builder.model_path(path);
+    }
 
     if quiet {
         builder = builder.quiet();
@@ -61,7 +66,9 @@ pub async fn run(
     if gpu {
         // Refuse before the loader starts uploading; an out-of-VRAM upload loses
         // the device and takes the terminal with it.
-        if let Some(mt) = kjarni::ModelType::from_cli_name(model) {
+        if model_path.is_none()
+            && let Some(mt) = kjarni::ModelType::from_cli_name(model)
+        {
             super::util::check_gpu_capacity(mt, gguf)?;
         }
         builder = builder.gpu();
