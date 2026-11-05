@@ -1154,6 +1154,7 @@ jobs:
           cp crates/kjarni-ffi/bindings/go/*.go go-push/
           cp crates/kjarni-ffi/bindings/go/go.mod go-push/
           cp crates/kjarni-ffi/bindings/go/go.sum go-push/ 2>/dev/null || true
+          cp -r crates/kjarni-ffi/bindings/go/examples go-push/
           cp crates/kjarni-ffi/include/kjarni.h go-push/
 
       # Fails before pushing if an embedded library is missing or the module does
@@ -1185,8 +1186,20 @@ jobs:
         run: |
           DEST=$(mktemp -d)
           git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-go.git "$DEST"
+          # Mirror the module rather than copy over it. Copying left lib_unix.go and
+          # lib_windows.go in place after they became dl_unix.go and dl_windows.go,
+          # and each pair declares openLibrary, so v0.4.3 and v0.4.4 did not build
+          # on any platform. README, LICENSE and the demo gif belong to kjarni-go.
+          find "$DEST" -maxdepth 1 -name '*.go' -delete
+          rm -rf "$DEST/lib" "$DEST/examples"
           cp -r go-push/* "$DEST"/
           cd "$DEST"
+          # The tree exactly as it will be pushed: Verify module checks go-push,
+          # which never has kjarni-go's own files in it.
+          go vet -unsafeptr=false ./...
+          GOOS=windows GOARCH=amd64 go vet -unsafeptr=false ./...
+          go build ./...
+          go test ./...
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A

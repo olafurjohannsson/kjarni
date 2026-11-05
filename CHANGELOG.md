@@ -17,6 +17,12 @@
   en-ROMANCE, is-en and en-is, `distilbart-cnn-12-6`, `flan-t5-base` and Whisper
   tiny, base, small, tiny.en and base.en. `kjarni rerank --model-path` works too.
 
+- **The Go module builds again.** `kjarni-go` v0.4.3 and v0.4.4 failed to compile on
+  every platform with `openLibrary redeclared`: publishing copied the new
+  `dl_unix.go` and `dl_windows.go` over the repository but left the old
+  `lib_unix.go` and `lib_windows.go`. Publishing now mirrors the Go files, the
+  examples and the libraries, and builds and tests the tree it pushes.
+
 - **Weights load from `pytorch_model.bin`.** Many Hub models, all Helsinki-NLP
   translation models among them, ship only PyTorch's pickle format. Kjarni reads it
   directly, both the zip format of PyTorch 1.6 and later and the older legacy
