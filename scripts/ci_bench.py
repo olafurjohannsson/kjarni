@@ -25,7 +25,10 @@ DECODE_MODEL = "qwen2.5-0.5b-instruct"
 # fewer tokens than the rate assumes and report a speed that is too low.
 DECODE_PROMPT = "Write a very long essay about the history of Iceland, in many chapters."
 DECODE_TOKENS = 129
-DECODE_MIN_WORDS = 100
+# Words stand in for tokens, which the CLI does not report. English runs about 0.75
+# words a token, so a full run is near 97 words and its exact count moves with the
+# text; on linux-x64 the full 129 tokens came to 99. An early stop leaves far fewer.
+DECODE_MIN_WORDS = 80
 EMBED_MODEL = "minilm-l6-v2"
 EMBED_LINES = 2000
 
