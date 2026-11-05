@@ -16,7 +16,7 @@
 //! same [`Aggregation`], with the same spans and scores. The default is
 //! `First`, which keeps every word whole.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use kjarni_models::TokenClassifier;
@@ -296,11 +296,7 @@ fn validate(model_type: ModelType) -> NerResult<()> {
     }
 }
 
-fn folder_name(path: &Path) -> String {
-    path.file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "custom".to_string())
-}
+use crate::common::folder_name;
 
 #[cfg(test)]
 mod tests {

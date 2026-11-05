@@ -24,7 +24,9 @@ pub async fn run(
 ) -> Result<()> {
     // Fail on an unknown model here, with suggestions, rather than letting the
     // builder report it without context.
-    let _ = crate::commands::util::resolve_model(model, Some("seq2seq"))?;
+    if model_path.is_none() {
+        let _ = crate::commands::util::resolve_model(model, Some("seq2seq"))?;
+    }
 
     // Resolve input
     let text = resolve_input(input)?;
@@ -32,12 +34,10 @@ pub async fn run(
         return Err(anyhow!("Input text is empty. Nothing to summarize."));
     }
 
-    // Build summarizer
-    if model_path.is_some() {
-        return Err(anyhow!("--model-path not yet implemented."));
-    }
-
     let mut builder = Summarizer::builder(model);
+    if let Some(path) = model_path {
+        builder = builder.model_path(path);
+    }
 
     if gpu {
         builder = builder.gpu();

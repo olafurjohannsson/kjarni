@@ -24,6 +24,9 @@ pub struct KjarniTranscriberConfig {
     pub translate: i32,
     /// Non-zero suppresses progress output.
     pub quiet: i32,
+    /// Folder holding a Whisper model in the Hugging Face layout, used instead of
+    /// `model_name`. Null uses the registry.
+    pub model_path: *const c_char,
 }
 
 /// Get default transcriber configuration.
@@ -35,6 +38,7 @@ pub extern "C" fn kjarni_transcriber_config_default() -> KjarniTranscriberConfig
         language: ptr::null(),
         translate: 0,
         quiet: 0,
+        model_path: ptr::null(),
     }
 }
 
@@ -188,8 +192,15 @@ pub unsafe extern "C" fn kjarni_transcriber_new(
                     Ok(l) => l,
                     Err(e) => return e,
                 };
+                let model_path = match opt_str(config.model_path) {
+                    Ok(p) => p,
+                    Err(e) => return e,
+                };
 
                 let mut builder = Transcriber::builder(model).timestamps(true);
+                if let Some(path) = model_path {
+                    builder = builder.model_path(path);
+                }
                 builder = match config.device {
                     KjarniDevice::Gpu => builder.gpu(),
                     KjarniDevice::Cpu => builder.cpu(),
@@ -328,6 +339,34 @@ pub unsafe extern "C" fn kjarni_transcriber_transcribe_pcm(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder whose config.json says it holds a `model_type` model.
+    fn folder_of(model_type: &str) -> (tempfile::TempDir, std::ffi::CString) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            format!(r#"{{"model_type": "{model_type}"}}"#),
+        )
+        .unwrap();
+        let path = std::ffi::CString::new(dir.path().to_str().unwrap()).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn a_folder_of_another_family_is_invalid_config() {
+        let (_dir, path) = folder_of("bart");
+        unsafe {
+            let mut config = kjarni_transcriber_config_default();
+            config.model_path = path.as_ptr();
+            config.quiet = 1;
+            let mut t = ptr::null_mut();
+            assert_eq!(
+                kjarni_transcriber_new(&config, &mut t),
+                KjarniErrorCode::InvalidConfig
+            );
+            assert!(t.is_null());
+        }
+    }
 
     #[test]
     fn defaults_detect_the_language() {

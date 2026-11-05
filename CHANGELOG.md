@@ -1,6 +1,51 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
+
+- **Summarize, translate and transcribe with any model folder.** `--model-path` on
+  `kjarni summarize`, `translate` and `transcribe`, `model_path(..)` on the Rust
+  `Summarizer`, `Translator`, `Transcriber` and `Seq2SeqGenerator` builders,
+  `model_path` in Python and in the C configs, `modelPath` in C# and `WithModelPath`
+  in Go load a Hugging Face folder instead of a registry model. The family comes
+  from `model_type` in `config.json`: BART and T5 summarize, Marian (the
+  Helsinki-NLP `opus-mt` models) and T5 translate, and Whisper transcribes,
+  including the English-only `.en` models. A folder of another family is refused by
+  name. A Marian folder translates the languages its `tokenizer_config.json` names;
+  one with several targets, such as `opus-mt-en-ROMANCE`, is given the target as its
+  `>>fr<<` token, and a code the language table does not know, such as `fr_BE`, can
+  be passed as is. Output matches transformers 4.57 for `opus-mt` en-de, de-en,
+  en-ROMANCE, is-en and en-is, `distilbart-cnn-12-6`, `flan-t5-base` and Whisper
+  tiny, base, small, tiny.en and base.en. `kjarni rerank --model-path` works too.
+
+- **Weights load from `pytorch_model.bin`.** Many Hub models, all Helsinki-NLP
+  translation models among them, ship only PyTorch's pickle format. Kjarni reads it
+  directly, both the zip format of PyTorch 1.6 and later and the older legacy
+  format, and sharded checkpoints with `pytorch_model.bin.index.json`. The pickle is
+  read by a restricted unpickler that accepts only the few names a state dict uses,
+  such as `collections.OrderedDict` and `torch._utils._rebuild_tensor_v2`, so a file
+  cannot run code. Safetensors is still preferred when a folder has both.
+
+- **Marian tokenizers load from `source.spm` and `vocab.json`.** Ids match
+  `MarianTokenizer`, including the `>>xx<<` language tokens.
+
+- **Attention with a bias on only some projections.** The fused query/key/value
+  projection, used on the CPU for hidden sizes of 512 or less, dropped all three
+  biases when one projection had none, and the decoder's fused key/value projection
+  did the same. Whisper tiny and base, whose key projection has no bias, gave wrong
+  text through it; their encoder output now matches PyTorch.
+
+- **Icelandic is a known language for translation** (`is`, `icelandic`,
+  `íslenska`).
+
+- **Breaking, C API: `KjarniSummarizerConfig`, `KjarniTranslatorConfig` and
+  `KjarniTranscriberConfig` end with a new `model_path` field.** Code that fills
+  these from `kjarni_*_config_default()` only needs recompiling; bindings that
+  declare the structs themselves must add the field.
+
+- **Breaking: `model_type()` on `Summarizer`, `Translator` and `Seq2SeqGenerator`
+  returns `Option<ModelType>`**, `None` for a model loaded from a folder.
+  `Seq2SeqGeneratorBuilder::from_path` is now `model_path`. The `Summarizer` and
+  `Translator` builders gain `with_load_config`.
 
 - **Named-entity recognition.** `kjarni ner`, `kjarni::ner::EntityRecognizer` and
   `EntityRecognizer` in Python, C# and Go find people, places, organizations and other

@@ -877,6 +877,7 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
             public IntPtr Language;
             public int Translate;
             public int Quiet;
+            public IntPtr ModelPath;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -906,6 +907,7 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
             public UIntPtr MinLength;
             public UIntPtr MaxLength;
             public int Quiet;
+            public IntPtr ModelPath;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -917,6 +919,7 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
             public IntPtr From;
             public IntPtr To;
             public int Quiet;
+            public IntPtr ModelPath;
         }
 
         [StructLayout(LayoutKind.Sequential)]

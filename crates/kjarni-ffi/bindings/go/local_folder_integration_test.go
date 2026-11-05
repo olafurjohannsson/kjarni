@@ -196,3 +196,116 @@ func TestChatNeedsANameOrAFolder(t *testing.T) {
 		t.Fatalf("NewChat on an encoder folder: %v", err)
 	}
 }
+
+func TestSeq2SeqFromAFolderOfTheWrongFamilyIsInvalidConfig(t *testing.T) {
+	cases := []struct {
+		kind, modelType string
+		load            func(dir string) (interface{ Close() error }, error)
+	}{
+		{"summarizer", "marian", func(dir string) (interface{ Close() error }, error) {
+			return NewSummarizer("", WithModelPath(dir), WithQuiet(true))
+		}},
+		{"translator", "bart", func(dir string) (interface{ Close() error }, error) {
+			return NewTranslator("", WithModelPath(dir), WithQuiet(true))
+		}},
+		{"transcriber", "bart", func(dir string) (interface{ Close() error }, error) {
+			return NewTranscriber("", WithModelPath(dir), WithQuiet(true))
+		}},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		config := `{"model_type": "` + c.modelType + `"}`
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(config), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := c.load(dir)
+		ke, ok := err.(*KjarniError)
+		if !ok || ke.Code != ErrInvalidConfig {
+			t.Errorf("%s from a %s folder: %v, want ErrInvalidConfig", c.kind, c.modelType, err)
+		}
+	}
+}
+
+func TestTranslatorFromFolderMatchesByName(t *testing.T) {
+	skipHeavy(t)
+	const text = "The committee postponed its decision until next spring."
+	byName, err := NewTranslator("opus-mt-en-de", WithQuiet(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer byName.Close()
+	want, err := byName.TranslateBetween(text, "en", "de")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	folder := filepath.Join(kjarniCacheDir(t), "kjarni-ai_opus-mt-en-de")
+	byPath, err := NewTranslator("", WithModelPath(folder), WithQuiet(true))
+	if err != nil {
+		t.Fatalf("NewTranslator with WithModelPath(%s): %v", folder, err)
+	}
+	defer byPath.Close()
+	got, err := byPath.TranslateBetween(text, "en", "de")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("from folder %q, by name %q", got, want)
+	}
+}
+
+func TestSummarizerFromFolderMatchesByName(t *testing.T) {
+	skipHeavy(t)
+	const article = "The city council voted on Tuesday to extend the bus network to the new harbour district, which is expected to house 4,000 residents by 2030. The plan adds two lines and raises evening frequency to every ten minutes. Opponents said the cost should be covered by the state rather than the city."
+	byName, err := NewSummarizer("", WithQuiet(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer byName.Close()
+	want, err := byName.Summarize(article)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	folder := filepath.Join(kjarniCacheDir(t), "olafuraron_distilbart-cnn-12-6")
+	byPath, err := NewSummarizer("", WithModelPath(folder), WithQuiet(true))
+	if err != nil {
+		t.Fatalf("NewSummarizer with WithModelPath(%s): %v", folder, err)
+	}
+	defer byPath.Close()
+	got, err := byPath.Summarize(article)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("from folder %q, by name %q", got, want)
+	}
+}
+
+func TestTranscriberFromFolderMatchesByName(t *testing.T) {
+	skipHeavy(t)
+	wav := repoFixture(t, "crates/kjarni/tests/fixtures/speech.wav")
+	byName, err := NewTranscriber("", WithLanguage("en"), WithQuiet(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer byName.Close()
+	want, err := byName.TranscribeFile(wav)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	folder := filepath.Join(kjarniCacheDir(t), "openai_whisper-small")
+	byPath, err := NewTranscriber("", WithModelPath(folder), WithLanguage("en"), WithQuiet(true))
+	if err != nil {
+		t.Fatalf("NewTranscriber with WithModelPath(%s): %v", folder, err)
+	}
+	defer byPath.Close()
+	got, err := byPath.TranscribeFile(wav)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != want.Text {
+		t.Errorf("from folder %q, by name %q", got.Text, want.Text)
+	}
+}

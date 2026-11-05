@@ -690,6 +690,11 @@ typedef struct KjarniSummarizerConfig {
    * Non-zero suppresses progress output.
    */
   int32_t quiet;
+  /**
+   * Folder holding a BART or T5 model in the Hugging Face layout, used instead of
+   * `model_name`. Null uses the registry.
+   */
+  const char *model_path;
 } KjarniSummarizerConfig;
 
 /**
@@ -714,6 +719,11 @@ typedef struct KjarniTranscriberConfig {
    * Non-zero suppresses progress output.
    */
   int32_t quiet;
+  /**
+   * Folder holding a Whisper model in the Hugging Face layout, used instead of
+   * `model_name`. Null uses the registry.
+   */
+  const char *model_path;
 } KjarniTranscriberConfig;
 
 /**
@@ -775,6 +785,11 @@ typedef struct KjarniTranslatorConfig {
    * Non-zero suppresses progress output.
    */
   int32_t quiet;
+  /**
+   * Folder holding a Marian (opus-mt) or T5 model in the Hugging Face layout, used instead of
+   * `model_name`. Null uses the registry.
+   */
+  const char *model_path;
 } KjarniTranslatorConfig;
 
 #ifdef __cplusplus

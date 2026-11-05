@@ -7,8 +7,8 @@ use kjarni_models::models::whisper::WhisperModel;
 use kjarni_models::models::whisper::{
     WHISPER_SAMPLE_RATE, WhisperChunkResult, WhisperSegment, WhisperTask, WhisperTranscriberConfig,
 };
+use kjarni_transformers::Device;
 use kjarni_transformers::audio::{AudioLoaderConfig, compute_mel_spectrogram, load_audio};
-use kjarni_transformers::{Device, ModelType};
 
 use super::builder::TranscriberBuilder;
 use super::types::*;
@@ -21,7 +21,7 @@ const DECODE_BATCH: usize = 4;
 
 pub struct Transcriber {
     model: Arc<WhisperModel>,
-    model_type: ModelType,
+    model_name: String,
     language: Option<String>,
     task: Task,
     timestamps: bool,
@@ -55,7 +55,7 @@ impl Transcriber {
 
     pub(crate) fn new(
         model: Arc<WhisperModel>,
-        model_type: ModelType,
+        model_name: String,
         language: Option<String>,
         task: Task,
         timestamps: bool,
@@ -66,7 +66,7 @@ impl Transcriber {
     ) -> Self {
         Self {
             model,
-            model_type,
+            model_name,
             language,
             task,
             timestamps,
@@ -79,7 +79,7 @@ impl Transcriber {
 
     /// Human-readable model name.
     pub fn model_name(&self) -> &str {
-        self.model_type.cli_name()
+        &self.model_name
     }
 
     /// Device the model is running on.
@@ -312,11 +312,12 @@ impl Transcriber {
 
                 // Decode with per-token callback into channel
                 let tx_ref = &tx;
+                let first_special = model.first_special_token();
                 let mut on_token = |id: u32, text: &str| -> bool {
                     let token = TranscribedToken {
                         text: text.to_string(),
                         id,
-                        is_special: id >= 50257, // FIRST_SPECIAL_TOKEN
+                        is_special: id >= first_special,
                     };
                     tx_ref.blocking_send(Ok(token)).is_ok()
                 };

@@ -10,6 +10,7 @@ mod validation;
 pub use builder::Seq2SeqGeneratorBuilder;
 pub use model::Seq2SeqGenerator;
 pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
+pub(crate) use validation::folder_architecture;
 
 /// Generate text with default settings.
 pub async fn generate(model: &str, input: &str) -> Seq2SeqResult<String> {

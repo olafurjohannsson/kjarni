@@ -51,8 +51,9 @@ func WithCacheDir(dir string) Option {
 }
 
 // WithModelPath loads the model from a local folder, such as one downloaded
-// from the Hugging Face Hub, instead of by name. Embedder, Classifier and
-// Reranker accept it.
+// from the Hugging Face Hub, instead of by name. Embedder, Classifier,
+// Reranker, EntityRecognizer, Chat, Summarizer, Translator and Transcriber
+// accept it.
 func WithModelPath(dir string) Option {
 	return func(o *options) {
 		o.modelPath = dir

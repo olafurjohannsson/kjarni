@@ -620,12 +620,7 @@ impl DecoderFamily {
     }
 }
 
-/// A folder's name, to call a model loaded from it by.
-pub(crate) fn folder_name(path: &std::path::Path) -> String {
-    path.file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
-}
+pub(crate) use crate::common::folder_name;
 
 #[cfg(test)]
 mod family_tests {

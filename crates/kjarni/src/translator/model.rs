@@ -8,24 +8,28 @@ use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
 use log::{debug, info};
 
-use kjarni_transformers::models::ModelType;
+use kjarni_transformers::models::{ModelArchitecture, ModelType};
 use kjarni_transformers::traits::Device;
 
-use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides};
+use crate::common::folder_name;
+use crate::seq2seq::{
+    Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides, folder_architecture,
+};
 
 use super::builder::TranslatorBuilder;
-use super::languages::normalize_language;
 use super::segment::{MAX_SEGMENT_TOKENS, segments};
 use super::types::{TranslatorError, TranslatorResult};
-use super::validation::{translation_input, validate_for_translation};
+use super::validation::{
+    Directions, translation_input, validate_folder_for_translation, validate_for_translation,
+};
 
 /// High-level translation API
 pub struct Translator {
     /// Underlying seq2seq generator.
     generator: Arc<Seq2SeqGenerator>,
 
-    /// Model type.
-    model_type: ModelType,
+    /// The directions the model translates.
+    directions: Directions,
 
     /// Default source language (normalized).
     default_from: Option<String>,
@@ -49,41 +53,41 @@ impl Translator {
     pub(crate) async fn from_builder(builder: TranslatorBuilder) -> TranslatorResult<Self> {
         let build_start = Instant::now();
 
-        // Resolve and validate model type
-        let model_type = ModelType::from_cli_name(&builder.model)
-            .ok_or_else(|| TranslatorError::UnknownModel(builder.model.clone()))?;
+        let (from, to) = (builder.default_from.clone(), builder.default_to.clone());
 
-        debug!(
-            "Resolved translator model '{}' -> {:?}",
-            builder.model, model_type
-        );
-
-        validate_for_translation(model_type)?;
-
-        // Normalize default languages if provided
-        let default_from = if let Some(ref lang) = builder.default_from {
-            let normalized = normalize_language(lang)
-                .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))?;
-            debug!("Default source language: '{}' -> '{}'", lang, normalized);
-            Some(normalized.to_string())
-        } else {
-            None
+        // A Marian folder's directions need its tokenizer, so they are read
+        // once it is loaded; the rest are known now.
+        let known_directions = match &builder.model_path {
+            Some(path) => {
+                let architecture = folder_architecture(path)?;
+                validate_folder_for_translation(&folder_name(path), architecture)?;
+                (architecture != ModelArchitecture::Marian).then_some(Directions::Prompt)
+            }
+            None => {
+                let model_type = ModelType::from_cli_name(&builder.model)
+                    .ok_or_else(|| TranslatorError::UnknownModel(builder.model.clone()))?;
+                debug!(
+                    "Resolved translator model '{}' -> {:?}",
+                    builder.model, model_type
+                );
+                validate_for_translation(model_type)?;
+                Some(Directions::of(model_type))
+            }
         };
-
-        let default_to = if let Some(ref lang) = builder.default_to {
-            let normalized = normalize_language(lang)
-                .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))?;
-            debug!("Default target language: '{}' -> '{}'", lang, normalized);
-            Some(normalized.to_string())
-        } else {
-            None
-        };
+        // Unknown default languages fail before the model is loaded.
+        if let Some(directions) = &known_directions {
+            Self::default_languages(directions, from.as_ref(), to.as_ref())?;
+        }
 
         // Build the underlying seq2seq generator
         let mut gen_builder = Seq2SeqGeneratorBuilder::new(&builder.model)
             .device(builder.device)
             .download_policy(builder.download_policy)
             .with_overrides(builder.overrides);
+
+        if let Some(path) = &builder.model_path {
+            gen_builder = gen_builder.model_path(path);
+        }
 
         if builder.quiet {
             gen_builder = gen_builder.quiet();
@@ -97,22 +101,62 @@ impl Translator {
             gen_builder = gen_builder.with_context(context);
         }
 
+        if let Some(load_config) = builder.load_config {
+            gen_builder.load_config = Some(load_config);
+        }
+
         let generator = gen_builder.build().await?;
+
+        let directions = match (known_directions, &builder.model_path) {
+            (Some(directions), _) => directions,
+            (None, Some(path)) => {
+                let tokenizer = generator.encoder_decoder().model.tokenizer();
+                Directions::of_marian_folder(path, |token| tokenizer.token_to_id(token).is_some())
+            }
+            (None, None) => unreachable!("a registry model's directions are known"),
+        };
+        debug!("Translator directions: {directions:?}");
+        let (default_from, default_to) =
+            Self::default_languages(&directions, from.as_ref(), to.as_ref())?;
 
         let build_elapsed = build_start.elapsed();
         info!(
             "Translator ready: model='{}', device={:?}, built in {:.2}s",
-            builder.model,
+            generator.model_name(),
             generator.device(),
             build_elapsed.as_secs_f32()
         );
 
         Ok(Self {
             generator: Arc::new(generator),
-            model_type,
+            directions,
             default_from,
             default_to,
         })
+    }
+
+    /// The default languages, as `directions` names them.
+    fn default_languages(
+        directions: &Directions,
+        from: Option<&String>,
+        to: Option<&String>,
+    ) -> TranslatorResult<(Option<String>, Option<String>)> {
+        let language = |lang: &String| {
+            directions
+                .language(lang)
+                .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))
+        };
+        Ok((
+            from.map(language).transpose()?,
+            to.map(language).transpose()?,
+        ))
+    }
+
+    /// The language `input` names for this model.
+    fn language(&self, input: &str) -> TranslatorResult<String> {
+        self.directions
+            .language(input)
+            .ok_or_else(|| TranslatorError::UnknownLanguage(input.to_string()))
     }
 
     /// Translate text with explicit source and target languages.
@@ -122,10 +166,8 @@ impl Translator {
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
         let translate_start = Instant::now();
 
-        let from_normalized = normalize_language(from)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(from.to_string()))?;
-        let to_normalized = normalize_language(to)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
+        let from_normalized = self.language(from)?;
+        let to_normalized = self.language(to)?;
 
         info!(
             "Translating {} -> {}: {} chars",
@@ -137,8 +179,8 @@ impl Translator {
         let result = self
             .translate_segments(
                 text,
-                from_normalized,
-                to_normalized,
+                &from_normalized,
+                &to_normalized,
                 &Seq2SeqOverrides::default(),
             )
             .await?;
@@ -162,17 +204,15 @@ impl Translator {
         to: &str,
         overrides: &Seq2SeqOverrides,
     ) -> TranslatorResult<String> {
-        let from_normalized = normalize_language(from)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(from.to_string()))?;
-        let to_normalized = normalize_language(to)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
+        let from_normalized = self.language(from)?;
+        let to_normalized = self.language(to)?;
 
         debug!(
             "Translation with overrides: {} -> {}, {:?}",
             from_normalized, to_normalized, overrides
         );
 
-        self.translate_segments(text, from_normalized, to_normalized, overrides)
+        self.translate_segments(text, &from_normalized, &to_normalized, overrides)
             .await
     }
 
@@ -199,19 +239,17 @@ impl Translator {
             .default_from
             .as_ref()
             .ok_or(TranslatorError::MissingLanguage)?;
-        let to_normalized = normalize_language(to)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
+        let to_normalized = self.language(to)?;
 
         debug!("Translate to: {} -> {}", from, to_normalized);
 
-        self.translate_segments(text, from, to_normalized, &Seq2SeqOverrides::default())
+        self.translate_segments(text, from, &to_normalized, &Seq2SeqOverrides::default())
             .await
     }
 
     /// Translate from a specific language using default target language.
     pub async fn translate_from(&self, text: &str, from: &str) -> TranslatorResult<String> {
-        let from_normalized = normalize_language(from)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(from.to_string()))?;
+        let from_normalized = self.language(from)?;
         let to = self
             .default_to
             .as_ref()
@@ -219,7 +257,7 @@ impl Translator {
 
         debug!("Translate from: {} -> {}", from_normalized, to);
 
-        self.translate_segments(text, from_normalized, to, &Seq2SeqOverrides::default())
+        self.translate_segments(text, &from_normalized, to, &Seq2SeqOverrides::default())
             .await
     }
 
@@ -231,10 +269,8 @@ impl Translator {
         to: &str,
     ) -> TranslatorResult<std::pin::Pin<Box<dyn Stream<Item = TranslatorResult<String>> + Send>>>
     {
-        let from_normalized = normalize_language(from)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(from.to_string()))?;
-        let to_normalized = normalize_language(to)
-            .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
+        let from_normalized = self.language(from)?;
+        let to_normalized = self.language(to)?;
 
         info!(
             "Streaming translation {} -> {}: {} chars",
@@ -243,7 +279,7 @@ impl Translator {
             text.len()
         );
 
-        self.stream_segments(text, from_normalized, to_normalized)
+        self.stream_segments(text, &from_normalized, &to_normalized)
     }
 
     /// Stream translation using default languages.
@@ -349,17 +385,17 @@ impl Translator {
 
     /// Format what the model is given for this direction.
     fn format_prompt(&self, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
-        translation_input(self.model_type, text, from, to)
+        translation_input(&self.directions, self.model_name(), text, from, to)
     }
 
-    /// Get the model type.
-    pub fn model_type(&self) -> ModelType {
-        self.model_type
+    /// The registry model, or `None` for a model loaded from a folder.
+    pub fn model_type(&self) -> Option<ModelType> {
+        self.generator.model_type()
     }
 
-    /// Get the model's CLI name.
+    /// The registry name, or the name of the folder the model was loaded from.
     pub fn model_name(&self) -> &str {
-        self.model_type.cli_name()
+        self.generator.model_name()
     }
 
     /// Get the device the model is running on.

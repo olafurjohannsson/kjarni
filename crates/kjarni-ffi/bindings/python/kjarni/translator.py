@@ -1,6 +1,7 @@
 """High-level Translator API."""
 
-from typing import Optional
+import os
+from typing import Optional, Union
 from ctypes import c_void_p, c_char_p, c_int, c_int32, byref, POINTER, Structure
 
 from ._ffi import _lib, check_error, take_string, encode_or_none, KjarniDevice
@@ -14,6 +15,7 @@ class KjarniTranslatorConfig(Structure):
         ("from", c_char_p),
         ("to", c_char_p),
         ("quiet", c_int32),
+        ("model_path", c_char_p),
     ]
 
 
@@ -44,6 +46,7 @@ class Translator:
         device: str = "cpu",
         cache_dir: Optional[str] = None,
         quiet: bool = False,
+        model_path: Optional[Union[str, os.PathLike]] = None,
     ):
         """Load a translation model, downloading it on first use.
 
@@ -57,6 +60,9 @@ class Translator:
             device: "cpu" or "gpu"
             cache_dir: Directory to cache models
             quiet: Suppress progress output
+            model_path: A local folder holding a Marian (opus-mt) or T5 model in the
+                Hugging Face layout, used instead of `model`. A Marian model translates
+                the languages its tokenizer_config.json names
         """
         config = _lib.kjarni_translator_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
@@ -66,6 +72,8 @@ class Translator:
         config.cache_dir = encode_or_none(cache_dir)
         setattr(config, "from", encode_or_none(source))
         config.to = encode_or_none(target)
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
 
         self._handle = c_void_p()
         check_error(_lib.kjarni_translator_new(byref(config), byref(self._handle)))

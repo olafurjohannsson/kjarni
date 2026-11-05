@@ -10,7 +10,9 @@ import unittest
 from pathlib import Path
 
 from _support import TempDir, heavy  # noqa: F401  (puts the package on sys.path)
-from kjarni import Chat, Classifier, Embedder, Reranker
+from _support import SPEECH_WAV
+from kjarni import Chat, Classifier, Embedder, KjarniException, Reranker, Summarizer, Transcriber, Translator
+from kjarni._ffi import KjarniError
 
 
 def cache_dir() -> Path:
@@ -59,10 +61,6 @@ class LocalFolderTest(unittest.TestCase):
             self.assertIn("config.json", str(ctx.exception))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def hf_snapshot(repo: str):
     """The folder of `repo` in the Hugging Face cache, if it is there."""
     home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
@@ -102,3 +100,61 @@ class ChatFromFolderTest(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             Chat(model_path=folder, quiet=True)
         self.assertIn("not suitable for chat", str(ctx.exception))
+
+
+def folder_of(path: Path, model_type: str) -> Path:
+    """A folder whose config.json says it holds a `model_type` model."""
+    (path / "config.json").write_text('{"model_type": "%s"}' % model_type)
+    return path
+
+
+class Seq2SeqFolderErrorsTest(unittest.TestCase):
+    def test_a_folder_of_the_wrong_family_is_invalid_config(self):
+        cases = [
+            (lambda p: Summarizer(model_path=p, quiet=True), "marian"),
+            (lambda p: Translator(model_path=p, quiet=True), "bart"),
+            (lambda p: Transcriber(model_path=p, quiet=True), "bart"),
+        ]
+        for make, model_type in cases:
+            with TempDir() as d:
+                with self.assertRaises(KjarniException) as e:
+                    make(folder_of(d, model_type))
+                self.assertEqual(e.exception.code, KjarniError.INVALID_CONFIG)
+
+
+@heavy
+class Seq2SeqFromFolderTest(unittest.TestCase):
+    def test_translator_from_the_download_folder_matches_by_name(self):
+        text = "The committee postponed its decision until next spring."
+        by_name = Translator(model="opus-mt-en-de", quiet=True).translate(text, "en", "de")
+        folder = cache_dir() / "kjarni-ai_opus-mt-en-de"
+        by_path = Translator(model_path=folder, quiet=True).translate(text, "en", "de")
+        self.assertEqual(by_path, by_name)
+
+    def test_summarizer_from_the_download_folder_matches_by_name(self):
+        from test_generation import ARTICLE
+        by_name = Summarizer(quiet=True).summarize(ARTICLE)
+        folder = cache_dir() / "olafuraron_distilbart-cnn-12-6"
+        self.assertEqual(Summarizer(model_path=folder, quiet=True).summarize(ARTICLE), by_name)
+
+    def test_transcriber_from_the_download_folder_matches_by_name(self):
+        by_name = Transcriber(language="en", quiet=True).transcribe_file(SPEECH_WAV)
+        folder = cache_dir() / "openai_whisper-small"
+        by_path = Transcriber(model_path=folder, language="en", quiet=True).transcribe_file(SPEECH_WAV)
+        self.assertEqual(by_path.text, by_name.text)
+
+    def test_translator_from_a_hub_marian_folder_picks_its_target(self):
+        folder = hf_snapshot("Helsinki-NLP/opus-mt-en-ROMANCE")
+        if folder is None:
+            self.skipTest("Helsinki-NLP/opus-mt-en-ROMANCE is not in the Hugging Face cache")
+        t = Translator(model_path=folder, source="en", quiet=True)
+        # transformers 4.57, MarianMTModel.generate with the model's own config
+        self.assertEqual(t.translate("Where is the library?", target="es"), "¿Dónde está la biblioteca?")
+        self.assertEqual(t.translate("The weather is nice today.", target="French"), "Le temps est beau aujourd'hui.")
+        with self.assertRaises(KjarniException) as e:
+            t.translate("Hello", target="de")
+        self.assertEqual(e.exception.code, KjarniError.INVALID_CONFIG)
+
+
+if __name__ == "__main__":
+    unittest.main()

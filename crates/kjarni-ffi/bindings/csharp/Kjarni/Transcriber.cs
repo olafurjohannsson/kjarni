@@ -40,12 +40,14 @@ namespace Kjarni
         /// <param name="translate">Translate the speech into English instead of transcribing it.</param>
         /// <param name="device">Compute device - "cpu" or "gpu".</param>
         /// <param name="quiet">Suppress progress output.</param>
+        /// <param name="modelPath">A local folder holding a Whisper model in the Hugging Face layout. Used instead of <paramref name="model"/> when given.</param>
         public Transcriber(
             string? model = null,
             string? language = null,
             bool translate = false,
             string device = "cpu",
-            bool quiet = false)
+            bool quiet = false,
+            string? modelPath = null)
         {
             var config = Native.kjarni_transcriber_config_default();
             config.Device = device == "gpu" ? KjarniDevice.Gpu : KjarniDevice.Cpu;
@@ -54,8 +56,10 @@ namespace Kjarni
 
             var modelPtr = Native.Utf8OrNull(model);
             var languagePtr = Native.Utf8OrNull(language);
+            var modelPathPtr = Native.Utf8OrNull(modelPath);
             try
             {
+                config.ModelPath = modelPathPtr;
                 if (modelPtr != IntPtr.Zero) config.ModelName = modelPtr;
                 config.Language = languagePtr;
                 Native.CheckError(Native.kjarni_transcriber_new(ref config, out _handle));
@@ -64,6 +68,7 @@ namespace Kjarni
             {
                 Marshal.FreeCoTaskMem(modelPtr);
                 Marshal.FreeCoTaskMem(languagePtr);
+                Marshal.FreeCoTaskMem(modelPathPtr);
             }
         }
 
