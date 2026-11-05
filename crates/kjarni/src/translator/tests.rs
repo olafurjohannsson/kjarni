@@ -1330,7 +1330,10 @@ mod fail_fast {
             .build()
             .await
             .unwrap_err();
-        assert!(matches!(err, TranslatorError::UnknownLanguage(ref l) if l == "klingon"), "{err}");
+        assert!(
+            matches!(err, TranslatorError::UnknownLanguage(ref l) if l == "klingon"),
+            "{err}"
+        );
     }
 }
 
