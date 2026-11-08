@@ -33,6 +33,7 @@ pub use kjarni_models::models::clip::{
 pub use crate::classifier::Classifier;
 pub use crate::embedder::Embedder;
 pub use crate::indexer::Indexer;
+pub use crate::ner::EntityRecognizer;
 pub use crate::reranker::Reranker;
 pub use crate::searcher::Searcher;
 pub use crate::summarizer::Summarizer;
