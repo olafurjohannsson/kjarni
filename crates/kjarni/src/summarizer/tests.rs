@@ -628,7 +628,7 @@ mod accessor_tests {
             .unwrap();
 
         assert_eq!(s.model_name(), "distilbart-cnn");
-        assert_eq!(s.model_type(), ModelType::DistilBartCnn);
+        assert_eq!(s.model_type(), Some(ModelType::DistilBartCnn));
         assert!(matches!(
             s.device(),
             kjarni_transformers::traits::Device::Cpu

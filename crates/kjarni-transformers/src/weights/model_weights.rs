@@ -80,6 +80,26 @@ impl ModelWeights {
                 });
             }
 
+            // Safetensors first: a folder with both reads the format that
+            // needs no unpickling.
+            if path.join("pytorch_model.bin").exists()
+                || path.join("pytorch_model.bin.index.json").exists()
+            {
+                let loader = Box::new(crate::weights::PyTorchLoader::new(path)?)
+                    as Box<dyn WeightLoader + Send + Sync>;
+                let config_json = std::fs::read_to_string(path.join("config.json"))
+                    .unwrap_or_else(|_| "{}".to_string());
+                return Ok(Self {
+                    inner: Arc::new(ModelWeightsInner {
+                        loader,
+                        config_json,
+                        is_gguf: false,
+                        shared: Default::default(),
+                        conversions: Default::default(),
+                    }),
+                });
+            }
+
             let gguf_in_dir = std::fs::read_dir(path)?
                 .filter_map(|e| e.ok())
                 .find(|e| e.path().extension().and_then(|s| s.to_str()) == Some("gguf"));

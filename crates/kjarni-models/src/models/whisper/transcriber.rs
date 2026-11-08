@@ -29,7 +29,6 @@ pub const WHISPER_CHUNK_LENGTH_SECS: f32 = 30.0;
 pub const WHISPER_CHUNK_SAMPLES: usize = 480_000;
 
 const SOT_TOKEN: u32 = 50258; // <|startoftranscript|>
-const EOT_TOKEN: u32 = 50257; // <|endoftext|>
 // large-v3 added a language, which moved every token after the language tokens, so
 // these are looked up in the tokenizer. The values are whisper-small's.
 const TRANSCRIBE_TOKEN: u32 = 50359; // <|transcribe|>
@@ -403,7 +402,9 @@ impl WhisperModel {
         let timestamp_begin = self.timestamp_begin();
         let audio_end = audio_end_timestamp(chunk, timestamp_begin);
         let tokenizer = self.tokenizer();
-        let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
+        let eos_token_id = self
+            .eos_token_id()
+            .unwrap_or_else(|| self.first_special_token());
         let prompt_tokens = self.build_prompt_tokens(config);
 
         let max_len = prompt_tokens.len() + config.max_tokens_per_chunk;
@@ -491,7 +492,9 @@ impl WhisperModel {
                 .map(|(e, chunk)| self.decode_chunk(e, config, chunk, None))
                 .collect();
         }
-        let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
+        let eos_token_id = self
+            .eos_token_id()
+            .unwrap_or_else(|| self.first_special_token());
         let prompt_tokens = self.build_prompt_tokens(config);
         let views: Vec<_> = encoder_hidden_states.iter().map(|e| e.view()).collect();
         let encoder = ndarray::concatenate(Axis(0), &views)?;
@@ -540,10 +543,14 @@ impl WhisperModel {
 
     /// The language spoken in a chunk, as Whisper itself decides it: given
     /// only start-of-transcript, the language token it rates highest.
+    /// An English-only model is English.
     pub fn detect_language(&self, encoder_hidden_states: &Array3<f32>) -> Result<String> {
+        if !self.is_multilingual() {
+            return Ok("en".to_string());
+        }
         let encoder = encoder_hidden_states.slice(s![0..1, .., ..]).to_owned();
         let mut steps = self.decoder_steps(&encoder, 1)?;
-        let logits = steps.step(&Array2::from_elem((1, 1), SOT_TOKEN))?;
+        let logits = steps.step(&Array2::from_elem((1, 1), self.start_of_transcript()))?;
         let logits = logits.slice(s![0, -1_i32, ..]);
         LANGUAGES
             .iter()
@@ -583,7 +590,8 @@ impl WhisperModel {
                 .max_by(|(_, a), (_, b)| a.total_cmp(b))
                 .map_or(eos_token_id, |(id, _)| id as u32)
         };
-        let is_text = |id: u32| id < FIRST_SPECIAL_TOKEN;
+        // <|endoftext|> is the first special token in every Whisper vocabulary.
+        let is_text = |id: u32| id < eos_token_id;
         if !config.timestamps {
             return argmax(&|id| is_text(id) || id == eos_token_id);
         }
@@ -647,7 +655,14 @@ impl WhisperModel {
 
     /// Build the decoder prompt token sequence for the given config.
     fn build_prompt_tokens(&self, config: &WhisperTranscriberConfig) -> Vec<u32> {
-        let mut tokens = vec![SOT_TOKEN];
+        let mut tokens = vec![self.start_of_transcript()];
+        // English-only models take no language or task token.
+        if !self.is_multilingual() {
+            if !config.timestamps {
+                tokens.push(self.special_token("<|notimestamps|>", NO_TIMESTAMPS_TOKEN));
+            }
+            return tokens;
+        }
 
         // Language token — resolve via tokenizer, fallback to English
         let lang = config.language.as_deref().unwrap_or("en");
@@ -676,6 +691,23 @@ impl WhisperModel {
         self.tokenizer().token_to_id(token).unwrap_or(fallback)
     }
 
+    /// The id of `<|startoftranscript|>`, which opens every decoder prompt.
+    fn start_of_transcript(&self) -> u32 {
+        self.special_token("<|startoftranscript|>", SOT_TOKEN)
+    }
+
+    /// The id of `<|endoftext|>`, the first special token: every id below
+    /// it is text. 50257 in the multilingual models, 50256 in the `.en` ones.
+    pub fn first_special_token(&self) -> u32 {
+        self.special_token("<|endoftext|>", FIRST_SPECIAL_TOKEN)
+    }
+
+    /// Whether the model knows more than English, as transformers decides
+    /// it: by the size of its vocabulary.
+    pub fn is_multilingual(&self) -> bool {
+        self.config().vocab_size >= 51865
+    }
+
     /// The id of `<|0.00|>`: this and every id above it are timestamps.
     fn timestamp_begin(&self) -> u32 {
         self.special_token("<|0.00|>", TIMESTAMP_BEGIN)
@@ -700,6 +732,7 @@ impl WhisperModel {
                 self.tokenizer(),
                 chunk_offset,
                 self.timestamp_begin(),
+                self.first_special_token(),
             );
             let text = segments
                 .iter()
@@ -711,7 +744,7 @@ impl WhisperModel {
             // No timestamps — single segment spanning the whole chunk
             let text_ids: Vec<u32> = generated_ids
                 .iter()
-                .filter(|&&id| id < FIRST_SPECIAL_TOKEN)
+                .filter(|&&id| id < self.first_special_token())
                 .copied()
                 .collect();
 
@@ -739,6 +772,7 @@ impl WhisperModel {
         tokenizer: &tokenizers::Tokenizer,
         chunk_offset: f32,
         timestamp_begin: u32,
+        first_special: u32,
     ) -> Vec<WhisperSegment> {
         let mut segments = Vec::new();
         let mut current_start: Option<f32> = None;
@@ -756,7 +790,7 @@ impl WhisperModel {
                     // Closing timestamp — emit segment
                     let text_ids: Vec<u32> = current_tokens
                         .iter()
-                        .filter(|&&t| t < FIRST_SPECIAL_TOKEN)
+                        .filter(|&&t| t < first_special)
                         .copied()
                         .collect();
 
@@ -774,7 +808,7 @@ impl WhisperModel {
                     current_start = Some(time);
                     current_tokens.clear();
                 }
-            } else if id < FIRST_SPECIAL_TOKEN {
+            } else if id < first_special {
                 current_tokens.push(id);
             }
             // Other special tokens are ignored
@@ -786,7 +820,7 @@ impl WhisperModel {
         {
             let text_ids: Vec<u32> = current_tokens
                 .iter()
-                .filter(|&&t| t < FIRST_SPECIAL_TOKEN)
+                .filter(|&&t| t < first_special)
                 .copied()
                 .collect();
 
@@ -856,6 +890,9 @@ fn looping_tail(ids: &[u32], timestamp_begin: u32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// <|endoftext|> in the multilingual vocabulary.
+    const EOT_TOKEN: u32 = 50257;
 
     #[test]
     fn test_chunk_audio_short() {

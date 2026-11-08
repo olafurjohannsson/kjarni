@@ -13,6 +13,8 @@ mod gguf_loader;
 #[cfg(not(target_arch = "wasm32"))]
 mod mmap_cache;
 mod model_weights;
+#[cfg(not(target_arch = "wasm32"))]
+mod pytorch_loader;
 mod safetensors_loader;
 
 use std::any::Any;
@@ -29,6 +31,8 @@ pub use gguf_loader::{GgufHfMapper, GgufLoader};
 #[cfg(not(target_arch = "wasm32"))]
 pub use mmap_cache::{clear_mmap_cache, mmap_cache_stats};
 pub use model_weights::{AttentionLayout, ModelWeights, raw_to_typed};
+#[cfg(not(target_arch = "wasm32"))]
+pub use pytorch_loader::PyTorchLoader;
 pub use safetensors_loader::SafeTensorsLoader;
 
 /// Splits a layout name of the form `tensor[start:end]` into its parts.

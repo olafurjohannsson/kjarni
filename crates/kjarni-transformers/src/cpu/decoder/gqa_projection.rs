@@ -160,20 +160,18 @@ impl GQAProjection {
             .slice_mut(s![kv_dim.., ..])
             .assign(&v.weights_view());
 
-        // Fuse biases if present
-        let fused_bias = match (k.bias(), v.bias()) {
-            (Some(kb), Some(vb)) => {
-                let mut bias = Array1::<f32>::zeros(2 * kv_dim);
+        // A projection without a bias, such as Whisper's `k_proj`,
+        // contributes zeros.
+        let fused_bias = (k.bias().is_some() || v.bias().is_some()).then(|| {
+            let mut bias = Array1::<f32>::zeros(2 * kv_dim);
+            if let Some(kb) = k.bias() {
                 bias.slice_mut(s![..kv_dim]).assign(kb);
+            }
+            if let Some(vb) = v.bias() {
                 bias.slice_mut(s![kv_dim..]).assign(vb);
-                Some(bias)
             }
-            (None, None) => None,
-            _ => {
-                log::warn!("K and V have inconsistent bias state, ignoring biases");
-                None
-            }
-        };
+            bias
+        });
 
         LinearLayer::new_f32(fused_weights, fused_bias)
     }
@@ -347,5 +345,44 @@ mod gqa_tests {
         assert_eq!(gqa.q_dim(), 8192);
         assert_eq!(gqa.kv_dim(), 1024);
         assert_eq!(gqa.hidden_size(), 8192);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array2;
+
+    fn layer(in_f: usize, out_f: usize, seed: f32, bias: bool) -> LinearLayer {
+        let w = Array2::from_shape_fn((out_f, in_f), |(o, i)| {
+            ((o * 7 + i * 3) as f32 * seed).sin()
+        });
+        let b = bias.then(|| Array1::from_shape_fn(out_f, |o| (o as f32 * seed).cos()));
+        LinearLayer::new_f32(w, b)
+    }
+
+    /// Whisper's k_proj has no bias and its v_proj does: the fused K/V
+    /// projection keeps V's bias and gives K none.
+    #[test]
+    fn fused_kv_keeps_v_bias_when_k_has_none() {
+        let (hidden, tokens) = (64, 3);
+        let x = Array2::from_shape_fn((tokens, hidden), |(t, i)| {
+            ((t * hidden + i) as f32 * 0.01).sin()
+        });
+        let (q, k, v) = (
+            layer(hidden, hidden, 0.1, true),
+            layer(hidden, hidden, 0.2, false),
+            layer(hidden, hidden, 0.3, true),
+        );
+        let want = (
+            q.matmul(&x.view()),
+            k.matmul(&x.view()),
+            v.matmul(&x.view()),
+        );
+        let (gq, gk, gv) = GQAProjection::new(q, k, v).forward(&x.view());
+        for (got, want) in [(gq, want.0), (gk, want.1), (gv, want.2)] {
+            let diff = (&got - &want).mapv(f32::abs).fold(0.0f32, |m, &d| m.max(d));
+            assert!(diff < 1e-4, "max difference {diff}");
+        }
     }
 }

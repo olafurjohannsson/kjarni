@@ -29,14 +29,11 @@ pub async fn run(
         return Err(anyhow!("Path is not a file: {}", file));
     }
 
-    if model_path.is_some() {
-        return Err(anyhow!(
-            "--model-path is not supported for transcription yet. Use --model whisper-small or whisper-large-v3."
-        ));
-    }
-
     // Build transcriber
     let mut builder = Transcriber::builder(model);
+    if let Some(path) = model_path {
+        builder = builder.model_path(path);
+    }
 
     if gpu {
         builder = builder.gpu();

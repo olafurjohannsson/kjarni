@@ -124,5 +124,67 @@ namespace Kjarni.Tests
             var ex = Assert.ThrowsAny<Exception>(() => new Chat(null, modelPath: folder, quiet: true));
             Assert.Contains("not suitable for chat", ex.Message);
         }
+
+        [Theory]
+        [InlineData("summarizer", "marian")]
+        [InlineData("translator", "bart")]
+        [InlineData("transcriber", "bart")]
+        public void Seq2Seq_FromAFolderOfTheWrongFamily_IsInvalidConfig(string kind, string modelType)
+        {
+            using var dir = new TempDir($"kjarni_cs_{kind}_{modelType}");
+            File.WriteAllText(Path.Combine(dir.Path, "config.json"), $"{{\"model_type\": \"{modelType}\"}}");
+            var ex = Assert.Throws<KjarniException>(() =>
+            {
+                IDisposable model = kind switch
+                {
+                    "summarizer" => new Summarizer(modelPath: dir.Path, quiet: true),
+                    "translator" => new Translator(modelPath: dir.Path, quiet: true),
+                    _ => new Transcriber(modelPath: dir.Path, quiet: true),
+                };
+                model.Dispose();
+            });
+            Assert.Equal(KjarniErrorCode.InvalidConfig, ex.ErrorCode);
+        }
+
+        [SkippableFact]
+        public void Translator_FromFolder_MatchesByName()
+        {
+            Heavy.SkipIfSet();
+            const string text = "The committee postponed its decision until next spring.";
+            string want;
+            using (var byName = new Translator("opus-mt-en-de", quiet: true))
+                want = byName.Translate(text, "en", "de");
+
+            var folder = Path.Combine(CacheDir(), "kjarni-ai_opus-mt-en-de");
+            using var byPath = new Translator(modelPath: folder, quiet: true);
+            Assert.Equal(want, byPath.Translate(text, "en", "de"));
+        }
+
+        [SkippableFact]
+        public void Summarizer_FromFolder_MatchesByName()
+        {
+            Heavy.SkipIfSet();
+            const string article = "The city council voted on Tuesday to extend the bus network to the new harbour district, which is expected to house 4,000 residents by 2030. The plan adds two lines and raises evening frequency to every ten minutes. Opponents said the cost should be covered by the state rather than the city.";
+            string want;
+            using (var byName = new Summarizer(quiet: true))
+                want = byName.Summarize(article);
+
+            var folder = Path.Combine(CacheDir(), "olafuraron_distilbart-cnn-12-6");
+            using var byPath = new Summarizer(modelPath: folder, quiet: true);
+            Assert.Equal(want, byPath.Summarize(article));
+        }
+
+        [SkippableFact]
+        public void Transcriber_FromFolder_MatchesByName()
+        {
+            Heavy.SkipIfSet();
+            string want;
+            using (var byName = new Transcriber(language: "en", quiet: true))
+                want = byName.TranscribeFile(Fixtures.SpeechWav).Text;
+
+            var folder = Path.Combine(CacheDir(), "openai_whisper-small");
+            using var byPath = new Transcriber(modelPath: folder, language: "en", quiet: true);
+            Assert.Equal(want, byPath.TranscribeFile(Fixtures.SpeechWav).Text);
+        }
     }
 }

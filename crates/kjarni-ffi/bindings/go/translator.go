@@ -17,6 +17,7 @@ type ffiTranslatorConfig struct {
 	To        uintptr
 	Quiet     int32
 	_2        int32 // padding
+	ModelPath uintptr
 }
 
 // Translator translates text between languages.
@@ -44,6 +45,8 @@ func NewTranslator(model string, opts ...Option) (*Translator, error) {
 	defer keepFrom()
 	toPtr, keepTo := cStringOrNull(o.to)
 	defer keepTo()
+	modelPath, keepModelPath := cStringOrNull(o.modelPath)
+	defer keepModelPath()
 
 	config := ffiTranslatorConfig{
 		Device:    deviceCode(o.device),
@@ -52,6 +55,7 @@ func NewTranslator(model string, opts ...Option) (*Translator, error) {
 		From:      fromPtr,
 		To:        toPtr,
 		Quiet:     boolToInt(o.quiet),
+		ModelPath: modelPath,
 	}
 	var handle uintptr
 	r1, _, _ := purego.SyscallN(_translatorNewSym, uintptr(unsafe.Pointer(&config)), uintptr(unsafe.Pointer(&handle)))

@@ -5,19 +5,19 @@ use futures::{Stream, StreamExt};
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
 use kjarni_transformers::traits::Device;
 
-use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides};
+use crate::common::folder_name;
+use crate::seq2seq::{
+    Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides, folder_architecture,
+};
 
 use super::builder::SummarizerBuilder;
 use super::types::{SummarizerError, SummarizerResult};
-use super::validation::validate_for_summarization;
+use super::validation::{validate_folder_for_summarization, validate_for_summarization};
 
 /// High-level summarization API
 pub struct Summarizer {
     /// Underlying seq2seq generator.
     generator: Seq2SeqGenerator,
-
-    /// Model type.
-    model_type: ModelType,
 
     /// Whether this model needs a "summarize: " prefix (T5 vs BART).
     needs_prefix: bool,
@@ -36,20 +36,31 @@ impl Summarizer {
 
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: SummarizerBuilder) -> SummarizerResult<Self> {
-        // Resolve and validate model type
-        let model_type = ModelType::from_cli_name(&builder.model)
-            .ok_or_else(|| SummarizerError::UnknownModel(builder.model.clone()))?;
+        let architecture = match &builder.model_path {
+            Some(path) => {
+                let architecture = folder_architecture(path)?;
+                validate_folder_for_summarization(&folder_name(path), architecture)?;
+                architecture
+            }
+            None => {
+                let model_type = ModelType::from_cli_name(&builder.model)
+                    .ok_or_else(|| SummarizerError::UnknownModel(builder.model.clone()))?;
+                validate_for_summarization(model_type)?;
+                model_type.info().architecture
+            }
+        };
 
-        validate_for_summarization(model_type)?;
+        // T5 is told the task in the input; BART is trained for it.
+        let needs_prefix = matches!(architecture, ModelArchitecture::T5);
 
-        // Check if model needs prefix
-        let needs_prefix = matches!(model_type.info().architecture, ModelArchitecture::T5);
-
-        // Build the underlying seq2seq generator
         let mut gen_builder = Seq2SeqGeneratorBuilder::new(&builder.model)
             .device(builder.device)
             .download_policy(builder.download_policy)
             .with_overrides(builder.overrides);
+
+        if let Some(path) = builder.model_path {
+            gen_builder = gen_builder.model_path(path);
+        }
 
         if builder.quiet {
             gen_builder = gen_builder.quiet();
@@ -63,11 +74,14 @@ impl Summarizer {
             gen_builder = gen_builder.with_context(context);
         }
 
+        if let Some(load_config) = builder.load_config {
+            gen_builder.load_config = Some(load_config);
+        }
+
         let generator = gen_builder.build().await?;
 
         Ok(Self {
             generator,
-            model_type,
             needs_prefix,
         })
     }
@@ -118,14 +132,14 @@ impl Summarizer {
         }
     }
 
-    /// Get the model type.
-    pub fn model_type(&self) -> ModelType {
-        self.model_type
+    /// The registry model, or `None` for a model loaded from a folder.
+    pub fn model_type(&self) -> Option<ModelType> {
+        self.generator.model_type()
     }
 
-    /// Get the model's CLI name.
+    /// The registry name, or the name of the folder the model was loaded from.
     pub fn model_name(&self) -> &str {
-        self.model_type.cli_name()
+        self.generator.model_name()
     }
 
     /// Get the device the model is running on.

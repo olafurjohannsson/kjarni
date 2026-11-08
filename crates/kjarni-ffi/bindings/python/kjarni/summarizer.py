@@ -1,6 +1,7 @@
 """High-level Summarizer API."""
 
-from typing import Optional
+import os
+from typing import Optional, Union
 from ctypes import c_void_p, c_char_p, c_int, c_int32, c_size_t, byref, POINTER, Structure
 
 from ._ffi import _lib, check_error, take_string, encode_or_none, KjarniDevice
@@ -14,6 +15,7 @@ class KjarniSummarizerConfig(Structure):
         ("min_length", c_size_t),
         ("max_length", c_size_t),
         ("quiet", c_int32),
+        ("model_path", c_char_p),
     ]
 
 
@@ -43,6 +45,7 @@ class Summarizer:
         device: str = "cpu",
         cache_dir: Optional[str] = None,
         quiet: bool = False,
+        model_path: Optional[Union[str, os.PathLike]] = None,
     ):
         """Load a summarization model, downloading it on first use.
 
@@ -53,6 +56,8 @@ class Summarizer:
             device: "cpu" or "gpu"
             cache_dir: Directory to cache models
             quiet: Suppress progress output
+            model_path: A local folder holding a BART or T5 model in the Hugging Face
+                layout, weights as safetensors or pytorch_model.bin, used instead of `model`
         """
         if min_length < 0 or max_length < 0:
             raise ValueError("min_length and max_length must not be negative")
@@ -64,6 +69,8 @@ class Summarizer:
         if model:
             config.model_name = model.encode("utf-8")
         config.cache_dir = encode_or_none(cache_dir)
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
 
         self._handle = c_void_p()
         check_error(_lib.kjarni_summarizer_new(byref(config), byref(self._handle)))

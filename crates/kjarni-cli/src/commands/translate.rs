@@ -25,7 +25,7 @@ pub async fn run(
 ) -> Result<()> {
     // Fail on an unknown model here, with suggestions, rather than letting the
     // builder report it without context.
-    if let Some(model) = model {
+    if let (Some(model), None) = (model, model_path) {
         let _ = crate::commands::util::resolve_model(model, Some("seq2seq"))?;
     }
 
@@ -45,6 +45,8 @@ pub async fn run(
 
     let model = match model {
         Some(model) => model,
+        // The folder's config says what the model is.
+        None if model_path.is_some() => "",
         None => {
             let model = default_model(source_lang, target_lang);
             if model == FALLBACK_MODEL {
@@ -57,12 +59,10 @@ pub async fn run(
         }
     };
 
-    // Build translator
-    if model_path.is_some() {
-        return Err(anyhow!("--model-path not yet implemented."));
-    }
-
     let mut builder = Translator::builder(model);
+    if let Some(path) = model_path {
+        builder = builder.model_path(path);
+    }
 
     if gpu {
         builder = builder.gpu();

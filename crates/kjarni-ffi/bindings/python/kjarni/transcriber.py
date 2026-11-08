@@ -1,6 +1,7 @@
 """High-level Transcriber API."""
 
-from typing import List, NamedTuple, Optional, Sequence
+import os
+from typing import List, NamedTuple, Optional, Sequence, Union
 from ctypes import (
     c_void_p, c_char_p, c_int, c_int32, c_float, c_size_t, c_uint32, byref, POINTER, Structure,
 )
@@ -15,6 +16,7 @@ class KjarniTranscriberConfig(Structure):
         ("language", c_char_p),
         ("translate", c_int32),
         ("quiet", c_int32),
+        ("model_path", c_char_p),
     ]
 
 
@@ -87,6 +89,7 @@ class Transcriber:
         translate: bool = False,
         device: str = "cpu",
         quiet: bool = False,
+        model_path: Optional[Union[str, os.PathLike]] = None,
     ):
         """Load a Whisper model, downloading it on first use.
 
@@ -96,6 +99,8 @@ class Transcriber:
             translate: Translate the speech into English instead of transcribing it
             device: "cpu" or "gpu"
             quiet: Suppress progress output
+            model_path: A local folder holding a Whisper model in the Hugging Face
+                layout, used instead of `model`
         """
         config = _lib.kjarni_transcriber_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
@@ -104,6 +109,8 @@ class Transcriber:
         if model:
             config.model_name = model.encode("utf-8")
         config.language = encode_or_none(language)
+        if model_path:
+            config.model_path = os.fspath(model_path).encode("utf-8")
 
         self._handle = c_void_p()
         check_error(_lib.kjarni_transcriber_new(byref(config), byref(self._handle)))

@@ -48,8 +48,27 @@ pub async fn run(
     // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
 
-    if model_path.is_some() {
-        return Err(anyhow!("--model-path not yet implemented."));
+    if let Some(path) = model_path {
+        let mut builder = kjarni::reranker::Reranker::builder("custom").model_path(path);
+        builder = if gpu { builder.gpu() } else { builder.cpu() };
+        builder = builder.quiet(quiet);
+        let reranker = builder.build().await.map_err(|e| anyhow!("{e}"))?;
+        let doc_refs: Vec<&str> = docs.iter().map(|s| s.as_str()).collect();
+        let results = reranker
+            .rerank(query, &doc_refs)
+            .await
+            .map_err(|e| anyhow!("{e}"))?;
+        let results: Vec<RerankResult> = results
+            .into_iter()
+            .take(top_k.unwrap_or(usize::MAX))
+            .map(|r| RerankResult {
+                index: r.index,
+                score: r.score,
+                document: docs[r.index].clone(),
+            })
+            .collect();
+        print!("{}", format_results(&results, format)?);
+        return Ok(());
     }
 
     let model_type = ModelType::from_cli_name(model)

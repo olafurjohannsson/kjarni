@@ -238,23 +238,20 @@ impl QKVProjection {
         fused
     }
 
-    /// Fuse Q, K, V biases into single [3*hidden] vector.
+    /// Fuse Q, K, V biases into single [3*hidden] vector. A projection
+    /// without a bias, such as Whisper's `k_proj`, contributes zeros.
     fn fuse_qkv_bias(q: &LinearLayer, k: &LinearLayer, v: &LinearLayer) -> Option<Array1<f32>> {
-        match (q.bias(), k.bias(), v.bias()) {
-            (Some(qb), Some(kb), Some(vb)) => {
-                let out = qb.len();
-                let mut fused = Array1::zeros(3 * out);
-                fused.slice_mut(s![0..out]).assign(qb);
-                fused.slice_mut(s![out..2 * out]).assign(kb);
-                fused.slice_mut(s![2 * out..3 * out]).assign(vb);
-                Some(fused)
-            }
-            (None, None, None) => None,
-            _ => {
-                log::warn!("QKV layers have inconsistent bias state, ignoring biases");
-                None
+        if q.bias().is_none() && k.bias().is_none() && v.bias().is_none() {
+            return None;
+        }
+        let out = q.out_features();
+        let mut fused = Array1::zeros(3 * out);
+        for (i, layer) in [q, k, v].into_iter().enumerate() {
+            if let Some(b) = layer.bias() {
+                fused.slice_mut(s![i * out..(i + 1) * out]).assign(b);
             }
         }
+        Some(fused)
     }
 }
 
@@ -270,11 +267,48 @@ impl std::fmt::Debug for QKVProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array2;
+    use ndarray::{Array1, Array2};
 
     fn create_test_layer(in_features: usize, out_features: usize) -> LinearLayer {
         let weights = Array2::from_elem((out_features, in_features), 0.01f32);
         LinearLayer::new_f32(weights, None)
+    }
+
+    /// A layer of pseudo-random weights, with or without a bias.
+    fn layer(in_f: usize, out_f: usize, seed: f32, bias: bool) -> LinearLayer {
+        let w = Array2::from_shape_fn((out_f, in_f), |(o, i)| {
+            ((o * 7 + i * 3) as f32 * seed).sin()
+        });
+        let b = bias.then(|| Array1::from_shape_fn(out_f, |o| (o as f32 * seed).cos()));
+        LinearLayer::new_f32(w, b)
+    }
+
+    /// Whisper's q_proj and v_proj have a bias and its k_proj does not. Fused,
+    /// the projections lost every bias, which put the CPU encoder of
+    /// whisper-tiny and whisper-base off from PyTorch from the first layer.
+    #[test]
+    fn fused_projection_keeps_q_and_v_biases_when_k_has_none() {
+        let (hidden, tokens) = (384, 5);
+        let x = Array2::from_shape_fn((tokens, hidden), |(t, i)| {
+            ((t * hidden + i) as f32 * 0.01).sin()
+        });
+        let (q, k, v) = (
+            layer(hidden, hidden, 0.1, true),
+            layer(hidden, hidden, 0.2, false),
+            layer(hidden, hidden, 0.3, true),
+        );
+        let want = (
+            q.matmul(&x.view()),
+            k.matmul(&x.view()),
+            v.matmul(&x.view()),
+        );
+        let fused = QKVProjection::new_fused(q, k, v);
+        assert!(fused.is_fused());
+        let (gq, gk, gv) = fused.forward(&x.view());
+        for (got, want) in [(gq, want.0), (gk, want.1), (gv, want.2)] {
+            let diff = (&got - &want).mapv(f32::abs).fold(0.0f32, |m, &d| m.max(d));
+            assert!(diff < 1e-4, "max difference {diff}");
+        }
     }
 
     #[test]

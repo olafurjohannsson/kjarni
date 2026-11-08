@@ -26,13 +26,15 @@ namespace Kjarni
         /// <param name="device">Compute device - "cpu" or "gpu".</param>
         /// <param name="cacheDir">Directory to cache downloaded models.</param>
         /// <param name="quiet">Suppress progress output.</param>
+        /// <param name="modelPath">A local folder holding a BART or T5 model in the Hugging Face layout, with weights as safetensors or pytorch_model.bin. Used instead of <paramref name="model"/> when given.</param>
         public Summarizer(
             string? model = null,
             int minLength = 0,
             int maxLength = 0,
             string device = "cpu",
             string? cacheDir = null,
-            bool quiet = false)
+            bool quiet = false,
+            string? modelPath = null)
         {
             if (minLength < 0) throw new ArgumentOutOfRangeException(nameof(minLength));
             if (maxLength < 0) throw new ArgumentOutOfRangeException(nameof(maxLength));
@@ -45,16 +47,19 @@ namespace Kjarni
 
             var modelPtr = Native.Utf8OrNull(model);
             var cacheDirPtr = Native.Utf8OrNull(cacheDir);
+            var modelPathPtr = Native.Utf8OrNull(modelPath);
             try
             {
                 if (modelPtr != IntPtr.Zero) config.ModelName = modelPtr;
                 config.CacheDir = cacheDirPtr;
+                config.ModelPath = modelPathPtr;
                 Native.CheckError(Native.kjarni_summarizer_new(ref config, out _handle));
             }
             finally
             {
                 Marshal.FreeCoTaskMem(modelPtr);
                 Marshal.FreeCoTaskMem(cacheDirPtr);
+                Marshal.FreeCoTaskMem(modelPathPtr);
             }
         }
 

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use kjarni_models::models::whisper::WhisperModel;
@@ -10,6 +11,7 @@ use super::validation;
 pub struct TranscriberBuilder {
     model_id: String,
     model_type: Option<ModelType>,
+    model_path: Option<PathBuf>,
     device: Device,
     context: Option<Arc<WgpuContext>>,
     language: Option<String>,
@@ -26,6 +28,7 @@ impl TranscriberBuilder {
         Self {
             model_id: model.to_string(),
             model_type: None,
+            model_path: None,
             device: Device::Cpu,
             context: None,
             language: None,
@@ -35,6 +38,14 @@ impl TranscriberBuilder {
             quiet: false,
             progress_callback: None,
         }
+    }
+
+    /// Load a Whisper model from a local folder instead of the registry,
+    /// such as one downloaded from the Hugging Face Hub: its `config.json`,
+    /// safetensors weights and tokenizer files.
+    pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.model_path = Some(path.into());
+        self
     }
 
     /// Use CPU for inference (default).
@@ -101,15 +112,22 @@ impl TranscriberBuilder {
     }
 
     pub async fn build(self) -> TranscriberResult<Transcriber> {
-        let model_type = self
-            .model_type
-            .or_else(|| resolve_model_type(&self.model_id))
-            .ok_or_else(|| {
-                TranscriberError::InvalidConfig(format!(
-                    "Unknown model: '{}'. Try 'whisper-small' or 'whisper-large-v3'.",
-                    self.model_id
-                ))
-            })?;
+        let model_type = match &self.model_path {
+            Some(_) => None,
+            None => Some(
+                self.model_type
+                    .or_else(|| resolve_model_type(&self.model_id))
+                    .ok_or_else(|| {
+                        TranscriberError::InvalidConfig(format!(
+                            "Unknown model: '{}'. Try 'whisper-small' or 'whisper-large-v3'.",
+                            self.model_id
+                        ))
+                    })?,
+            ),
+        };
+        if let Some(path) = &self.model_path {
+            check_whisper_folder(path)?;
+        }
 
         validation::validate_config(self.language.as_deref(), self.max_tokens_per_chunk)?;
 
@@ -127,13 +145,28 @@ impl TranscriberBuilder {
             None
         };
 
-        let model = WhisperModel::from_registry(model_type, None, self.device, context, None)
-            .await
-            .map_err(TranscriberError::ModelLoadFailed)?;
+        let (model, model_name) = match (&self.model_path, model_type) {
+            (Some(path), _) => (
+                WhisperModel::from_pretrained(
+                    path,
+                    self.device,
+                    context,
+                    Default::default(),
+                    kjarni_transformers::common::HFGenerationConfig::load_or_default(path),
+                ),
+                crate::common::folder_name(path),
+            ),
+            (None, Some(mt)) => (
+                WhisperModel::from_registry(mt, None, self.device, context, None).await,
+                mt.cli_name().to_string(),
+            ),
+            (None, None) => unreachable!("a registry model was resolved above"),
+        };
+        let model = model.map_err(TranscriberError::ModelLoadFailed)?;
 
         Ok(Transcriber::new(
             Arc::new(model),
-            model_type,
+            model_name,
             self.language,
             self.task,
             self.timestamps,
@@ -142,6 +175,26 @@ impl TranscriberBuilder {
             self.quiet,
             self.progress_callback,
         ))
+    }
+}
+
+/// A folder that is not a Whisper model is reported as such, rather than as
+/// a tensor the loader could not find.
+fn check_whisper_folder(path: &std::path::Path) -> TranscriberResult<()> {
+    let file = path.join("config.json");
+    let text = std::fs::read_to_string(&file).map_err(|e| {
+        TranscriberError::InvalidConfig(format!("cannot read {}: {e}", file.display()))
+    })?;
+    let config: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        TranscriberError::InvalidConfig(format!("cannot parse {}: {e}", file.display()))
+    })?;
+    match config["model_type"].as_str() {
+        Some("whisper") => Ok(()),
+        other => Err(TranscriberError::InvalidConfig(format!(
+            "{} is not a Whisper model: its config.json has model_type {}",
+            path.display(),
+            other.map_or("missing".to_string(), |t| format!("'{t}'"))
+        ))),
     }
 }
 

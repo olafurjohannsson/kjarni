@@ -11,10 +11,11 @@ use log::{debug, info};
 use tokio::sync::mpsc;
 
 use kjarni_transformers::WgpuContext;
-use kjarni_transformers::common::GenerationConfig;
+use kjarni_transformers::common::{GenerationConfig, HFGenerationConfig};
 use kjarni_transformers::encoder_decoder::{EncoderDecoderGenerator, EncoderDecoderLanguageModel};
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
+use kjarni_transformers::pipeline::Seq2SeqLoader;
 use kjarni_transformers::traits::Device;
 
 use crate::common::DownloadPolicy;
@@ -22,16 +23,40 @@ use crate::common::DownloadPolicy;
 use super::builder::Seq2SeqGeneratorBuilder;
 use super::resolution::apply_overrides;
 use super::types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
-use super::validation::validate_for_seq2seq;
+use super::validation::{folder_architecture, validate_for_seq2seq};
 use kjarni_transformers::models::get_default_cache_dir;
+
+/// Where the model comes from.
+enum ModelSource {
+    Registry(ModelType),
+    Folder {
+        path: std::path::PathBuf,
+        architecture: ModelArchitecture,
+    },
+}
+
+impl ModelSource {
+    fn architecture(&self) -> ModelArchitecture {
+        match self {
+            Self::Registry(model_type) => model_type.info().architecture,
+            Self::Folder { architecture, .. } => *architecture,
+        }
+    }
+}
 
 /// Generic text-to-text generator for encoder-decoder models
 pub struct Seq2SeqGenerator {
     /// The underlying encoder-decoder generator (wrapped in Arc for streaming).
     encoder_decoder: Arc<EncoderDecoderGenerator>,
 
-    /// Model type from registry.
-    model_type: ModelType,
+    /// The registry model, or `None` for a model loaded from a folder.
+    model_type: Option<ModelType>,
+
+    /// The registry name, or the folder's name.
+    model_name: String,
+
+    /// The model's family.
+    architecture: ModelArchitecture,
 
     /// User-provided overrides (only what the user explicitly set).
     user_overrides: Seq2SeqOverrides,
@@ -58,26 +83,37 @@ impl Seq2SeqGenerator {
     pub(crate) async fn from_builder(builder: Seq2SeqGeneratorBuilder) -> Seq2SeqResult<Self> {
         let load_start = Instant::now();
 
-        // Resolve model type
-        let model_type = ModelType::from_cli_name(&builder.model)
-            .ok_or_else(|| Seq2SeqError::UnknownModel(builder.model.clone()))?;
-
-        debug!(
-            "Resolved model '{}' -> {:?} ({:?})",
-            builder.model,
-            model_type,
-            model_type.info().architecture
-        );
-
-        // Validate model for seq2seq
-        let validation = validate_for_seq2seq(model_type)?;
-
-        // Emit warnings if not suppressed
-        if !builder.quiet && !builder.allow_warnings {
-            for warning in &validation.warnings {
-                eprintln!("warning: {}", warning);
+        let source = match &builder.model_path {
+            Some(path) => {
+                let architecture = folder_architecture(path)?;
+                debug!("Folder {path:?} holds a {architecture:?} model");
+                ModelSource::Folder {
+                    path: path.clone(),
+                    architecture,
+                }
             }
-        }
+            None => {
+                let model_type = ModelType::from_cli_name(&builder.model)
+                    .ok_or_else(|| Seq2SeqError::UnknownModel(builder.model.clone()))?;
+                debug!(
+                    "Resolved model '{}' -> {:?} ({:?})",
+                    builder.model,
+                    model_type,
+                    model_type.info().architecture
+                );
+                let validation = validate_for_seq2seq(model_type)?;
+                if !builder.quiet && !builder.allow_warnings {
+                    for warning in &validation.warnings {
+                        eprintln!("warning: {}", warning);
+                    }
+                }
+                ModelSource::Registry(model_type)
+            }
+        };
+        let model_name = match &source {
+            ModelSource::Folder { path, .. } => crate::common::folder_name(path),
+            ModelSource::Registry(model_type) => model_type.cli_name().to_string(),
+        };
 
         // Determine cache directory
         let cache_dir = builder
@@ -85,10 +121,9 @@ impl Seq2SeqGenerator {
             .clone()
             .unwrap_or_else(get_default_cache_dir);
 
-        // Check if model is downloaded
-        let is_downloaded = model_type.is_downloaded(&cache_dir);
-
-        if !is_downloaded {
+        if let ModelSource::Registry(model_type) = source
+            && !model_type.is_downloaded(&cache_dir)
+        {
             match builder.download_policy {
                 DownloadPolicy::Never => {
                     return Err(Seq2SeqError::ModelNotDownloaded(builder.model.clone()));
@@ -138,26 +173,21 @@ impl Seq2SeqGenerator {
             .map(|c| c.into_inner())
             .unwrap_or_default();
 
-        // Load the model based on architecture
-        info!(
-            "Loading {} model '{}' on {:?}...",
-            model_type.info().architecture,
-            builder.model,
-            device
-        );
+        let architecture = source.architecture();
+        info!("Loading {architecture} model '{model_name}' on {device:?}...");
 
         let model: Box<dyn EncoderDecoderLanguageModel> =
-            Self::load_model(model_type, &cache_dir, device, context.clone(), load_config)
+            Self::load_model(&source, &cache_dir, device, context.clone(), load_config)
                 .await
                 .map_err(|e| Seq2SeqError::LoadFailed {
-                    model: builder.model.clone(),
+                    model: model_name.clone(),
                     source: e,
                 })?;
 
         // Create the encoder-decoder generator (takes ownership of model)
         let encoder_decoder = Arc::new(EncoderDecoderGenerator::new(model).map_err(|e| {
             Seq2SeqError::LoadFailed {
-                model: builder.model.clone(),
+                model: model_name.clone(),
                 source: e,
             }
         })?);
@@ -165,7 +195,7 @@ impl Seq2SeqGenerator {
         let load_elapsed = load_start.elapsed();
         info!(
             "Model '{}' loaded in {:.2}s (vocab={}, context={})",
-            builder.model,
+            model_name,
             load_elapsed.as_secs_f32(),
             encoder_decoder.model.vocab_size(),
             encoder_decoder.model.context_size()
@@ -173,53 +203,77 @@ impl Seq2SeqGenerator {
 
         Ok(Self {
             encoder_decoder,
-            model_type,
+            model_type: match source {
+                ModelSource::Registry(model_type) => Some(model_type),
+                ModelSource::Folder { .. } => None,
+            },
+            model_name,
+            architecture,
             user_overrides: builder.overrides,
             device,
             context,
         })
     }
 
-    /// Load the appropriate model based on architecture.
+    /// Load the model from the registry cache or its folder.
     async fn load_model(
-        model_type: ModelType,
+        source: &ModelSource,
         cache_dir: &std::path::Path,
         device: Device,
         context: Option<Arc<WgpuContext>>,
         load_config: ModelLoadConfig,
     ) -> anyhow::Result<Box<dyn EncoderDecoderLanguageModel>> {
-        let info = model_type.info();
-
-        match info.architecture {
-            ModelArchitecture::T5 => {
-                debug!("Loading T5 model from {:?}", cache_dir);
+        match (source, source.architecture()) {
+            (ModelSource::Folder { path, .. }, ModelArchitecture::T5) => {
+                let model: T5Model = Seq2SeqLoader::load_from_pretrained(
+                    path,
+                    device,
+                    context,
+                    Some(load_config),
+                    HFGenerationConfig::load_or_default(path),
+                )?;
+                Ok(Box::new(model))
+            }
+            (
+                ModelSource::Folder { path, .. },
+                ModelArchitecture::Bart | ModelArchitecture::Marian,
+            ) => {
+                let model: BartModel = Seq2SeqLoader::load_from_pretrained(
+                    path,
+                    device,
+                    context,
+                    Some(load_config),
+                    HFGenerationConfig::load_or_default(path),
+                )?;
+                Ok(Box::new(model))
+            }
+            (ModelSource::Registry(model_type), ModelArchitecture::T5) => {
                 let model = T5Model::from_registry(
-                    model_type,
+                    *model_type,
                     Some(cache_dir.to_path_buf()),
                     device,
                     context,
                     Some(load_config),
                 )
                 .await?;
-                Ok(Box::new(model) as Box<dyn EncoderDecoderLanguageModel>)
+                Ok(Box::new(model))
             }
-
-            ModelArchitecture::Bart | ModelArchitecture::Marian => {
-                debug!("Loading BART model from {:?}", cache_dir);
+            (
+                ModelSource::Registry(model_type),
+                ModelArchitecture::Bart | ModelArchitecture::Marian,
+            ) => {
                 let model = BartModel::from_registry(
-                    model_type,
+                    *model_type,
                     Some(cache_dir.to_path_buf()),
                     device,
                     context,
                     Some(load_config),
                 )
                 .await?;
-                Ok(Box::new(model) as Box<dyn EncoderDecoderLanguageModel>)
+                Ok(Box::new(model))
             }
-
-            _ => Err(anyhow!(
-                "Architecture {:?} is not supported for seq2seq generation. Use T5 or BART.",
-                info.architecture
+            (_, architecture) => Err(anyhow!(
+                "Architecture {architecture:?} is not supported for seq2seq generation. Use T5 or BART."
             )),
         }
     }
@@ -357,14 +411,19 @@ impl Seq2SeqGenerator {
         self.encoder_decoder.model.get_default_generation_config()
     }
 
-    /// Get the model type.
-    pub fn model_type(&self) -> ModelType {
+    /// The registry model, or `None` for a model loaded from a folder.
+    pub fn model_type(&self) -> Option<ModelType> {
         self.model_type
     }
 
-    /// Get the model's CLI name.
+    /// The registry name, or the name of the folder the model was loaded from.
     pub fn model_name(&self) -> &str {
-        self.model_type.cli_name()
+        &self.model_name
+    }
+
+    /// The model's family: T5, BART or Marian.
+    pub fn architecture(&self) -> ModelArchitecture {
+        self.architecture
     }
 
     /// Get the device the model is running on.

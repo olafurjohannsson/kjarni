@@ -24,6 +24,9 @@ pub struct KjarniTranslatorConfig {
     pub to: *const c_char,
     /// Non-zero suppresses progress output.
     pub quiet: i32,
+    /// Folder holding a Marian (opus-mt) or T5 model in the Hugging Face layout, used instead of
+    /// `model_name`. Null uses the registry.
+    pub model_path: *const c_char,
 }
 
 /// Get default translator configuration.
@@ -36,6 +39,7 @@ pub extern "C" fn kjarni_translator_config_default() -> KjarniTranslatorConfig {
         from: ptr::null(),
         to: ptr::null(),
         quiet: 0,
+        model_path: ptr::null(),
     }
 }
 
@@ -90,16 +94,18 @@ pub unsafe extern "C" fn kjarni_translator_new(
                 } else {
                     &*config
                 };
-                let (model, cache_dir, from, to) = match (
+                let (model, cache_dir, from, to, model_path) = match (
                     opt_str(config.model_name),
                     opt_str(config.cache_dir),
                     opt_str(config.from),
                     opt_str(config.to),
+                    opt_str(config.model_path),
                 ) {
-                    (Ok(m), Ok(c), Ok(f), Ok(t)) => (m, c, f, t),
+                    (Ok(m), Ok(c), Ok(f), Ok(t), Ok(p)) => (m, c, f, t, p),
                     _ => return KjarniErrorCode::InvalidUtf8,
                 };
-                let model = model.unwrap_or_else(|| {
+                // A folder's config says what the model is.
+                let model = model.or(model_path.map(|_| "")).unwrap_or_else(|| {
                     let model = model_for(from, to);
                     if model == FALLBACK_MODEL && config.quiet == 0 {
                         eprintln!(
@@ -112,6 +118,9 @@ pub unsafe extern "C" fn kjarni_translator_new(
                 });
 
                 let mut builder = Translator::builder(model);
+                if let Some(path) = model_path {
+                    builder = builder.model_path(path);
+                }
                 builder = match config.device {
                     KjarniDevice::Gpu => builder.gpu(),
                     KjarniDevice::Cpu => builder.cpu(),
@@ -218,6 +227,89 @@ pub unsafe extern "C" fn kjarni_translator_translate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder whose config.json says it holds a `model_type` model.
+    fn folder_of(model_type: &str) -> (tempfile::TempDir, std::ffi::CString) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            format!(r#"{{"model_type": "{model_type}"}}"#),
+        )
+        .unwrap();
+        let path = std::ffi::CString::new(dir.path().to_str().unwrap()).unwrap();
+        (dir, path)
+    }
+
+    /// A snapshot of `repo` in the Hugging Face cache that has `file`.
+    fn cached(repo: &str, file: &str) -> Option<std::ffi::CString> {
+        let home = std::env::var_os("HF_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|h| std::path::Path::new(&h).join(".cache/huggingface"))
+            })?;
+        let snapshots = home.join(format!("hub/models--{}/snapshots", repo.replace('/', "--")));
+        std::fs::read_dir(snapshots)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.join(file).exists())
+            .map(|p| std::ffi::CString::new(p.to_str().unwrap()).unwrap())
+    }
+
+    #[test]
+    fn a_folder_of_another_family_is_invalid_config() {
+        let (_dir, path) = folder_of("bart");
+        unsafe {
+            let mut config = kjarni_translator_config_default();
+            config.model_path = path.as_ptr();
+            config.quiet = 1;
+            let mut t = ptr::null_mut();
+            assert_eq!(
+                kjarni_translator_new(&config, &mut t),
+                KjarniErrorCode::InvalidConfig
+            );
+            assert!(t.is_null());
+        }
+    }
+
+    #[test]
+    fn translates_from_a_marian_folder() {
+        let Some(path) = cached("Helsinki-NLP/opus-mt-en-ROMANCE", "pytorch_model.bin") else {
+            eprintln!("skipping: opus-mt-en-ROMANCE not in the Hugging Face cache");
+            return;
+        };
+        unsafe {
+            let mut config = kjarni_translator_config_default();
+            config.model_path = path.as_ptr();
+            config.from = c"en".as_ptr();
+            config.quiet = 1;
+            let mut t = ptr::null_mut();
+            assert_eq!(kjarni_translator_new(&config, &mut t), KjarniErrorCode::Ok);
+            let mut out = ptr::null_mut();
+            // transformers 4.57: MarianMTModel.generate on ">>es<< Where is the library?"
+            let code = kjarni_translator_translate(
+                t,
+                c"Where is the library?".as_ptr(),
+                ptr::null(),
+                c"es".as_ptr(),
+                &mut out,
+            );
+            assert_eq!(code, KjarniErrorCode::Ok);
+            let text = CStr::from_ptr(out).to_str().unwrap().to_string();
+            crate::kjarni_string_free(out);
+            let code = kjarni_translator_translate(
+                t,
+                c"Hello".as_ptr(),
+                ptr::null(),
+                c"de".as_ptr(),
+                &mut out,
+            );
+            assert_eq!(code, KjarniErrorCode::InvalidConfig);
+            kjarni_translator_free(t);
+            assert_eq!(text, "¿Dónde está la biblioteca?");
+        }
+    }
 
     #[test]
     fn a_null_model_is_chosen_from_the_default_languages() {

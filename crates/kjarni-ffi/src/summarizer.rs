@@ -21,6 +21,9 @@ pub struct KjarniSummarizerConfig {
     pub max_length: usize,
     /// Non-zero suppresses progress output.
     pub quiet: i32,
+    /// Folder holding a BART or T5 model in the Hugging Face layout, used instead of
+    /// `model_name`. Null uses the registry.
+    pub model_path: *const c_char,
 }
 
 /// Get default summarizer configuration.
@@ -33,6 +36,7 @@ pub extern "C" fn kjarni_summarizer_config_default() -> KjarniSummarizerConfig {
         min_length: 0,
         max_length: 0,
         quiet: 0,
+        model_path: ptr::null(),
     }
 }
 
@@ -84,8 +88,15 @@ pub unsafe extern "C" fn kjarni_summarizer_new(
                     Ok(c) => c,
                     Err(e) => return e,
                 };
+                let model_path = match opt_str(config.model_path) {
+                    Ok(p) => p,
+                    Err(e) => return e,
+                };
 
                 let mut builder = Summarizer::builder(model);
+                if let Some(path) = model_path {
+                    builder = builder.model_path(path);
+                }
                 builder = match config.device {
                     KjarniDevice::Gpu => builder.gpu(),
                     KjarniDevice::Cpu => builder.cpu(),
@@ -177,6 +188,79 @@ pub unsafe extern "C" fn kjarni_summarizer_summarize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder whose config.json says it holds a `model_type` model.
+    fn folder_of(model_type: &str) -> (tempfile::TempDir, std::ffi::CString) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            format!(r#"{{"model_type": "{model_type}"}}"#),
+        )
+        .unwrap();
+        let path = std::ffi::CString::new(dir.path().to_str().unwrap()).unwrap();
+        (dir, path)
+    }
+
+    /// A snapshot of `repo` in the Hugging Face cache that has `file`.
+    fn cached(repo: &str, file: &str) -> Option<std::ffi::CString> {
+        let home = std::env::var_os("HF_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|h| std::path::Path::new(&h).join(".cache/huggingface"))
+            })?;
+        let snapshots = home.join(format!("hub/models--{}/snapshots", repo.replace('/', "--")));
+        std::fs::read_dir(snapshots)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.join(file).exists())
+            .map(|p| std::ffi::CString::new(p.to_str().unwrap()).unwrap())
+    }
+
+    #[test]
+    fn a_folder_of_another_family_is_invalid_config() {
+        let (_dir, path) = folder_of("marian");
+        unsafe {
+            let mut config = kjarni_summarizer_config_default();
+            config.model_path = path.as_ptr();
+            config.quiet = 1;
+            let mut s = ptr::null_mut();
+            assert_eq!(
+                kjarni_summarizer_new(&config, &mut s),
+                KjarniErrorCode::InvalidConfig
+            );
+            assert!(s.is_null());
+        }
+    }
+
+    #[test]
+    fn summarizes_from_a_folder_with_pytorch_weights() {
+        let Some(path) = cached("sshleifer/distilbart-cnn-12-6", "pytorch_model.bin") else {
+            eprintln!(
+                "skipping: distilbart-cnn-12-6 with pytorch_model.bin not in the Hugging Face cache"
+            );
+            return;
+        };
+        unsafe {
+            let mut config = kjarni_summarizer_config_default();
+            config.model_path = path.as_ptr();
+            config.max_length = 40;
+            config.quiet = 1;
+            let mut s = ptr::null_mut();
+            assert_eq!(kjarni_summarizer_new(&config, &mut s), KjarniErrorCode::Ok);
+            let mut out = ptr::null_mut();
+            let text = c"The city council voted on Tuesday to extend the bus network to the new harbour district. The plan adds two lines and raises evening frequency to every ten minutes.";
+            assert_eq!(
+                kjarni_summarizer_summarize(s, text.as_ptr(), &mut out),
+                KjarniErrorCode::Ok
+            );
+            let summary = CStr::from_ptr(out).to_str().unwrap().to_string();
+            crate::kjarni_string_free(out);
+            kjarni_summarizer_free(s);
+            assert!(summary.contains("bus"), "{summary}");
+        }
+    }
 
     #[test]
     fn null_arguments_are_errors_not_crashes() {

@@ -90,3 +90,33 @@ pub fn suggest_seq2seq_models() -> Vec<&'static str> {
         "bart-large-cnn", // Quality summarization
     ]
 }
+
+/// The encoder-decoder family of the model in `path`, from the `model_type` in
+/// its config.json.
+pub fn folder_architecture(path: &std::path::Path) -> Seq2SeqResult<ModelArchitecture> {
+    let name = crate::common::folder_name(path);
+    let config = path.join("config.json");
+    let text = std::fs::read_to_string(&config).map_err(|e| {
+        Seq2SeqError::InvalidConfig(format!("cannot read {}: {e}", config.display()))
+    })?;
+    let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        Seq2SeqError::InvalidConfig(format!("{} is not valid JSON: {e}", config.display()))
+    })?;
+    let model_type = json["model_type"].as_str().unwrap_or_default();
+    match model_type {
+        "t5" => Ok(ModelArchitecture::T5),
+        "bart" => Ok(ModelArchitecture::Bart),
+        "marian" => Ok(ModelArchitecture::Marian),
+        "whisper" => Err(Seq2SeqError::IncompatibleModel {
+            model: name,
+            reason: "Whisper is for speech-to-text, not text-to-text. Use Transcriber instead."
+                .to_string(),
+        }),
+        other => Err(Seq2SeqError::IncompatibleModel {
+            model: name,
+            reason: format!(
+                "its config.json has model_type {other:?}; text-to-text generation loads t5, bart and marian models."
+            ),
+        }),
+    }
+}

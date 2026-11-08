@@ -146,7 +146,7 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             .tokenizer()
             .encode(input_text, true)
             .map_err(|e| anyhow!(e))?;
-        let encoder_tokens = encoding.get_ids();
+        let encoder_tokens = &known_ids(model, encoding.get_ids());
 
         let encoder_state = backend.encode(model, encoder_tokens, num_beams).await?;
         let cache = model.new_cache(1, config.max_length, num_beams)?;
@@ -516,6 +516,20 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
             }
         }
     }
+}
+
+/// `ids`, with any the model has no embedding for read as `<unk>`. A Marian
+/// tokenizer gives such ids to pieces its source SentencePiece model has and
+/// its vocabulary lacks, which `MarianTokenizer` maps to `<unk>` too.
+fn known_ids(model: &dyn EncoderDecoderLanguageModel, ids: &[u32]) -> Vec<u32> {
+    let size = model.vocab_size() as u32;
+    if ids.iter().all(|&id| id < size) {
+        return ids.to_vec();
+    }
+    let unk = model.tokenizer().token_to_id("<unk>").unwrap_or(0);
+    ids.iter()
+        .map(|&id| if id < size { id } else { unk })
+        .collect()
 }
 
 #[cfg(test)]

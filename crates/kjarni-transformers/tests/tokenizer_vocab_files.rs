@@ -339,3 +339,64 @@ fn sentencepiece_matches_transformers_on_every_reference_model() {
     eprintln!("checked {checked} SentencePiece tokenizers");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Marian folders (`source.spm`, `target.spm`, `vocab.json`) against
+/// transformers' `MarianTokenizer`: the ids of each text, with an id the model
+/// has no embedding for read as `<unk>` as the seq2seq encoder reads it, and
+/// the decoded text of target-language ids. Runs when
+/// `KJARNI_MARIAN_REFERENCE` names the file the reference script writes.
+#[test]
+fn marian_matches_transformers() {
+    let Ok(path) = std::env::var("KJARNI_MARIAN_REFERENCE") else {
+        eprintln!("skipping: KJARNI_MARIAN_REFERENCE not set");
+        return;
+    };
+    let reference: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut failures = Vec::new();
+    for (name, model) in reference["models"].as_object().unwrap() {
+        let dir = std::path::Path::new(model["dir"].as_str().unwrap());
+        let tok = match kjarni_transformers::tokenizer::load_tokenizer(dir) {
+            Ok(t) => t,
+            Err(e) => {
+                failures.push(format!("{name}: {e:#}"));
+                continue;
+            }
+        };
+        let vocab: std::collections::HashMap<String, u32> =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("vocab.json")).unwrap())
+                .unwrap();
+        let size = vocab.len() as u32;
+        let unk = vocab["<unk>"];
+        for case in model["cases"].as_array().unwrap() {
+            let text = case["text"].as_str().unwrap();
+            let want: Vec<u32> = serde_json::from_value(case["ids"].clone()).unwrap();
+            let got: Vec<u32> = tok
+                .encode(text, true)
+                .unwrap()
+                .get_ids()
+                .iter()
+                .map(|&id| if id >= size { unk } else { id })
+                .collect();
+            if got != want {
+                failures.push(format!(
+                    "{name}: {text:?}\n  kjarni: {got:?}\n  hf:     {want:?}"
+                ));
+            }
+        }
+        let ids: Vec<u32> = serde_json::from_value(model["decode"]["ids"].clone()).unwrap();
+        let want = model["decode"]["text"].as_str().unwrap();
+        let got = tok.decode(&ids, true).unwrap();
+        if got != want {
+            failures.push(format!(
+                "{name}: decode\n  kjarni: {got:?}\n  hf:     {want:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

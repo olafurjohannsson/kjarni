@@ -50,6 +50,7 @@ pub const TOKENIZER_FILES: &[&str] = &[
     "sentencepiece.bpe.model",
     "spiece.model",
     "tokenizer.model",
+    "source.spm",
 ];
 
 /// The SentencePiece files, by the name each Python tokenizer class gives it.
@@ -58,6 +59,7 @@ const SPM_FILES: [&str; 3] = ["sentencepiece.bpe.model", "spiece.model", "tokeni
 /// Whether `dir` has a file a tokenizer can be loaded from.
 pub fn has_tokenizer(dir: &Path) -> bool {
     dir.join("tokenizer.json").exists()
+        || (dir.join("source.spm").exists() && dir.join("vocab.json").exists())
         || (dir.join("vocab.json").exists() && dir.join("merges.txt").exists())
         || dir.join("vocab.txt").exists()
         || spm_file(dir).is_some()
@@ -92,6 +94,12 @@ pub fn load_tokenizer(dir: &Path) -> Result<Tokenizer> {
     if json.exists() {
         return Tokenizer::from_file(&json)
             .map_err(|e| anyhow!("Failed to load tokenizer {}: {e}", json.display()));
+    }
+
+    // Marian (Helsinki-NLP opus-mt): two SentencePiece models and a joint
+    // vocabulary, a layout no other tokenizer has.
+    if dir.join("source.spm").exists() && dir.join("vocab.json").exists() {
+        return build_marian(dir);
     }
 
     let settings = Settings::read(dir)?;
@@ -511,6 +519,122 @@ fn build_wordpiece(dir: &Path, kind: Kind, settings: &Settings) -> Result<Tokeni
 /// The tokenizer transformers' `SpmConverter` subclasses build from a
 /// SentencePiece `.model` file, with the post-processor the fast tokenizer
 /// class sets.
+/// The tokenizer of a Marian model, as transformers' `MarianTokenizer`
+/// encodes: text is split into pieces by `source.spm`, each piece takes its
+/// id from `vocab.json`, the vocabulary source and target share, and `</s>`
+/// ends the sequence. A leading language code such as `>>fr<<`, which
+/// multilingual models read to pick the target language, is one token.
+///
+/// The vocabulary is `vocab.json` in id order, each piece scored as
+/// `source.spm` scores it, so the Unigram model splits text as `source.spm`
+/// does. Pieces only the target uses score so low that they are never picked
+/// over the source's own; they are there to decode. Pieces only the source
+/// has come after the vocabulary, at ids the model has no embedding for,
+/// which the encoder reads as `<unk>`, as `MarianTokenizer` maps them.
+fn build_marian(dir: &Path) -> Result<Tokenizer> {
+    let source_path = dir.join("source.spm");
+    let bytes = std::fs::read(&source_path)
+        .with_context(|| format!("reading {}", source_path.display()))?;
+    let source =
+        SpmModel::parse(&bytes).with_context(|| format!("parsing {}", source_path.display()))?;
+    let vocab_path = dir.join("vocab.json");
+    let vocab: HashMap<String, u32> = serde_json::from_str(
+        &std::fs::read_to_string(&vocab_path)
+            .with_context(|| format!("reading {}", vocab_path.display()))?,
+    )
+    .with_context(|| format!("parsing {}", vocab_path.display()))?;
+
+    let size = vocab.values().max().map_or(0, |&m| m as usize + 1);
+    let mut by_id: Vec<Option<&str>> = vec![None; size];
+    for (piece, &id) in &vocab {
+        by_id[id as usize] = Some(piece);
+    }
+    let source_score: HashMap<&str, f64> = source
+        .pieces
+        .iter()
+        .filter(|p| p.kind == PieceType::Normal)
+        .map(|p| (p.piece.as_str(), f64::from(p.score)))
+        .collect();
+    let floor = source_score.values().copied().fold(0.0, f64::min);
+    let target_only = floor - 1000.0;
+
+    let mut scored: Vec<(String, f64)> = by_id
+        .iter()
+        .enumerate()
+        .map(|(id, piece)| match piece {
+            Some(p) => (
+                p.to_string(),
+                source_score.get(p).copied().unwrap_or(target_only),
+            ),
+            // A gap in the ids: a piece no text can produce.
+            None => (format!("<gap_{id}>"), target_only),
+        })
+        .collect();
+    let mut source_only: Vec<(&str, f64)> = source_score
+        .iter()
+        .filter(|(p, _)| !vocab.contains_key(**p))
+        .map(|(p, s)| (*p, *s))
+        .collect();
+    source_only.sort_by(|a, b| a.0.cmp(b.0));
+    scored.extend(source_only.into_iter().map(|(p, s)| (p.to_string(), s)));
+
+    let unk = *vocab
+        .get("<unk>")
+        .ok_or_else(|| anyhow!("{} has no <unk>", vocab_path.display()))?;
+    let eos = *vocab
+        .get("</s>")
+        .ok_or_else(|| anyhow!("{} has no </s>", vocab_path.display()))?;
+    let mut tokenizer =
+        Tokenizer::new(Unigram::from(scored, Some(unk as usize), false).map_err(|e| anyhow!(e))?);
+
+    let mut seq: Vec<NormalizerWrapper> = Vec::new();
+    if !source.precompiled_charsmap.is_empty() {
+        let precompiled = Precompiled::from(&source.precompiled_charsmap).map_err(|e| {
+            anyhow!(
+                "reading the normalization table of {}: {e}",
+                source_path.display()
+            )
+        })?;
+        seq.push(precompiled.into());
+    }
+    seq.push(Strip::new(true, true).into());
+    seq.push(
+        Replace::new(
+            tokenizers::normalizers::replace::ReplacePattern::Regex(" {2,}".into()),
+            " ",
+        )
+        .map_err(|e| anyhow!(e))?
+        .into(),
+    );
+    tokenizer.with_normalizer(Some(NormalizerSequence::new(seq)));
+    tokenizer.with_pre_tokenizer(Some(Metaspace::new('▁', PrependScheme::Always, true)));
+    tokenizer.with_decoder(Some(Metaspace::new('▁', PrependScheme::Always, true)));
+    tokenizer.with_post_processor(Some(
+        TemplateProcessing::builder()
+            .try_single("$A </s>")
+            .map_err(|e| anyhow!(e))?
+            .try_pair("$A $B </s>")
+            .map_err(|e| anyhow!(e))?
+            .special_tokens(vec![("</s>".to_string(), eos)])
+            .build()
+            .map_err(anyhow::Error::from)?,
+    ));
+
+    let mut specials: Vec<AddedToken> = ["</s>", "<unk>", "<pad>"]
+        .into_iter()
+        .filter(|t| vocab.contains_key(*t))
+        .map(|t| AddedToken::from(t, true))
+        .collect();
+    let mut codes: Vec<&String> = vocab
+        .keys()
+        .filter(|k| k.len() > 4 && k.starts_with(">>") && k.ends_with("<<"))
+        .collect();
+    codes.sort();
+    specials.extend(codes.into_iter().map(|c| AddedToken::from(c.clone(), true)));
+    tokenizer.add_special_tokens(&specials);
+    Ok(tokenizer)
+}
+
 fn build_sentencepiece(file: &Path, kind: Kind, settings: &Settings) -> Result<Tokenizer> {
     let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
     let spm = SpmModel::parse(&bytes).with_context(|| format!("parsing {}", file.display()))?;

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use kjarni_transformers::WgpuContext;
 
-use crate::common::{DownloadPolicy, KjarniDevice};
+use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder};
 use crate::seq2seq::Seq2SeqOverrides;
 
 use super::model::Summarizer;
@@ -15,10 +15,12 @@ use super::types::SummarizerResult;
 /// Builder for configuring a Summarizer instance.
 pub struct SummarizerBuilder {
     pub(crate) model: String,
+    pub(crate) model_path: Option<PathBuf>,
     pub(crate) device: KjarniDevice,
     pub(crate) context: Option<Arc<WgpuContext>>,
     pub(crate) cache_dir: Option<PathBuf>,
     pub(crate) download_policy: DownloadPolicy,
+    pub(crate) load_config: Option<LoadConfig>,
     pub(crate) overrides: Seq2SeqOverrides,
     pub(crate) quiet: bool,
 }
@@ -28,10 +30,12 @@ impl SummarizerBuilder {
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             model: model.into(),
+            model_path: None,
             device: KjarniDevice::default(),
             context: None,
             cache_dir: None,
             download_policy: DownloadPolicy::default(),
+            load_config: None,
             overrides: Seq2SeqOverrides::default(),
             quiet: false,
         }
@@ -45,6 +49,23 @@ impl SummarizerBuilder {
         builder.overrides.max_length = Some(preset.default_max_length);
         builder
     }
+    /// Load the model from a folder in the Hugging Face layout instead of the
+    /// registry: a BART or T5 model, with its weights as safetensors or
+    /// pytorch_model.bin. The model name is then not used.
+    pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.model_path = Some(path.into());
+        self
+    }
+
+    /// Configure model loading options, such as the weight dtype.
+    pub fn with_load_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(LoadConfigBuilder) -> LoadConfigBuilder,
+    {
+        self.load_config = Some(f(LoadConfigBuilder::new()).build());
+        self
+    }
+
     /// Set minimum summary length.
     pub fn min_length(mut self, len: usize) -> Self {
         self.overrides.min_length = Some(len);
