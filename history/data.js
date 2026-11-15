@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794760600573,
+  "lastUpdate": 1794761792748,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1128,6 +1128,66 @@ window.BENCHMARK_DATA = {
             "value": 20.84,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "26c464ce3867917261c1c5c1f851a4ff720c4657",
+          "message": "Add kjarni serve, an OpenAI-compatible HTTP server; 0.5.1 (#112)\n\nChat, completions, embeddings, speech-to-text and the model list follow\nOpenAI's API, so its client libraries work by changing the base URL.\nReranking follows Cohere's and Jina's format; classification (including\nzero-shot), translation, summarization and entity recognition use Kjarni's\nown. Models load on their first request and stay loaded.\n\nThe Rust API gains what the server needed: Chat::render_messages and\nreply_prefix, Generator::count_tokens and max_new_tokens,\nEmbedder::count_tokens and Transcriber::with_settings.\n\nVersions move to 0.5.1, which also ships zero-shot classification.",
+          "timestamp": "2026-11-15T16:12:59Z",
+          "tree_id": "097a13aa8a9105c78779cf7acc836e08318ab04d",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/26c464ce3867917261c1c5c1f851a4ff720c4657"
+        },
+        "date": 1794761792421,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 657.02,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel(R) Xeon(R) 6975P-C; vs previous commit: 0.982"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 24.13,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel(R) Xeon(R) 6975P-C; vs previous commit: 0.993"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 398.61,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.959"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 27.26,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.267"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 464.46,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.992"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 20.84,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.002"
           }
         ]
       }
