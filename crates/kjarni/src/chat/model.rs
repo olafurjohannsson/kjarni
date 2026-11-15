@@ -226,6 +226,42 @@ impl Chat {
         }
     }
 
+    /// The prompt for a whole conversation, as the model's chat template
+    /// renders it, ready for [`generate`](Self::generate) or
+    /// [`generate_stream`](Self::generate_stream).
+    ///
+    /// System messages are joined into one at the start, because templates take
+    /// a single system prompt. Without any, the chat's own system prompt or the
+    /// template's default is used, as [`send`](Self::send) does.
+    pub fn render_messages(&self, messages: &[super::types::Message]) -> ChatResult<String> {
+        let system: Vec<&str> = messages
+            .iter()
+            .filter(|m| matches!(m.role, Role::System))
+            .map(|m| m.content.as_str())
+            .collect();
+        let mut conversation = if system.is_empty() {
+            self.create_conversation()
+        } else {
+            Conversation::with_system(system.join("\n\n"))
+        };
+        for message in messages {
+            match message.role {
+                Role::User => conversation.push_user(&message.content),
+                Role::Assistant => conversation.push_assistant(&message.content),
+                Role::System => {}
+            }
+        }
+        self.render_prompt(&conversation)
+    }
+
+    /// What [`generate_stream`](Self::generate_stream) sends before the first
+    /// generated token for this prompt: the opening of the reply when the
+    /// template writes it into the prompt, such as a reasoning model's
+    /// `<think>`, and otherwise nothing.
+    pub fn reply_prefix(&self, prompt: &str) -> &str {
+        reply_prefix(self.chat_template(), prompt)
+    }
+
     /// Convert History to Conversation.
     pub fn history_to_conversation(&self, history: &History) -> Conversation {
         let mut conversation = Conversation::new();

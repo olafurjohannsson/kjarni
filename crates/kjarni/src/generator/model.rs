@@ -453,6 +453,27 @@ impl Generator {
         self.decoder.model.vocab_size()
     }
 
+    /// How many tokens `text` is as a prompt to this model, counted the way
+    /// generation counts it, beginning-of-sequence token included.
+    pub fn count_tokens(&self, text: &str) -> GeneratorResult<usize> {
+        let config = self.resolved_config(&GenerationOverrides::default());
+        Ok(self.decoder.encode(text, config.as_ref())?.len())
+    }
+
+    /// The most tokens a reply can have with these overrides, or `None` when
+    /// only the context size limits it.
+    pub fn max_new_tokens(&self, overrides: &GenerationOverrides) -> Option<usize> {
+        self.resolved_config(overrides).as_ref().max_new_tokens
+    }
+
+    fn resolved_config(&self, overrides: &GenerationOverrides) -> ResolvedGenerationConfig {
+        resolve_generation_config(
+            self.generation_config.inner.clone(),
+            &self.user_overrides,
+            overrides,
+        )
+    }
+
     pub fn generation_config(&self) -> &ResolvedGenerationConfig {
         &self.generation_config
     }

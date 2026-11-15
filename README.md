@@ -241,6 +241,41 @@ same input gives byte-identical output in all of them, which the tests check.
 The browser build covers the encoder and chat paths; Whisper, the seq2seq models and
 CLIP are native only for now.
 
+## As an OpenAI-compatible server
+
+`kjarni serve` puts Kjarni behind an HTTP API in OpenAI's format, so the OpenAI client libraries, and the tools built on them, run against your own machine by changing the base URL.
+
+```bash
+kjarni serve
+```
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "qwen2.5-0.5b-instruct",
+  "messages": [{"role": "user", "content": "What is the capital of France?"}]
+}'
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="unused")
+vectors = client.embeddings.create(model="minilm-l6-v2", input=["hello", "world"])
+```
+
+| Endpoint | Format | Does |
+|---|---|---|
+| `/v1/chat/completions` | OpenAI | chat, streamed or whole |
+| `/v1/completions` | OpenAI | continues raw text |
+| `/v1/embeddings` | OpenAI | embeddings, as floats or base64 |
+| `/v1/audio/transcriptions`, `/v1/audio/translations` | OpenAI | speech to text, and to English; JSON, text, SRT or WebVTT |
+| `/v1/models` | OpenAI | every model Kjarni has, and which endpoint each serves |
+| `/v1/rerank` | Cohere and Jina | orders documents by relevance to a query |
+| `/v1/classify` | Kjarni | sentiment, emotion and other labels, or zero-shot with `"labels"` you choose |
+| `/v1/translate`, `/v1/summarize`, `/v1/ner` | Kjarni | translation, summarization, named entities |
+
+A request picks its model by Kjarni name, and each model loads on its first request and stays loaded. Without a model, each endpoint uses a default you can set with flags such as `--chat qwen2.5-1.5b-instruct`. The server listens on 127.0.0.1 only; to accept other machines, use `--host 0.0.0.0 --api-key KEY`. Tool calling, JSON mode and log probabilities are not supported yet, and requests that ask for them get an error instead of a quiet answer without them.
+
 ## For AI agents (MCP)
 
 `kjarni mcp` serves Kjarni's capabilities to any MCP client (Claude Code, Cursor, Claude Desktop, VS Code) as tools that run on your machine: `search_folder` (semantic and hybrid search over a folder of documents or code, indexed on first use and kept up to date), `search_images` (find photos in a folder by describing them, with CLIP), `transcribe`, `classify`, `rerank` and `similarity`.
