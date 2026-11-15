@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794761792748,
+  "lastUpdate": 1794774032137,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1188,6 +1188,66 @@ window.BENCHMARK_DATA = {
             "value": 20.84,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.002"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "62fc5241e8e0fa1ac88d68f8c9a329311f3d3972",
+          "message": "Add Qwen 3.5 (hybrid Gated DeltaNet) on the CPU (#114)\n\nQwen 3.5 interleaves three Gated DeltaNet layers with each gated\nfull-attention layer. This adds the architecture as qwen3_5, text only:\na multimodal checkpoint loads its decoder and skips the vision tower and\nMTP head.\n\n- Gated attention: sigmoid output gate, per-head q/k norm, partial\n  rotary (64 of 256 dims).\n- Gated DeltaNet: causal depthwise conv1d, l2-normalized q/k, gated\n  delta-rule recurrence, gated RMSNorm.\n- HybridCache: KV cache for attention layers plus conv window and\n  recurrent state per DeltaNet layer, with snapshots at each prefill end\n  and 16 tokens before it so the prefix cache can reuse them.\n- Cache::reusable_prefix lets a cache report how much of a prefix it can\n  keep; speculation refuses caches that cannot rewind.\n- Chat template matching transformers' rendering (non-thinking mode).\n- Registry: Qwen3.5-0.8B, 2B and 4B; folder detection for\n  Qwen3_5ForConditionalGeneration and Qwen3_5ForCausalLM; CLI and chat.\n\nTests: a tiny committed checkpoint checked against transformers (grouped\nvalue heads, untied head, text-only prefix), plus ignored parity tests\nfor 0.8B and 4B pinned to transformers 5.16.1 logits and greedy output.",
+          "timestamp": "2026-11-15T20:04:52Z",
+          "tree_id": "612ad7d8a235ae94b3ee66c9804fd3bc55032ad2",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/62fc5241e8e0fa1ac88d68f8c9a329311f3d3972"
+        },
+        "date": 1794774031423,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 437.54,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.997"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 30.38,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.982"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 501.5,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.142"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 33.56,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.972"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 991.57,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 0.997"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 37.45,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 0.978"
           }
         ]
       }
