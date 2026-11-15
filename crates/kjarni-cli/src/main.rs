@@ -1,6 +1,7 @@
-// The server tests drive whole routers whose future types nest deeply
-// enough to pass the default limit when checking they are Send and Sync.
-#![cfg_attr(test, recursion_limit = "256")]
+// The command futures nest deeply enough, through the decoder loading chain
+// and the server's routers, to pass the default limit when the compiler checks
+// that they are Send and Sync.
+#![recursion_limit = "256"]
 
 mod commands;
 

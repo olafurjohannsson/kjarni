@@ -18,6 +18,14 @@ pub trait Cache: Send + Sync {
     fn clear(&mut self);
     fn increment_len(&mut self, new_tokens_len: usize);
     fn clone_box(&self) -> Box<dyn Cache>;
+
+    /// The longest prefix of at most `len` tokens that this cache can be cut
+    /// back to with [`Cache::set_seq_length`] and still be exact. A KV cache
+    /// keeps every position separately, so it can be cut anywhere. A recurrent
+    /// state cannot be, and says where it can.
+    fn reusable_prefix(&self, len: usize) -> usize {
+        len
+    }
 }
 
 #[cfg(test)]
@@ -89,6 +97,8 @@ impl PrefixCache {
         // Never reuse the entire prompt: prefill needs at least one token to
         // produce logits from.
         let keep = shared.min(wanted.len().saturating_sub(1));
+        // A cache that cannot be cut at every position offers a shorter prefix.
+        let keep = self.cache.reusable_prefix(keep);
 
         // Unconditionally, not only when the token list shrinks. After a turn the
         // cache holds the generated tokens too, which this list never recorded,
@@ -229,5 +239,72 @@ mod prefix_cache_tests {
         pc.extend(&[4]);
         assert_eq!(pc.len(), 4);
         assert_eq!(pc.reuse(&[1, 2, 3, 4]), 3);
+    }
+
+    /// A cache that can only be cut back to the start or to fixed points, as a
+    /// recurrent state with snapshots can.
+    struct PointsCache {
+        len: usize,
+        points: Vec<usize>,
+    }
+
+    impl Cache for PointsCache {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn get_seq_length(&self) -> usize {
+            self.len
+        }
+        fn set_seq_length(&mut self, len: usize) {
+            assert!(
+                len == 0 || len >= self.len || self.points.contains(&len),
+                "cut to {len}, where this cache cannot be cut"
+            );
+            self.len = len;
+        }
+        fn clear(&mut self) {
+            self.len = 0;
+        }
+        fn increment_len(&mut self, n: usize) {
+            self.len += n;
+        }
+        fn clone_box(&self) -> Box<dyn Cache> {
+            Box::new(PointsCache {
+                len: self.len,
+                points: self.points.clone(),
+            })
+        }
+        fn reusable_prefix(&self, len: usize) -> usize {
+            if len >= self.len {
+                return self.len;
+            }
+            self.points
+                .iter()
+                .copied()
+                .filter(|&p| p <= len)
+                .max()
+                .unwrap_or(0)
+        }
+    }
+
+    #[test]
+    fn a_cache_that_cuts_only_at_points_reuses_up_to_the_nearest_one() {
+        let cache = PointsCache {
+            len: 0,
+            points: vec![4],
+        };
+        let mut pc = PrefixCache::new(Box::new(cache), 1024);
+        pc.cache_mut().increment_len(8);
+        pc.extend(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        // Six tokens are shared, but the cache can only go back to four.
+        assert_eq!(pc.reuse(&[1, 2, 3, 4, 5, 6, 9]), 4);
+        assert_eq!(pc.len(), 4);
+        assert_eq!(pc.cache_mut().get_seq_length(), 4);
+        // Shared tokens short of the first point reuse nothing.
+        assert_eq!(pc.reuse(&[1, 2, 9]), 0);
+        assert_eq!(pc.cache_mut().get_seq_length(), 0);
     }
 }

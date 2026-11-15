@@ -8,7 +8,7 @@ use kjarni::common::LoadConfigBuilder;
 use kjarni::{
     DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig,
     ModelArchitecture, ModelType, SamplingParams, SpeculationParams, TokenType, WgpuContext,
-    models::{Gpt2Model, LlamaModel, PhiModel, QwenModel},
+    models::{Gpt2Model, LlamaModel, PhiModel, Qwen3_5Model, QwenModel},
     registry,
 };
 use std::io::{self, Write};
@@ -125,6 +125,8 @@ pub async fn run(
         Arc::new(LlamaModel::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_qwen_model() {
         Arc::new(QwenModel::from_registry(model_type, None, device, None, load_cfg).await?)
+    } else if model_type.architecture() == ModelArchitecture::Qwen3_5 {
+        Arc::new(Qwen3_5Model::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_phi_model() {
         Arc::new(PhiModel::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_gpt2_model() {
@@ -234,6 +236,8 @@ async fn load_decoder_from_registry(
         Arc::new(LlamaModel::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_qwen_model() {
         Arc::new(QwenModel::from_registry(model_type, None, device, None, load_cfg).await?)
+    } else if model_type.architecture() == ModelArchitecture::Qwen3_5 {
+        Arc::new(Qwen3_5Model::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_phi_model() {
         Arc::new(PhiModel::from_registry(model_type, None, device, None, load_cfg).await?)
     } else if model_type.is_gpt2_model() {
@@ -332,6 +336,7 @@ mod tests {
         let all = [
             ModelArchitecture::Llama,
             ModelArchitecture::Qwen2,
+            ModelArchitecture::Qwen3_5,
             ModelArchitecture::Mistral,
             ModelArchitecture::Phi3,
             ModelArchitecture::GPT,
@@ -348,6 +353,7 @@ mod tests {
             let expected = match arch {
                 ModelArchitecture::Llama
                 | ModelArchitecture::Qwen2
+                | ModelArchitecture::Qwen3_5
                 | ModelArchitecture::Mistral
                 | ModelArchitecture::Phi3
                 | ModelArchitecture::GPT => true,

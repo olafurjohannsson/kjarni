@@ -58,6 +58,7 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
         // Decoders can generate text - these are valid for chat
         ModelArchitecture::Llama
         | ModelArchitecture::Qwen2
+        | ModelArchitecture::Qwen3_5
         | ModelArchitecture::Mistral
         | ModelArchitecture::Phi3
         | ModelArchitecture::GPT => {
@@ -150,6 +151,7 @@ pub fn is_decoder_architecture(arch: ModelArchitecture) -> bool {
         arch,
         ModelArchitecture::Llama
             | ModelArchitecture::Qwen2
+            | ModelArchitecture::Qwen3_5
             | ModelArchitecture::Mistral
             | ModelArchitecture::Phi3
             | ModelArchitecture::GPT

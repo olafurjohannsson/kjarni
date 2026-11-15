@@ -10,6 +10,7 @@ use crate::chat::deepseek::DeepSeekR1ChatTemplate;
 use crate::chat::llama3::Llama3ChatTemplate;
 use crate::chat::mistral::MistralChatTemplate;
 use crate::chat::phi3::Phi3ChatTemplate;
+use crate::chat::qwen3_5::Qwen3_5ChatTemplate;
 use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::loaders::LoadedRoPE;
@@ -49,6 +50,13 @@ pub trait DecoderModelFactory: Sized {
         chat_template: Option<Box<dyn ChatTemplate>>,
     ) -> Self;
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>>;
+
+    /// The geometry the rotary table is built for. Most models rotate whole
+    /// heads; one that rotates only part of each head returns that width as
+    /// `head_dim`, so the table holds what it uses and nothing more.
+    fn rope_metadata(config: &Self::Config) -> ModelMetadata {
+        config.metadata()
+    }
 }
 
 pub struct DecoderLoader;
@@ -144,7 +152,11 @@ impl DecoderLoader {
             .unwrap();
         tokenizer.with_padding(None);
 
-        let rope = LoadedRoPE::new(context.as_ref(), &meta, device.is_gpu())?;
+        let rope = LoadedRoPE::new(
+            context.as_ref(),
+            &M::rope_metadata(&config),
+            device.is_gpu(),
+        )?;
 
         // try load generation defaults from generation_config.json
         let generation_defaults = Self::try_load_generation_defaults(model_path);
@@ -292,9 +304,13 @@ impl DecoderLoader {
         };
 
         #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
-        let rope = LoadedRoPE::new(context.as_ref(), &meta, device.is_gpu())?;
+        let rope = LoadedRoPE::new(
+            context.as_ref(),
+            &M::rope_metadata(&config),
+            device.is_gpu(),
+        )?;
         #[cfg(all(target_arch = "wasm32", not(feature = "wasm-gpu")))]
-        let rope = LoadedRoPE::new(&meta)?;
+        let rope = LoadedRoPE::new(&M::rope_metadata(&config))?;
 
         let (cpu_decoder, gpu_decoder) = M::build_backends(
             &weights,
@@ -374,6 +390,9 @@ fn chat_template_for(mt: ModelType) -> Option<Box<dyn ChatTemplate>> {
         ModelType::Llama3_1_8B_Instruct => Box::new(Llama3ChatTemplate::llama3_1()),
         ModelType::Qwen2_5_0_5B_Instruct | ModelType::Qwen2_5_1_5B_Instruct => {
             Box::new(ChatMLTemplate::qwen2_5())
+        }
+        ModelType::Qwen3_5_0_8B | ModelType::Qwen3_5_2B | ModelType::Qwen3_5_4B => {
+            Box::new(Qwen3_5ChatTemplate::new())
         }
         _ => match mt.architecture() {
             ModelArchitecture::Llama => Box::new(Llama3ChatTemplate::for_generation()),

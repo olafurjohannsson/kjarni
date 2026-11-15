@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Qwen 3.5.** Qwen's hybrid decoder, with a Gated DeltaNet layer (linear
+  attention with a fixed-size recurrent state) in three layers of every four and
+  gated attention in the fourth. The registry has `qwen3.5-0.8b`, `qwen3.5-2b` and
+  `qwen3.5-4b`; any dense Qwen 3.5 folder from the Hugging Face Hub loads with
+  `--model-path`, the multimodal checkpoints' text decoder included. Logits match
+  transformers to within 3e-5 on Qwen3.5-0.8B, and greedy output matches token for
+  token. Chat uses the model's non-thinking mode, as its own template does by
+  default. `--prefix-cache` works: the recurrent state is kept at the end of each
+  prompt and just before it, which is where the next turn's prompt diverges, so a
+  second turn after a 2,200-token system prompt takes 1.9s instead of 7.8s on the
+  0.8B. CPU only for now; the GPU, the mixture-of-experts variants, images and
+  speculative decoding are not supported yet, and speculative decoding says so.
+- `Cache::reusable_prefix`, for a cache that can only be cut back to some
+  lengths. `PrefixCache` uses it, so a model with a recurrent state reuses what it
+  can rather than reading state from the wrong position.
+
 ## 0.5.1
 
 - **`kjarni serve`, an OpenAI-compatible HTTP server.** The OpenAI client libraries
