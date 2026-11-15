@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794774032137,
+  "lastUpdate": 1794782775176,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1248,6 +1248,66 @@ window.BENCHMARK_DATA = {
             "value": 37.45,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 0.978"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7f4514fcbdd75336ab3f6df1ae57a62c2194ef7b",
+          "message": "Load Qwen 3.5 from GGUF; add Q5_K; commit the tiny test checkpoint (#115)\n\n* Load Qwen 3.5 from GGUF; add Q5_K; commit the tiny test checkpoint\n\nQwen 3.5 GGUFs written by llama.cpp's converter now load, from the\nregistry with --gguf (unsloth's Q4_K_M for 0.8B, 2B and 4B) or with\n--model-path.\n\n- Name mapping for the Gated DeltaNet tensors (attn_qkv, attn_gate,\n  ssm_alpha, ssm_beta, ssm_conv1d, ssm_a, ssm_dt, ssm_norm, ssm_out) and\n  Qwen 3.5's post_attention_norm and q/k norms.\n- The converter's changes are undone where they matter: norms already\n  carry their +1, ssm_a is -exp(A_log), conv1d is 2-D, and value heads\n  are tiled, so head h reads key head h % num_key_heads.\n- Newer files that merge attn_qkv with attn_gate and ssm_beta with\n  ssm_alpha load through row slices of the merged tensor.\n- The config comes from qwen35.* metadata, including recurrent_layers,\n  and leaves out the multi-token-prediction block.\n\nQ5_K: block type, dequantization matching ggml, an integer dot product\nagainst Q8_K activations, and the matmul. Every Q4_K_M Qwen 3.5 file\nstores some tensors as Q5_K. A Q5_K tensor on the GPU is an error.\n\nGGUF loading: the tensor data start is taken from the end of the last\ntensor rather than the sum of sizes, which fell short whenever tensors\nwere padded.\n\nThe tiny Qwen 3.5 checkpoint's model.safetensors was ignored by\n*.safetensors, so CI could not load it; test fixtures are now excluded\nfrom that rule.\n\nTests: Q5_K dequantization pinned to gguf-py on a real block; tiny.gguf\n(make_gguf.py) against the transformers values, covering tiled heads,\nmerged tensors and recurrent_layers; ignored Q4_K_M tests on 0.8B and 4B\nagainst the f32 transformers greedy output.\n\n* Build Qwen 3.5's GGUF config on wasm, where GgufLoader is compiled out",
+          "timestamp": "2026-11-15T22:23:21Z",
+          "tree_id": "a62cbcdd9b5fbe745492ecb07cf8ab1ad5cee93d",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/7f4514fcbdd75336ab3f6df1ae57a62c2194ef7b"
+        },
+        "date": 1794782774267,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 634.26,
+            "unit": "sentences/s",
+            "extra": "CPU: INTEL(R) XEON(R) PLATINUM 8573C; vs previous commit: 0.994"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 26.06,
+            "unit": "tokens/s",
+            "extra": "CPU: INTEL(R) XEON(R) PLATINUM 8573C; vs previous commit: 1.007"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 376.57,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.999"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 20.32,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.946"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 466.68,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.004"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 20.44,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.991"
           }
         ]
       }
