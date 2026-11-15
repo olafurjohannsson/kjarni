@@ -27,6 +27,10 @@ colored = "2"
 bincode = "1"
 walkdir = "2.5.0"
 tempfile = "3.23.0"
+axum = { version = "0.8.9", features = ["multipart"] }
+tower-http = { version = "0.7.1", features = ["cors"] }
+serde = { workspace = true, features = ["derive"] }
+base64 = "0.23.1"
 
 [target.'cfg(unix)'.dependencies]
 # `kjarni mcp` points stdout at stderr, keeping the real stdout for protocol
@@ -41,3 +45,6 @@ default = ["image-io"]
 # On by default here, unlike the library: someone running the CLI wants
 # `kjarni image index ~/Photos` to work without rebuilding with a flag.
 image-io = ["kjarni/image-io"]
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }

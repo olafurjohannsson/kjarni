@@ -12,6 +12,7 @@ pub mod model;
 pub mod ner;
 pub mod rerank;
 pub mod search;
+pub mod serve;
 pub mod similarity;
 pub mod summarize;
 pub mod transcribe;

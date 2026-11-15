@@ -1,3 +1,7 @@
+// The server tests drive whole routers whose future types nest deeply
+// enough to pass the default limit when checking they are Send and Sync.
+#![cfg_attr(test, recursion_limit = "256")]
+
 mod commands;
 
 use anyhow::Result;
@@ -154,6 +158,73 @@ async fn main() -> Result<()> {
         }
 
         Commands::Mcp => commands::mcp::run().await,
+        Commands::Serve {
+            host,
+            port,
+            chat,
+            embed,
+            classify,
+            zero_shot,
+            rerank,
+            transcribe,
+            translate,
+            summarize,
+            ner,
+            preload,
+            api_key,
+            cors,
+            prefix_cache,
+            gpu,
+            quiet,
+        } => {
+            use commands::serve::{Defaults, Endpoint, ServeOptions};
+            let named = [
+                (Endpoint::Chat, &chat),
+                (Endpoint::Embed, &embed),
+                (Endpoint::Classify, &classify),
+                (Endpoint::Classify, &zero_shot),
+                (Endpoint::Rerank, &rerank),
+                (Endpoint::Transcribe, &transcribe),
+                (Endpoint::Translate, &translate),
+                (Endpoint::Summarize, &summarize),
+                (Endpoint::Ner, &ner),
+            ];
+            let preload = if preload {
+                named
+                    .iter()
+                    .filter_map(|(endpoint, name)| name.as_ref().map(|n| (*endpoint, n.clone())))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let defaults = Defaults::default();
+            let defaults = Defaults {
+                chat: chat.unwrap_or(defaults.chat),
+                embed: embed.unwrap_or(defaults.embed),
+                classify: classify.unwrap_or(defaults.classify),
+                zero_shot: zero_shot.unwrap_or(defaults.zero_shot),
+                rerank: rerank.unwrap_or(defaults.rerank),
+                transcribe: transcribe.unwrap_or(defaults.transcribe),
+                translate: translate.or(defaults.translate),
+                summarize: summarize.unwrap_or(defaults.summarize),
+                ner: ner.unwrap_or(defaults.ner),
+            };
+            let api_key = api_key
+                .or_else(|| std::env::var("KJARNI_API_KEY").ok())
+                .filter(|k| !k.is_empty());
+            commands::serve::run(ServeOptions {
+                host,
+                port,
+                defaults,
+                preload,
+                api_key,
+                cors,
+                gpu,
+                prefix_cache,
+                quiet,
+            })
+            .await
+        }
         Commands::Transcribe {
             file,
             model,

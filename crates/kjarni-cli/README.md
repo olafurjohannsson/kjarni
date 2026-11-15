@@ -321,6 +321,33 @@ kjarni search ./docs.idx "query" --format docs  # Just text, for piping
 
 ---
 
+## HTTP server
+
+`kjarni serve` serves every task over HTTP: chat, completions, embeddings and
+speech-to-text in OpenAI's format, reranking in Cohere's and Jina's, and
+classification, translation, summarization and entity recognition in Kjarni's own.
+
+```bash
+kjarni serve                                    # http://127.0.0.1:8080/v1
+kjarni serve --chat qwen2.5-1.5b-instruct --preload
+kjarni serve --host 0.0.0.0 --api-key secret    # accept other machines
+```
+
+```bash
+curl http://127.0.0.1:8080/v1/classify -H "Content-Type: application/json" \
+  -d '{"input": "The shoes run a full size small.", "labels": ["sizing", "shipping", "price"]}'
+
+curl http://127.0.0.1:8080/v1/rerank -H "Content-Type: application/json" \
+  -d '{"query": "capital of France", "documents": ["Paris is the capital of France.", "Bananas are yellow."]}'
+
+curl http://127.0.0.1:8080/v1/audio/transcriptions -F file=@speech.wav -F response_format=srt
+```
+
+Each request names a model with `"model"`, or gets the endpoint's default:
+`--chat`, `--embed`, `--classify`, `--zero-shot`, `--rerank`, `--transcribe`,
+`--translate`, `--summarize` and `--ner` set them. `GET /v1/models` lists every
+model and the endpoint it serves.
+
 ## Advanced Pipelines
 
 ### Semantic grep (find relevant lines)

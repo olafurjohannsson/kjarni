@@ -77,6 +77,28 @@ impl Transcriber {
         }
     }
 
+    /// The same model with other settings for one job. The weights are shared,
+    /// not reloaded, so this is cheap; the progress callback is not carried over.
+    pub fn with_settings(
+        &self,
+        language: Option<&str>,
+        task: Task,
+        timestamps: bool,
+    ) -> TranscriberResult<Self> {
+        validation::validate_config(language, self.max_tokens_per_chunk)?;
+        Ok(Self {
+            model: self.model.clone(),
+            model_name: self.model_name.clone(),
+            language: language.map(str::to_string),
+            task,
+            timestamps,
+            max_tokens_per_chunk: self.max_tokens_per_chunk,
+            device: self.device,
+            quiet: self.quiet,
+            progress_callback: None,
+        })
+    }
+
     /// Human-readable model name.
     pub fn model_name(&self) -> &str {
         &self.model_name

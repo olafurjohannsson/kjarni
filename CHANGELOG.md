@@ -1,7 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
+- **`kjarni serve`, an OpenAI-compatible HTTP server.** The OpenAI client libraries
+  and the tools built on them work against Kjarni by changing the base URL.
+  `/v1/chat/completions` (streamed or whole, with `stop`, `max_tokens`,
+  `temperature`, `top_p` and token usage), `/v1/completions`, `/v1/embeddings`
+  (floats or base64), `/v1/audio/transcriptions` and `/v1/audio/translations`
+  (JSON, text, SRT and WebVTT) and `/v1/models` follow OpenAI's format;
+  `/v1/rerank` follows Cohere's and Jina's; `/v1/classify` (including zero-shot
+  with `"labels"`), `/v1/translate`, `/v1/summarize` and `/v1/ner` are Kjarni's own.
+  Requests name a registry model or get the endpoint's default, set with flags such
+  as `--chat`. Models load on their first request, or at start with `--preload`.
+  `--api-key` (or `KJARNI_API_KEY`) guards the API, `--cors` lets web pages call it,
+  and `--prefix-cache` reuses earlier turns of a conversation. Tool calling, JSON
+  mode and log probabilities are refused with an error rather than ignored. The
+  responses match Kjarni's library exactly, and through it transformers.
+- New in the Rust API, for the server and anyone building one:
+  `Chat::render_messages` and `Chat::reply_prefix`, `Generator::count_tokens` and
+  `Generator::max_new_tokens`, `Embedder::count_tokens`, and
+  `Transcriber::with_settings` for one job's language, task and timestamps without
+  reloading the model.
 - **Zero-shot classification.** Classify text into labels you choose at run time,
   with no training: `kjarni classify -m minilm-zeroshot --labels "sizing,shipping"`
   and `Classifier::zero_shot`, `zero_shot_with` and `zero_shot_batch` in Rust, with

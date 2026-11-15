@@ -226,6 +226,20 @@ impl Embedder {
         }
     }
 
+    /// How many tokens each text is to this model, special tokens included and
+    /// capped at [`max_seq_length`](Self::max_seq_length), the most it reads.
+    pub fn count_tokens(&self, texts: &[&str]) -> EmbedderResult<Vec<usize>> {
+        let encodings = self
+            .inner
+            .tokenizer()
+            .encode_batch(texts.to_vec(), true)
+            .map_err(|e| {
+                EmbedderError::EmbeddingFailed(anyhow::anyhow!("tokenization failed: {e}"))
+            })?;
+        let cap = self.max_seq_length();
+        Ok(encodings.iter().map(|e| e.len().min(cap)).collect())
+    }
+
     /// Embed a single text.
     pub async fn embed(&self, text: &str) -> EmbedderResult<Vec<f32>> {
         self.embed_with_config(text, &EmbeddingOverrides::default())

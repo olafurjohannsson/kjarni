@@ -273,6 +273,89 @@ pub enum Commands {
     /// search, transcription, classification, reranking and similarity
     Mcp,
 
+    /// Serve Kjarni over HTTP with an OpenAI-compatible API: chat, completions,
+    /// embeddings and speech-to-text, plus reranking, classification,
+    /// translation, summarization and entity recognition.
+    ///
+    /// Any OpenAI client works by pointing its base URL at
+    /// http://127.0.0.1:8080/v1. A request picks a model by its Kjarni name,
+    /// such as "qwen2.5-1.5b-instruct", or gets the default set by the flags
+    /// below. Each model loads on its first request and stays loaded.
+    Serve {
+        /// Address to listen on. Use 0.0.0.0 to accept other machines, and set
+        /// an API key when you do
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 8080)]
+        port: u16,
+
+        /// Default model for /v1/chat/completions and /v1/completions
+        #[arg(long, value_name = "MODEL")]
+        chat: Option<String>,
+
+        /// Default model for /v1/embeddings
+        #[arg(long, value_name = "MODEL")]
+        embed: Option<String>,
+
+        /// Default model for /v1/classify without labels
+        #[arg(long, value_name = "MODEL")]
+        classify: Option<String>,
+
+        /// Default model for /v1/classify with labels (zero-shot)
+        #[arg(long, value_name = "MODEL")]
+        zero_shot: Option<String>,
+
+        /// Default model for /v1/rerank
+        #[arg(long, value_name = "MODEL")]
+        rerank: Option<String>,
+
+        /// Default model for /v1/audio/transcriptions and /v1/audio/translations
+        #[arg(long, value_name = "MODEL")]
+        transcribe: Option<String>,
+
+        /// Default model for /v1/translate. Without one, a model is picked for
+        /// each language pair
+        #[arg(long, value_name = "MODEL")]
+        translate: Option<String>,
+
+        /// Default model for /v1/summarize
+        #[arg(long, value_name = "MODEL")]
+        summarize: Option<String>,
+
+        /// Default model for /v1/ner
+        #[arg(long, value_name = "MODEL")]
+        ner: Option<String>,
+
+        /// Load the models named by the flags above before taking requests,
+        /// instead of on their first request
+        #[arg(long)]
+        preload: bool,
+
+        /// Require 'Authorization: Bearer KEY' on every /v1 request. Also read
+        /// from the KJARNI_API_KEY environment variable
+        #[arg(long, value_name = "KEY")]
+        api_key: Option<String>,
+
+        /// Allow requests from web pages on other origins (CORS)
+        #[arg(long)]
+        cors: bool,
+
+        /// Reuse the work on a conversation's earlier turns between chat
+        /// requests. Faster multi-turn chat, more memory
+        #[arg(long)]
+        prefix_cache: bool,
+
+        /// Run models on the GPU
+        #[arg(long)]
+        gpu: bool,
+
+        /// Don't log requests or startup messages
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
     /// Transcribe audio to text
     Transcribe {
         /// Path to audio file (wav, mp3, flac, ogg)
