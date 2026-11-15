@@ -169,6 +169,7 @@ pub enum ModelType {
     ToxicBertMultilingual,
     RobertaGoEmotions,
     DistilRobertaEmotion,
+    MiniLMZeroShot,
 
     DistilBertNer,
 
@@ -306,6 +307,7 @@ impl ModelType {
             Self::ToxicBertMultilingual => "toxic-bert",
 
             // Named entities
+            Self::MiniLMZeroShot => "minilm-zeroshot",
             Self::DistilBertNer => "distilbert-ner",
 
             // Edge LLMs
@@ -578,6 +580,22 @@ impl ModelType {
                 },
                 description: "7 emotions: anger, disgust, fear, joy, neutral, sadness, surprise.",
                 size_mb: 329,
+                params_millions: 82,
+            },
+            Self::MiniLMZeroShot => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::ZeroShotClassification,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/cross-encoder/nli-MiniLM2-L6-H768/resolve/main/model.safetensors",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/cross-encoder/nli-MiniLM2-L6-H768/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/cross-encoder/nli-MiniLM2-L6-H768/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Zero-shot classifier. Classify text into labels you choose at runtime, with no training.",
+                size_mb: 328,
                 params_millions: 82,
             },
             Self::DistilBertNer => ModelInfo {
@@ -1024,6 +1042,9 @@ impl ModelType {
                 Some(Self::RobertaGoEmotions)
             }
             "emotion-english-distilroberta-base" => Some(Self::DistilRobertaEmotion),
+            "nli-minilm2-l6-h768" | "cross-encoder/nli-minilm2-l6-h768" => {
+                Some(Self::MiniLMZeroShot)
+            }
             "distilbert-ner" | "dslim/distilbert-ner" => Some(Self::DistilBertNer),
 
             "distilbart-cnn" | "olafuraron/distilbart-cnn-12-6" | "distilbart-cnn-12-6" => {

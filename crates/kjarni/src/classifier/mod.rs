@@ -34,6 +34,7 @@ mod model;
 pub mod presets;
 mod types;
 mod validation;
+mod zero_shot;
 
 pub use builder::ClassifierBuilder;
 pub use model::Classifier;
@@ -42,6 +43,7 @@ pub use types::{
     ClassificationMode, ClassificationOverrides, ClassificationResult, ClassifierError,
     ClassifierResult,
 };
+pub use zero_shot::{DEFAULT_HYPOTHESIS_TEMPLATE, ZeroShotOptions};
 
 /// Classify a single text using the specified model.
 ///

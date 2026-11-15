@@ -348,11 +348,19 @@ done | kjarni rerank "key findings" -k 1 --format docs
 cat texts.txt | kjarni encode --format raw > embeddings.txt
 ```
 
-### Zero-shot classification via reranking
+### Zero-shot classification with labels you choose
 ```bash
-echo -e "positive sentiment\nnegative sentiment\nneutral" | \
-  kjarni rerank "This product is amazing!" -k 1 --format docs
-# Output: positive sentiment
+kjarni classify -m minilm-zeroshot --labels "sizing,shipping,price" \
+  "The shoes run a full size small."
+#   ✓         sizing  ██████████████████░░   91.8%
+#              price  █░░░░░░░░░░░░░░░░░░░    6.6%
+#           shipping  ░░░░░░░░░░░░░░░░░░░░    1.6%
+
+# One text per line; --multi-label judges each label on its own, and
+# --hypothesis changes the sentence each label is put into
+kjarni classify -q -m minilm-zeroshot --multi-label \
+  --hypothesis "This review is about {}." \
+  --labels "sizing,shipping,price,quality,customer service" < reviews.txt
 ```
 
 ### Find similar content

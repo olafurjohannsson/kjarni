@@ -329,10 +329,18 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         model_path: Option<String>,
 
-        /// Custom labels (comma-separated, order must match model output)
-        /// Example: --labels "negative,positive" or --labels "neikvætt,jákvætt"
+        /// Comma-separated labels. With a zero-shot model such as
+        /// minilm-zeroshot, the labels to choose from:
+        /// --labels "sizing,shipping,price". With other models, names for
+        /// the model's own labels, in the order of its output:
+        /// --labels "neikvætt,jákvætt"
         #[arg(long, value_name = "LABELS")]
         labels: Option<String>,
+
+        /// Zero-shot models only: the hypothesis each label is put into,
+        /// with {} where the label goes [default: "This example is {}."]
+        #[arg(long, value_name = "TEMPLATE")]
+        hypothesis: Option<String>,
 
         /// Return top K predictions
         #[arg(long, default_value = "5")]
@@ -350,7 +358,8 @@ pub enum Commands {
         #[arg(long)]
         batch_size: Option<usize>,
 
-        /// Use multi-label classification (sigmoid instead of softmax)
+        /// Use multi-label classification (sigmoid instead of softmax). With
+        /// a zero-shot model, judge each label on its own.
         #[arg(long)]
         multi_label: bool,
 

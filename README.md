@@ -400,6 +400,9 @@ $ kjarni classify "Best purchase ever"
 $ echo "Great service" | kjarni classify --format json | jq -r '.label'
 POSITIVE
 
+$ kjarni classify -q -m minilm-zeroshot --labels "sizing,shipping,price" "Arrived two weeks late"
+shipping
+
 $ kjarni index create my-docs docs/*
 ✓ Indexed 15 documents (39.52 KB)
 
@@ -440,6 +443,7 @@ Referenced by short name; the underlying HuggingFace model is listed for searcha
 | Summarization | `bart-large-cnn` | `facebook/bart-large-cnn` | 406 MB |
 | Translation (English to German) | `opus-mt-en-de` | `Helsinki-NLP/opus-mt-en-de` \* | 285 MB |
 | Translation (German to English) | `opus-mt-de-en` | `Helsinki-NLP/opus-mt-de-en` \* | 285 MB |
+| Zero-shot (labels you choose) | `minilm-zeroshot` | `cross-encoder/nli-MiniLM2-L6-H768` | 328 MB |
 | Named entities | `distilbert-ner` | `dslim/distilbert-NER` | 66 MB |
 | Instruction / seq2seq | `flan-t5-base` | `google/flan-t5-base` | 250 MB |
 | Instruction / seq2seq | `flan-t5-large` | `google/flan-t5-large` | 780 MB |
