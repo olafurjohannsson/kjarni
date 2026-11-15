@@ -305,10 +305,15 @@ impl Qwen3_5Config {
             .context("qwen35.nextn_predict_layers exceeds the block count")?;
         // The converter lists which layers are recurrent when the checkpoint
         // names its layer types; otherwise every `interval`-th is attention.
-        let recurrent: Option<Vec<bool>> = loader
+        // GGUF files are read natively only, so wasm never has the list.
+        #[cfg(not(target_arch = "wasm32"))]
+        let listed = loader
             .as_any()
             .downcast_ref::<kjarni_transformers::weights::GgufLoader>()
-            .and_then(|g| g.metadata().get("qwen35.attention.recurrent_layers"))
+            .and_then(|g| g.metadata().get("qwen35.attention.recurrent_layers"));
+        #[cfg(target_arch = "wasm32")]
+        let listed: Option<&serde_json::Value> = None;
+        let recurrent: Option<Vec<bool>> = listed
             .and_then(|v| v.as_array())
             .map(|flags| {
                 flags
