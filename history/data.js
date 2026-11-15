@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794707483948,
+  "lastUpdate": 1794749656920,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1008,6 +1008,66 @@ window.BENCHMARK_DATA = {
             "value": 28.4,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 0.993"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "973363112a1bcb0bfe88a93ec20295105d8e892d",
+          "message": "Add zero-shot classification (#111)\n\nClassifier::zero_shot, zero_shot_with and zero_shot_batch pick among\nlabels given at run time with a natural-language-inference model, as\ntransformers' pipeline(\"zero-shot-classification\") does: each label goes\ninto a hypothesis (\"This example is {}.\"), and the scores are a softmax\nof the entailment logits across labels, or entailment against\ncontradiction per label with multi_label. SequenceClassifier gains\npredict_logits_pairs for the (text, hypothesis) pairs.\n\nThe registry gets minilm-zeroshot, cross-encoder/nli-MiniLM2-L6-H768\n(82M). On twelve product-review sentences it picked the right aspect for\neleven; xtremedistil-l6-h256-zeroshot (13M) got five.\n\nkjarni classify takes the candidates with --labels when the model is\nzero-shot, a registry zero-shot model or a folder with an entailment\nlabel, plus --hypothesis and --multi-label.\n\nScores are pinned to transformers 4.57 in float32 on the CPU.",
+          "timestamp": "2026-11-15T13:12:21Z",
+          "tree_id": "f024445dd7b5b804b5e36bf221c0d910abfbcdcd",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/973363112a1bcb0bfe88a93ec20295105d8e892d"
+        },
+        "date": 1794749656455,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 493.04,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.002"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 25.85,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.009"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 463.64,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.006"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 27.95,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.081"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 466.94,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.004"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 20.37,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.997"
           }
         ]
       }
