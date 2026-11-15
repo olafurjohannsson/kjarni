@@ -162,6 +162,10 @@ pub struct GatedDeltaNet {
     pub num_v_heads: usize,
     pub key_dim: usize,
     pub value_dim: usize,
+    /// Value heads are in llama.cpp's tiled order: head `h` reads key head
+    /// `h % num_k_heads`. Otherwise grouped, as Hugging Face stores them: key
+    /// head `h / (num_v_heads / num_k_heads)`.
+    pub tiled_value_heads: bool,
 }
 
 impl GatedDeltaNet {
@@ -218,7 +222,11 @@ impl GatedDeltaNet {
                 .zip(kept.axis_iter_mut(Axis(0)).into_par_iter())
                 .enumerate()
                 .for_each(|(head, ((mut st, mut out_h), mut kept_h))| {
-                    let kh = head / rep;
+                    let kh = if self.tiled_value_heads {
+                        head % nk
+                    } else {
+                        head / rep
+                    };
                     let st = st.as_slice_mut().expect("recurrent state is contiguous");
                     let mut q = vec![0f32; dk];
                     let mut k = vec![0f32; dk];

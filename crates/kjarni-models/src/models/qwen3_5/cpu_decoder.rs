@@ -69,6 +69,14 @@ impl Qwen3_5CpuDecoder {
                 .get_array1(&name)
                 .with_context(|| format!("loading {name}"))
         };
+        // A llama.cpp GGUF stores these norms with their +1 already added.
+        let norm = |weight: ndarray::Array1<f32>| {
+            if c.llama_cpp_layout {
+                RMSNorm::new(weight, eps)
+            } else {
+                offset_norm(weight, eps)
+            }
+        };
 
         let (mut attention_slot, mut linear_slot) = (0, 0);
         let mut layers = Vec::with_capacity(c.num_hidden_layers);
@@ -81,8 +89,8 @@ impl Qwen3_5CpuDecoder {
                         k_proj: linear(t("self_attn.k_proj.weight"))?,
                         v_proj: linear(t("self_attn.v_proj.weight"))?,
                         o_proj: linear(t("self_attn.o_proj.weight"))?,
-                        q_norm: offset_norm(vector(t("self_attn.q_norm.weight"))?, eps),
-                        k_norm: offset_norm(vector(t("self_attn.k_norm.weight"))?, eps),
+                        q_norm: norm(vector(t("self_attn.q_norm.weight"))?),
+                        k_norm: norm(vector(t("self_attn.k_norm.weight"))?),
                         num_heads: c.num_attention_heads,
                         num_kv_heads: c.num_key_value_heads,
                         head_dim: c.head_dim,
@@ -93,18 +101,23 @@ impl Qwen3_5CpuDecoder {
                 }
                 LayerKind::LinearAttention => {
                     let name = t("linear_attn.conv1d.weight");
-                    let conv = weights
-                        .get_array3(&name)
-                        .with_context(|| format!("loading {name}"))?;
-                    let (channels, _, kernel) = conv.dim();
+                    // `[channels, 1, kernel]`, or `[channels, kernel]` from llama.cpp.
+                    let conv_weight = if c.llama_cpp_layout {
+                        weights.get_array2(&name)
+                    } else {
+                        weights.get_array3(&name).and_then(|w| {
+                            let (channels, _, kernel) = w.dim();
+                            Ok(w.into_shape_with_order((channels, kernel))?)
+                        })
+                    }
+                    .with_context(|| format!("loading {name}"))?;
                     anyhow::ensure!(
-                        channels == c.conv_dim() && kernel == c.conv_kernel,
-                        "{name} is {:?}; expected [{}, 1, {}]",
-                        conv.dim(),
+                        conv_weight.dim() == (c.conv_dim(), c.conv_kernel),
+                        "{name} is {:?}; expected {} channels of {}",
+                        conv_weight.dim(),
                         c.conv_dim(),
                         c.conv_kernel
                     );
-                    let conv_weight = conv.into_shape_with_order((channels, kernel))?;
                     let net = GatedDeltaNet {
                         in_proj_qkv: linear(t("linear_attn.in_proj_qkv.weight"))?,
                         in_proj_z: linear(t("linear_attn.in_proj_z.weight"))?,
@@ -112,7 +125,11 @@ impl Qwen3_5CpuDecoder {
                         in_proj_a: linear(t("linear_attn.in_proj_a.weight"))?,
                         out_proj: linear(t("linear_attn.out_proj.weight"))?,
                         conv_weight,
-                        neg_a: vector(t("linear_attn.A_log"))?.mapv(|v| -v.exp()),
+                        neg_a: if c.llama_cpp_layout {
+                            vector(t("linear_attn.A_log"))?
+                        } else {
+                            vector(t("linear_attn.A_log"))?.mapv(|v| -v.exp())
+                        },
                         dt_bias: vector(t("linear_attn.dt_bias"))?,
                         norm_weight: vector(t("linear_attn.norm.weight"))?,
                         eps,
@@ -120,15 +137,16 @@ impl Qwen3_5CpuDecoder {
                         num_v_heads: c.linear_num_value_heads,
                         key_dim: c.linear_key_head_dim,
                         value_dim: c.linear_value_head_dim,
+                        tiled_value_heads: c.llama_cpp_layout,
                     };
                     linear_slot += 1;
                     Mixer::DeltaNet(net, linear_slot - 1)
                 }
             };
             layers.push(Qwen3_5Layer {
-                input_norm: offset_norm(vector(t("input_layernorm.weight"))?, eps),
+                input_norm: norm(vector(t("input_layernorm.weight"))?),
                 mixer,
-                post_norm: offset_norm(vector(t("post_attention_layernorm.weight"))?, eps),
+                post_norm: norm(vector(t("post_attention_layernorm.weight"))?),
                 mlp: SwiGluFeedForward::new(
                     linear(t("mlp.gate_proj.weight"))?,
                     linear(t("mlp.up_proj.weight"))?,
@@ -140,7 +158,7 @@ impl Qwen3_5CpuDecoder {
 
         Ok(Self {
             layers,
-            final_norm: offset_norm(vector(c.tensor("norm.weight"))?, eps),
+            final_norm: norm(vector(c.tensor("norm.weight"))?),
             rope,
             config,
         })

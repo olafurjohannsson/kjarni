@@ -2,6 +2,8 @@ target/
 .idea/
 Cargo.lock
 *.safetensors
+# Test fixtures small enough to commit, which the tests load directly.
+!**/testdata/*.safetensors
 vocab.txt
 # Not a blanket *.json: that silently swallowed every package.json and
 # tsconfig.json in the repo, so the TypeScript package could not be committed and

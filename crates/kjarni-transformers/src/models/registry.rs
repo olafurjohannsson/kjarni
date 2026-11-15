@@ -687,7 +687,9 @@ impl ModelType {
                         "https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/tokenizer.json",
                     ),
                     config_url: "https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/config.json",
-                    gguf_url: None,
+                    gguf_url: Some(
+                        "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+                    ),
                     preprocessor_url: None,
                 },
                 description: "Qwen's hybrid small model: linear attention in three layers of four. CPU only for now.",
@@ -703,7 +705,9 @@ impl ModelType {
                         "https://huggingface.co/Qwen/Qwen3.5-2B/resolve/main/tokenizer.json",
                     ),
                     config_url: "https://huggingface.co/Qwen/Qwen3.5-2B/resolve/main/config.json",
-                    gguf_url: None,
+                    gguf_url: Some(
+                        "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
+                    ),
                     preprocessor_url: None,
                 },
                 description: "Qwen 3.5 at 2B: the 0.8B's design, twice as wide. CPU only for now.",
@@ -719,7 +723,9 @@ impl ModelType {
                         "https://huggingface.co/Qwen/Qwen3.5-4B/resolve/main/tokenizer.json",
                     ),
                     config_url: "https://huggingface.co/Qwen/Qwen3.5-4B/resolve/main/config.json",
-                    gguf_url: None,
+                    gguf_url: Some(
+                        "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+                    ),
                     preprocessor_url: None,
                 },
                 description: "Qwen 3.5 at 4B, with 32 linear-attention heads. CPU only for now.",

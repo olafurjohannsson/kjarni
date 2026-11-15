@@ -1,7 +1,7 @@
 use crate::cpu::kernels::q_common::BlockQ6_K;
 use crate::cpu::kernels::{
     self,
-    q_common::{BlockQ4_K, BlockQ8_0, BlockQ8_K, QK_K},
+    q_common::{BlockQ4_K, BlockQ5_K, BlockQ8_0, BlockQ8_K, QK_K},
     quantize::quantize_row_q8_k,
 };
 
@@ -923,6 +923,50 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
             });
     }
 
+    output
+}
+
+/// Computes `C = A @ B^T` for F32 input `A` and Q5_K quantized weight matrix `B`.
+///
+/// The activations are quantised to Q8_K and the dot products run on integers, as
+/// for Q4_K and Q6_K. Q4_K_M files use Q5_K for some of their larger tensors.
+pub fn matmul_2d_cpu_q5_k(input: &ArrayView2<f32>, weights: &[BlockQ5_K]) -> Array2<f32> {
+    let (m, k) = input.dim();
+    let blocks_per_row = k / QK_K;
+    let n = weights.len() / blocks_per_row;
+    let mut output = Array2::zeros((m, n));
+    let input = input.as_standard_layout();
+
+    let rows_into = |out: &mut [f32], first_row: usize, a_q8: &[BlockQ8_K]| {
+        for (j, o) in out.iter_mut().enumerate() {
+            let start = (first_row + j) * blocks_per_row;
+            *o = kernels::scalar::vec_dot_q5k_q8k_scalar(
+                k,
+                &weights[start..start + blocks_per_row],
+                a_q8,
+            );
+        }
+    };
+
+    if m == 1 {
+        let a_q8 = quantize_row_q8_k(input.as_slice().unwrap());
+        let chunk_size = n.div_ceil(rayon::current_num_threads()).max(1);
+        output
+            .as_slice_mut()
+            .unwrap()
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk, out)| rows_into(out, chunk * chunk_size, &a_q8));
+    } else {
+        output
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(input.outer_iter())
+            .for_each(|(mut out_row, in_row)| {
+                let a_q8 = quantize_row_q8_k(in_row.as_slice().unwrap());
+                rows_into(out_row.as_slice_mut().unwrap(), 0, &a_q8);
+            });
+    }
     output
 }
 
@@ -2187,7 +2231,7 @@ pub fn matmul_2d_dequant_blocks<B: crate::tensor::Dequantizable + Sync>(
 #[cfg(test)]
 mod dequant_tiled_tests {
     use super::*;
-    use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K};
+    use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K};
     use crate::tensor::QuantizedMatrix;
     use half::f16;
 
@@ -2254,6 +2298,29 @@ mod dequant_tiled_tests {
         // The per-row kernel quantizes activations to 8 bits, so it is close
         // rather than equal.
         assert!(max_rel(&tiled, &matmul_2d_cpu_q4_k(&a.view(), &blocks)) < 2e-2);
+    }
+
+    /// Covers both the single-row (decode) and per-row (prompt) branches of the
+    /// integer kernel, against dequantize-then-multiply.
+    #[test]
+    fn q5_k_matches_dequantize_then_multiply() {
+        let blocks: Vec<BlockQ5_K> = (0..N * K / 256)
+            .map(|b| BlockQ5_K {
+                d: f16::from_f32(0.01 + (b % 7) as f32 * 0.002),
+                dmin: f16::from_f32(0.005 + (b % 5) as f32 * 0.001),
+                scales: std::array::from_fn(|i| byte(b * 12 + i)),
+                qh: std::array::from_fn(|i| byte(b * 700 + i)),
+                qs: std::array::from_fn(|i| byte(b * 1000 + i)),
+            })
+            .collect();
+        let a = input(M, K);
+        let want = reference(&a, blocks.clone(), N);
+        let tiled = matmul_2d_dequant_blocks(&a.view(), &blocks, N, None);
+        assert!(max_rel(&tiled, &want) < 1e-4);
+        assert!(max_rel(&matmul_2d_cpu_q5_k(&a.view(), &blocks), &want) < 2e-2);
+        let one = a.slice(ndarray::s![..1, ..]).to_owned();
+        let want_one = want.slice(ndarray::s![..1, ..]).to_owned();
+        assert!(max_rel(&matmul_2d_cpu_q5_k(&one.view(), &blocks), &want_one) < 2e-2);
     }
 
     #[test]

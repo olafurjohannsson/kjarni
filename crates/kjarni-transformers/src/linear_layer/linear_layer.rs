@@ -1,7 +1,7 @@
 //! CPU-based linear layer with multi-dtype support.
 
 use crate::cpu::{
-    kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+    kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0},
     ops,
 };
 #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
@@ -63,6 +63,7 @@ pub enum LinearData {
     Q4_K(Arc<QuantizedMatrix<BlockQ4_K>>),
 
     /// 6-bit block-quantized weights with K-quants.
+    Q5_K(Arc<QuantizedMatrix<BlockQ5_K>>),
     Q6_K(Arc<QuantizedMatrix<BlockQ6_K>>),
 }
 impl LinearData {
@@ -73,6 +74,7 @@ impl LinearData {
             LinearData::BF16(_) => DType::BF16,
             LinearData::F16(_) => DType::F16,
             LinearData::Q8_0(_) => DType::Q8_0,
+            LinearData::Q5_K(_) => DType::Q5_K,
             LinearData::Q6_K(_) => DType::Q6_K,
             LinearData::Q4_K(_) => DType::Q4_K,
         }
@@ -216,6 +218,7 @@ impl LinearLayer {
             LinearData::BF16(_)
             | LinearData::F16(_)
             | LinearData::Q8_0(_)
+            | LinearData::Q5_K(_)
             | LinearData::Q6_K(_)
             | LinearData::Q4_K(_) => {
                 // Quantized/BF16 paths don't have no-alloc versions yet
@@ -302,6 +305,15 @@ impl LinearLayer {
                 )
             }
             #[cfg(not(target_arch = "wasm32"))]
+            LinearData::Q5_K(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
+                ops::matmul::matmul_2d_dequant_blocks(
+                    input,
+                    &w.blocks,
+                    w.shape[0],
+                    self.bias_slice(),
+                )
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             LinearData::Q6_K(w) if input.nrows() >= ops::matmul::DEQUANT_GEMM_MIN_ROWS => {
                 ops::matmul::matmul_2d_dequant_blocks(
                     input,
@@ -333,6 +345,15 @@ impl LinearLayer {
             }
             LinearData::Q8_0(w) => {
                 let mut result = ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks);
+                if let Some(b) = &self.bias {
+                    for mut row in result.rows_mut() {
+                        row += b;
+                    }
+                }
+                result
+            }
+            LinearData::Q5_K(w) => {
+                let mut result = ops::matmul::matmul_2d_cpu_q5_k(input, &w.blocks);
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
@@ -449,6 +470,7 @@ impl LinearLayer {
             LinearData::F16(w) => w.shape()[0],
             LinearData::Q8_0(w) => w.shape[0],
             LinearData::Q4_K(w) => w.shape[0],
+            LinearData::Q5_K(w) => w.shape[0],
             LinearData::Q6_K(w) => w.shape[0],
         }
     }
@@ -466,6 +488,7 @@ impl LinearLayer {
             LinearData::F16(w) => w.shape()[1],
             LinearData::Q8_0(w) => w.shape[1],
             LinearData::Q4_K(w) => w.shape[1],
+            LinearData::Q5_K(w) => w.shape[1],
             LinearData::Q6_K(w) => w.shape[1],
         }
     }
@@ -582,6 +605,9 @@ impl LinearLayer {
                 };
                 GpuTensor::from_raw(ctx, &raw_tensor, label)
             }
+            LinearData::Q5_K(_) => Err(anyhow!(
+                "'{label}' is Q5_K, which has no GPU kernel yet; run this model on the CPU"
+            )),
         }
     }
 }

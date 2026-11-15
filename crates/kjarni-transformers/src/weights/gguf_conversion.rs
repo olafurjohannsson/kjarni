@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{ArrayD, IxDyn};
 
-use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, QK_K};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0, QK_K};
 use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::model_weights::AttentionLayout;
@@ -110,6 +110,23 @@ pub fn reorder_q_k_blocks3(
     reordered
 }
 
+/// Reorders whole rows of 256-weight blocks from GGUF interleaved layout to row-major.
+fn reorder_k_block_rows<B: Copy>(
+    blocks: Vec<B>,
+    rows: usize,
+    cols: usize,
+    head_dim: usize,
+) -> Vec<B> {
+    let blocks_per_row = cols / QK_K;
+    debug_assert_eq!(blocks.len(), rows * blocks_per_row);
+    let mut reordered = Vec::with_capacity(blocks.len());
+    for r in 0..rows {
+        let src = get_gguf_src_row(r, head_dim) * blocks_per_row;
+        reordered.extend_from_slice(&blocks[src..src + blocks_per_row]);
+    }
+    reordered
+}
+
 /// Returns `true` if this tensor needs GGUF block reordering.
 fn needs_gguf_reordering(name: &str, _rows: usize) -> bool {
     name.contains("q_proj")
@@ -197,6 +214,17 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> 
             }
 
             Ok(CpuTensor::Q4_K(QuantizedMatrix { blocks, shape }))
+        }
+
+        DType::Q5_K => {
+            let mut blocks: Vec<BlockQ5_K> = cast_or_copy(&raw.bytes);
+            let shape = [raw.shape[0], raw.shape[1]];
+            if let Some(attn) = attn
+                && needs_gguf_reordering(&raw.name, shape[0])
+            {
+                blocks = reorder_k_block_rows(blocks, shape[0], shape[1], attn.head_dim);
+            }
+            Ok(CpuTensor::Q5_K(QuantizedMatrix { blocks, shape }))
         }
 
         DType::Q6_K => {

@@ -128,11 +128,21 @@ pub struct Qwen3_5Config {
     /// Where the decoder's tensors start: `model.language_model.` in a multimodal
     /// checkpoint, `model.` in a text-only one.
     pub prefix: String,
+    /// The weights are as llama.cpp's converter writes them: the norms already
+    /// include their +1 offset (except the DeltaNet's gated norm), `A_log` is
+    /// stored as -exp(A_log), and when value heads outnumber key heads they are
+    /// in tiled order, so value head `h` reads key head `h % num_key_heads`
+    /// rather than `h / (num_value_heads / num_key_heads)`.
+    pub llama_cpp_layout: bool,
 }
 
 impl Qwen3_5Config {
-    /// Reads `config.json`, taking the weight prefix from what the checkpoint holds.
+    /// Reads `config.json`, taking the weight prefix from what the checkpoint holds,
+    /// or a GGUF's own metadata.
     pub fn from_weights(weights: &ModelWeights) -> Result<Arc<Self>> {
+        if weights.is_gguf() {
+            return Ok(Arc::new(Self::from_gguf(weights)?));
+        }
         let prefix = if weights.contains("model.language_model.embed_tokens.weight") {
             "model.language_model."
         } else {
@@ -263,6 +273,108 @@ impl Qwen3_5Config {
             pad_token_id: text.pad_token_id,
             tie_word_embeddings,
             prefix: prefix.to_string(),
+            llama_cpp_layout: false,
+        })
+    }
+
+    /// Reads the `qwen35.*` metadata llama.cpp's converter writes.
+    pub fn from_gguf(weights: &ModelWeights) -> Result<Self> {
+        let loader = weights.loader();
+        let arch = loader.get_string("general.architecture").unwrap_or("");
+        match arch {
+            "qwen35" => {}
+            "qwen35moe" => {
+                bail!(
+                    "Qwen 3.5 mixture-of-experts models are not supported yet; the dense ones are"
+                )
+            }
+            other => bail!("this GGUF holds a '{other}' model, not Qwen 3.5"),
+        }
+        let int = |key: &str| {
+            loader
+                .get_u32(&format!("qwen35.{key}"))
+                .map(|v| v as usize)
+                .with_context(|| format!("the GGUF has no qwen35.{key}"))
+        };
+        let float = |key: &str| loader.get_f32(&format!("qwen35.{key}"));
+
+        // Converters that keep the multi-token-prediction head count it as blocks.
+        let mtp = loader.get_u32("qwen35.nextn_predict_layers").unwrap_or(0) as usize;
+        let num_hidden_layers = int("block_count")?
+            .checked_sub(mtp)
+            .context("qwen35.nextn_predict_layers exceeds the block count")?;
+        // The converter lists which layers are recurrent when the checkpoint
+        // names its layer types; otherwise every `interval`-th is attention.
+        let recurrent: Option<Vec<bool>> = loader
+            .as_any()
+            .downcast_ref::<kjarni_transformers::weights::GgufLoader>()
+            .and_then(|g| g.metadata().get("qwen35.attention.recurrent_layers"))
+            .and_then(|v| v.as_array())
+            .map(|flags| {
+                flags
+                    .iter()
+                    .map(|f| f.as_bool().or_else(|| f.as_u64().map(|n| n != 0)))
+                    .collect::<Option<Vec<bool>>>()
+                    .context("qwen35.attention.recurrent_layers is not a list of booleans")
+            })
+            .transpose()?;
+        let interval = int("full_attention_interval").unwrap_or(4);
+        let layer_kinds: Vec<LayerKind> = (0..num_hidden_layers)
+            .map(|i| {
+                let linear = match &recurrent {
+                    Some(flags) => flags.get(i).copied().unwrap_or(false),
+                    None => (i + 1) % interval != 0,
+                };
+                if linear {
+                    LayerKind::LinearAttention
+                } else {
+                    LayerKind::FullAttention
+                }
+            })
+            .collect();
+
+        let num_k = int("ssm.group_count")?;
+        let num_v = int("ssm.time_step_rank")?;
+        if num_k == 0 || num_v == 0 || !num_v.is_multiple_of(num_k) {
+            bail!("{num_v} value heads cannot share {num_k} key heads evenly");
+        }
+        let head_dim = int("attention.key_length")?;
+        let rotary_dim = int("rope.dimension_count")?;
+        if rotary_dim == 0 || !rotary_dim.is_multiple_of(2) || rotary_dim > head_dim {
+            bail!("a rotary width of {rotary_dim} does not fit a head of {head_dim}");
+        }
+        let vocab_size = *weights
+            .tensor_shape("model.embed_tokens.weight")?
+            .first()
+            .context("the token embedding has no shape")?;
+        let eos = loader.get_u32("tokenizer.ggml.eos_token_id");
+
+        Ok(Self {
+            hidden_size: int("embedding_length")?,
+            num_hidden_layers,
+            num_attention_heads: int("attention.head_count")?,
+            num_key_value_heads: int("attention.head_count_kv")?,
+            head_dim,
+            intermediate_size: int("feed_forward_length")?,
+            vocab_size,
+            max_position_embeddings: int("context_length")?,
+            rms_norm_eps: float("attention.layer_norm_rms_epsilon")
+                .unwrap_or_else(default_rms_norm_eps),
+            layer_kinds,
+            conv_kernel: int("ssm.conv_kernel")?,
+            linear_key_head_dim: int("ssm.state_size")?,
+            linear_value_head_dim: int("ssm.inner_size")? / num_v,
+            linear_num_key_heads: num_k,
+            linear_num_value_heads: num_v,
+            rope_theta: float("rope.freq_base").unwrap_or_else(default_rope_theta),
+            rotary_dim,
+            eos_token_id: eos.into_iter().collect(),
+            bos_token_id: None,
+            pad_token_id: loader.get_u32("tokenizer.ggml.padding_token_id"),
+            // `output.weight` is absent when the head shares the embedding.
+            tie_word_embeddings: !weights.contains("lm_head.weight"),
+            prefix: "model.".to_string(),
+            llama_cpp_layout: true,
         })
     }
 

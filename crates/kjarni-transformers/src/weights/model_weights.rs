@@ -467,6 +467,11 @@ pub fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
             shape: [raw.shape[0], raw.shape[1]],
         })),
 
+        DType::Q5_K => Ok(CpuTensor::Q5_K(QuantizedMatrix {
+            blocks: cast_or_copy(&raw.bytes),
+            shape: [raw.shape[0], raw.shape[1]],
+        })),
+
         DType::Q6_K => Ok(CpuTensor::Q6_K(QuantizedMatrix {
             blocks: cast_or_copy(&raw.bytes),
             shape: [raw.shape[0], raw.shape[1]],

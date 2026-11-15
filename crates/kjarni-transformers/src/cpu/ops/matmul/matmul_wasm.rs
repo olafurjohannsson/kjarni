@@ -223,6 +223,31 @@ pub fn matmul_2d_cpu_q6_k(a: &ArrayView2<f32>, b_weights: &[BlockQ6_K]) -> Array
     c
 }
 
+/// Q5_K matmul, one row at a time on the single wasm thread.
+pub fn matmul_2d_cpu_q5_k(
+    a: &ArrayView2<f32>,
+    b_weights: &[crate::cpu::kernels::q_common::BlockQ5_K],
+) -> Array2<f32> {
+    let (m, k) = a.dim();
+    let blocks_per_row = k / crate::cpu::kernels::q_common::QK_K;
+    let n = b_weights.len() / blocks_per_row;
+    let mut c = Array2::<f32>::zeros((m, n));
+    for (mut out_row, a_row) in c.outer_iter_mut().zip(a.outer_iter()) {
+        let a_q8 = crate::cpu::kernels::quantize::quantize_row_q8_k(
+            a_row.as_standard_layout().as_slice().unwrap(),
+        );
+        for (j, out) in out_row.iter_mut().enumerate() {
+            let start = j * blocks_per_row;
+            *out = crate::cpu::kernels::scalar::vec_dot_q5k_q8k_scalar(
+                k,
+                &b_weights[start..start + blocks_per_row],
+                &a_q8,
+            );
+        }
+    }
+    c
+}
+
 /// Q6_K matmul variant 2, same as q6_k for WASM.
 pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     matmul_2d_cpu_q6_k(input, weights)

@@ -2,7 +2,7 @@
 
 use crate::cpu::kernels::{
     dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, get_scale_min_k4},
-    q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, BlockQ8_K, QK_K},
+    q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0, BlockQ8_K, QK_K},
 };
 
 /// Computes vector-matrix product for F32 input and BF16 weights.
@@ -176,6 +176,35 @@ pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[Bloc
         sumf += q.d * d * (sum_qs as f32) - q.d * dmin * (sum_mins as f32);
     }
 
+    sumf
+}
+
+/// Computes dot product of Q5_K weights and Q8_K quantized input.
+///
+/// As [`vec_dot_q4k_q8k_scalar`], with each weight's fifth bit taken from `qh`.
+pub fn vec_dot_q5k_q8k_scalar(n: usize, w_blocks: &[BlockQ5_K], q_blocks: &[BlockQ8_K]) -> f32 {
+    let mut sumf = 0.0f32;
+    for (w, q) in w_blocks.iter().zip(q_blocks).take(n / QK_K) {
+        let mut sum_qs = 0i32;
+        let mut sum_mins = 0i32;
+        for j in 0..4 {
+            let ql = &w.qs[j * 32..j * 32 + 32];
+            for (half, shift) in [(0usize, 0u32), (1, 4)] {
+                let sub = 2 * j + half;
+                let (sc, m) = get_scale_min_k4(sub, &w.scales);
+                let a = &q.qs[sub * 32..sub * 32 + 32];
+                let mut dot = 0i32;
+                for l in 0..32 {
+                    let low = (ql[l] >> shift) & 0xF;
+                    let high = ((w.qh[l] >> sub) & 1) << 4;
+                    dot += (low | high) as i32 * a[l] as i32;
+                }
+                sum_qs += dot * sc as i32;
+                sum_mins += (q.bsums[sub * 2] as i32 + q.bsums[sub * 2 + 1] as i32) * m as i32;
+            }
+        }
+        sumf += q.d * w.d.to_f32() * sum_qs as f32 - q.d * w.dmin.to_f32() * sum_mins as f32;
+    }
     sumf
 }
 
