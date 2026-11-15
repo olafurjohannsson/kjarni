@@ -363,13 +363,28 @@ impl SequenceClassifier {
         if texts.is_empty() {
             return Ok(vec![]);
         }
-
-        // Tokenize
         let encodings = self
             .tokenizer
             .encode_batch(texts.to_vec(), true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
+        self.logits_of(&encodings).await
+    }
 
+    /// Raw logits for text pairs, each encoded as one sequence with the
+    /// tokenizer's pair template (`[CLS] a [SEP] b [SEP]` for BERT). NLI
+    /// models read the pair as premise and hypothesis.
+    pub async fn predict_logits_pairs(&self, pairs: &[(&str, &str)]) -> Result<Vec<Vec<f32>>> {
+        if pairs.is_empty() {
+            return Ok(vec![]);
+        }
+        let encodings = self
+            .tokenizer
+            .encode_batch(pairs.to_vec(), true)
+            .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
+        self.logits_of(&encodings).await
+    }
+
+    async fn logits_of(&self, encodings: &[tokenizers::Encoding]) -> Result<Vec<Vec<f32>>> {
         let head = self
             .pipeline
             .cpu_head()
@@ -399,7 +414,7 @@ impl SequenceClassifier {
             .pipeline
             .cpu_encoder()
             .ok_or_else(|| anyhow!("No CPU encoder available"))?;
-        map_bucketed(&encodings, TOKENS_PER_BATCH, MAX_ROWS_PER_BATCH, |b| {
+        map_bucketed(encodings, TOKENS_PER_BATCH, MAX_ROWS_PER_BATCH, |b| {
             let hidden = cpu_ops.embed_tokens(&b.input_ids, Some(&b.token_type_ids), 2)?;
             let normalized = cpu_encoder.embed_norm(&hidden)?;
             let (rows, width) = b.input_ids.dim();

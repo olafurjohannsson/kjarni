@@ -2270,4 +2270,242 @@ mod classifier_tests {
             }
         }
     }
+
+    /// Scoring and input checks of zero-shot classification, with no model.
+    mod zero_shot_scoring_tests {
+        use crate::classifier::zero_shot::{NliLabels, hypotheses, result};
+
+        fn labels(names: &[&str]) -> Vec<String> {
+            names.iter().map(|s| s.to_string()).collect()
+        }
+
+        #[test]
+        fn three_label_nli_models_contradict_first() {
+            let nli = NliLabels::of(&labels(&["contradiction", "entailment", "neutral"])).unwrap();
+            assert_eq!((nli.entailment, nli.contradiction), (1, 0));
+        }
+
+        #[test]
+        fn two_label_models_contradict_with_the_last_label() {
+            let nli = NliLabels::of(&labels(&["entailment", "not_entailment"])).unwrap();
+            assert_eq!((nli.entailment, nli.contradiction), (0, 1));
+        }
+
+        #[test]
+        fn a_model_without_an_entailment_label_is_refused() {
+            let err = NliLabels::of(&labels(&["NEGATIVE", "POSITIVE"]))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("entailment"), "{err}");
+        }
+
+        #[test]
+        fn each_label_fills_the_template() {
+            let h = hypotheses("This review is about {}.", &["sizing", "price"]).unwrap();
+            assert_eq!(
+                h,
+                [
+                    "This review is about sizing.",
+                    "This review is about price."
+                ]
+            );
+        }
+
+        #[test]
+        fn no_labels_or_no_placeholder_is_an_error() {
+            assert!(hypotheses("This example is {}.", &[]).is_err());
+            let err = hypotheses("This example is.", &["a"])
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("{}"), "{err}");
+        }
+
+        /// One label per text: a softmax of the entailment logits across
+        /// labels. Entailment logits 0 and ln 3 give 1/4 and 3/4.
+        #[test]
+        fn one_label_per_text_shares_the_probability() {
+            let nli = NliLabels {
+                entailment: 1,
+                contradiction: 0,
+            };
+            let rows = vec![vec![5.0, 0.0, -2.0], vec![-1.0, 3f32.ln(), 7.0]];
+            let r = result(&rows, &["a", "b"], nli, false);
+            assert_eq!((r.label.as_str(), r.label_index), ("b", 1));
+            assert!((r.score - 0.75).abs() < 1e-6, "{}", r.score);
+            assert!((r.all_scores[1].1 - 0.25).abs() < 1e-6);
+        }
+
+        /// Labels judged on their own: entailment against contradiction for
+        /// each label, ignoring neutral. Logits 0 and ln 3 give 3/4.
+        #[test]
+        fn labels_judged_alone_ignore_the_other_labels() {
+            let nli = NliLabels {
+                entailment: 1,
+                contradiction: 0,
+            };
+            let rows = vec![vec![0.0, 3f32.ln(), 9.0], vec![3f32.ln(), 0.0, -9.0]];
+            let r = result(&rows, &["a", "b"], nli, true);
+            assert_eq!(r.label, "a");
+            assert!((r.all_scores[0].1 - 0.75).abs() < 1e-6);
+            assert!((r.all_scores[1].1 - 0.25).abs() < 1e-6);
+        }
+
+        /// transformers judges a single label on its own, since a softmax
+        /// over one label would always give 1.
+        #[test]
+        fn a_single_label_is_judged_alone() {
+            let nli = NliLabels {
+                entailment: 1,
+                contradiction: 0,
+            };
+            let rows = vec![vec![0.0, 3f32.ln(), 9.0]];
+            for multi_label in [false, true] {
+                let r = result(&rows, &["a"], nli, multi_label);
+                assert!((r.score - 0.75).abs() < 1e-6, "{}", r.score);
+            }
+        }
+    }
+
+    /// Downloads minilm-zeroshot (328 MB) the first time. Scores are from
+    /// transformers 4.57 `pipeline("zero-shot-classification")` with
+    /// cross-encoder/nli-MiniLM2-L6-H768 in float32 on the CPU.
+    mod zero_shot_tests {
+        use crate::classifier::{Classifier, ZeroShotOptions};
+
+        const REVIEW_LABELS: [&str; 5] =
+            ["sizing", "shipping", "price", "quality", "customer service"];
+
+        async fn classifier() -> Classifier {
+            Classifier::builder("minilm-zeroshot")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap()
+        }
+
+        fn assert_ranked(got: &[(String, f32)], want: &[(&str, f32)]) {
+            assert_eq!(got.len(), want.len(), "{got:?}");
+            for ((gl, gs), (wl, ws)) in got.iter().zip(want) {
+                assert_eq!(gl, wl, "{got:?}");
+                assert!((gs - ws).abs() < 1e-4, "{gl}: {gs} vs {ws}");
+            }
+        }
+
+        #[tokio::test]
+        #[ignore = "downloads minilm-zeroshot"]
+        async fn one_label_per_text_matches_transformers() {
+            let c = classifier().await;
+            let labels = ["sizing", "shipping", "price", "quality"];
+            let r = c
+                .zero_shot("Arrived two weeks late and the box was crushed.", &labels)
+                .await
+                .unwrap();
+            assert_eq!((r.label.as_str(), r.label_index), ("shipping", 1));
+            assert_ranked(
+                &r.all_scores,
+                &[
+                    ("shipping", 0.496644),
+                    ("price", 0.215547),
+                    ("quality", 0.178925),
+                    ("sizing", 0.108884),
+                ],
+            );
+        }
+
+        #[tokio::test]
+        #[ignore = "downloads minilm-zeroshot"]
+        async fn a_template_and_multi_label_match_transformers() {
+            let c = classifier().await;
+            let text = "I emailed support three times and nobody answered.";
+            let multi = ZeroShotOptions::default().multi_label(true);
+            let r = c
+                .zero_shot_with(text, &REVIEW_LABELS, &multi)
+                .await
+                .unwrap();
+            assert_ranked(
+                &r.all_scores,
+                &[
+                    ("customer service", 0.844133),
+                    ("quality", 0.693499),
+                    ("price", 0.257746),
+                    ("sizing", 0.158574),
+                    ("shipping", 0.146039),
+                ],
+            );
+            let review = multi.hypothesis_template("This review is about {}.");
+            let r = c
+                .zero_shot_with(text, &REVIEW_LABELS, &review)
+                .await
+                .unwrap();
+            assert_ranked(
+                &r.all_scores,
+                &[
+                    ("customer service", 0.870215),
+                    ("price", 0.171758),
+                    ("quality", 0.112427),
+                    ("sizing", 0.028049),
+                    ("shipping", 0.01264),
+                ],
+            );
+        }
+
+        /// A batch gives each text the result it gets alone.
+        #[tokio::test]
+        #[ignore = "downloads minilm-zeroshot"]
+        async fn a_batch_matches_texts_alone() {
+            let c = classifier().await;
+            let texts = [
+                "The shoes run a full size small, I had to return them.",
+                "Short.",
+                "The battery died after a week and support never answered.",
+            ];
+            let labels = ["sizing", "shipping", "price", "quality"];
+            let batch = c
+                .zero_shot_batch(&texts, &labels, &ZeroShotOptions::default())
+                .await
+                .unwrap();
+            assert_eq!(batch.len(), texts.len());
+            for (text, got) in texts.iter().zip(&batch) {
+                let alone = c.zero_shot(text, &labels).await.unwrap();
+                assert_eq!(got.all_scores.len(), alone.all_scores.len());
+                for ((gl, gs), (al, a)) in got.all_scores.iter().zip(&alone.all_scores) {
+                    assert_eq!(gl, al);
+                    assert!((gs - a).abs() < 1e-5, "{text}: {gl} {gs} vs {a}");
+                }
+            }
+            assert_ranked(
+                &batch[0].all_scores,
+                &[
+                    ("sizing", 0.644393),
+                    ("quality", 0.153637),
+                    ("price", 0.133332),
+                    ("shipping", 0.068638),
+                ],
+            );
+        }
+
+        #[tokio::test]
+        #[ignore = "downloads minilm-zeroshot"]
+        async fn a_single_label_matches_transformers() {
+            let c = classifier().await;
+            let r = c.zero_shot("Short.", &["only one label"]).await.unwrap();
+            assert!((r.score - 0.382968).abs() < 1e-4, "{}", r.score);
+        }
+
+        #[tokio::test]
+        #[ignore = "downloads distilbert-sentiment"]
+        async fn a_model_that_is_not_nli_is_refused() {
+            let c = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let err = c
+                .zero_shot("text", &["a", "b"])
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("entailment"), "{err}");
+        }
+    }
 }

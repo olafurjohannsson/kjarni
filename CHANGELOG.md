@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Zero-shot classification.** Classify text into labels you choose at run time,
+  with no training: `kjarni classify -m minilm-zeroshot --labels "sizing,shipping"`
+  and `Classifier::zero_shot`, `zero_shot_with` and `zero_shot_batch` in Rust, with
+  `ZeroShotOptions` for the hypothesis template (default `"This example is {}."`)
+  and for judging each label on its own (`--multi-label`, `--hypothesis` in the
+  CLI). Any natural-language-inference model works, from the registry or a folder
+  with an entailment label. The new registry model `minilm-zeroshot` is
+  `cross-encoder/nli-MiniLM2-L6-H768` (82M parameters). Scores match transformers
+  4.57 `pipeline("zero-shot-classification")`.
+
 ## 0.5.0
 
 - **Summarize, translate and transcribe with any model folder.** `--model-path` on

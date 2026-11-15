@@ -3,7 +3,8 @@
 use anyhow::{Result, anyhow};
 use colored::*;
 use kjarni::DType;
-use kjarni::classifier::{ClassificationResult, Classifier};
+use kjarni::classifier::{ClassificationResult, Classifier, ZeroShotOptions};
+use kjarni::{ModelTask, ModelType};
 
 use crate::commands::display;
 
@@ -12,6 +13,7 @@ pub async fn run(
     model: &str,
     model_path: Option<&str>,
     labels: Option<&str>,
+    hypothesis: Option<&str>,
     top_k: usize,
     threshold: Option<f32>,
     max_length: Option<usize>,
@@ -41,6 +43,23 @@ pub async fn run(
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let is_batch = lines.len() > 1;
 
+    let zero_shot = is_zero_shot(model, model_path)?;
+    let candidates = match (zero_shot, labels) {
+        (true, Some(l)) => Some(split_labels(l)?),
+        (true, None) => {
+            return Err(anyhow!(
+                "a zero-shot model needs the labels to choose from, such as \
+                 --labels \"sizing,shipping,price\""
+            ));
+        }
+        (false, _) => None,
+    };
+    if hypothesis.is_some() && !zero_shot {
+        return Err(anyhow!(
+            "--hypothesis needs a zero-shot model, such as minilm-zeroshot"
+        ));
+    }
+
     // Build classifier
     let mut builder = if let Some(path) = model_path {
         Classifier::from_path(path)
@@ -59,7 +78,7 @@ pub async fn run(
     if let Some(bs) = batch_size {
         builder = builder.batch_size(bs);
     }
-    if multi_label {
+    if multi_label && !zero_shot {
         builder = builder.multi_label();
     }
     if gpu {
@@ -69,7 +88,7 @@ pub async fn run(
         let dtype_enum = parse_dtype(dt)?;
         builder = builder.dtype(dtype_enum);
     }
-    if let Some(labels_str) = labels {
+    if let (Some(labels_str), false) = (labels, zero_shot) {
         builder = builder.labels_str(labels_str);
     }
 
@@ -88,6 +107,33 @@ pub async fn run(
             )
             .dimmed()
         );
+    }
+
+    if let Some(candidates) = candidates {
+        let labels: Vec<&str> = candidates.iter().map(String::as_str).collect();
+        let mut options = ZeroShotOptions::default().multi_label(multi_label);
+        if let Some(h) = hypothesis {
+            options = options.hypothesis_template(h);
+        }
+        let texts = if is_batch {
+            lines.clone()
+        } else {
+            vec![lines.first().copied().unwrap_or(&text)]
+        };
+        let mut results = classifier
+            .zero_shot_batch(&texts, &labels, &options)
+            .await
+            .map_err(|e| anyhow!("Classification failed: {}", e))?;
+        for r in &mut results {
+            r.all_scores.truncate(top_k.max(1));
+        }
+        let output = if is_batch {
+            format_batch_results(&texts, &results, format, quiet)?
+        } else {
+            format_single_result(texts[0], &results[0], format, quiet)?
+        };
+        print!("{}", output);
+        return Ok(());
     }
 
     // Run classification
@@ -115,6 +161,42 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+/// Whether the model picks among labels given at run time: a registry model
+/// for zero-shot classification, or a folder whose config.json has an
+/// entailment label, as natural-language-inference models do.
+fn is_zero_shot(model: &str, model_path: Option<&str>) -> Result<bool> {
+    let Some(path) = model_path else {
+        return Ok(ModelType::resolve(model)
+            .is_ok_and(|m| matches!(m.info().task, ModelTask::ZeroShotClassification)));
+    };
+    let config = std::path::Path::new(path).join("config.json");
+    let Ok(json) = std::fs::read_to_string(&config) else {
+        return Ok(false);
+    };
+    let config: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| anyhow!("{} is not valid JSON: {e}", config.display()))?;
+    Ok(config["id2label"].as_object().is_some_and(|labels| {
+        labels.values().any(|l| {
+            l.as_str()
+                .is_some_and(|l| l.to_lowercase().starts_with("entail"))
+        })
+    }))
+}
+
+/// The labels of a comma-separated list, trimmed, with empty ones left out.
+fn split_labels(labels: &str) -> Result<Vec<String>> {
+    let labels: Vec<String> = labels
+        .split(',')
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    if labels.is_empty() {
+        return Err(anyhow!("--labels has no labels"));
+    }
+    Ok(labels)
 }
 
 fn parse_dtype(dt: &str) -> Result<DType> {
@@ -315,6 +397,40 @@ mod tests {
                 .map(|(l, s)| (l.to_string(), s))
                 .collect(),
         }
+    }
+
+    #[test]
+    fn the_zero_shot_registry_model_takes_labels_at_run_time() {
+        assert!(is_zero_shot("minilm-zeroshot", None).unwrap());
+        assert!(!is_zero_shot("distilbert-sentiment", None).unwrap());
+    }
+
+    #[test]
+    fn a_folder_with_an_entailment_label_is_zero_shot() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |labels: &str| {
+            std::fs::write(
+                dir.path().join("config.json"),
+                format!(r#"{{"id2label": {labels}}}"#),
+            )
+            .unwrap()
+        };
+        let path = dir.path().to_str().unwrap();
+        write(r#"{"0": "contradiction", "1": "entailment", "2": "neutral"}"#);
+        assert!(is_zero_shot("custom", Some(path)).unwrap());
+        write(r#"{"0": "ENTAILMENT", "1": "NOT_ENTAILMENT"}"#);
+        assert!(is_zero_shot("custom", Some(path)).unwrap());
+        write(r#"{"0": "NEGATIVE", "1": "POSITIVE"}"#);
+        assert!(!is_zero_shot("custom", Some(path)).unwrap());
+    }
+
+    #[test]
+    fn labels_are_split_on_commas_and_trimmed() {
+        assert_eq!(
+            split_labels(" sizing, shipping ,,customer service").unwrap(),
+            ["sizing", "shipping", "customer service"]
+        );
+        assert!(split_labels(" , ").is_err());
     }
 
     #[test]

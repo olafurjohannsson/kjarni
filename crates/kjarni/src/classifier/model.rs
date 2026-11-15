@@ -14,6 +14,7 @@ use super::types::{
     ClassifierResult,
 };
 use super::validation::validate_for_classification;
+use super::zero_shot::{self, ZeroShotOptions};
 
 /// High-level text classifier.
 ///
@@ -443,6 +444,75 @@ impl Classifier {
             ClassificationMode::SingleLabel => scores,
             ClassificationMode::MultiLabel => scores.iter().map(|&x| sigmoid(x)).collect(),
         })
+    }
+
+    /// Zero-shot classification: picks one of `labels`, which the model
+    /// never saw in training, with the default hypothesis "This example is
+    /// {}.". Needs a natural-language-inference model, such as
+    /// `minilm-zeroshot`.
+    ///
+    /// ```ignore
+    /// let c = Classifier::new("minilm-zeroshot").await?;
+    /// let r = c.zero_shot("Arrived two weeks late.", &["sizing", "shipping"]).await?;
+    /// assert_eq!(r.label, "shipping");
+    /// ```
+    pub async fn zero_shot(
+        &self,
+        text: &str,
+        labels: &[&str],
+    ) -> ClassifierResult<ClassificationResult> {
+        self.zero_shot_with(text, labels, &ZeroShotOptions::default())
+            .await
+    }
+
+    /// Zero-shot classification with a hypothesis template of your own, or
+    /// with each label judged on its own.
+    pub async fn zero_shot_with(
+        &self,
+        text: &str,
+        labels: &[&str],
+        options: &ZeroShotOptions,
+    ) -> ClassifierResult<ClassificationResult> {
+        Ok(self
+            .zero_shot_batch(&[text], labels, options)
+            .await?
+            .remove(0))
+    }
+
+    /// Zero-shot classification of several texts against the same labels,
+    /// one result per text, in order. Every (text, hypothesis) pair goes
+    /// through the model in one call.
+    pub async fn zero_shot_batch(
+        &self,
+        texts: &[&str],
+        labels: &[&str],
+        options: &ZeroShotOptions,
+    ) -> ClassifierResult<Vec<ClassificationResult>> {
+        let hypotheses = zero_shot::hypotheses(&options.hypothesis_template, labels)?;
+        let nli = zero_shot::NliLabels::of(self.inner.labels().ok_or(ClassifierError::NoLabels)?)?;
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pairs: Vec<(&str, &str)> = texts
+            .iter()
+            .flat_map(|t| hypotheses.iter().map(move |h| (*t, h.as_str())))
+            .collect();
+        let logits = self
+            .inner
+            .predict_logits_pairs(&pairs)
+            .await
+            .map_err(ClassifierError::ClassificationFailed)?;
+        if logits.len() != pairs.len() {
+            return Err(ClassifierError::ClassificationFailed(anyhow::anyhow!(
+                "model returned {} results for {} pairs",
+                logits.len(),
+                pairs.len()
+            )));
+        }
+        Ok(logits
+            .chunks(labels.len())
+            .map(|rows| zero_shot::result(rows, labels, nli, options.multi_label))
+            .collect())
     }
 
     /// Get the effective labels (custom or model).
