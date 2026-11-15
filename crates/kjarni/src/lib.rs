@@ -90,6 +90,7 @@ pub mod models {
     pub use kjarni_models::models::llama::{LlamaConfig, LlamaModel};
     pub use kjarni_models::models::phi::{PhiConfig, PhiModel};
     pub use kjarni_models::models::qwen::{QwenConfig, QwenModel};
+    pub use kjarni_models::models::qwen3_5::{Qwen3_5Config, Qwen3_5Model};
 }
 pub mod kjarni_config;
 pub mod kjarni_config_loader;

@@ -265,6 +265,19 @@ impl Generator {
                 Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
             }
 
+            ModelArchitecture::Qwen3_5 => {
+                use kjarni_models::models::qwen3_5::Qwen3_5Model;
+                let model = Qwen3_5Model::from_registry(
+                    model_type,
+                    Some(cache_dir.to_path_buf()),
+                    device,
+                    context,
+                    Some(load_config),
+                )
+                .await?;
+                Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
+            }
+
             ModelArchitecture::Mistral => {
                 use kjarni_models::models::mistral::MistralModel;
                 let model = MistralModel::from_registry(
@@ -516,7 +529,7 @@ pub async fn generate_with_config(
 }
 
 /// Load the decoder in a model folder, its architecture read from its
-/// `config.json`: Llama, Qwen2, Mistral, Phi-3 or GPT-2. A folder that is not
+/// `config.json`: Llama, Qwen2, Qwen 3.5, Mistral, Phi-3 or GPT-2. A folder that is not
 /// a registry model uses its own Jinja chat template.
 pub async fn load_decoder(
     path: &std::path::Path,
@@ -554,6 +567,7 @@ pub async fn load_decoder(
 pub(crate) enum DecoderFamily {
     Llama,
     Qwen2,
+    Qwen3_5,
     Mistral,
     Phi3,
     Gpt2,
@@ -582,12 +596,15 @@ impl DecoderFamily {
         match (architecture, model_type) {
             ("LlamaForCausalLM", _) | ("", "llama") => Ok(Self::Llama),
             ("Qwen2ForCausalLM", _) | ("", "qwen2") => Ok(Self::Qwen2),
+            ("Qwen3_5ForConditionalGeneration" | "Qwen3_5ForCausalLM", _)
+            | ("", "qwen3_5" | "qwen3_5_text") => Ok(Self::Qwen3_5),
             ("MistralForCausalLM", _) | ("", "mistral") => Ok(Self::Mistral),
             ("Phi3ForCausalLM", _) | ("", "phi3") => Ok(Self::Phi3),
             ("GPT2LMHeadModel", _) | ("", "gpt2") => Ok(Self::Gpt2),
             _ => Err(format!(
                 "it is a {} model; text generation supports LlamaForCausalLM, \
-                 Qwen2ForCausalLM, MistralForCausalLM, Phi3ForCausalLM and GPT2LMHeadModel",
+                 Qwen2ForCausalLM, Qwen3_5ForConditionalGeneration, Qwen3_5ForCausalLM, \
+                 MistralForCausalLM, Phi3ForCausalLM and GPT2LMHeadModel",
                 if architecture.is_empty() {
                     model_type
                 } else {
@@ -601,6 +618,7 @@ impl DecoderFamily {
         match self {
             Self::Llama => "Llama",
             Self::Qwen2 => "Qwen2",
+            Self::Qwen3_5 => "Qwen 3.5",
             Self::Mistral => "Mistral",
             Self::Phi3 => "Phi-3",
             Self::Gpt2 => "GPT-2",
@@ -616,7 +634,7 @@ impl DecoderFamily {
     ) -> anyhow::Result<Arc<dyn DecoderLanguageModel + Send + Sync>> {
         use kjarni_models::models::{
             gpt2::Gpt2Model, llama::LlamaModel, mistral::MistralModel, phi::PhiModel,
-            qwen::QwenModel,
+            qwen::QwenModel, qwen3_5::Qwen3_5Model,
         };
         let cfg = Some(load_config);
         Ok(match self {
@@ -624,6 +642,9 @@ impl DecoderFamily {
                 path, device, context, cfg, None,
             )?),
             Self::Qwen2 => Arc::new(QwenModel::from_pretrained(
+                path, device, context, cfg, None,
+            )?),
+            Self::Qwen3_5 => Arc::new(Qwen3_5Model::from_pretrained(
                 path, device, context, cfg, None,
             )?),
             Self::Mistral => Arc::new(MistralModel::from_pretrained(
@@ -658,6 +679,8 @@ mod family_tests {
         for (arch, family) in [
             ("LlamaForCausalLM", DecoderFamily::Llama),
             ("Qwen2ForCausalLM", DecoderFamily::Qwen2),
+            ("Qwen3_5ForConditionalGeneration", DecoderFamily::Qwen3_5),
+            ("Qwen3_5ForCausalLM", DecoderFamily::Qwen3_5),
             ("MistralForCausalLM", DecoderFamily::Mistral),
             ("Phi3ForCausalLM", DecoderFamily::Phi3),
             ("GPT2LMHeadModel", DecoderFamily::Gpt2),
@@ -675,6 +698,8 @@ mod family_tests {
         for (mt, family) in [
             ("llama", DecoderFamily::Llama),
             ("qwen2", DecoderFamily::Qwen2),
+            ("qwen3_5", DecoderFamily::Qwen3_5),
+            ("qwen3_5_text", DecoderFamily::Qwen3_5),
             ("mistral", DecoderFamily::Mistral),
             ("phi3", DecoderFamily::Phi3),
             ("gpt2", DecoderFamily::Gpt2),

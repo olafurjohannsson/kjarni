@@ -216,6 +216,7 @@ pub async fn run_speculative_generation_loop(
     let logits = draft_backend
         .prefill(draft.as_ref(), &tokens, cache.as_mut())
         .await?;
+    ensure_rewindable(cache.as_ref(), input_tokens.len(), "draft")?;
     let token = draft_backend.new_decode_token()?;
     let proposer = Proposer::Model(DraftState {
         model: draft,
@@ -264,6 +265,20 @@ pub async fn run_prompt_lookup_generation_loop(
         cancellation,
     )
     .await
+}
+
+/// Speculation drops rejected tokens by cutting the cache back to where they
+/// began, wherever that is. A recurrent state can only be cut back to a few
+/// saved points, so a model that keeps one cannot speculate.
+fn ensure_rewindable(cache: &dyn Cache, len: usize, which: &str) -> Result<()> {
+    let back = len.saturating_sub(1);
+    if cache.reusable_prefix(back) != back {
+        return Err(anyhow!(
+            "speculative decoding cannot use this {which} model: it keeps a recurrent \
+             state, which cannot be cut back to drop rejected tokens"
+        ));
+    }
+    Ok(())
 }
 
 fn generation_limit(prompt_len: usize, config: &GenerationConfig) -> usize {
@@ -324,6 +339,7 @@ async fn run_loop(
     target_backend
         .prefill(target.as_ref(), &tokens_array, target_cache.as_mut())
         .await?;
+    ensure_rewindable(target_cache.as_ref(), prompt_len, "target")?;
     stats.end_prefill();
 
     let tokenizer = target.tokenizer();
@@ -681,6 +697,46 @@ mod tests {
     #[test]
     fn prompt_lookup_can_run_into_the_tail_itself() {
         assert_eq!(prompt_lookup(&[4, 4, 4], 1, 5), vec![4]);
+    }
+
+    /// A cache that, like a recurrent state, can only go back to the start.
+    #[derive(Clone)]
+    struct StartOnly(usize);
+
+    impl Cache for StartOnly {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+        fn get_seq_length(&self) -> usize {
+            self.0
+        }
+        fn set_seq_length(&mut self, len: usize) {
+            self.0 = len;
+        }
+        fn clear(&mut self) {
+            self.0 = 0;
+        }
+        fn increment_len(&mut self, n: usize) {
+            self.0 += n;
+        }
+        fn clone_box(&self) -> Box<dyn Cache> {
+            Box::new(self.clone())
+        }
+        fn reusable_prefix(&self, len: usize) -> usize {
+            if len >= self.0 { self.0 } else { 0 }
+        }
+    }
+
+    #[test]
+    fn a_cache_that_cannot_be_cut_back_refuses_speculation() {
+        let err = ensure_rewindable(&StartOnly(10), 10, "target").unwrap_err();
+        assert!(err.to_string().contains("recurrent state"), "{err}");
+        let mut kv = crate::cache::CpuKVCache::new(1, 1, 16, 4);
+        kv.increment_len(10);
+        assert!(ensure_rewindable(&kv, 10, "target").is_ok());
     }
 
     #[test]

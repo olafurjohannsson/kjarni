@@ -100,7 +100,7 @@ impl ChatBuilder {
     }
 
     /// Load the model from a local folder instead of the registry: a
-    /// Llama, Qwen2, Mistral, Phi-3 or GPT-2 model with its `config.json`,
+    /// Llama, Qwen2, Qwen 3.5, Mistral, Phi-3 or GPT-2 model with its `config.json`,
     /// weights, tokenizer and the `chat_template` it was tuned with. A Kjarni
     /// download folder, which keeps no template, uses its registry model's.
     pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {

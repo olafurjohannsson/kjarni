@@ -113,7 +113,7 @@ kjarni chat --model llama-3-8b-instruct
 ```bash
 kjarni chat --model-path ./Qwen2.5-0.5B-Instruct
 ```
-Any Llama, Qwen2, Mistral, Phi-3 or GPT-2 folder from the Hugging Face Hub, formatted
+Any Llama, Qwen2, Qwen 3.5, Mistral, Phi-3 or GPT-2 folder from the Hugging Face Hub, formatted
 with its own chat template. `kjarni generate --model-path` takes the same folders.
 
 ### With system prompt

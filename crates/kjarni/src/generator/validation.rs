@@ -13,6 +13,7 @@ pub fn validate_for_generation(model_type: ModelType) -> GeneratorResult<()> {
         // Decoder-only models can generate text
         ModelArchitecture::Llama
         | ModelArchitecture::Qwen2
+        | ModelArchitecture::Qwen3_5
         | ModelArchitecture::Mistral
         | ModelArchitecture::Phi3
         | ModelArchitecture::GPT => {

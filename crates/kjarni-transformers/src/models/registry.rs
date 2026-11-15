@@ -25,6 +25,9 @@ pub enum ModelArchitecture {
     /// Qwen2 family with bias terms in attention projections.
     Qwen2,
 
+    /// Qwen 3.5: gated attention every fourth layer, Gated DeltaNet between.
+    Qwen3_5,
+
     /// Mistral family with sliding window attention.
     Mistral,
 
@@ -70,6 +73,7 @@ impl ModelArchitecture {
         match self {
             Self::Llama => "Llama (Standard)",
             Self::Qwen2 => "Qwen2 (Biased)",
+            Self::Qwen3_5 => "Qwen3.5 (Hybrid DeltaNet)",
             Self::Mistral => "Mistral (SWA)",
             Self::Phi3 => "Phi-3 (LongRoPE)",
             Self::Clip => "CLIP (ViT + text)",
@@ -88,7 +92,9 @@ impl ModelArchitecture {
     pub fn category(&self) -> &'static str {
         match self {
             // Decoders (LLMs)
-            Self::Llama | Self::Qwen2 | Self::Mistral | Self::Phi3 | Self::GPT => "decoder",
+            Self::Llama | Self::Qwen2 | Self::Qwen3_5 | Self::Mistral | Self::Phi3 | Self::GPT => {
+                "decoder"
+            }
 
             // Encoders (Embeddings/Classifiers)
             Self::Bert | Self::NomicBert | Self::Mpnet | Self::Clip => "encoder",
@@ -175,6 +181,9 @@ pub enum ModelType {
 
     Qwen2_5_0_5B_Instruct,
     Qwen2_5_1_5B_Instruct,
+    Qwen3_5_0_8B,
+    Qwen3_5_2B,
+    Qwen3_5_4B,
     Llama3_2_1B_Instruct,
     Llama3_2_3B_Instruct,
     Phi3_5_Mini_Instruct,
@@ -313,6 +322,9 @@ impl ModelType {
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b-instruct",
             Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b-instruct",
+            Self::Qwen3_5_0_8B => "qwen3.5-0.8b",
+            Self::Qwen3_5_2B => "qwen3.5-2b",
+            Self::Qwen3_5_4B => "qwen3.5-4b",
             Self::Llama3_2_1B_Instruct => "llama3.2-1b-instruct",
             Self::Llama3_2_3B_Instruct => "llama3.2-3b-instruct",
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini-instruct",
@@ -665,6 +677,54 @@ impl ModelType {
                 description: "Balanced edge model. Good reasoning in a small package.",
                 size_mb: 3100,
                 params_millions: 1540,
+            },
+            Self::Qwen3_5_0_8B => ModelInfo {
+                architecture: ModelArchitecture::Qwen3_5,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Qwen's hybrid small model: linear attention in three layers of four. CPU only for now.",
+                size_mb: 1750,
+                params_millions: 752,
+            },
+            Self::Qwen3_5_2B => ModelInfo {
+                architecture: ModelArchitecture::Qwen3_5,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen3.5-2B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/Qwen/Qwen3.5-2B/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/Qwen/Qwen3.5-2B/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Qwen 3.5 at 2B: the 0.8B's design, twice as wide. CPU only for now.",
+                size_mb: 4500,
+                params_millions: 1882,
+            },
+            Self::Qwen3_5_4B => ModelInfo {
+                architecture: ModelArchitecture::Qwen3_5,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen3.5-4B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/Qwen/Qwen3.5-4B/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/Qwen/Qwen3.5-4B/resolve/main/config.json",
+                    gguf_url: None,
+                    preprocessor_url: None,
+                },
+                description: "Qwen 3.5 at 4B, with 32 linear-attention heads. CPU only for now.",
+                size_mb: 9300,
+                params_millions: 4206,
             },
             Self::Llama3_2_1B_Instruct => ModelInfo {
                 architecture: ModelArchitecture::Llama,
