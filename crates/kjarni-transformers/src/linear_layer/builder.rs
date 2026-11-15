@@ -40,6 +40,7 @@ fn array2_shape<T>(arr: &Array2<T>) -> [usize; 2] {
 /// | F32    | BF16   | Downcasting |
 /// | Q8_0   | Q8_0   | Direct copy |
 /// | Q4_K   | Q4_K   | Direct copy |
+/// | Q5_K   | Q5_K   | Direct copy |
 /// | Q6_K   | Q6_K   | Direct copy |
 /// | Any quantized | F32 | Dequantization |
 /// | F32/BF16 | Q8_0 | Quantization |
@@ -126,6 +127,7 @@ impl<'a> LinearLayerBuilder<'a> {
             }
             (CpuTensor::Q8_0(m), DType::Q8_0) => LinearData::Q8_0(Arc::new(m)),
             (CpuTensor::Q4_K(m), DType::Q4_K) => LinearData::Q4_K(Arc::new(m)),
+            (CpuTensor::Q5_K(m), DType::Q5_K) => LinearData::Q5_K(Arc::new(m)),
             (CpuTensor::Q6_K(m), DType::Q6_K) => LinearData::Q6_K(Arc::new(m)),
             (CpuTensor::BF16(arr), DType::F32) => {
                 let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());

@@ -6,8 +6,10 @@ pub mod raw_tensor;
 pub use dtype::DType;
 
 use crate::cpu::kernels::{
-    dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block},
-    q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+    dequantize::{
+        dequantize_q4_k_block, dequantize_q5_k_block, dequantize_q6_k_block, dequantize_q8_0_block,
+    },
+    q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0},
 };
 use anyhow::{Result, anyhow};
 use half::{bf16, f16};
@@ -85,6 +87,14 @@ impl Dequantizable for BlockQ4_K {
     }
 }
 
+impl Dequantizable for BlockQ5_K {
+    const BLOCK_SIZE: usize = 256;
+
+    fn dequantize_block(block: &Self, output: &mut [f32]) {
+        dequantize_q5_k_block(block, output);
+    }
+}
+
 impl Dequantizable for BlockQ6_K {
     const BLOCK_SIZE: usize = 256;
 
@@ -102,6 +112,7 @@ pub enum CpuTensor {
     F16(ArrayD<f16>),
     Q8_0(QuantizedMatrix<BlockQ8_0>),
     Q4_K(QuantizedMatrix<BlockQ4_K>),
+    Q5_K(QuantizedMatrix<BlockQ5_K>),
     Q6_K(QuantizedMatrix<BlockQ6_K>),
 }
 
@@ -113,6 +124,7 @@ impl CpuTensor {
             CpuTensor::F16(_) => DType::F16,
             CpuTensor::Q8_0(_) => DType::Q8_0,
             CpuTensor::Q4_K(_) => DType::Q4_K,
+            CpuTensor::Q5_K(_) => DType::Q5_K,
             CpuTensor::Q6_K(_) => DType::Q6_K,
         }
     }
@@ -120,7 +132,7 @@ impl CpuTensor {
     pub fn is_quantized(&self) -> bool {
         matches!(
             self,
-            CpuTensor::Q8_0(_) | CpuTensor::Q4_K(_) | CpuTensor::Q6_K(_)
+            CpuTensor::Q8_0(_) | CpuTensor::Q4_K(_) | CpuTensor::Q5_K(_) | CpuTensor::Q6_K(_)
         )
     }
 
@@ -132,6 +144,7 @@ impl CpuTensor {
             CpuTensor::BF16(arr) => arr.shape(),
             CpuTensor::Q8_0(q) => &q.shape,
             CpuTensor::Q4_K(q) => &q.shape,
+            CpuTensor::Q5_K(q) => &q.shape,
             CpuTensor::Q6_K(q) => &q.shape,
         }
     }
@@ -154,6 +167,7 @@ impl CpuTensor {
             CpuTensor::BF16(arr) => arr.len() * 2,
             CpuTensor::Q8_0(q) => q.blocks.len() * std::mem::size_of::<BlockQ8_0>(),
             CpuTensor::Q4_K(q) => q.blocks.len() * std::mem::size_of::<BlockQ4_K>(),
+            CpuTensor::Q5_K(q) => q.blocks.len() * std::mem::size_of::<BlockQ5_K>(),
             CpuTensor::Q6_K(q) => q.blocks.len() * std::mem::size_of::<BlockQ6_K>(),
         }
     }
@@ -208,6 +222,7 @@ impl CpuTensor {
                 .into_dimensionality::<Ix2>()?),
             CpuTensor::Q8_0(matrix) => matrix.dequantize(),
             CpuTensor::Q4_K(matrix) => matrix.dequantize(),
+            CpuTensor::Q5_K(matrix) => matrix.dequantize(),
             CpuTensor::Q6_K(matrix) => matrix.dequantize(),
         }
     }

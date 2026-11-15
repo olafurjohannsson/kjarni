@@ -1,4 +1,4 @@
-use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0};
 
 /// Dequantize a Q4_K block to 256 f32 values.
 pub fn dequantize_q4_k_block(b: &BlockQ4_K, out: &mut [f32]) {
@@ -32,6 +32,25 @@ pub fn dequantize_q4_k_block(b: &BlockQ4_K, out: &mut [f32]) {
 
         q_idx += 32;
         is += 2;
+    }
+}
+
+/// Dequantize a Q5_K block to 256 f32 values, as ggml's `dequantize_row_q5_K`.
+pub fn dequantize_q5_k_block(b: &BlockQ5_K, out: &mut [f32]) {
+    let d = b.d.to_f32();
+    let dmin = b.dmin.to_f32();
+    for j in 0..4 {
+        let (sc1, m1) = get_scale_min_k4(2 * j, &b.scales);
+        let (sc2, m2) = get_scale_min_k4(2 * j + 1, &b.scales);
+        let (d1, min1) = (d * sc1 as f32, dmin * m1 as f32);
+        let (d2, min2) = (d * sc2 as f32, dmin * m2 as f32);
+        let ql = &b.qs[j * 32..j * 32 + 32];
+        for l in 0..32 {
+            let lo = (ql[l] & 0xF) | (((b.qh[l] >> (2 * j)) & 1) << 4);
+            let hi = (ql[l] >> 4) | (((b.qh[l] >> (2 * j + 1)) & 1) << 4);
+            out[j * 64 + l] = d1 * lo as f32 - min1;
+            out[j * 64 + 32 + l] = d2 * hi as f32 - min2;
+        }
     }
 }
 
@@ -212,6 +231,70 @@ mod tests {
         assert!(
             out.iter().all(|&v| v.is_finite()),
             "All values should be finite"
+        );
+    }
+
+    /// The first block of `blk.0.attn_qkv.weight` in unsloth's
+    /// Qwen3.5-0.8B-Q4_K_M.gguf, which stores that tensor as Q5_K.
+    const REAL_Q5_K: &str = "65037511e59ca3aa6cde69ffdf85a2cb8ccb0969294b8da88220098de0222e29a76c26bf2c082c4a64cae92ba9afec8c794274309a9037406b0750a1e7465da7376e5836ed9c96fd8c7def2c64d7d7cd31777b5a4ba1935db8da5b30ae0b2158f8208c704b0c35165360ed9a9e361e82b2f6467623aaf8d450d8d93980476997471ae34f4b76c5b73604f608794f75d5872fc7b08ac30a5c0e02e173b4fff06b05a09aedcd98d6f5f12115e5ae9704b0";
+
+    fn real_q5_k() -> crate::cpu::kernels::q_common::BlockQ5_K {
+        let bytes: Vec<u8> = (0..REAL_Q5_K.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&REAL_Q5_K[i..i + 2], 16).unwrap())
+            .collect();
+        *bytemuck::from_bytes(&bytes)
+    }
+
+    /// Values from gguf-py's `dequantize` (llama.cpp's reference) on the same block.
+    #[test]
+    fn q5_k_dequantizes_as_ggml_does() {
+        let mut out = [0f32; 256];
+        dequantize_q5_k_block(&real_q5_k(), &mut out);
+        for (i, want) in [
+            (0, -0.012062013149261475f32),
+            (1, 0.005186200141906738),
+            (31, -0.0043961405754089355),
+            (32, -0.009832143783569336),
+            (63, -0.0025806427001953125),
+            (64, 0.003507077693939209),
+            (100, 0.0015420913696289062),
+            (127, 0.010243892669677734),
+            (128, -0.012791752815246582),
+            (191, -0.012389838695526123),
+            (200, 0.0073354244232177734),
+            (255, 0.020167171955108643),
+        ] {
+            assert!(
+                (out[i] - want).abs() < 1e-7,
+                "value {i}: {} vs {want}",
+                out[i]
+            );
+        }
+        let sum: f64 = out.iter().map(|&v| v as f64).sum();
+        assert!((sum - -0.129644513130188).abs() < 1e-5, "sum {sum}");
+    }
+
+    /// The integer dot product equals the dequantized weights against the
+    /// dequantized activations.
+    #[test]
+    fn q5_k_dot_matches_its_dequantized_values() {
+        let w = real_q5_k();
+        let a: Vec<f32> = (0..256)
+            .map(|i| ((i * 37) % 101) as f32 / 25.0 - 2.0)
+            .collect();
+        let q = crate::cpu::kernels::quantize::quantize_row_q8_k(&a);
+        let mut wf = [0f32; 256];
+        dequantize_q5_k_block(&w, &mut wf);
+        let want: f64 = wf
+            .iter()
+            .zip(q[0].qs.iter())
+            .map(|(&x, &y)| x as f64 * y as f64 * q[0].d as f64)
+            .sum();
+        let got = crate::cpu::kernels::scalar::vec_dot_q5k_q8k_scalar(256, &[w], &q);
+        assert!(
+            (got as f64 - want).abs() < 1e-5 * want.abs().max(1.0),
+            "{got} vs {want}"
         );
     }
 }

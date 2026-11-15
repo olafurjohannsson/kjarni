@@ -70,9 +70,12 @@ impl GgufLoader {
 
         let mut tensor_map = HashMap::new();
         let mut total_tensor_bytes = 0u64;
+        // Where the last tensor ends, relative to the start of the data section.
+        let mut data_end = 0u64;
 
         for t in model.tensors() {
             total_tensor_bytes += t.size;
+            data_end = data_end.max(t.offset + t.size);
 
             let mut shape: Vec<usize> = t.shape.iter().map(|&s| s as usize).collect();
             shape.reverse();
@@ -94,7 +97,20 @@ impl GgufLoader {
         }
 
         let mmap = get_or_create_mmap(path)?;
-        let data_start_offset = (mmap.len() as u64 - total_tensor_bytes) & !31;
+        // The data section starts on an alignment boundary and ends with the last
+        // tensor plus less than one alignment of padding. Tensors are padded to
+        // the alignment between each other too, so the sum of their sizes falls
+        // short of the section whenever any size is not a multiple of it.
+        let alignment = model
+            .metadata()
+            .get("general.alignment")
+            .and_then(|v| v.as_u64())
+            .filter(|a| a.is_power_of_two())
+            .unwrap_or(32);
+        let data_start_offset = (mmap.len() as u64)
+            .checked_sub(data_end)
+            .ok_or_else(|| anyhow!("GGUF tensors extend past the end of {:?}", path))?
+            & !(alignment - 1);
 
         log::info!(
             "loaded GGUF model: {} tensors, {:.1} MB data, architecture: {}",
@@ -153,6 +169,66 @@ impl GgufLoader {
         })
     }
 
+    /// Where a tensor that newer llama.cpp converters merge with another lives:
+    /// the merged tensor's name and the range of its rows that is this one.
+    ///
+    /// For Qwen 3.5 they stack `attn_qkv` over `attn_gate`, and `ssm_beta` over
+    /// `ssm_alpha`. Rows of every ggml type are stored independently, so either
+    /// half reads as a tensor of its own, quantized or not.
+    fn merged_half(&self, gguf_name: &str) -> Option<(String, std::ops::Range<usize>)> {
+        let (block, tensor) = gguf_name.rsplit_once('.').and_then(|(rest, ext)| {
+            let (block, tensor) = rest.rsplit_once('.')?;
+            (ext == "weight").then_some((block, tensor))
+        })?;
+        let (merged, second_rows, first) = match tensor {
+            "attn_qkv" | "attn_gate" => (
+                "attn_qkv_gate",
+                self.get_arch_u32("ssm.inner_size")? as usize,
+                tensor == "attn_qkv",
+            ),
+            "ssm_beta" | "ssm_alpha" => (
+                "ssm_beta_alpha",
+                self.get_arch_u32("ssm.time_step_rank")? as usize,
+                tensor == "ssm_beta",
+            ),
+            _ => return None,
+        };
+        let merged = format!("{block}.{merged}.weight");
+        let rows = *self.tensor_map.get(&merged)?.shape.first()?;
+        let first_rows = rows.checked_sub(second_rows)?;
+        let range = if first {
+            0..first_rows
+        } else {
+            first_rows..rows
+        };
+        Some((merged, range))
+    }
+
+    /// [`Self::view`] of a range of a 2-D tensor's rows.
+    fn view_rows<'a>(
+        &'a self,
+        name: &str,
+        gguf_name: &str,
+        info: &GgufTensorInfo,
+        rows: std::ops::Range<usize>,
+    ) -> Result<TensorView<'a>> {
+        let total = info.shape[0];
+        if info.shape.len() != 2 || !info.size.is_multiple_of(total as u64) {
+            return Err(anyhow!(
+                "cannot split rows of '{gguf_name}' with shape {:?}",
+                info.shape
+            ));
+        }
+        let row_bytes = info.size / total as u64;
+        let part = GgufTensorInfo {
+            kind: info.kind,
+            offset: info.offset + rows.start as u64 * row_bytes,
+            size: rows.len() as u64 * row_bytes,
+            shape: vec![rows.len(), info.shape[1]],
+        };
+        self.view(name, gguf_name, &part)
+    }
+
     pub(crate) fn ggml_type_to_dtype(kind: u32) -> Result<DType> {
         match kind {
             0 => Ok(DType::F32),
@@ -161,6 +237,7 @@ impl GgufLoader {
             GGML_Q4_0 | GGML_Q5_0 => Ok(DType::Q8_0),
             8 => Ok(DType::Q8_0),
             12 => Ok(DType::Q4_K),
+            13 => Ok(DType::Q5_K),
             14 => Ok(DType::Q6_K),
             30 => Ok(DType::BF16),
             other => Err(anyhow!("unsupported GGML type ID {}", other)),
@@ -197,7 +274,25 @@ impl GgufLoader {
                     "self_attn.k_proj.bias" => "attn_k.bias",
                     "self_attn.v_proj.bias" => "attn_v.bias",
                     "self_attn.o_proj.bias" => "attn_output.bias",
+                    // Qwen 3.5 keeps the name; llama.cpp's llama and qwen2 call it ffn_norm.
+                    "post_attention_layernorm.weight" if self.architecture == "qwen35" => {
+                        "post_attention_norm.weight"
+                    }
                     "post_attention_layernorm.weight" => "ffn_norm.weight",
+                    "self_attn.q_norm.weight" => "attn_q_norm.weight",
+                    "self_attn.k_norm.weight" => "attn_k_norm.weight",
+                    // Qwen 3.5's Gated DeltaNet, as llama.cpp's converter names it.
+                    // `A_log` is stored as -exp(A_log), and conv1d without its unit
+                    // middle dimension.
+                    "linear_attn.in_proj_qkv.weight" => "attn_qkv.weight",
+                    "linear_attn.in_proj_z.weight" => "attn_gate.weight",
+                    "linear_attn.in_proj_a.weight" => "ssm_alpha.weight",
+                    "linear_attn.in_proj_b.weight" => "ssm_beta.weight",
+                    "linear_attn.conv1d.weight" => "ssm_conv1d.weight",
+                    "linear_attn.A_log" => "ssm_a",
+                    "linear_attn.dt_bias" => "ssm_dt.bias",
+                    "linear_attn.norm.weight" => "ssm_norm.weight",
+                    "linear_attn.out_proj.weight" => "ssm_out.weight",
                     "mlp.gate_proj.weight" => "ffn_gate.weight",
                     "mlp.up_proj.weight" => "ffn_up.weight",
                     "mlp.down_proj.weight" => "ffn_down.weight",
@@ -286,6 +381,7 @@ impl GgufLoader {
                 1 => "F16",
                 8 => "Q8_0",
                 12 => "Q4_K",
+                13 => "Q5_K",
                 14 => "Q6_K",
                 30 => "BF16",
                 other => {
@@ -363,15 +459,18 @@ impl WeightLoader for GgufLoader {
             gguf_name
         };
 
-        let info = self.tensor_map.get(&gguf_name).ok_or_else(|| {
-            anyhow!(
-                "tensor '{}' (translated to '{}') not found",
-                name,
-                gguf_name
-            )
-        })?;
-
-        self.view(name, &gguf_name, info)
+        if let Some(info) = self.tensor_map.get(&gguf_name) {
+            return self.view(name, &gguf_name, info);
+        }
+        if let Some((merged, rows)) = self.merged_half(&gguf_name) {
+            let info = &self.tensor_map[&merged];
+            return self.view_rows(name, &merged, info, rows);
+        }
+        Err(anyhow!(
+            "tensor '{}' (translated to '{}') not found",
+            name,
+            gguf_name
+        ))
     }
 
     fn get_string(&self, key: &str) -> Option<&str> {
@@ -398,7 +497,7 @@ impl WeightLoader for GgufLoader {
 
     fn contains(&self, name: &str) -> bool {
         let gguf_name = self.translate_name(name);
-        self.tensor_map.contains_key(&gguf_name)
+        self.tensor_map.contains_key(&gguf_name) || self.merged_half(&gguf_name).is_some()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -483,6 +582,7 @@ mod tests {
             DType::Q8_0
         );
         assert_eq!(GgufLoader::ggml_type_to_dtype(12).unwrap(), DType::Q4_K);
+        assert_eq!(GgufLoader::ggml_type_to_dtype(13).unwrap(), DType::Q5_K);
         assert_eq!(GgufLoader::ggml_type_to_dtype(14).unwrap(), DType::Q6_K);
         assert_eq!(GgufLoader::ggml_type_to_dtype(30).unwrap(), DType::BF16);
         assert!(GgufLoader::ggml_type_to_dtype(999).is_err());

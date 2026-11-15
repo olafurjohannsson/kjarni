@@ -41,6 +41,26 @@ pub struct BlockQ4_K {
     pub qs: [u8; QK_K / 2],
 }
 
+/// A 5-bit quantization block (256 elements), ggml's `block_q5_K`.
+///
+/// Laid out as Q4_K with one more bit per weight: eight sub-blocks of 32 share a
+/// 6-bit scale and a 6-bit min, and `qh` holds the fifth bit. Bit `2j` of `qh[l]`
+/// belongs to weight `l` of sub-block `2j`, bit `2j + 1` to weight `l` of
+/// sub-block `2j + 1`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct BlockQ5_K {
+    pub d: f16,
+    pub dmin: f16,
+    pub scales: [u8; 12],
+    /// The fifth bit of every weight.
+    pub qh: [u8; QK_K / 8],
+    /// The low four bits, packed two per byte as in Q4_K.
+    pub qs: [u8; QK_K / 2],
+}
+
+const _: () = assert!(std::mem::size_of::<BlockQ5_K>() == 176);
+
 /// A 6-bit  quantization block (256 elements).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

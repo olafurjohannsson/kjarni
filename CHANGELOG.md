@@ -14,6 +14,20 @@
   second turn after a 2,200-token system prompt takes 1.9s instead of 7.8s on the
   0.8B. CPU only for now; the GPU, the mixture-of-experts variants, images and
   speculative decoding are not supported yet, and speculative decoding says so.
+- **Qwen 3.5 from GGUF.** `--gguf` downloads unsloth's Q4_K_M for `qwen3.5-0.8b`,
+  `qwen3.5-2b` and `qwen3.5-4b`, and any Qwen 3.5 GGUF written by llama.cpp's
+  converter loads with `--model-path`, including the newer files that merge
+  `attn_qkv` with `attn_gate` and `ssm_beta` with `ssm_alpha`, and those that keep
+  the multi-token-prediction block. The 4B Q4_K_M continues a 272-token prompt
+  token for token as the f32 transformers model does, and peaks at 6.0 GB of
+  memory instead of 9.7. On the 0.8B, loading and generating 100 tokens takes
+  6.7s instead of 11.8.
+- **Q5_K weights.** Q4_K_M files store some tensors as Q5_K, so until now no Q4_K_M
+  Qwen 3.5 file could load. CPU only; a Q5_K tensor on the GPU is an error that
+  says so.
+- GGUF files whose tensor sizes are not all multiples of 32 bytes load. The start
+  of the tensor data was computed from the sum of the tensor sizes, which falls
+  short by the padding between tensors.
 - `Cache::reusable_prefix`, for a cache that can only be cut back to some
   lengths. `PrefixCache` uses it, so a model with a recurrent state reuses what it
   can rather than reading state from the wrong position.

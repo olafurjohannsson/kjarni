@@ -7,6 +7,7 @@ use kjarni_transformers::{Device, cache::Cache, decoder::prelude::*, models::Lan
 use ndarray::Array2;
 
 use super::Qwen3_5Model;
+use super::config::LayerKind;
 
 const PROMPT_IDS: [u32; 5] = [760, 6511, 314, 9338, 369];
 const LAST_LOGITS_HEAD: [f32; 8] = [
@@ -265,7 +266,7 @@ mod four_b {
     }
 
     /// " Paris.\nA. True\nB. False\nAnswer:\nA\n\n"
-    const SHORT_GREEDY: [u32; 16] = [
+    pub(super) const SHORT_GREEDY: [u32; 16] = [
         11751, 13, 198, 32, 13, 2912, 198, 33, 13, 3439, 198, 15666, 25, 198, 32, 271,
     ];
     const SHORT_LAST8: [f32; 8] = [
@@ -279,7 +280,7 @@ mod four_b {
         9.242416381835938,
     ];
     /// " Kjarni is a Rust library for running AI models locally. It loads weights"
-    const LONG_GREEDY: [u32; 16] = [
+    pub(super) const LONG_GREEDY: [u32; 16] = [
         218515, 1820, 72, 369, 264, 32671, 6522, 364, 4162, 14791, 3983, 22756, 13, 1049, 20269,
         13914,
     ];
@@ -404,5 +405,106 @@ mod tiny {
             &floats(&e["long_last_logits"]),
             1e-4,
         );
+    }
+
+    /// The same model as llama.cpp's converter lays it out; see `make_gguf.py`.
+    /// Layer 0 holds the merged `attn_qkv_gate` and `ssm_beta_alpha` tensors,
+    /// the other layers the separate ones, and the value heads are tiled.
+    fn gguf_model() -> Qwen3_5Model {
+        Qwen3_5Model::from_pretrained(&dir().join("tiny.gguf"), Device::Cpu, None, None, None)
+            .unwrap()
+    }
+
+    #[test]
+    fn reads_the_gguf_layout_from_its_metadata() {
+        let m = gguf_model();
+        let c = m.config();
+        assert!(c.llama_cpp_layout);
+        assert_eq!((c.linear_num_key_heads, c.linear_num_value_heads), (2, 4));
+        assert_eq!((c.linear_key_head_dim, c.linear_value_head_dim), (16, 16));
+        assert!(!c.tie_word_embeddings);
+        assert_eq!((c.head_dim, c.rotary_dim, c.vocab_size), (32, 8, 256));
+        // From recurrent_layers, which disagrees with full_attention_interval.
+        assert_eq!(
+            c.layer_kinds,
+            [
+                LayerKind::LinearAttention,
+                LayerKind::LinearAttention,
+                LayerKind::FullAttention,
+                LayerKind::LinearAttention,
+            ]
+        );
+    }
+
+    #[test]
+    fn the_gguf_matches_transformers() {
+        let e = expected();
+        let m = gguf_model();
+        let prompt = ids(&e["short_ids"]);
+        let mut cache = m.new_cache(1, 64, 1).unwrap();
+        let got = logits(&m, &prompt, cache.as_mut());
+        for (pos, row) in e["short_logits"].as_array().unwrap().iter().enumerate() {
+            assert_close(got.row(pos), &floats(row), 1e-4);
+        }
+        let long = ids(&e["long_ids"]);
+        let mut cache = m.new_cache(1, 128, 1).unwrap();
+        let got = logits(&m, &long, cache.as_mut());
+        assert_close(
+            got.row(long.len() - 1),
+            &floats(&e["long_last_logits"]),
+            1e-4,
+        );
+        assert_eq!(greedy(&m, &prompt, 12), ids(&e["short_greedy"]));
+    }
+}
+
+/// The Q4_K_M files the registry downloads with `--gguf`, against the f32
+/// transformers references above. Quantization moves logits by tenths, so these
+/// check what survives it: the greedy continuation of the long prompt.
+mod q4_k_m {
+    use super::*;
+
+    fn load(folder: &str) -> Option<Qwen3_5Model> {
+        let path = dirs::home_dir()?
+            .join(".cache/kjarni")
+            .join(folder)
+            .join("model.gguf");
+        path.is_file().then(|| {
+            Qwen3_5Model::from_pretrained(&path, Device::Cpu, None, None, None).expect("loads")
+        })
+    }
+
+    fn greedy(model: &Qwen3_5Model, ids: &[u32], n: usize) -> Vec<u32> {
+        let mut cache = model.new_cache(1, ids.len() + n, 1).unwrap();
+        let mut next = argmax(logits(model, ids, cache.as_mut()).row(ids.len() - 1));
+        let mut out = vec![next];
+        while out.len() < n {
+            next = argmax(logits(model, &[next], cache.as_mut()).row(0));
+            out.push(next);
+        }
+        out
+    }
+
+    #[test]
+    #[ignore = "needs `kjarni model download qwen3.5-0.8b --gguf`"]
+    fn the_0_8b_continues_the_long_prompt_as_transformers_does() {
+        let Some(model) = load("Qwen_Qwen3.5-0.8B") else {
+            return;
+        };
+        let ids = long_ids(&model);
+        assert_eq!(greedy(&model, &ids, LONG_GREEDY.len()), LONG_GREEDY);
+    }
+
+    /// 32 value heads over 16 key heads, so this reads llama.cpp's tiled order.
+    #[test]
+    #[ignore = "needs `kjarni model download qwen3.5-4b --gguf`"]
+    fn the_4b_continues_both_prompts_as_transformers_does() {
+        let Some(model) = load("Qwen_Qwen3.5-4B") else {
+            return;
+        };
+        let ids = long_ids(&model);
+        assert_eq!(greedy(&model, &ids, 16), four_b::LONG_GREEDY);
+        // " Paris.\n", where the f32 model's continuation and this one part ways.
+        assert_eq!(greedy(&model, &PROMPT_IDS, 3), four_b::SHORT_GREEDY[..3]);
     }
 }

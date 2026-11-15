@@ -1,4 +1,4 @@
-use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ8_0, QK_K};
 use anyhow::{Result, anyhow};
 
 #[allow(non_camel_case_types)]
@@ -93,7 +93,13 @@ impl DType {
                 unimplemented!()
             }
             DType::Q5_K => {
-                unimplemented!()
+                if num_elements % QK_K != 0 {
+                    return Err(anyhow!(
+                        "For Q5_K, the number of elements must be a multiple of {}",
+                        QK_K
+                    ));
+                }
+                Ok(num_elements / QK_K * std::mem::size_of::<BlockQ5_K>())
             }
         }
     }
