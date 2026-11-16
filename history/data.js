@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794819747701,
+  "lastUpdate": 1794826387581,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1428,6 +1428,66 @@ window.BENCHMARK_DATA = {
             "value": 26.75,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 0.999"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wsj040303@gmail.com",
+            "name": "ledd",
+            "username": "wsj040303"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d36729167163b0243831b770c144326e2eb96eea",
+          "message": "Document index write-lock limits on network drives (#113)\n\n* docs: explain index write locks on network drives\n\n* docs: clarify cross-machine index locking\n\n---------\n\nCo-authored-by: wsj <279978307+wsj040303@users.noreply.github.com>",
+          "timestamp": "2026-11-16T10:26:49Z",
+          "tree_id": "0f49925f1a3c386ab545518b455062e6f2936ba3",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/d36729167163b0243831b770c144326e2eb96eea"
+        },
+        "date": 1794826387274,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 432.98,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.997"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 44.31,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.994"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 354.23,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.887"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 23.29,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.985"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 469.13,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.993"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 27.41,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.979"
           }
         ]
       }
