@@ -35,6 +35,11 @@
   index. A folder with more than 10,000 documents, such as a whole home folder, is
   refused with the subfolders that hold the most, so the model searches one of
   those. Text and code files are read, not PDF or Word.
+- **The agent reuses its prompt cache after `remember`.** The system prompt lists
+  the memory's facts as they were when the conversation started, so saving a fact
+  no longer makes the model read the whole conversation again; a forgotten fact
+  still leaves at once. A list, remember and answer run went from 271 s to 112 s
+  on four cores with `qwen3.5-4b`.
 - **`kjarni::folder_search`.** The folder search behind `search_documents` and the
   MCP server's `search_folder`, as a library module. The two share their indexes,
   now kept in `folder-indexes` in the model cache; the old `mcp-indexes` folder

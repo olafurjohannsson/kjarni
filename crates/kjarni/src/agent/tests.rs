@@ -291,11 +291,14 @@ async fn folds_old_messages_into_a_summary_and_saves_it() {
     assert!(restored.messages[0].content.starts_with("Is it fast?"));
 }
 
+/// The system prompt lists saved facts and stays the same through a
+/// conversation, so the prompt cache is reused after `remember`. A fact saved
+/// now joins it in the next conversation; a forgotten fact leaves at once.
 #[tokio::test]
 async fn saved_facts_appear_in_the_system_prompt() {
     let dir = tempfile::tempdir().unwrap();
     let memory = Arc::new(Memory::open(dir.path(), None).unwrap());
-    memory
+    let short = memory
         .remember("The user prefers short answers.")
         .await
         .unwrap();
@@ -317,14 +320,27 @@ async fn saved_facts_appear_in_the_system_prompt() {
 
     agent.send("My dog is Loki", &mut events).await.unwrap();
 
-    assert!(model.prompts()[0].contains(
+    let prompts = model.prompts();
+    let system = |p: &str| p[..p.find("<|im_end|>").unwrap()].to_string();
+    assert!(system(&prompts[0]).ends_with(
         "What you remember from earlier conversations:\n- The user prefers short answers."
     ));
     assert_eq!(memory.len(), 2);
+    assert_eq!(system(&prompts[1]), system(&prompts[0]));
+    assert!(prompts[1].starts_with(&prompts[0]));
+
+    agent.start_over(None);
     assert!(
         agent
             .system_prompt()
             .ends_with("- The user prefers short answers.\n- The user's dog is Loki.")
+    );
+
+    memory.forget(short.id).unwrap();
+    assert!(
+        agent
+            .system_prompt()
+            .ends_with("What you remember from earlier conversations:\n- The user's dog is Loki.")
     );
 }
 

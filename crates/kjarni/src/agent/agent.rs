@@ -9,7 +9,7 @@ use futures::StreamExt;
 use kjarni_transformers::chat::tools::displayable_prefix_len;
 use kjarni_transformers::{Conversation, Message, Role, ToolCall, ToolSpec, parse_tool_calls};
 
-use super::memory::Memory;
+use super::memory::{Memory, MemoryEntry};
 use super::model::AgentModel;
 use super::session::{Restored, Session, today};
 use super::tool::{Access, Tool};
@@ -134,6 +134,12 @@ pub struct Agent {
     approved_access: HashSet<Access>,
     approved_tools: HashSet<String>,
     memory: Option<Arc<Memory>>,
+    /// The facts the system prompt lists, read from memory when the
+    /// conversation starts or is summarized. Facts saved in between are left
+    /// out: the conversation already shows them being saved, and changing the
+    /// system prompt would make the model read the whole prompt again. A
+    /// forgotten fact leaves at once.
+    facts: Vec<MemoryEntry>,
     session: Option<Session>,
 }
 
@@ -150,6 +156,7 @@ impl Agent {
             approved_access: HashSet::from([Access::Read]),
             approved_tools: HashSet::new(),
             memory: None,
+            facts: Vec::new(),
             session: None,
         }
     }
@@ -157,7 +164,15 @@ impl Agent {
     /// Lists the memory's facts in the prompt.
     pub fn with_memory(mut self, memory: Arc<Memory>) -> Self {
         self.memory = Some(memory);
+        self.read_facts();
         self
+    }
+
+    fn read_facts(&mut self) {
+        self.facts = match &self.memory {
+            Some(memory) => memory.recent(self.config.facts_in_prompt),
+            None => Vec::new(),
+        };
     }
 
     /// Saves the conversation to `session` as it goes.
@@ -205,6 +220,7 @@ impl Agent {
         self.messages.clear();
         self.summary = None;
         self.session = session;
+        self.read_facts();
     }
 
     /// The system prompt: instructions, where and when, saved facts, and the
@@ -219,13 +235,17 @@ impl Agent {
         if let Some(dir) = &self.config.workdir {
             prompt.push_str(&format!(" Working directory: {dir}."));
         }
-        if let Some(memory) = &self.memory {
-            let facts = memory.recent(self.config.facts_in_prompt);
-            if !facts.is_empty() {
-                prompt.push_str("\n\nWhat you remember from earlier conversations:");
-                for fact in facts {
-                    prompt.push_str(&format!("\n- {}", fact.text));
-                }
+        let kept: Vec<&MemoryEntry> = match &self.memory {
+            Some(memory) => {
+                let ids: HashSet<u64> = memory.entries().iter().map(|e| e.id).collect();
+                self.facts.iter().filter(|f| ids.contains(&f.id)).collect()
+            }
+            None => Vec::new(),
+        };
+        if !kept.is_empty() {
+            prompt.push_str("\n\nWhat you remember from earlier conversations:");
+            for fact in kept {
+                prompt.push_str(&format!("\n- {}", fact.text));
             }
         }
         if let Some(summary) = &self.summary {
@@ -396,6 +416,8 @@ impl Agent {
             session.append_summary(&summary, cut)?;
         }
         self.summary = Some(summary);
+        // The new summary changes the system prompt anyway.
+        self.read_facts();
         Ok(())
     }
 
