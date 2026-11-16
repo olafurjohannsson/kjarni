@@ -13,11 +13,16 @@
   `kjarni generate`, `chat` and now `agent`: gated attention, the Gated DeltaNet
   convolution and delta rule, and their recurrent state, with snapshots so a
   prompt that shares its start with the last one reuses the cache as it does on
-  the CPU. `qwen3.5-4b` (Q4_K_M) on an RTX A2000 decodes 26.8 tokens/s against
-  7.2 on four CPU cores, and prefills a 1,500-token prompt in 8.4 s against
+  the CPU. `qwen3.5-4b` (Q4_K_M) on an RTX A2000 decodes about 29 tokens/s
+  against 7.2 on four CPU cores, and prefills a 1,500-token prompt in 8.4 s against
   66 s; an agent session of two messages and a tool call took 22 s against
   75 s. The 0.8B matches transformers within 1e-3 and continues both reference
   prompts token for token. The mixture-of-experts models stay on the CPU.
+- **Q5_K stays packed on the GPU.** The linear layer reads Q5_K blocks as
+  stored, in decode and prefill, where it expanded them to BF16 before: Q4_K_M
+  files use Q5_K for some tensors (Qwen 3.5's `attn_qkv` and `ssm_out`). For
+  `qwen3.5-4b` that is about 1 GB less VRAM, decode 11% faster and loading
+  9.6 s down to 6.8 s, measured back to back with the build before.
 - **Project notes.** The agent reads `KJARNI.md`, or else `AGENTS.md`, from the
   folder it starts in and from each folder above it up to the repository root,
   into its instructions (up to 16 KB): how the project builds, tests and is
