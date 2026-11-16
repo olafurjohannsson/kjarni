@@ -327,3 +327,55 @@ async fn saved_facts_appear_in_the_system_prompt() {
             .ends_with("- The user prefers short answers.\n- The user's dog is Loki.")
     );
 }
+
+/// The agent on a real model: Qwen 3.5 0.8B reads a file it is pointed at and
+/// answers from it, through the `Chat` implementation of [`AgentModel`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "downloads qwen3.5-0.8b"]
+async fn a_real_model_reads_a_file_and_answers_from_it() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("notes.txt"),
+        "The project code word is heron.\n",
+    )
+    .unwrap();
+    let chat = crate::chat::Chat::builder("qwen3.5-0.8b")
+        .temperature(0.0)
+        .max_tokens(200)
+        .cpu()
+        .quiet()
+        .with_load_config(|c| c.prefer_gguf(true))
+        .build()
+        .await
+        .unwrap();
+    assert!(chat.supports_tools());
+    assert!(AgentModel::context_size(&chat) >= 32_768);
+
+    let workspace = Arc::new(tools::Workspace::new(dir.path()));
+    let agent_config = AgentConfig {
+        workdir: Some(dir.path().display().to_string()),
+        ..Default::default()
+    };
+    let mut agent = Agent::new(
+        Arc::new(chat),
+        tools::builtin(workspace, None),
+        agent_config,
+    );
+    let mut events = Recorder::default();
+    let reply = agent
+        .send("What is the code word in notes.txt?", &mut events)
+        .await
+        .unwrap();
+    assert!(
+        events.calls.iter().any(|c| c.starts_with("read_file")),
+        "{:?}",
+        events.calls
+    );
+    assert!(
+        reply.text.to_lowercase().contains("heron"),
+        "{}",
+        reply.text
+    );
+    assert!(!reply.text.contains("<tool_call>"), "{}", reply.text);
+    assert!(!reply.stopped_early);
+}

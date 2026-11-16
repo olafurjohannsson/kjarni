@@ -6,6 +6,8 @@ mod embedder;
 mod error;
 #[cfg(feature = "image-io")]
 mod image_index;
+#[cfg(test)]
+mod index_tests;
 mod indexer;
 mod ner;
 mod panic;

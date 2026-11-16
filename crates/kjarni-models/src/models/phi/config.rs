@@ -220,6 +220,13 @@ impl PhiConfig {
     /// attention logit by its square, 1.42.
     fn rope_scaling_with_attention_factor(&self) -> Option<RopeScalingConfig> {
         let mut scaling = self.rope_scaling.clone()?;
+        // Phi-3 keeps the trained context at the top level of config.json; RoPE
+        // reads it from the scaling config to know when the long factors apply.
+        if scaling.original_max_position_embeddings == 0
+            && let Some(n) = self.original_max_position_embeddings.filter(|&n| n > 0)
+        {
+            scaling.original_max_position_embeddings = n;
+        }
         if scaling.rope_type == "longrope" && scaling.attention_factor.is_none() {
             let trained = self
                 .original_max_position_embeddings

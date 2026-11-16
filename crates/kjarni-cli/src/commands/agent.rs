@@ -408,3 +408,102 @@ impl AgentEvents for Terminal {
         println!("{}", message.dimmed());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kjarni::agent::{AgentModel, TextStream};
+
+    /// A model the slash commands never call.
+    struct Idle;
+
+    #[async_trait]
+    impl AgentModel for Idle {
+        fn render(&self, _: &kjarni::Conversation) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        async fn stream(&self, _: String) -> anyhow::Result<TextStream> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+        fn count_tokens(&self, text: &str) -> anyhow::Result<usize> {
+            Ok(text.len())
+        }
+        fn context_size(&self) -> usize {
+            32_768
+        }
+        fn name(&self) -> String {
+            "idle".into()
+        }
+    }
+
+    fn agent(dir: &std::path::Path) -> Agent {
+        let workspace = Arc::new(tools::Workspace::new(dir));
+        Agent::new(
+            Arc::new(Idle),
+            tools::builtin(workspace, None),
+            AgentConfig::default(),
+        )
+    }
+
+    #[test]
+    fn quit_commands_end_the_loop_and_others_do_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = agent(dir.path());
+        for q in ["/quit", "/exit", "/q"] {
+            assert!(
+                matches!(command(q, &mut a, None, dir.path()), Flow::Quit),
+                "{q}"
+            );
+        }
+        for other in [
+            "/help",
+            "/tools",
+            "/memory",
+            "/sessions",
+            "/forget 1",
+            "/nonsense",
+        ] {
+            assert!(
+                matches!(command(other, &mut a, None, dir.path()), Flow::Continue),
+                "{other}"
+            );
+        }
+    }
+
+    #[test]
+    fn clear_starts_a_new_saved_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = dir.path().join("sessions");
+        let mut a = agent(dir.path());
+        assert!(a.session().is_none());
+        command("/clear", &mut a, None, &sessions);
+        let session = a.session().expect("a session");
+        assert!(session.path().starts_with(&sessions) && session.path().exists());
+        assert!(a.messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn forget_takes_the_number_memory_lists() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Memory::open(dir.path(), None).unwrap();
+        let first = memory.remember("Prefers tabs.").await.unwrap();
+        let second = memory.remember("Lives in Reykjavik.").await.unwrap();
+        let mut a = agent(dir.path());
+        command(
+            &format!("/forget #{}", first.id),
+            &mut a,
+            Some(&memory),
+            dir.path(),
+        );
+        command("/forget not-a-number", &mut a, Some(&memory), dir.path());
+        command("/forget 9999", &mut a, Some(&memory), dir.path());
+        let left: Vec<u64> = memory.entries().iter().map(|e| e.id).collect();
+        assert_eq!(left, [second.id]);
+    }
+
+    #[test]
+    fn listing_sessions_works_with_none_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(list_sessions(&dir.path().join("sessions")).is_ok());
+    }
+}

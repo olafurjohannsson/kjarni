@@ -14,6 +14,15 @@ pub struct RoPE {
     pub sin_cache: Array2<f32>,
     pub head_dim: usize,
     pub theta: f32,
+    /// LongRoPE's tables for its long factors, used by a forward pass that
+    /// reaches past `from` positions, as transformers switches.
+    long: Option<LongTables>,
+}
+
+struct LongTables {
+    from: usize,
+    cos: Array2<f32>,
+    sin: Array2<f32>,
 }
 
 impl RoPE {
@@ -38,16 +47,9 @@ impl RoPE {
             ),
             Some(scaling) if scaling.rope_type == "longrope" => {
                 // LongRoPE divides each frequency by its own factor rather than sharing
-                // one. Which list applies depends on how far the cache reaches: the short
-                // list within the trained context, the long list beyond it. Phi-3.5 is
-                // trained to 4096 and extended to 131072.
-                let trained = scaling.original_max_position_embeddings;
-                let factors = if trained > 0 && max_seq_len > trained {
-                    scaling.long_factor.as_ref()
-                } else {
-                    scaling.short_factor.as_ref()
-                };
-                match factors {
+                // one. The short list applies within the trained context; a pass that
+                // reaches beyond it uses the long list, whose tables are built below.
+                match scaling.short_factor.as_ref() {
                     Some(f) if f.len() == head_dim / 2 => {
                         Self::calculate_inv_freq_longrope(head_dim, theta, f)
                     }
@@ -59,17 +61,43 @@ impl RoPE {
             _ => Self::calculate_inv_freq_base(head_dim, theta),
         };
 
-        let (mut cos_cache, mut sin_cache) = Self::build_cache(max_seq_len, &inv_freq);
-        if let Some(factor) = rope_scaling.and_then(|s| s.attention_factor) {
-            cos_cache *= factor;
-            sin_cache *= factor;
-        }
+        let attention_factor = rope_scaling.and_then(|s| s.attention_factor);
+        let scaled = |inv_freq: &Array1<f32>| {
+            let (mut cos, mut sin) = Self::build_cache(max_seq_len, inv_freq);
+            if let Some(factor) = attention_factor {
+                cos *= factor;
+                sin *= factor;
+            }
+            (cos, sin)
+        };
+        let (cos_cache, sin_cache) = scaled(&inv_freq);
+
+        let long = rope_scaling
+            .filter(|s| s.rope_type == "longrope")
+            .and_then(|s| {
+                let from = s.original_max_position_embeddings;
+                let factors = s.long_factor.as_ref()?;
+                (from > 0 && from < max_seq_len && factors.len() == head_dim / 2).then(|| {
+                    let (cos, sin) =
+                        scaled(&Self::calculate_inv_freq_longrope(head_dim, theta, factors));
+                    LongTables { from, cos, sin }
+                })
+            });
 
         Self {
             cos_cache,
             sin_cache,
             head_dim,
             theta,
+            long,
+        }
+    }
+
+    /// The cos and sin tables for a pass whose last position is `end - 1`.
+    fn tables(&self, end: usize) -> (&Array2<f32>, &Array2<f32>) {
+        match &self.long {
+            Some(long) if end > long.from => (&long.cos, &long.sin),
+            _ => (&self.cos_cache, &self.sin_cache),
         }
     }
 
@@ -155,17 +183,12 @@ impl RoPE {
     #[cfg_attr(not(target_arch = "x86_64"), allow(unused_variables))]
     fn rotate_4d_in_place(&self, x: &mut Array4<f32>, position_offset: usize) {
         let (batch, num_heads, seq_len, head_dim) = x.dim();
+        let (cos_table, sin_table) = self.tables(position_offset + seq_len);
 
         if x.is_standard_layout() {
             let x_slice = x.as_slice_mut().expect("array should be contiguous");
-            let cos_slice = self
-                .cos_cache
-                .as_slice()
-                .expect("cache should be contiguous");
-            let sin_slice = self
-                .sin_cache
-                .as_slice()
-                .expect("cache should be contiguous");
+            let cos_slice = cos_table.as_slice().expect("cache should be contiguous");
+            let sin_slice = sin_table.as_slice().expect("cache should be contiguous");
 
             #[cfg(target_arch = "x86_64")]
             if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
@@ -178,7 +201,7 @@ impl RoPE {
                         num_heads,
                         seq_len,
                         head_dim,
-                        self.cos_cache.ncols(),
+                        cos_table.ncols(),
                         position_offset,
                     );
                 }
@@ -194,7 +217,7 @@ impl RoPE {
                         sin_slice,
                         seq_len,
                         head_dim,
-                        self.cos_cache.ncols(),
+                        cos_table.ncols(),
                         position_offset,
                     );
                 }
@@ -208,6 +231,7 @@ impl RoPE {
     fn rotate_4d_in_place_scalar(&self, x: &mut Array4<f32>, position_offset: usize) {
         let (batch, num_heads, seq_len, head_dim) = x.dim();
         let half_dim = head_dim / 2;
+        let (cos_table, sin_table) = self.tables(position_offset + seq_len);
 
         for b in 0..batch {
             for h in 0..num_heads {
@@ -215,8 +239,8 @@ impl RoPE {
                     let pos = position_offset + s;
 
                     for i in 0..half_dim {
-                        let cos = self.cos_cache[[pos, i]];
-                        let sin = self.sin_cache[[pos, i]];
+                        let cos = cos_table[[pos, i]];
+                        let sin = sin_table[[pos, i]];
 
                         let x0 = x[[b, h, s, i]];
                         let x1 = x[[b, h, s, i + half_dim]];
@@ -233,6 +257,7 @@ impl RoPE {
         let mut rotated = x.to_owned();
         let (batch, num_heads, seq_len, head_dim) = rotated.dim();
         let half_dim = head_dim / 2;
+        let (cos_table, sin_table) = self.tables(position_offset + seq_len);
 
         for b in 0..batch {
             for h in 0..num_heads {
@@ -240,8 +265,8 @@ impl RoPE {
                     let pos = position_offset + s;
 
                     for i in 0..half_dim {
-                        let cos = self.cos_cache[[pos, i]];
-                        let sin = self.sin_cache[[pos, i]];
+                        let cos = cos_table[[pos, i]];
+                        let sin = sin_table[[pos, i]];
 
                         let x0 = x[[b, h, s, i]];
                         let x1 = x[[b, h, s, i + half_dim]];

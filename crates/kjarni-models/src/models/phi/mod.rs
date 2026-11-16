@@ -10,3 +10,6 @@ pub mod model;
 
 pub use config::PhiConfig;
 pub use model::PhiModel;
+
+#[cfg(test)]
+mod tests;

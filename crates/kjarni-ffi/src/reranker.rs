@@ -426,3 +426,148 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
         },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn sigmoid_matches_the_formula_and_never_returns_nan() {
+        assert_eq!(kjarni_sigmoid(0.0), 0.5);
+        // 1 / (1 + e^-2) and its complement.
+        assert!((kjarni_sigmoid(2.0) - 0.880_797_1).abs() < 1e-6);
+        assert!((kjarni_sigmoid(-2.0) - 0.119_202_92).abs() < 1e-6);
+        // exp(1000) overflows; the naive formula gives NaN here.
+        assert_eq!(kjarni_sigmoid(-1000.0), 0.0);
+        assert_eq!(kjarni_sigmoid(1000.0), 1.0);
+    }
+
+    #[test]
+    fn empty_results_free_cleanly() {
+        let empty = KjarniRerankResults::from_results(Vec::new());
+        assert!(empty.results.is_null());
+        assert_eq!(empty.len, 0);
+        unsafe { kjarni_rerank_results_free(empty) };
+    }
+
+    #[test]
+    fn null_arguments_are_refused_before_any_model_is_needed() {
+        let q = CString::new("q").unwrap();
+        let docs = [q.as_ptr()];
+        let mut score = 1.0f32;
+        let mut out = KjarniRerankResults::empty();
+        unsafe {
+            assert_eq!(
+                kjarni_reranker_new(std::ptr::null(), std::ptr::null_mut()),
+                KjarniErrorCode::NullPointer
+            );
+            let none = std::ptr::null_mut();
+            assert_eq!(
+                kjarni_reranker_score(none, q.as_ptr(), q.as_ptr(), &mut score),
+                KjarniErrorCode::NullPointer
+            );
+            assert_eq!(
+                kjarni_reranker_rerank(none, q.as_ptr(), docs.as_ptr(), 1, &mut out),
+                KjarniErrorCode::NullPointer
+            );
+            assert_eq!(
+                kjarni_reranker_rerank_top_k(none, q.as_ptr(), docs.as_ptr(), 1, 1, &mut out),
+                KjarniErrorCode::NullPointer
+            );
+            kjarni_reranker_free(none);
+        }
+    }
+
+    /// Through the C interface, the order and scores the library gives.
+    #[test]
+    #[ignore = "downloads minilm-l6-v2-cross-encoder"]
+    fn rerank_through_c_matches_the_library() {
+        let mut config = kjarni_reranker_config_default();
+        let name = CString::new("minilm-l6-v2-cross-encoder").unwrap();
+        config.model_name = name.as_ptr();
+        config.quiet = 1;
+        let mut handle = ptr::null_mut();
+        assert_eq!(
+            unsafe { kjarni_reranker_new(&config, &mut handle) },
+            KjarniErrorCode::Ok
+        );
+
+        let query = "How long do refunds take?";
+        let docs = [
+            "Our office is closed on public holidays.",
+            "Refunds are processed within thirty days of the return.",
+            "Shipping is free on orders over fifty euros.",
+        ];
+        let c_query = CString::new(query).unwrap();
+        let c_docs: Vec<CString> = docs.iter().map(|d| CString::new(*d).unwrap()).collect();
+        let ptrs: Vec<*const c_char> = c_docs.iter().map(|d| d.as_ptr()).collect();
+
+        let want = get_runtime().block_on(async {
+            let reranker = Reranker::builder("minilm-l6-v2-cross-encoder")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            reranker.rerank(query, &docs).await.unwrap()
+        });
+
+        unsafe {
+            let mut out = KjarniRerankResults::empty();
+            assert_eq!(
+                kjarni_reranker_rerank(
+                    handle,
+                    c_query.as_ptr(),
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    &mut out
+                ),
+                KjarniErrorCode::Ok
+            );
+            let got = std::slice::from_raw_parts(out.results, out.len);
+            assert_eq!(got.len(), want.len());
+            for (g, w) in got.iter().zip(&want) {
+                assert_eq!(g.index, w.index);
+                assert!(
+                    (g.score - w.score).abs() < 1e-5,
+                    "{} vs {}",
+                    g.score,
+                    w.score
+                );
+            }
+            assert_eq!(got[0].index, 1, "the refund passage ranks first");
+            kjarni_rerank_results_free(out);
+
+            let mut top = KjarniRerankResults::empty();
+            assert_eq!(
+                kjarni_reranker_rerank_top_k(
+                    handle,
+                    c_query.as_ptr(),
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    1,
+                    &mut top
+                ),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(top.len, 1);
+            assert_eq!((*top.results).index, 1);
+            kjarni_rerank_results_free(top);
+
+            let mut score = 0.0f32;
+            assert_eq!(
+                kjarni_reranker_score(handle, c_query.as_ptr(), ptrs[1], &mut score),
+                KjarniErrorCode::Ok
+            );
+            assert!((score - want[0].score).abs() < 1e-5);
+
+            let mut none = KjarniRerankResults::empty();
+            assert_eq!(
+                kjarni_reranker_rerank(handle, c_query.as_ptr(), ptrs.as_ptr(), 0, &mut none),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(none.len, 0);
+            kjarni_reranker_free(handle);
+        }
+    }
+}
