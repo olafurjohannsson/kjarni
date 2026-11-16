@@ -13,17 +13,16 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
 use kjarni::classifier::Classifier;
 use kjarni::common::{DownloadPolicy, ensure_model_downloaded};
 use kjarni::embedder::Embedder;
+use kjarni::folder_search::{FolderSearch, folder_key, scan};
 use kjarni::reranker::Reranker;
-use kjarni::searcher::{SearchOptions, Searcher};
 use kjarni::transcriber::Transcriber;
-use kjarni::{ImageIndex, Indexer, ModelType, SearchMode};
+use kjarni::{ImageIndex, ModelType, SearchMode};
 use serde_json::{Value, json};
 use tokio::io::AsyncBufReadExt;
 
@@ -33,29 +32,12 @@ const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// The embedding model behind `search_folder`. Small and fast, which matters
 /// more than the last few points of quality when an agent is waiting.
-const SEARCH_MODEL: &str = "minilm-l6-v2";
+const SEARCH_MODEL: &str = kjarni::folder_search::DEFAULT_MODEL;
 const RERANK_MODEL: &str = "minilm-l6-v2-cross-encoder";
 const TRANSCRIBE_MODEL: &str = "whisper-small";
 const CLASSIFY_MODEL: &str = "distilbert-sentiment";
 /// CLIP, which puts photos and descriptions in one space for `search_images`.
 const IMAGE_MODEL: ModelType = ModelType::ClipVitBase32;
-
-/// Never indexed by `search_folder`: build output, dependencies and virtual
-/// environments, which in a code repository outnumber the sources many times
-/// over. Hidden folders such as .git are skipped as well.
-pub(crate) const EXCLUDED: &[&str] = &[
-    "target",
-    "node_modules",
-    "dist",
-    "build",
-    "out",
-    "bin",
-    "obj",
-    "vendor",
-    "venv",
-    "__pycache__",
-    "*.min.js",
-];
 
 const INSTRUCTIONS: &str = "Kjarni runs AI models locally on the user's machine; nothing leaves it. \
 Use search_folder to find passages in a folder of documents or code by meaning, not just by \
@@ -115,14 +97,21 @@ fn protocol_stdout() -> Box<dyn Write + Send> {
 
 #[derive(Default)]
 struct Server {
-    searcher: Option<Searcher>,
-    rerank_searcher: Option<Searcher>,
-    indexer: Option<Indexer>,
+    folders: Folders,
     embedder: Option<Embedder>,
     reranker: Option<Reranker>,
     transcriber: Option<Transcriber>,
     images: Option<ImageIndex>,
     classifiers: HashMap<String, Classifier>,
+}
+
+/// `search_folder`'s searches, reranked on request.
+struct Folders(FolderSearch);
+
+impl Default for Folders {
+    fn default() -> Self {
+        Self(FolderSearch::new().reranker(RERANK_MODEL))
+    }
 }
 
 impl Server {
@@ -178,12 +167,6 @@ impl Server {
 
     async fn search_folder(&mut self, args: &Value) -> Result<String> {
         let folder = PathBuf::from(string(args, "path")?);
-        let folder = folder
-            .canonicalize()
-            .with_context(|| format!("cannot open {}", folder.display()))?;
-        if !folder.is_dir() {
-            bail!("{} is not a folder", folder.display());
-        }
         let query = string(args, "query")?;
         let mode: SearchMode = optional_string(args, "mode")
             .unwrap_or("hybrid")
@@ -196,105 +179,32 @@ impl Server {
             .clamp(1, 50) as usize;
         let rerank = args.get("rerank").and_then(Value::as_bool).unwrap_or(false);
 
-        let (index, note) = self.index_for(&folder).await?;
-        let index = index.to_string_lossy().into_owned();
-        let options = SearchOptions::new().mode(mode).top_k(top_k).rerank(rerank);
-        let searcher = if rerank {
-            if self.rerank_searcher.is_none() {
-                let s = Searcher::builder(SEARCH_MODEL)
-                    .reranker(RERANK_MODEL)
-                    .quiet(true)
-                    .build()
-                    .await?;
-                self.rerank_searcher = Some(s);
-            }
-            self.rerank_searcher.as_ref().expect("built above")
-        } else {
-            if self.searcher.is_none() {
-                self.searcher = Some(Searcher::builder(SEARCH_MODEL).quiet(true).build().await?);
-            }
-            self.searcher.as_ref().expect("built above")
-        };
-        let results = searcher
-            .search_with_options(&index, query, &options)
+        let found = self
+            .folders
+            .0
+            .search_with(&folder, query, top_k, mode, rerank)
             .await?;
 
         let mut text = String::new();
-        if let Some(note) = note {
-            text.push_str(&format!("({note} for this search.)\n\n"));
+        if let Some(update) = &found.update {
+            text.push_str(&format!(
+                "({} for this search.)\n\n",
+                update.describe(&found.indexed_folder)
+            ));
         }
-        if results.is_empty() {
+        if found.results.is_empty() {
             text.push_str("No matching passages.");
         }
-        for (i, r) in results.iter().enumerate() {
-            let source = r.metadata.get("source").map(String::as_str).unwrap_or("?");
+        for (i, hit) in found.results.iter().enumerate() {
             text.push_str(&format!(
-                "{}. {source}  (score {:.3})\n{}\n\n",
+                "{}. {}  (score {:.3})\n{}\n\n",
                 i + 1,
-                r.score,
-                clip(r.text.trim(), 800)
+                hit.source.display(),
+                hit.score,
+                clip(hit.text.trim(), 800)
             ));
         }
         Ok(text.trim_end().to_string())
-    }
-
-    /// The index for a folder, and a note on what was updated if anything was.
-    /// Built on first use, then kept in step with the folder: only new and
-    /// changed files are embedded. Indexes live in Kjarni's cache, never in the
-    /// folder.
-    async fn index_for(&mut self, folder: &Path) -> Result<(PathBuf, Option<String>)> {
-        let root = kjarni::registry::cache_dir().join("mcp-indexes");
-        let index = root.join(format!(
-            "{:016x}",
-            fnv1a(folder.as_os_str().as_encoded_bytes())
-        ));
-        let stamp_file = index.with_extension("stamp");
-        let stamp = fingerprint(folder, SEARCH_MODEL);
-
-        let current = std::fs::read_to_string(&stamp_file).ok();
-        if index.exists() && current.as_deref() == Some(stamp.as_str()) {
-            return Ok((index, None));
-        }
-        if self.indexer.is_none() {
-            let mut builder = Indexer::builder(SEARCH_MODEL).quiet(true);
-            for pattern in EXCLUDED {
-                builder = builder.exclude(pattern);
-            }
-            self.indexer = Some(builder.build().await?);
-        }
-        let indexer = self.indexer.as_ref().expect("built above");
-        std::fs::create_dir_all(&root)?;
-        let index_str = index.to_string_lossy().into_owned();
-        let folder_str = folder.to_string_lossy().into_owned();
-        let existed = index.exists();
-        let stats = match indexer.sync(&index_str, &[folder_str.as_str()]).await {
-            Ok(stats) => stats,
-            // An index this version cannot update, such as one from another
-            // model, is rebuilt.
-            Err(_) if existed => {
-                std::fs::remove_dir_all(&index).context("removing the outdated index")?;
-                indexer.sync(&index_str, &[folder_str.as_str()]).await?
-            }
-            Err(e) => return Err(e.into()),
-        };
-        std::fs::write(&stamp_file, stamp)?;
-
-        let note = if !existed {
-            format!("Indexed {} ({} files)", folder.display(), stats.files_added)
-        } else {
-            let changed = stats.files_added + stats.files_updated + stats.files_removed;
-            if changed == 0 {
-                return Ok((index, None));
-            }
-            format!(
-                "Updated the index of {}: {} new, {} changed, {} removed",
-                folder.display(),
-                stats.files_added,
-                stats.files_updated,
-                stats.files_removed
-            )
-        };
-        Ok((index, Some(note)))
     }
 
     async fn search_images(&mut self, args: &Value) -> Result<String> {
@@ -323,12 +233,9 @@ impl Server {
         // Vectors are cached per folder like search_folder's indexes, and
         // recomputed when the folder's files change.
         let root = kjarni::registry::cache_dir().join("mcp-image-indexes");
-        let saved = root.join(format!(
-            "{:016x}.json",
-            fnv1a(folder.as_os_str().as_encoded_bytes())
-        ));
+        let saved = root.join(format!("{}.json", folder_key(&folder)));
         let stamp_file = saved.with_extension("stamp");
-        let stamp = fingerprint(&folder, IMAGE_MODEL.cli_name());
+        let stamp = scan(&folder, IMAGE_MODEL.cli_name()).stamp;
         let current = std::fs::read_to_string(&stamp_file).ok();
 
         let mut text = String::new();
@@ -517,7 +424,7 @@ fn tools() -> Value {
         {
             "name": "search_folder",
             "title": "Search a folder by meaning",
-            "description": "Find the passages in a folder of documents or code (txt, md, source code, json, yaml, html, ...) that best match a query, by meaning as well as by keyword. Runs locally. The first search of a folder indexes it, which takes seconds to minutes depending on its size; later searches reuse the index until files change. Build output, dependencies and hidden folders are skipped.",
+            "description": "Find the passages in a folder of documents or code (txt, md, source code, json, yaml, html, ...) that best match a query, by meaning as well as by keyword. Runs locally. The first search of a folder indexes it, which takes seconds to minutes depending on its size; later searches reuse the index until files change, and a folder inside an indexed one uses that index. Build output, dependencies and hidden folders are skipped. A folder with more than 10,000 documents is refused with its largest subfolders, to search one of those instead.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -615,50 +522,6 @@ fn optional_string<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
-/// What says a folder has changed since it was indexed: how many files it
-/// has outside the excluded and hidden folders, their total size, and the
-/// newest modification time.
-fn fingerprint(folder: &Path, model: &str) -> String {
-    let (mut files, mut bytes, mut newest) = (0u64, 0u64, 0u128);
-    let walker = walkdir::WalkDir::new(folder).into_iter().filter_entry(|e| {
-        e.depth() == 0 || {
-            let name = e.file_name().to_string_lossy();
-            !name.starts_with('.') && !EXCLUDED.iter().any(|p| wildcard(p, &name))
-        }
-    });
-    for entry in walker.filter_map(|e| e.ok()) {
-        if let Ok(meta) = entry.metadata()
-            && meta.is_file()
-        {
-            files += 1;
-            bytes += meta.len();
-            let mtime = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok());
-            newest = newest.max(mtime.map_or(0, |d| d.as_nanos()));
-        }
-    }
-    format!("{model} {files} {bytes} {newest}")
-}
-
-/// `*` matches any run of characters, as in the indexer's own exclusions.
-fn wildcard(pattern: &str, name: &str) -> bool {
-    match pattern.split_once('*') {
-        None => pattern == name,
-        Some((head, tail)) => {
-            name.len() >= head.len() + tail.len() && name.starts_with(head) && name.ends_with(tail)
-        }
-    }
-}
-
-/// A stable hash, so the same folder maps to the same index across runs.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325, |h, &b| {
-        (h ^ b as u64).wrapping_mul(0x100000001b3)
-    })
-}
-
 fn timestamp(secs: f32) -> String {
     let s = secs.max(0.0) as u64;
     format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
@@ -675,6 +538,7 @@ fn clip(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     async fn ask(server: &mut Server, message: Value) -> Value {
         server
@@ -854,28 +718,8 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_follows_the_files_that_would_be_indexed() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = dir.path();
-        std::fs::write(d.join("a.md"), "one").unwrap();
-        let before = fingerprint(d, SEARCH_MODEL);
-        // Excluded and hidden folders do not count.
-        std::fs::create_dir_all(d.join("target/debug")).unwrap();
-        std::fs::write(d.join("target/debug/x.rs"), "generated").unwrap();
-        std::fs::create_dir_all(d.join(".git")).unwrap();
-        std::fs::write(d.join(".git/HEAD"), "ref").unwrap();
-        assert_eq!(fingerprint(d, SEARCH_MODEL), before);
-        // A new real file does.
-        std::fs::write(d.join("b.md"), "two").unwrap();
-        assert_ne!(fingerprint(d, SEARCH_MODEL), before);
-    }
-
-    #[test]
     fn helpers() {
-        assert!(wildcard("*.min.js", "app.min.js") && !wildcard("*.min.js", "app.js"));
-        assert!(wildcard("target", "target") && !wildcard("target", "targets"));
         assert_eq!(timestamp(3725.5), "01:02:05");
         assert_eq!(clip("abcdef", 3), "abc…");
-        assert_eq!(fnv1a(b"same"), fnv1a(b"same"));
     }
 }

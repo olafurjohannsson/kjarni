@@ -379,3 +379,60 @@ async fn a_real_model_reads_a_file_and_answers_from_it() {
     assert!(!reply.text.contains("<tool_call>"), "{}", reply.text);
     assert!(!reply.stopped_early);
 }
+
+/// `search_documents` indexes the working folder on its first call, names
+/// files relative to it, and searches a subfolder through the same index.
+#[tokio::test(flavor = "multi_thread")]
+async fn search_documents_finds_passages_by_meaning() {
+    use crate::folder_search::FolderSearch;
+    use tool::Tool;
+
+    let cache = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("notes")).unwrap();
+    std::fs::write(
+        dir.path().join("notes/boat.md"),
+        "The ferry leaves the harbour at nine.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("notes/bread.md"),
+        "Knead the dough and let it rise.",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("todo.txt"), "Pump the bicycle tyres.").unwrap();
+    let search = FolderSearch::new()
+        .cache_dir(cache.path())
+        .reranker(tools::documents::RERANK_MODEL);
+    let tool = tools::SearchDocuments::new(
+        Arc::new(tools::Workspace::new(dir.path())),
+        Arc::new(search),
+    );
+    let args = |pairs: serde_json::Value| pairs.as_object().unwrap().clone();
+    let boat = std::path::Path::new("notes").join("boat.md");
+
+    let first = tool
+        .call(&args(
+            serde_json::json!({"query": "when does the boat sail", "limit": 1}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        first,
+        format!(
+            "(Indexed the working folder (3 files).)\n\n1. {}\nThe ferry leaves the harbour at nine.",
+            boat.display()
+        )
+    );
+
+    let inside = tool
+        .call(&args(
+            serde_json::json!({"query": "tyres", "path": "notes", "limit": 5}),
+        ))
+        .await
+        .unwrap();
+    assert!(!inside.contains("Indexed"), "{inside}");
+    assert!(!inside.contains("todo.txt"), "{inside}");
+    assert!(inside.starts_with("1. notes"), "{inside}");
+    assert_eq!(inside.matches("\n\n").count(), 1, "{inside}");
+}
