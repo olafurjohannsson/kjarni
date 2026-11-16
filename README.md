@@ -405,6 +405,12 @@ foreach (var r in searcher.Search("my_index", "how do returns work?", mode: Sear
 
 Search modes: `Semantic` (vector), `Keyword` (BM25), `Hybrid` (both, fused).
 
+Kjarni requests an exclusive file lock for index writes. If the filesystem
+reports that locking is unsupported, Kjarni proceeds without the lock, even if
+`write.lock` exists. On network drives, the lock may fail to prevent concurrent
+writes from different machines even when the filesystem accepts it. Keep the
+index on a local drive, or make sure only one machine writes to it at a time.
+
 ### Reranking
 
 ```csharp
