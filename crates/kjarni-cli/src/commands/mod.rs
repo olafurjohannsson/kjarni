@@ -4,6 +4,7 @@ pub mod classify;
 pub mod display;
 pub mod embed;
 pub mod generate;
+pub mod hub;
 #[cfg(feature = "image-io")]
 pub mod image;
 pub mod index;

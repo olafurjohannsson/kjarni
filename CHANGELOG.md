@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Models straight from Hugging Face.** Anywhere a model name goes, a Hub
+  repository works too: `kjarni chat --model Qwen/Qwen3.5-9B`, a
+  `https://huggingface.co/...` link, a GGUF repository such as
+  `unsloth/Qwen3.5-9B-GGUF` (Q4_K_M unless `:Q8_0` or a link to one file says
+  otherwise), in every command, in `kjarni model download`, and in the library
+  builders the bindings use. `kjarni serve` starts with one (`--chat org/name`),
+  and a request may name any the server has downloaded, but never makes it
+  download a new one. The files go into the
+  model cache once; after that the folder loads with no network. A GGUF repository
+  takes its tokenizer and config from the model its card names as `base_model`. The
+  small files come first, so a repository that cannot work, such as an encoder
+  given to `chat`, is turned down before gigabytes of weights download. `HF_TOKEN`
+  is sent for gated and private repositories, and `HF_ENDPOINT` points at a mirror.
+- `kjarni embed` and `kjarni classify` load `--model-path` whatever `--model`
+  says; they turned away a `--model` missing from the registry first.
 - **`kjarni agent`, an assistant in the terminal that uses tools.** It reads,
   searches, writes and edits files in the folder it is started in, runs commands,
   reads web pages, and remembers facts between conversations (`remember`,

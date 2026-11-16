@@ -8,6 +8,7 @@ mod validation;
 
 pub use builder::{DEFAULT_PREFIX_CACHE_TOKENS, GeneratorBuilder};
 use kjarni_transformers::ModelType;
+pub use model::decoder_folder_check;
 pub use model::{Generator, load_decoder};
 pub use types::*;
 

@@ -10,7 +10,7 @@ pub use registry::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use registry::download_model_files;
+pub use registry::{download_file, download_model_files, download_sharded_weights};
 
 #[cfg(test)]
 mod tests;

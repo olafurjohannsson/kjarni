@@ -80,7 +80,25 @@ impl Seq2SeqGenerator {
     }
 
     /// construct from builder.
-    pub(crate) async fn from_builder(builder: Seq2SeqGeneratorBuilder) -> Seq2SeqResult<Self> {
+    pub(crate) async fn from_builder(mut builder: Seq2SeqGeneratorBuilder) -> Seq2SeqResult<Self> {
+        // A Hugging Face repository named as the model is fetched into the
+        // cache and loaded as a folder.
+        if let Some(dir) = crate::hub::builder_folder(
+            &builder.model,
+            &builder.model_path,
+            &builder.cache_dir,
+            builder.download_policy,
+            &builder.load_config,
+            builder.quiet,
+            None,
+        )
+        .await
+        .map_err(|source| Seq2SeqError::DownloadFailed {
+            model: builder.model.clone(),
+            source,
+        })? {
+            builder.model_path = Some(dir);
+        }
         let load_start = Instant::now();
 
         let source = match &builder.model_path {

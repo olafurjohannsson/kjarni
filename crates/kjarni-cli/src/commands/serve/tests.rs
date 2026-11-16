@@ -8,7 +8,7 @@ use tower::ServiceExt;
 
 use super::audio::{Format, audio_format, srt, vtt};
 use super::generation::{InMessage, Sampling, messages, offered_tools};
-use super::models::{Defaults, Models, resolve};
+use super::models::{Defaults, Models, resolve, resolve_in};
 use super::stop::{StopFilter, Trim};
 use super::{AppState, RouterOptions, router};
 
@@ -385,6 +385,37 @@ mod model_names {
         let e = resolve(Some("gpt-4o-mini"), "minilm-l6-v2").unwrap_err();
         assert_eq!(e.status, StatusCode::NOT_FOUND);
         assert_eq!(e.code, Some("model_not_found"));
+    }
+
+    /// A request may name a Hugging Face repository the server has downloaded,
+    /// or the one it was started with, but never make it download a new one.
+    #[test]
+    fn a_hub_repository_is_used_once_downloaded_or_when_started_with_it() {
+        let cache = tempfile::tempdir().unwrap();
+        let e = resolve_in(Some("org/tiny"), "minilm-l6-v2", Some(cache.path())).unwrap_err();
+        assert_eq!(e.status, StatusCode::NOT_FOUND);
+        assert!(
+            e.message.contains("kjarni model download org/tiny"),
+            "{}",
+            e.message
+        );
+        assert_eq!(
+            resolve_in(Some("org/tiny"), "org/tiny", Some(cache.path())).unwrap(),
+            "org/tiny"
+        );
+
+        let folder = cache.path().join("org_tiny");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join(".kjarni-hub.json"), "{}").unwrap();
+        assert_eq!(
+            resolve_in(
+                Some("https://huggingface.co/org/tiny"),
+                "minilm-l6-v2",
+                Some(cache.path())
+            )
+            .unwrap(),
+            "https://huggingface.co/org/tiny"
+        );
     }
 
     #[test]

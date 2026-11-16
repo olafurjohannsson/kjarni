@@ -1426,8 +1426,11 @@ fn is_permanent(e: &anyhow::Error) -> bool {
     })
 }
 
+/// Downloads `url` to `model_dir/filename` unless that file exists, resuming
+/// an interrupted download and retrying dropped connections. Sends `HF_TOKEN`
+/// as a bearer token when it is set. The folder `filename` lands in must exist.
 #[cfg(not(target_arch = "wasm32"))]
-async fn download_file(model_dir: &Path, filename: &str, url: &str, quiet: bool) -> Result<()> {
+pub async fn download_file(model_dir: &Path, filename: &str, url: &str, quiet: bool) -> Result<()> {
     download_file_with(model_dir, filename, url, quiet, &RETRY).await
 }
 
@@ -1627,8 +1630,14 @@ async fn download_to_part(
     Ok(())
 }
 
+/// Downloads a sharded safetensors index from `index_url` and every shard it
+/// names, which sit beside it.
 #[cfg(not(target_arch = "wasm32"))]
-async fn download_sharded_weights(model_dir: &Path, index_url: &str, quiet: bool) -> Result<()> {
+pub async fn download_sharded_weights(
+    model_dir: &Path,
+    index_url: &str,
+    quiet: bool,
+) -> Result<()> {
     download_file(model_dir, "model.safetensors.index.json", index_url, quiet).await?;
 
     // Parse index

@@ -280,6 +280,15 @@ fn has_gguf_downloaded(model_type: &ModelType) -> bool {
 }
 
 async fn download(name: &str, prefer_gguf: bool, quiet: bool) -> Result<()> {
+    let options = kjarni::hub::FetchOptions {
+        prefer_gguf,
+        quiet,
+        ..Default::default()
+    };
+    if let Some(dir) = kjarni::hub::resolve(name, &options).await? {
+        println!("{}", dir.display());
+        return Ok(());
+    }
     registry::download_model(name, prefer_gguf, quiet).await
 }
 

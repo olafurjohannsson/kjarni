@@ -60,6 +60,19 @@ impl ApiError {
         }
     }
 
+    pub fn hub_model_not_downloaded(model: &str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            param: Some("model"),
+            code: Some("model_not_found"),
+            ..Self::bad_request(format!(
+                "the server has not downloaded '{model}'; requests use Hugging Face models \
+                 already downloaded. Run 'kjarni model download {model}' on the server, or \
+                 start it with that model"
+            ))
+        }
+    }
+
     pub fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
