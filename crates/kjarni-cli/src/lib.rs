@@ -7,6 +7,10 @@ use clap::{Parser, Subcommand};
 /// this and [`DEFAULT_GENERATE_MODEL`] against the registry.
 pub const DEFAULT_CHAT_MODEL: &str = "llama3.2-3b-instruct";
 
+/// The agent's default model: the smallest registry model tuned for tool calls
+/// that follows multi-step instructions reliably.
+pub const DEFAULT_AGENT_MODEL: &str = "qwen3.5-4b";
+
 /// Default model for `kjarni generate`.
 pub const DEFAULT_GENERATE_MODEL: &str = "llama3.2-1b-instruct";
 
@@ -526,6 +530,65 @@ pub enum Commands {
         gpu: bool,
 
         /// Suppress progress output
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
+    /// An assistant that uses tools: it reads and edits files, runs commands
+    /// and fetches web pages (asking first), and remembers between sessions
+    Agent {
+        #[arg(short, long, default_value = DEFAULT_AGENT_MODEL)]
+        model: String,
+
+        /// Load weights from a local file or directory instead of the registry
+        #[arg(long)]
+        model_path: Option<String>,
+
+        /// Load full-precision safetensors instead of the Q4_K_M GGUF
+        #[arg(long)]
+        full_precision: bool,
+
+        /// Folder the tools work in. Default: the current folder
+        #[arg(short = 'C', long)]
+        dir: Option<String>,
+
+        /// Run every tool call without asking first
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Continue the most recent conversation
+        #[arg(short = 'c', long = "continue")]
+        continue_last: bool,
+
+        /// Continue a saved conversation, by the id --sessions lists
+        #[arg(long)]
+        resume: Option<String>,
+
+        /// List saved conversations and exit
+        #[arg(long)]
+        sessions: bool,
+
+        /// Neither read nor save long-term memory
+        #[arg(long)]
+        no_memory: bool,
+
+        /// Answer this one message, then exit
+        #[arg(short, long)]
+        prompt: Option<String>,
+
+        /// Sampling temperature
+        #[arg(short, long, default_value_t = 0.7)]
+        temperature: f32,
+
+        /// Max tokens per model reply; a file the agent writes must fit in one
+        #[arg(short = 'n', long, default_value_t = 4096)]
+        max_tokens: usize,
+
+        /// Model replies per message at most
+        #[arg(long, default_value_t = 16)]
+        max_steps: usize,
+
+        /// Suppress the banner and progress output
         #[arg(short, long)]
         quiet: bool,
     },

@@ -5,5 +5,7 @@ pub mod jinja;
 pub mod llama3;
 pub mod mistral;
 pub mod phi3;
+pub(crate) mod pyjson;
 pub mod qwen3_5;
 pub mod templates;
+pub mod tools;

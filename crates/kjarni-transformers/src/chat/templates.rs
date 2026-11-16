@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use super::tools::ToolSpec;
+
 /// A role in a conversation
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -11,6 +13,8 @@ pub enum Role {
     User,
     /// Assistant responses (model output)
     Assistant,
+    /// The result of a tool call, fed back to the model
+    Tool,
 }
 
 impl fmt::Display for Role {
@@ -19,6 +23,7 @@ impl fmt::Display for Role {
             Role::System => write!(f, "system"),
             Role::User => write!(f, "user"),
             Role::Assistant => write!(f, "assistant"),
+            Role::Tool => write!(f, "tool"),
         }
     }
 }
@@ -51,12 +56,22 @@ impl Message {
             content: content.into(),
         }
     }
+
+    /// A tool's result. An assistant message carries its calls in its content,
+    /// as the model wrote them.
+    pub fn tool(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::Tool,
+            content: content.into(),
+        }
+    }
 }
 
 /// A conversation history
 #[derive(Clone, Debug, Default)]
 pub struct Conversation {
     messages: Vec<Message>,
+    tools: Vec<ToolSpec>,
 }
 
 impl Conversation {
@@ -69,6 +84,7 @@ impl Conversation {
     pub fn with_system(system_prompt: impl Into<String>) -> Self {
         Self {
             messages: vec![Message::system(system_prompt)],
+            tools: Vec::new(),
         }
     }
 
@@ -85,6 +101,17 @@ impl Conversation {
     /// Add any message
     pub fn push(&mut self, message: Message) {
         self.messages.push(message);
+    }
+
+    /// Offer `tools` to the model. Only a template whose
+    /// [`supports_tools`](ChatTemplate::supports_tools) is true renders them.
+    pub fn set_tools(&mut self, tools: Vec<ToolSpec>) {
+        self.tools = tools;
+    }
+
+    /// The tools offered to the model.
+    pub fn tools(&self) -> &[ToolSpec] {
+        &self.tools
     }
 
     /// Get all messages
@@ -151,6 +178,18 @@ pub trait ChatTemplate: Send + Sync {
     /// not alternate.
     fn try_apply(&self, conversation: &Conversation) -> Result<String, String> {
         Ok(self.apply(conversation))
+    }
+
+    /// Whether the template renders [`Conversation::tools`] and tool messages
+    /// in the format the model was tuned on.
+    fn supports_tools(&self) -> bool {
+        false
+    }
+
+    /// `call` written as the model writes calls, for an assistant message in
+    /// the history. Qwen 3.5's XML format unless the template says otherwise.
+    fn format_tool_call(&self, call: &super::tools::ToolCall) -> String {
+        call.to_qwen_xml()
     }
 
     /// Get stop tokens/sequences that indicate end of assistant response

@@ -940,11 +940,7 @@ pub fn matmul_2d_cpu_q5_k(input: &ArrayView2<f32>, weights: &[BlockQ5_K]) -> Arr
     let rows_into = |out: &mut [f32], first_row: usize, a_q8: &[BlockQ8_K]| {
         for (j, o) in out.iter_mut().enumerate() {
             let start = (first_row + j) * blocks_per_row;
-            *o = kernels::scalar::vec_dot_q5k_q8k_scalar(
-                k,
-                &weights[start..start + blocks_per_row],
-                a_q8,
-            );
+            *o = dot_q5k_q8k(k, &weights[start..start + blocks_per_row], a_q8);
         }
     };
 
@@ -976,8 +972,24 @@ fn dot_q6k_q8k(k: usize, w_row: &[BlockQ6_K], a_q8: &[BlockQ8_K]) -> f32 {
     // SAFETY: every aarch64 target Kjarni builds for has NEON enabled at compile time.
     #[cfg(target_arch = "aarch64")]
     return unsafe { kernels::aarch64::q6k_q8k::vec_dot_q6k_q8k_neon(k, w_row, a_q8) };
+    // SAFETY: AVX2 was detected; the slices hold k / 256 blocks each.
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("avx2") {
+        return unsafe { kernels::x86::k_quants::vec_dot_q6k_q8k_avx2(k, w_row, a_q8) };
+    }
     #[cfg(not(target_arch = "aarch64"))]
     kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, a_q8)
+}
+
+/// One Q5_K weight row against a quantised activation row.
+#[inline]
+fn dot_q5k_q8k(k: usize, w_row: &[BlockQ5_K], a_q8: &[BlockQ8_K]) -> f32 {
+    // SAFETY: AVX2 was detected; the slices hold k / 256 blocks each.
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("avx2") {
+        return unsafe { kernels::x86::k_quants::vec_dot_q5k_q8k_avx2(k, w_row, a_q8) };
+    }
+    kernels::scalar::vec_dot_q5k_q8k_scalar(k, w_row, a_q8)
 }
 
 /// Computes `C = A @ B^T` for F32 input `A` and Q6_K quantized weight matrix `B`.

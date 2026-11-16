@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+pub mod agent;
 pub mod chat;
 pub mod classifier;
 pub mod common;

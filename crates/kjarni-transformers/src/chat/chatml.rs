@@ -43,7 +43,7 @@ impl ChatTemplate for ChatMLTemplate {
         for message in conversation.messages() {
             let role = match message.role {
                 Role::System => "system",
-                Role::User => "user",
+                Role::User | Role::Tool => "user",
                 Role::Assistant => "assistant",
             };
 

@@ -31,6 +31,7 @@ axum = { version = "0.8.9", features = ["multipart"] }
 tower-http = { version = "0.7.1", features = ["cors"] }
 serde = { workspace = true, features = ["derive"] }
 base64 = "0.23.1"
+async-trait = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # `kjarni mcp` points stdout at stderr, keeping the real stdout for protocol

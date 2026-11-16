@@ -17,7 +17,7 @@ use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelInput;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
-use crate::{EmbeddingData, Embeddings};
+use crate::Embeddings;
 
 /// Configuration for embedding loading.
 #[derive(Debug, Clone, Default)]
@@ -215,7 +215,7 @@ impl LoadedEmbeddings {
         ctx: Option<&Arc<WgpuContext>>,
         weights: &ModelWeights,
         config: EmbeddingConfig,
-        shared_word_cpu: Option<EmbeddingData>,
+        shared_word_cpu: Option<crate::EmbeddingData>,
         shared_word_gpu: Option<GpuTensor>,
         load_cpu: bool,
         load_gpu: bool,
@@ -281,11 +281,9 @@ impl LoadedEmbeddings {
 
     /// Returns the raw word embedding weights for CPU weight sharing.
     pub fn word_embeddings_cpu(&self) -> Option<LinearLayer> {
-        self.cpu.as_ref().map(|e| match &e.word_embeddings {
-            EmbeddingData::F32(arc_w) => LinearLayer::from_arc_f32(arc_w.clone(), None),
-            EmbeddingData::BF16(arc_w) => LinearLayer::from_arc_bf16(arc_w.clone(), None),
-            EmbeddingData::Q8_0(arc_q) => LinearLayer::from_arc_q8_0(arc_q.clone(), None),
-        })
+        self.cpu
+            .as_ref()
+            .map(|e| e.word_embeddings.to_linear_layer())
     }
 
     #[inline]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::cpu::kernels::dequantize::dequantize_q8_0_block;
 use crate::cpu::kernels::q_common::BlockQ8_0;
 use crate::cpu::kernels::quantize::quantize_matrix_q8_0;
-use crate::linear_layer::LinearLayer;
+use crate::linear_layer::{KQuantMatrix, LinearLayer};
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::ModelWeights;
 use anyhow::Result;
@@ -19,6 +19,9 @@ pub enum EmbeddingData {
     F32(Arc<Array2<f32>>),
     BF16(Arc<Array2<bf16>>),
     Q8_0(Arc<QuantizedMatrix<BlockQ8_0>>),
+    /// A GGUF file's table as stored, its rows dequantized as tokens look
+    /// them up: a fraction of the memory of an F32 copy.
+    KQuant(KQuantMatrix),
 }
 
 impl EmbeddingData {
@@ -27,6 +30,7 @@ impl EmbeddingData {
             EmbeddingData::F32(arc) => LinearLayer::from_arc_f32(arc.clone(), None),
             EmbeddingData::BF16(arc) => LinearLayer::from_arc_bf16(arc.clone(), None),
             EmbeddingData::Q8_0(arc) => LinearLayer::from_arc_q8_0(arc.clone(), None),
+            EmbeddingData::KQuant(m) => LinearLayer::from_k_quant(m.clone(), None),
         }
     }
     pub fn dtype(&self) -> DType {
@@ -34,6 +38,7 @@ impl EmbeddingData {
             EmbeddingData::F32(_) => DType::F32,
             EmbeddingData::BF16(_) => DType::BF16,
             EmbeddingData::Q8_0(_) => DType::Q8_0,
+            EmbeddingData::KQuant(m) => m.dtype(),
         }
     }
 }
@@ -125,6 +130,15 @@ impl Embeddings {
                     .mapv(bf16::from_f32);
                 EmbeddingData::BF16(Arc::new(w))
             }
+            (CpuTensor::Q4_K(m), DType::Q4_K) => {
+                EmbeddingData::KQuant(KQuantMatrix::Q4_K(Arc::new(m)))
+            }
+            (CpuTensor::Q5_K(m), DType::Q5_K) => {
+                EmbeddingData::KQuant(KQuantMatrix::Q5_K(Arc::new(m)))
+            }
+            (CpuTensor::Q6_K(m), DType::Q6_K) => {
+                EmbeddingData::KQuant(KQuantMatrix::Q6_K(Arc::new(m)))
+            }
             (t, _) => {
                 log::warn!("Implicitly dequantizing {:?} embeddings to F32", t.dtype());
                 EmbeddingData::F32(Arc::new(t.to_array2_f32()?))
@@ -163,6 +177,7 @@ impl Embeddings {
             EmbeddingData::F32(w) => w.shape()[0],
             EmbeddingData::BF16(w) => w.shape()[0],
             EmbeddingData::Q8_0(w) => w.shape[0],
+            EmbeddingData::KQuant(m) => m.shape()[0],
         }
     }
 
@@ -171,6 +186,7 @@ impl Embeddings {
             EmbeddingData::F32(w) => w.shape()[1],
             EmbeddingData::BF16(w) => w.shape()[1],
             EmbeddingData::Q8_0(w) => w.shape[1],
+            EmbeddingData::KQuant(m) => m.shape()[1],
         }
     }
 
@@ -300,6 +316,23 @@ impl Embeddings {
                                 let dest = &mut out_slice[b_idx * 32..(b_idx + 1) * 32];
                                 dequantize_q8_0_block(block, dest);
                             }
+                        }
+                    });
+            }
+            EmbeddingData::KQuant(matrix) => {
+                hidden
+                    .axis_iter_mut(Axis(0))
+                    .into_par_iter()
+                    .zip(input_ids.axis_iter(Axis(0)))
+                    .for_each(|(mut hidden_slice, ids)| {
+                        for (j, &token_id) in ids.iter().enumerate() {
+                            let token_id = token_id as usize;
+                            if token_id >= vocab_size {
+                                continue;
+                            }
+                            let out_row = hidden_slice.slice_mut(s![j, ..]);
+                            let out = out_row.into_slice().expect("Non-contiguous output slice");
+                            matrix.dequantize_row(token_id, out);
                         }
                     });
             }

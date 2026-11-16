@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **`kjarni agent`, an assistant in the terminal that uses tools.** It reads,
+  searches, writes and edits files in the folder it is started in, runs commands,
+  reads web pages, and remembers facts between conversations (`remember`,
+  `recall`, `forget`; recalled by meaning with `minilm-l6-v2`, by words without
+  it). Reading is never asked about; writing, running and going online ask first
+  (yes, always, no), or never with `--yes`. Conversations are saved, and continue
+  with `-c` or `--resume <id>`; `-p` answers one prompt and exits. When a
+  conversation outgrows 16k tokens, its older part is folded into a summary the
+  model writes. Defaults to `qwen3.5-4b` from GGUF. The same agent is a library
+  module, `kjarni::agent`, with the `Tool` trait for adding tools of your own.
+- **Tool calling.** Qwen 3.5's chat template renders tools, calls and tool results
+  as transformers renders them, and `parse_tool_calls` reads calls back in both
+  Qwen 3.5's XML form and the JSON form of Qwen 2.5 and 3. Jinja templates that
+  read `tools` get them.
+- **Tool calling in `kjarni serve`.** `/v1/chat/completions` takes `tools`,
+  assistant messages with `tool_calls`, and `tool` messages, and answers with
+  `tool_calls` and `finish_reason: "tool_calls"`, streamed or not. Streamed, the
+  call markup never reaches the client's text. `tool_choice` takes `"auto"` and
+  `"none"`; forcing a call is refused, since it can't be guaranteed yet.
+- **Faster K-quant kernels.** AVX2 dot products for Q5_K and Q6_K weights, and
+  integer accumulation for Q4_K, each bit for bit the same as the scalar code.
+  With a faster Gated DeltaNet recurrence, a 2,300-token prompt to the 4B is
+  read in 21.7s instead of 24.
 - **Qwen 3.5.** Qwen's hybrid decoder, with a Gated DeltaNet layer (linear
   attention with a fixed-size recurrent state) in three layers of every four and
   gated attention in the fourth. The registry has `qwen3.5-0.8b`, `qwen3.5-2b` and
@@ -19,8 +42,9 @@
   converter loads with `--model-path`, including the newer files that merge
   `attn_qkv` with `attn_gate` and `ssm_beta` with `ssm_alpha`, and those that keep
   the multi-token-prediction block. The 4B Q4_K_M continues a 272-token prompt
-  token for token as the f32 transformers model does, and peaks at 6.0 GB of
-  memory instead of 9.7. On the 0.8B, loading and generating 100 tokens takes
+  token for token as the f32 transformers model does, and peaks at 4.0 GB of
+  memory instead of 9.7: the token table stays in its K-quant format and each
+  token's row is dequantized as it is looked up. On the 0.8B, loading and generating 100 tokens takes
   6.7s instead of 11.8.
 - **Q5_K weights.** Q4_K_M files store some tensors as Q5_K, so until now no Q4_K_M
   Qwen 3.5 file could load. CPU only; a Q5_K tensor on the GPU is an error that

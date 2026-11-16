@@ -618,3 +618,34 @@ mod embeddings_tests {
         assert_eq!(output[[0, 0, 0]], 0.0);
     }
 }
+
+/// A GGUF table kept as Q6_K gives every token exactly the row a full
+/// dequantization of the table gives it.
+#[test]
+fn k_quant_rows_are_dequantized_on_lookup() {
+    use crate::cpu::kernels::q_common::BlockQ6_K;
+    use crate::linear_layer::KQuantMatrix;
+    use crate::tensor::{Dequantizable, QuantizedMatrix};
+
+    let (rows, cols) = (3usize, 512usize);
+    let blocks: Vec<BlockQ6_K> = (0..rows * cols / 256)
+        .map(|i| BlockQ6_K {
+            ql: std::array::from_fn(|j| (i * 31 + j * 7) as u8),
+            qh: std::array::from_fn(|j| (i * 13 + j * 5) as u8),
+            scales: std::array::from_fn(|j| (j as i8) - 8),
+            d: half::f16::from_f32(0.01 * (i + 1) as f32),
+        })
+        .collect();
+    let mut full = ndarray::Array2::<f32>::zeros((rows, cols));
+    BlockQ6_K::dequantize_blocks(&blocks, &mut full, rows, cols).unwrap();
+    let table = KQuantMatrix::Q6_K(std::sync::Arc::new(QuantizedMatrix {
+        blocks,
+        shape: [rows, cols],
+    }));
+    let embeddings = super::Embeddings::new(super::EmbeddingData::KQuant(table), None, None);
+    let ids = ndarray::Array2::from_shape_vec((1, 4), vec![2u32, 0, 1, 2]).unwrap();
+    let out = embeddings.forward(&ids, None, 0, false);
+    for (j, &id) in [2usize, 0, 1, 2].iter().enumerate() {
+        assert_eq!(out.slice(ndarray::s![0, j, ..]), full.row(id));
+    }
+}

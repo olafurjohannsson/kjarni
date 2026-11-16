@@ -45,7 +45,8 @@ pub unsafe fn vec_dot_q4k_q8k_avx2(
             let d = w.d.to_f32();
             let dmin = w.dmin.to_f32();
 
-            let mut sum_qs = 0;
+            // Products scaled per sub-block in registers, summed once per block.
+            let mut sums = _mm256_setzero_si256();
             let mut sum_mins = 0;
 
             let mut is = 0;
@@ -71,14 +72,10 @@ pub unsafe fn vec_dot_q4k_q8k_avx2(
                 let dot1 = _mm256_maddubs_epi16(w_low, q_v1);
                 let dot2 = _mm256_maddubs_epi16(w_high, q_v2);
 
-                let ones = _mm256_set1_epi16(1);
-                let sum1 = _mm256_madd_epi16(dot1, ones);
-                let sum2 = _mm256_madd_epi16(dot2, ones);
-
-                let s1 = hsum_i32_8(sum1);
-                let s2 = hsum_i32_8(sum2);
-                sum_qs += s1 * (sc1 as i32);
-                sum_qs += s2 * (sc2 as i32);
+                sums =
+                    _mm256_add_epi32(sums, _mm256_madd_epi16(dot1, _mm256_set1_epi16(sc1 as i16)));
+                sums =
+                    _mm256_add_epi32(sums, _mm256_madd_epi16(dot2, _mm256_set1_epi16(sc2 as i16)));
 
                 let isum1 = q.bsums[is * 2] as i32 + q.bsums[is * 2 + 1] as i32;
                 sum_mins += isum1 * (m1 as i32);
@@ -88,6 +85,7 @@ pub unsafe fn vec_dot_q4k_q8k_avx2(
 
                 is += 2;
             }
+            let sum_qs = hsum_i32_8(sums);
 
             acc += q.d * d * (sum_qs as f32) - q.d * dmin * (sum_mins as f32);
         }

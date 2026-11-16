@@ -152,6 +152,8 @@ pub enum Role {
     System,
     User,
     Assistant,
+    /// A tool's result, answering an assistant's call.
+    Tool,
 }
 
 impl fmt::Display for Role {
@@ -160,6 +162,7 @@ impl fmt::Display for Role {
             Self::System => write!(f, "system"),
             Self::User => write!(f, "user"),
             Self::Assistant => write!(f, "assistant"),
+            Self::Tool => write!(f, "tool"),
         }
     }
 }
@@ -188,6 +191,14 @@ impl Message {
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: Role::Assistant,
+            content: content.into(),
+        }
+    }
+
+    /// A tool's result.
+    pub fn tool(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::Tool,
             content: content.into(),
         }
     }

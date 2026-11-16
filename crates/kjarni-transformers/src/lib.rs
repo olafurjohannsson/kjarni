@@ -60,6 +60,7 @@ pub use audio::{
 
 pub use crate::{
     chat::templates::{ChatTemplate, Conversation, Message, Role},
+    chat::tools::{ParsedReply, ToolCall, ToolSpec, parse_tool_calls},
     cpu::{
         attention::multi_head_attention::MultiHeadAttention,
         embeddings::{EmbeddingData, Embeddings},
