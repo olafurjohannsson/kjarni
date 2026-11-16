@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ndarray::Array2;
 
+use crate::Embeddings;
 #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
 use crate::WgpuContext;
 #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
@@ -17,7 +18,6 @@ use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelInput;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
-use crate::Embeddings;
 
 /// Configuration for embedding loading.
 #[derive(Debug, Clone, Default)]
