@@ -15,7 +15,7 @@
 //! let search = FolderSearch::new().reranker("minilm-l6-v2-cross-encoder");
 //! let found = search.search("/home/me/notes".as_ref(), "when does the ferry go", 5).await?;
 //! for hit in &found.results {
-//!     println!("{} {}", hit.source, hit.text);
+//!     println!("{} {}", hit.source.display(), hit.text);
 //! }
 //! # Ok(())
 //! # }
