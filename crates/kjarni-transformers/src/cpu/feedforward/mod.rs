@@ -2,13 +2,17 @@ use anyhow::Result;
 use ndarray::{Array3, ArrayView2};
 
 pub mod legacy;
+pub mod moe;
 pub mod standard;
 pub mod standard_new;
 pub mod swiglu;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
 pub use crate::cpu::feedforward::{
-    legacy::LegacyFeedForward, standard::StdFeedForward, standard_new::StdFeedForwardNew,
+    legacy::LegacyFeedForward,
+    moe::{MoeFeedForward, SharedExpert},
+    standard::StdFeedForward,
+    standard_new::StdFeedForwardNew,
     swiglu::SwiGluFeedForward,
 };
 

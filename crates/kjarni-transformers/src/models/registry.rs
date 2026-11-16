@@ -184,6 +184,9 @@ pub enum ModelType {
     Qwen3_5_0_8B,
     Qwen3_5_2B,
     Qwen3_5_4B,
+    Qwen3_5_9B,
+    Qwen3_5_27B,
+    Qwen3_5_35B_A3B,
     Llama3_2_1B_Instruct,
     Llama3_2_3B_Instruct,
     Phi3_5_Mini_Instruct,
@@ -325,6 +328,9 @@ impl ModelType {
             Self::Qwen3_5_0_8B => "qwen3.5-0.8b",
             Self::Qwen3_5_2B => "qwen3.5-2b",
             Self::Qwen3_5_4B => "qwen3.5-4b",
+            Self::Qwen3_5_9B => "qwen3.5-9b",
+            Self::Qwen3_5_27B => "qwen3.5-27b",
+            Self::Qwen3_5_35B_A3B => "qwen3.5-35b-a3b",
             Self::Llama3_2_1B_Instruct => "llama3.2-1b-instruct",
             Self::Llama3_2_3B_Instruct => "llama3.2-3b-instruct",
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini-instruct",
@@ -731,6 +737,60 @@ impl ModelType {
                 description: "Qwen 3.5 at 4B, with 32 linear-attention heads. CPU only for now.",
                 size_mb: 9300,
                 params_millions: 4206,
+            },
+            Self::Qwen3_5_9B => ModelInfo {
+                architecture: ModelArchitecture::Qwen3_5,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen3.5-9B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/Qwen/Qwen3.5-9B/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/Qwen/Qwen3.5-9B/resolve/main/config.json",
+                    gguf_url: Some(
+                        "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
+                    ),
+                    preprocessor_url: None,
+                },
+                description: "Qwen 3.5 at 9B, with its own LM head. CPU only for now.",
+                size_mb: 19306,
+                params_millions: 9653,
+            },
+            Self::Qwen3_5_27B => ModelInfo {
+                architecture: ModelArchitecture::Qwen3_5,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen3.5-27B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/Qwen/Qwen3.5-27B/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/Qwen/Qwen3.5-27B/resolve/main/config.json",
+                    gguf_url: Some(
+                        "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf",
+                    ),
+                    preprocessor_url: None,
+                },
+                description: "Qwen 3.5 at 27B, the largest dense one. CPU only for now; about 17 GB as Q4_K_M.",
+                size_mb: 55563,
+                params_millions: 27781,
+            },
+            Self::Qwen3_5_35B_A3B => ModelInfo {
+                architecture: ModelArchitecture::Qwen3_5,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: Some(
+                        "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/resolve/main/tokenizer.json",
+                    ),
+                    config_url: "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/resolve/main/config.json",
+                    gguf_url: Some(
+                        "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/Qwen3.5-35B-A3B-Q4_K_M.gguf",
+                    ),
+                    preprocessor_url: None,
+                },
+                description: "Qwen 3.5 mixture of experts: 35B weights, 3B used per token, so it runs near the speed of a 3B. CPU only for now; about 22 GB as Q4_K_M.",
+                size_mb: 71904,
+                params_millions: 35952,
             },
             Self::Llama3_2_1B_Instruct => ModelInfo {
                 architecture: ModelArchitecture::Llama,

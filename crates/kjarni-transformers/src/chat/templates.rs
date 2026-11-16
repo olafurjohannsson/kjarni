@@ -72,6 +72,7 @@ impl Message {
 pub struct Conversation {
     messages: Vec<Message>,
     tools: Vec<ToolSpec>,
+    thinking: Option<bool>,
 }
 
 impl Conversation {
@@ -84,7 +85,7 @@ impl Conversation {
     pub fn with_system(system_prompt: impl Into<String>) -> Self {
         Self {
             messages: vec![Message::system(system_prompt)],
-            tools: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -112,6 +113,17 @@ impl Conversation {
     /// The tools offered to the model.
     pub fn tools(&self) -> &[ToolSpec] {
         &self.tools
+    }
+
+    /// Whether the model should reason before it answers, for templates of
+    /// models that can do either; `None` leaves it to the template. Others
+    /// ignore it.
+    pub fn set_thinking(&mut self, thinking: Option<bool>) {
+        self.thinking = thinking;
+    }
+
+    pub fn thinking(&self) -> Option<bool> {
+        self.thinking
     }
 
     /// Get all messages
@@ -214,6 +226,13 @@ pub trait ChatTemplate: Send + Sync {
     /// does not generate but which belongs to the reply.
     fn reply_prefix(&self) -> &str {
         ""
+    }
+
+    /// [`reply_prefix`](Self::reply_prefix) when `prompt` ends with it, as a
+    /// prompt this template rendered does, and otherwise nothing.
+    fn reply_prefix_for(&self, prompt: &str) -> &str {
+        let prefix = self.reply_prefix();
+        if prompt.ends_with(prefix) { prefix } else { "" }
     }
 
     /// Validate if a conversation is properly formatted for this template

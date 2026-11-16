@@ -726,3 +726,121 @@ async fn test_to_gpu_tensor_with_label() {
 
     assert_eq!(gpu_tensor.shape(), &[64, 32]);
 }
+
+/// `rows_into` computes the same rows `matmul` does, for every weight type:
+/// it is how a mixture of experts multiplies its experts one token at a time.
+#[test]
+fn rows_into_matches_matmul_for_every_weight_type() {
+    use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0, QK_K};
+    use crate::linear_layer::{KQuantMatrix, RowInput};
+    use crate::tensor::QuantizedMatrix;
+    use half::f16;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+
+    let (rows, k) = (96, 2 * QK_K);
+    let mut rng = StdRng::seed_from_u64(7);
+    let blocks = rows * k / QK_K;
+    let mut bytes = |n: usize| -> Vec<u8> { (0..n).map(|_| rng.gen_range(0..=255u8)).collect() };
+    let q4: Vec<BlockQ4_K> = (0..blocks)
+        .map(|i| BlockQ4_K {
+            d: f16::from_f32(0.1 + (i % 7) as f32 * 0.1),
+            dmin: f16::from_f32(0.01 * (i % 5) as f32),
+            scales: bytes(12).try_into().unwrap(),
+            qs: bytes(QK_K / 2).try_into().unwrap(),
+        })
+        .collect();
+    let q5: Vec<BlockQ5_K> = (0..blocks)
+        .map(|i| BlockQ5_K {
+            d: f16::from_f32(0.1 + (i % 3) as f32 * 0.2),
+            dmin: f16::from_f32(0.02),
+            scales: bytes(12).try_into().unwrap(),
+            qh: bytes(QK_K / 8).try_into().unwrap(),
+            qs: bytes(QK_K / 2).try_into().unwrap(),
+        })
+        .collect();
+    let q6: Vec<BlockQ6_K> = (0..blocks)
+        .map(|i| BlockQ6_K {
+            ql: bytes(128).try_into().unwrap(),
+            qh: bytes(64).try_into().unwrap(),
+            scales: bytes(16)
+                .into_iter()
+                .map(|b| (b as i8) / 4)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+            d: f16::from_f32(0.05 + (i % 4) as f32 * 0.05),
+        })
+        .collect();
+    let q8: Vec<BlockQ8_0> = (0..rows * k / 32)
+        .map(|i| BlockQ8_0 {
+            d: f16::from_f32(0.01 + (i % 9) as f32 * 0.01),
+            qs: bytes(32)
+                .into_iter()
+                .map(|b| b as i8)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        })
+        .collect();
+    let dense = Array2::from_shape_fn((rows, k), |(i, j)| {
+        ((i * 31 + j * 7) % 97) as f32 / 97.0 - 0.5
+    });
+    let bias = Array1::from_shape_fn(rows, |i| i as f32 * 0.01);
+    let shape = [rows, k];
+
+    let layers = [
+        (
+            "f32",
+            LinearLayer::new_f32(dense.clone(), Some(bias.clone())),
+        ),
+        (
+            "bf16",
+            LinearLayer::new_bf16(dense.mapv(bf16::from_f32), None),
+        ),
+        (
+            "q8_0",
+            LinearLayer {
+                data: LinearData::Q8_0(Arc::new(QuantizedMatrix { blocks: q8, shape })),
+                bias: None,
+                f32_strategy: F32MatmulStrategy::CustomSimd,
+            },
+        ),
+        (
+            "q4_k",
+            LinearLayer::from_k_quant(
+                KQuantMatrix::Q4_K(Arc::new(QuantizedMatrix { blocks: q4, shape })),
+                None,
+            ),
+        ),
+        (
+            "q5_k",
+            LinearLayer::from_k_quant(
+                KQuantMatrix::Q5_K(Arc::new(QuantizedMatrix { blocks: q5, shape })),
+                None,
+            ),
+        ),
+        (
+            "q6_k",
+            LinearLayer::from_k_quant(
+                KQuantMatrix::Q6_K(Arc::new(QuantizedMatrix { blocks: q6, shape })),
+                None,
+            ),
+        ),
+    ];
+    let x: Vec<f32> = (0..k)
+        .map(|i| ((i * 13) % 29) as f32 / 29.0 - 0.5)
+        .collect();
+    let input = RowInput::new(&x);
+    for (name, layer) in &layers {
+        let full = layer.matmul(&Array2::from_shape_vec((1, k), x.clone()).unwrap().view());
+        let mut part = vec![0.0; 37];
+        layer.rows_into(&input, 40, &mut part);
+        for (i, (&got, &want)) in part.iter().zip(full.row(0).iter().skip(40)).enumerate() {
+            assert!(
+                (got - want).abs() <= 1e-4 * want.abs().max(1.0),
+                "{name}, row {}: {got} vs {want}",
+                40 + i
+            );
+        }
+    }
+}

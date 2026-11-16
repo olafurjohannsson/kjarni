@@ -7,6 +7,8 @@
 //! Both modules export the same public API. Code above this level
 //! (LinearLayer, EncoderPipeline, etc.) is platform-agnostic.
 
+pub mod rows;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod matmul_native;
 #[cfg(not(target_arch = "wasm32"))]

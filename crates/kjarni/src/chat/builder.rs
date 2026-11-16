@@ -33,6 +33,7 @@ pub struct ChatBuilder {
     // Chat-specific
     pub(crate) system_prompt: Option<String>,
     pub(crate) mode: ChatMode,
+    pub(crate) thinking: Option<bool>,
 
     // Device configuration
     pub(crate) device: KjarniDevice,
@@ -64,6 +65,7 @@ impl ChatBuilder {
             model_path: None,
             system_prompt: None,
             mode: ChatMode::default(),
+            thinking: None,
             device: KjarniDevice::default(),
             context: None,
             cache_dir: None,
@@ -173,6 +175,14 @@ impl ChatBuilder {
     /// [`prefix_cache_tokens`](Self::prefix_cache_tokens) to choose. Longer
     /// conversations still work, they simply stop reusing once they outgrow it.
     ///
+    /// Whether a model that can reason before answering, such as Qwen 3.5,
+    /// does. Off unless set: replies come sooner and agents parse them more
+    /// reliably. The reasoning arrives first, between `<think>` and `</think>`.
+    pub fn thinking(mut self, on: bool) -> Self {
+        self.thinking = Some(on);
+        self
+    }
+
     /// Off by default: the KV cache is eagerly allocated f32, roughly 24KB per
     /// token on Qwen2.5-0.5B, and one cache holds one conversation, so sends on a
     /// single instance serialise. Ignored while speculative decoding is active.

@@ -35,8 +35,8 @@
   default. `--prefix-cache` works: the recurrent state is kept at the end of each
   prompt and just before it, which is where the next turn's prompt diverges, so a
   second turn after a 2,200-token system prompt takes 1.9s instead of 7.8s on the
-  0.8B. CPU only for now; the GPU, the mixture-of-experts variants, images and
-  speculative decoding are not supported yet, and speculative decoding says so.
+  0.8B. CPU only for now; the GPU, images and speculative decoding are not
+  supported yet, and speculative decoding says so.
 - **Qwen 3.5 from GGUF.** `--gguf` downloads unsloth's Q4_K_M for `qwen3.5-0.8b`,
   `qwen3.5-2b` and `qwen3.5-4b`, and any Qwen 3.5 GGUF written by llama.cpp's
   converter loads with `--model-path`, including the newer files that merge
@@ -46,9 +46,35 @@
   memory instead of 9.7: the token table stays in its K-quant format and each
   token's row is dequantized as it is looked up. On the 0.8B, loading and generating 100 tokens takes
   6.7s instead of 11.8.
+- **Qwen 3.5 mixture of experts.** `qwen3.5-35b-a3b`, and any Qwen 3.5 MoE
+  folder or GGUF with `--model-path`. In every layer a router picks 8 of 256
+  small experts per token, and a gated shared expert always runs. Experts load
+  from transformers' per-expert or fused tensors and from llama.cpp's stacked
+  `ffn_*_exps` tensors; a tiny Qwen 3.5 MoE checkpoint matches transformers'
+  logits to within 1e-4 and its greedy output token for token, from
+  safetensors and from GGUF. The unsloth Q4_K_M (22 GB) decodes at 5.9 tok/s on
+  an i7-13700 whose memory reads about 17 GB/s: each token reads about 2.6 GB
+  of weights, so that is within 10% of what the memory allows. For one token,
+  all the chosen experts' rows go to the threads in one dispatch. CPU only.
+- `qwen3.5-9b` and `qwen3.5-27b` in the registry, from safetensors or unsloth's
+  Q4_K_M with `--gguf`.
+- **Thinking mode for Qwen 3.5.** Off by default, as before. `kjarni chat
+  --think`, `ChatBuilder::thinking(true)` or `Conversation::set_thinking` turn it
+  on; the chat prints the reasoning dimmed before the answer. `kjarni serve`
+  takes vLLM's `chat_template_kwargs: {"enable_thinking": true}` or OpenAI's
+  `reasoning_effort` (anything but `"none"` turns it on), and returns the
+  reasoning apart from the answer in `reasoning_content`, streamed or not.
+- Qwen 3.5 decodes faster: the DeltaNet's short convolution runs one token
+  without a task per channel. Qwen3.5-0.8B from GGUF goes from 28.8 to 31.8
+  tok/s on an i7-13700.
+- `ModelWeights` reads `name[start:end]`, rows `start..end` of a stacked tensor
+  (every dimension but the last counting as rows), borrowed from the file where
+  it is mapped, so a layer can be built on one expert of a stacked tensor.
 - **Q5_K weights.** Q4_K_M files store some tensors as Q5_K, so until now no Q4_K_M
   Qwen 3.5 file could load. CPU only; a Q5_K tensor on the GPU is an error that
   says so.
+- `kjarni generate --gguf` no longer downloads the model's safetensors when they
+  are not cached; it reads only the GGUF.
 - GGUF files whose tensor sizes are not all multiples of 32 bytes load. The start
   of the tensor data was computed from the sum of the tensor sizes, which falls
   short by the padding between tensors.

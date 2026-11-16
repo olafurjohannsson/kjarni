@@ -856,6 +856,110 @@ mod with_models {
         })
     }
 
+    #[test]
+    fn thinking_is_asked_for_as_vllm_or_openai_ask_for_it() {
+        let thinking = |extra: Value| {
+            let mut body = json!({ "messages": [] });
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<super::super::generation::ChatRequest>(body)
+                .unwrap()
+                .thinking()
+                .map_err(|e| e.message)
+        };
+        assert_eq!(thinking(json!({})), Ok(None));
+        assert_eq!(
+            thinking(json!({ "chat_template_kwargs": { "enable_thinking": true } })),
+            Ok(Some(true))
+        );
+        assert_eq!(
+            thinking(json!({ "chat_template_kwargs": { "enable_thinking": false } })),
+            Ok(Some(false))
+        );
+        assert_eq!(
+            thinking(json!({ "reasoning_effort": "none" })),
+            Ok(Some(false))
+        );
+        assert_eq!(
+            thinking(json!({ "reasoning_effort": "low" })),
+            Ok(Some(true))
+        );
+        // The template switch wins over the effort.
+        assert_eq!(
+            thinking(
+                json!({ "chat_template_kwargs": { "enable_thinking": false }, "reasoning_effort": "high" })
+            ),
+            Ok(Some(false))
+        );
+        assert!(thinking(json!({ "chat_template_kwargs": { "enable_thinking": "yes" } })).is_err());
+    }
+
+    /// With thinking on, the reasoning comes back as `reasoning_content`, apart
+    /// from the answer, whole and streamed. The budget ends the reply while it
+    /// is still reasoning: greedy decoding keeps a small model reasoning for
+    /// thousands of tokens, and where reasoning turns into the answer is
+    /// covered by `commands::reasoning`'s tests.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "downloads qwen3.5-0.8b"]
+    async fn a_thinking_reply_returns_its_reasoning_apart() {
+        let app = app();
+        let body = |stream: bool| {
+            json!({
+                "model": "qwen3.5-0.8b",
+                "messages": [{ "role": "user", "content": "What is 17 times 3? Answer with the number." }],
+                "chat_template_kwargs": { "enable_thinking": true },
+                "temperature": 0,
+                "max_tokens": 40,
+                "stream": stream,
+            })
+        };
+        let (status, reply) = post(app.clone(), "/v1/chat/completions", body(false)).await;
+        assert_eq!(status, StatusCode::OK, "{reply}");
+        let message = &reply["choices"][0]["message"];
+        let reasoning = message["reasoning_content"].as_str().unwrap();
+        let answer = message["content"].as_str().unwrap();
+        assert_eq!(reply["choices"][0]["finish_reason"], "length", "{reply}");
+        assert!(reasoning.len() > 40, "{reply}");
+        assert!(!reasoning.starts_with('\n'), "{reply}");
+        assert_eq!(answer, "", "{reply}");
+        assert!(!reasoning.contains("<think>"), "{reply}");
+
+        let request = Request::post("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body(true).to_string()))
+            .unwrap();
+        let (status, events) = send(app.clone(), request).await;
+        assert_eq!(status, StatusCode::OK);
+        let chunks: Vec<Value> = sse_data(&events)
+            .iter()
+            .filter(|e| *e != "[DONE]")
+            .map(|e| serde_json::from_str(e).unwrap())
+            .collect();
+        let streamed = |key: &str| -> String {
+            chunks
+                .iter()
+                .filter_map(|c| c["choices"][0]["delta"][key].as_str())
+                .collect()
+        };
+        assert_eq!(streamed("reasoning_content"), reasoning);
+        assert_eq!(streamed("content"), answer);
+
+        // Without the switch, no reasoning comes back.
+        let mut direct = body(false);
+        direct
+            .as_object_mut()
+            .unwrap()
+            .remove("chat_template_kwargs");
+        let (_, reply) = post(app, "/v1/chat/completions", direct).await;
+        assert!(
+            reply["choices"][0]["message"]
+                .get("reasoning_content")
+                .is_none(),
+            "{reply}"
+        );
+    }
+
     /// The data lines of a server-sent event stream.
     fn sse_data(body: &[u8]) -> Vec<String> {
         String::from_utf8(body.to_vec())

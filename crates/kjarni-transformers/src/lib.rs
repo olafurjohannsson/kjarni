@@ -45,7 +45,8 @@ pub mod normalization {
 
 pub mod feedforward {
     pub use crate::cpu::feedforward::{
-        FeedForward, LegacyFeedForward, StdFeedForward, StdFeedForwardNew, SwiGluFeedForward,
+        FeedForward, LegacyFeedForward, MoeFeedForward, SharedExpert, StdFeedForward,
+        StdFeedForwardNew, SwiGluFeedForward,
     };
 }
 

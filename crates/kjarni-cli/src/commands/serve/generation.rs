@@ -21,6 +21,7 @@ use super::AppState;
 use super::error::{ApiError, ApiJson};
 use super::models::{LoadedDecoder, resolve};
 use super::stop::{StopFilter, Trim};
+use crate::commands::reasoning::ReasoningSplit;
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -131,6 +132,30 @@ pub struct ChatRequest {
     pub tools: Option<Vec<Value>>,
     pub tool_choice: Option<Value>,
     pub response_format: Option<Value>,
+    /// `{"enable_thinking": bool}`, as vLLM and SGLang take it.
+    pub chat_template_kwargs: Option<Value>,
+    /// OpenAI's switch: `"none"` answers directly, any other level reasons first.
+    pub reasoning_effort: Option<String>,
+}
+
+impl ChatRequest {
+    /// Whether the reply should reason first, if the request says.
+    pub(super) fn thinking(&self) -> Result<Option<bool>, ApiError> {
+        if let Some(kwargs) = &self.chat_template_kwargs
+            && let Some(on) = kwargs.get("enable_thinking")
+        {
+            return on.as_bool().map(Some).ok_or_else(|| {
+                ApiError::invalid(
+                    "chat_template_kwargs",
+                    "enable_thinking must be true or false",
+                )
+            });
+        }
+        Ok(self
+            .reasoning_effort
+            .as_deref()
+            .map(|effort| effort != "none"))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -613,23 +638,32 @@ pub async fn chat_completions(
             ),
         ));
     }
+    let thinking = request.thinking()?;
     let messages = messages(request.messages, &|call| chat.format_tool_call(call))?;
     let prompt = chat
-        .render_messages_with_tools(&messages, &tools)
+        .render_messages_thinking(&messages, &tools, thinking)
         .map_err(|e| ApiError::invalid("messages", e.to_string()))?;
+    // The reply opens inside a think block, so its reasoning comes back apart.
+    let reasoning = chat.reply_prefix(&prompt).starts_with("<think>");
     let stops = request.stop.map(Stop::into_vec).unwrap_or_default();
     let mut run = start(decoder.clone(), model, prompt, overrides, stops, true).await?;
     run.id = new_id("chatcmpl");
 
     if request.stream {
         let include_usage = request.stream_options.unwrap_or_default().include_usage;
-        let stream = chat_events(run, include_usage, tools);
+        let stream = chat_events(run, include_usage, tools, reasoning);
         return Ok(Sse::new(stream)
             .keep_alive(KeepAlive::default())
             .into_response());
     }
 
     let (text, finish_reason, completion_tokens) = collect(&mut run).await?;
+    let (thought, text) = if reasoning {
+        let split = ReasoningSplit::all(&text);
+        (Some(split.reasoning), split.answer)
+    } else {
+        (None, text)
+    };
     let reply = parse_tool_calls(&text, &tools);
     let (message, finish_reason) = if tools.is_empty() || reply.tool_calls.is_empty() {
         (
@@ -648,6 +682,10 @@ pub async fn chat_completions(
             "tool_calls",
         )
     };
+    let mut message = message;
+    if let Some(thought) = thought {
+        message["reasoning_content"] = json!(thought);
+    }
     Ok(Json(json!({
         "id": run.id,
         "object": "chat.completion",
@@ -684,6 +722,7 @@ fn chat_events(
     mut run: Run,
     include_usage: bool,
     tools: Vec<ToolSpec>,
+    reasoning: bool,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     async_stream_events(move |tx| async move {
         let chunk = |run: &Run, delta: Value, finish: Option<&str>| {
@@ -713,9 +752,23 @@ fn chat_events(
         }
         let mut text = String::new();
         let mut shown = 0;
+        let mut split = reasoning.then(ReasoningSplit::default);
         while let Some(piece) = run.pieces.recv().await {
             match piece {
                 Piece::Text(t) => {
+                    let t = match &mut split {
+                        Some(split) => {
+                            let out = split.push(&t);
+                            if !out.reasoning.is_empty() {
+                                let delta = json!({ "reasoning_content": out.reasoning });
+                                if tx.send(chunk(&run, delta, None)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            out.answer
+                        }
+                        None => t,
+                    };
                     text.push_str(&t);
                     let showable = if tools.is_empty() {
                         text.len()
@@ -734,6 +787,14 @@ fn chat_events(
                     finish_reason,
                     completion_tokens,
                 } => {
+                    if let Some(split) = &mut split {
+                        let rest = split.finish();
+                        if !rest.reasoning.is_empty() {
+                            let delta = json!({ "reasoning_content": rest.reasoning });
+                            let _ = tx.send(chunk(&run, delta, None)).await;
+                        }
+                        text.push_str(&rest.answer);
+                    }
                     let calls = if tools.is_empty() {
                         Vec::new()
                     } else {

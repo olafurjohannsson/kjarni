@@ -639,6 +639,12 @@ pub enum Commands {
         /// Tokens the draft proposes per round.
         #[arg(long, default_value_t = 4)]
         draft_tokens: usize,
+
+        /// Let the model reason before it answers, for models that can, such
+        /// as Qwen 3.5. The reasoning is shown dimmed. It runs to hundreds of
+        /// tokens, so raise --max-tokens with it.
+        #[arg(long)]
+        think: bool,
     },
 
     /// Create or manage search indexes
