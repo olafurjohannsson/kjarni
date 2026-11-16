@@ -126,7 +126,10 @@ async fn a_new_message_extends_the_last_prompt() {
     let mut agent = agent_in(dir.path(), model.clone());
     let mut events = Recorder::default();
 
-    agent.send("What's in notes.txt?", &mut events).await.unwrap();
+    agent
+        .send("What's in notes.txt?", &mut events)
+        .await
+        .unwrap();
     agent.send("Thanks!", &mut events).await.unwrap();
 
     let prompts = model.prompts();
@@ -479,4 +482,24 @@ async fn search_documents_finds_passages_by_meaning() {
     assert!(!inside.contains("todo.txt"), "{inside}");
     assert!(inside.starts_with("1. notes"), "{inside}");
     assert_eq!(inside.matches("\n\n").count(), 1, "{inside}");
+}
+
+#[test]
+fn project_notes_follow_the_working_directory_in_the_system_prompt() {
+    let config = AgentConfig {
+        workdir: Some("/work".into()),
+        project_notes: Some("From AGENTS.md:\nTest with cargo test.".into()),
+        ..Default::default()
+    };
+    let agent = Agent::new(ScriptedModel::new(&[]), Vec::new(), config);
+    let prompt = agent.system_prompt();
+    let date_line = format!("\n\nToday's date: {}.", super::session::today());
+    assert!(
+        prompt.ends_with(&format!(
+            "{date_line} Working directory: /work.\n\n\
+             Notes on this project; follow them when you work on it.\n\n\
+             From AGENTS.md:\nTest with cargo test."
+        )),
+        "{prompt}"
+    );
 }

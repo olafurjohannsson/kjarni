@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **The agent answers a new message without re-reading the conversation.**
+  Qwen 3.5's template drops the think blocks of earlier turns, which changed
+  the prompt from the last reply on, so each new message re-read the previous
+  exchange, tool output included. The agent now keeps those blocks
+  (`Conversation::set_preserve_thinking`), and the second message of a
+  conversation reuses the whole cached prompt. Chat renders as Qwen's own
+  template does.
+- **Project notes.** The agent reads `KJARNI.md`, or else `AGENTS.md`, from the
+  folder it starts in and from each folder above it up to the repository root,
+  into its instructions (up to 16 KB): how the project builds, tests and is
+  laid out. `kjarni::agent::project_notes` finds them for other front ends.
+
 ## 0.6.0
 
 - **Models straight from Hugging Face.** Anywhere a model name goes, a Hub

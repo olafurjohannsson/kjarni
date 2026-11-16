@@ -55,9 +55,11 @@ pub async fn run(args: AgentArgs) -> Result<()> {
     if args.model_path.is_none() {
         let _ = crate::commands::util::resolve_model(&args.model, Some("decoder"))?;
     }
+    let notes = kjarni::agent::project_notes(&workdir);
     let config = AgentConfig {
         max_steps: args.max_steps,
         workdir: Some(workdir.display().to_string()),
+        project_notes: notes.as_ref().map(|n| n.text.clone()),
         ..Default::default()
     };
 
@@ -159,7 +161,14 @@ pub async fn run(args: AgentArgs) -> Result<()> {
     }
 
     if !args.quiet {
-        print_welcome(&model_name, &workdir, &agent, memory.as_deref(), args.yes);
+        print_welcome(
+            &model_name,
+            &workdir,
+            &agent,
+            memory.as_deref(),
+            notes.as_ref(),
+            args.yes,
+        );
     }
 
     let stdin = io::stdin();
@@ -280,11 +289,20 @@ fn print_welcome(
     workdir: &std::path::Path,
     agent: &Agent,
     memory: Option<&Memory>,
+    notes: Option<&kjarni::agent::ProjectNotes>,
     yes: bool,
 ) {
     println!();
     println!("  {}  {}", "kjarni agent".bold(), model.dimmed());
     println!("  {} {}", "folder".dimmed(), workdir.display());
+    if let Some(notes) = notes {
+        let names: Vec<String> = notes
+            .files
+            .iter()
+            .map(|f| f.strip_prefix(workdir).unwrap_or(f).display().to_string())
+            .collect();
+        println!("  {} {}", "notes".dimmed(), names.join(", "));
+    }
     if let Some(m) = memory {
         println!("  {} {} facts", "memory".dimmed(), m.len());
     }

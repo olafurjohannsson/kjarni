@@ -20,6 +20,7 @@
 mod agent;
 pub mod memory;
 pub mod model;
+pub mod notes;
 pub mod session;
 pub mod tool;
 pub mod tools;
@@ -30,6 +31,7 @@ pub use agent::{
 };
 pub use memory::{Embed, Memory, MemoryEntry};
 pub use model::{AgentModel, TextStream};
+pub use notes::{ProjectNotes, project_notes};
 pub use session::{Restored, Session, SessionInfo};
 pub use tool::{
     Access, ParsedReply, Tool, ToolCall, ToolSpec, displayable_prefix_len, parse_tool_calls,

@@ -226,7 +226,10 @@ mod tests {
         c.push_assistant("Hello!");
         c.push_user("Bye");
         let second = t.apply(&c);
-        assert!(second.starts_with(&format!("{first}Hello!<|im_end|>\n")), "{second:?}");
+        assert!(
+            second.starts_with(&format!("{first}Hello!<|im_end|>\n")),
+            "{second:?}"
+        );
 
         // Reasoning in an earlier turn stays too.
         let mut c = Conversation::new();
