@@ -315,11 +315,11 @@ mod four_b {
 mod tiny {
     use super::*;
 
-    fn dir() -> PathBuf {
+    pub(super) fn dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/models/qwen3_5/testdata")
     }
 
-    fn expected() -> serde_json::Value {
+    pub(super) fn expected() -> serde_json::Value {
         expected_in(&dir())
     }
 
@@ -576,5 +576,184 @@ mod q4_k_m {
         assert_eq!(greedy(&model, &ids, 16), four_b::LONG_GREEDY);
         // " Paris.\n", where the f32 model's continuation and this one part ways.
         assert_eq!(greedy(&model, &PROMPT_IDS, 3), four_b::SHORT_GREEDY[..3]);
+    }
+}
+
+/// The tiny models on the GPU against transformers, and against the GPU
+/// itself across cache cut-backs.
+#[cfg(not(target_arch = "wasm32"))]
+mod gpu {
+    use super::tiny::{dir, expected, floats, ids};
+    use super::*;
+    use crate::models::qwen3_5::cache::SNAPSHOT_TAIL;
+    use kjarni_transformers::WgpuContext;
+
+    async fn model(file: Option<&str>) -> (Qwen3_5Model, GpuDecoderBackend) {
+        let ctx = WgpuContext::new().await.unwrap();
+        let path = file.map_or_else(dir, |f| dir().join(f));
+        let model =
+            Qwen3_5Model::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)
+                .unwrap();
+        (model, GpuDecoderBackend::new(ctx).unwrap())
+    }
+
+    async fn logits(
+        model: &Qwen3_5Model,
+        backend: &GpuDecoderBackend,
+        ids: &[u32],
+        cache: &mut dyn Cache,
+    ) -> Array2<f32> {
+        backend.forward_batch(model, ids, cache).await.unwrap()
+    }
+
+    async fn greedy(
+        model: &Qwen3_5Model,
+        backend: &GpuDecoderBackend,
+        prompt: &[u32],
+        n: usize,
+    ) -> Vec<u32> {
+        let mut cache = model.new_cache(1, prompt.len() + n, 1).unwrap();
+        let first = logits(model, backend, prompt, cache.as_mut()).await;
+        let mut next = argmax(first.row(prompt.len() - 1));
+        let mut out = vec![next];
+        while out.len() < n {
+            next = argmax(logits(model, backend, &[next], cache.as_mut()).await.row(0));
+            out.push(next);
+        }
+        out
+    }
+
+    async fn matches_transformers(file: Option<&str>) {
+        let e = expected();
+        let (m, backend) = model(file).await;
+        let prompt = ids(&e["short_ids"]);
+        let mut cache = m.new_cache(1, 64, 1).unwrap();
+        let got = logits(&m, &backend, &prompt, cache.as_mut()).await;
+        for (pos, row) in e["short_logits"].as_array().unwrap().iter().enumerate() {
+            assert_close(got.row(pos), &floats(row), 1e-4);
+        }
+        let long = ids(&e["long_ids"]);
+        let mut cache = m.new_cache(1, 128, 1).unwrap();
+        let got = logits(&m, &backend, &long, cache.as_mut()).await;
+        assert_close(
+            got.row(long.len() - 1),
+            &floats(&e["long_last_logits"]),
+            1e-4,
+        );
+        assert_eq!(
+            greedy(&m, &backend, &prompt, 12).await,
+            ids(&e["short_greedy"])
+        );
+        assert_eq!(
+            greedy(&m, &backend, &long, 12).await,
+            ids(&e["long_greedy"])
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn the_tiny_model_matches_transformers_on_the_gpu() {
+        matches_transformers(None).await;
+    }
+
+    /// llama.cpp's layout: merged tensors in layer 0, tiled value heads.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn the_tiny_gguf_matches_transformers_on_the_gpu() {
+        matches_transformers(Some("tiny.gguf")).await;
+    }
+
+    /// A prompt that shares a prefix with the last one starts from the
+    /// snapshot at the end of that prefix, or the one just before it, and
+    /// gives the logits a fresh cache gives.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn continuing_from_snapshots_matches_starting_fresh() {
+        let e = expected();
+        let (m, backend) = model(None).await;
+        let long = ids(&e["long_ids"]);
+        assert!(long.len() > 2 * SNAPSHOT_TAIL);
+        let fresh = {
+            let mut cache = m.new_cache(1, 256, 1).unwrap();
+            logits(&m, &backend, &long, cache.as_mut()).await
+        };
+
+        let mut cache = m.new_cache(1, 256, 1).unwrap();
+        let half = long.len() / 2;
+        logits(&m, &backend, &long[..half], cache.as_mut()).await;
+        logits(&m, &backend, &[7, 8, 9], cache.as_mut()).await;
+        for point in [half, half - SNAPSHOT_TAIL] {
+            assert_eq!(cache.reusable_prefix(half + 1), half);
+            assert_eq!(cache.reusable_prefix(point), point);
+            cache.set_seq_length(point);
+            let rest = logits(&m, &backend, &long[point..], cache.as_mut()).await;
+            for (got, want) in rest
+                .rows()
+                .into_iter()
+                .zip(fresh.rows().into_iter().skip(point))
+            {
+                let want: Vec<f32> = want.to_vec();
+                assert_close(got, &want, 1e-4);
+            }
+            cache.set_seq_length(half);
+        }
+    }
+
+    async fn load_real(path: Option<PathBuf>) -> Option<(Qwen3_5Model, GpuDecoderBackend)> {
+        let path = path.filter(|p| p.exists())?;
+        let ctx = WgpuContext::new().await.unwrap();
+        let model =
+            Qwen3_5Model::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)
+                .expect("loads");
+        Some((model, GpuDecoderBackend::new(ctx).unwrap()))
+    }
+
+    fn gguf(folder: &str) -> Option<PathBuf> {
+        Some(
+            dirs::home_dir()?
+                .join(".cache/kjarni")
+                .join(folder)
+                .join("model.gguf"),
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a GPU and Qwen/Qwen3.5-0.8B in the Hugging Face cache"]
+    async fn the_0_8b_matches_transformers_on_the_gpu() {
+        let Some((m, backend)) = load_real(model_dir()).await else {
+            return;
+        };
+        let mut cache = m.new_cache(1, 64, 1).unwrap();
+        let l = logits(&m, &backend, &PROMPT_IDS, cache.as_mut()).await;
+        let last = l.row(PROMPT_IDS.len() - 1);
+        let diff = last
+            .iter()
+            .zip(LAST_LOGITS_HEAD)
+            .map(|(g, w)| (g - w).abs())
+            .fold(0.0f32, f32::max);
+        assert!(diff < 1e-3, "largest difference {diff}");
+        assert_eq!(
+            greedy(&m, &backend, &PROMPT_IDS, GREEDY.len()).await,
+            GREEDY
+        );
+        let ids = long_ids(&m);
+        assert_eq!(
+            greedy(&m, &backend, &ids, LONG_GREEDY.len()).await,
+            LONG_GREEDY
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a GPU and `kjarni model download qwen3.5-4b --gguf`"]
+    async fn the_4b_gguf_continues_both_prompts_as_transformers_does_on_the_gpu() {
+        let Some((m, backend)) = load_real(gguf("Qwen_Qwen3.5-4B")).await else {
+            return;
+        };
+        let ids = long_ids(&m);
+        assert_eq!(greedy(&m, &backend, &ids, 16).await, four_b::LONG_GREEDY);
+        assert_eq!(
+            greedy(&m, &backend, &PROMPT_IDS, 3).await,
+            four_b::SHORT_GREEDY[..3]
+        );
     }
 }

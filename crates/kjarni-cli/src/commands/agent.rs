@@ -23,6 +23,7 @@ pub struct AgentArgs {
     pub model: String,
     pub model_path: Option<String>,
     pub full_precision: bool,
+    pub gpu: bool,
     pub dir: Option<String>,
     pub yes: bool,
     pub continue_last: bool,
@@ -77,8 +78,19 @@ pub async fn run(args: AgentArgs) -> Result<()> {
         .temperature(args.temperature)
         .max_tokens(args.max_tokens)
         .prefix_cache_tokens(config.context_budget + args.max_tokens)
-        .cpu()
         .quiet();
+    if args.gpu {
+        // Refuse before the loader starts uploading; an out-of-VRAM upload loses
+        // the device and takes the terminal with it.
+        if args.model_path.is_none()
+            && let Some(mt) = kjarni::ModelType::from_cli_name(&args.model)
+        {
+            crate::commands::util::check_gpu_capacity(mt, !args.full_precision)?;
+        }
+        builder = builder.gpu();
+    } else {
+        builder = builder.cpu();
+    }
     if let Some(path) = &args.model_path {
         builder = builder.model_path(path);
     }

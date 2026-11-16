@@ -548,6 +548,10 @@ pub enum Commands {
         #[arg(long)]
         full_precision: bool,
 
+        /// Run the model on the GPU
+        #[arg(long)]
+        gpu: bool,
+
         /// Folder the tools work in. Default: the current folder
         #[arg(short = 'C', long)]
         dir: Option<String>,

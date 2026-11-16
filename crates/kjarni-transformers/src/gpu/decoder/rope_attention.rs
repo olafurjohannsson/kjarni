@@ -5,12 +5,11 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 
 use crate::WgpuContext;
-use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu::{ComputeKernel, GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::attention::ops::AttentionOps;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::primitives::softmax::GpuSoftmax;
-use crate::gpu_ops::utils::dispatch_1d;
 
 /// Threads in a workgroup of all three kernels.
 const WORKGROUP_THREADS: usize = 32;
@@ -46,12 +45,8 @@ struct RoPEAttendInfo {
     _pad: [u32; 2],
 }
 
-/// A compute pipeline and its bind group layout: a uniform at binding 0, then
-/// one storage buffer per entry of `read_only`.
-struct Kernel {
-    pipeline: wgpu::ComputePipeline,
-    layout: wgpu::BindGroupLayout,
-}
+/// The shared helper, with this module's workgroup size.
+struct Kernel(ComputeKernel);
 
 impl Kernel {
     fn new(
@@ -60,49 +55,7 @@ impl Kernel {
         shader: wgpu::ShaderModuleDescriptor<'_>,
         read_only: &[bool],
     ) -> Self {
-        let mut entries = vec![wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }];
-        for (i, read_only) in read_only.iter().enumerate() {
-            entries.push(wgpu::BindGroupLayoutEntry {
-                binding: i as u32 + 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage {
-                        read_only: *read_only,
-                    },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            });
-        }
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(label),
-            entries: &entries,
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(label),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
-        let module = device.create_shader_module(shader);
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some(label),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        Self { pipeline, layout }
+        Self(ComputeKernel::new(device, label, shader, read_only))
     }
 
     /// One dispatch of `threads` threads over `tensors`, at bindings 1 and up.
@@ -114,27 +67,14 @@ impl Kernel {
         tensors: &[&GpuTensor],
         threads: usize,
     ) {
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniforms.as_entire_binding(),
-        }];
-        for (i, tensor) in tensors.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: i as u32 + 1,
-                resource: tensor.buffer().as_entire_binding(),
-            });
-        }
-        let bind_group = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.layout,
-                entries: &entries,
-            });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        dispatch_1d(&mut pass, threads.div_ceil(WORKGROUP_THREADS) as u32);
+        self.0.encode(
+            context,
+            encoder,
+            uniforms,
+            tensors,
+            threads,
+            WORKGROUP_THREADS,
+        );
     }
 }
 
@@ -224,7 +164,7 @@ impl GpuRoPEAttention {
         position_offset: usize,
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
-        let (batch, seq, hidden) = hidden_states.dims3();
+        let (batch, seq, _) = hidden_states.dims3();
         let heads = self.ops.num_heads() as usize;
         let kv_heads = self.ops.num_kv_heads() as usize;
         let head_dim = self.ops.head_dim() as usize;
@@ -281,6 +221,48 @@ impl GpuRoPEAttention {
             write_offset,
         );
 
+        let attended = self.attend(
+            encoder,
+            &q_rotated,
+            &k_store,
+            &v_store,
+            attention_mask,
+            position_offset,
+            keys,
+            pool,
+        );
+
+        Ok(self.ops.project(
+            encoder,
+            &attended,
+            &weights.output_weight,
+            weights.output_bias.as_ref(),
+            pool,
+        ))
+    }
+
+    /// Attends with queries already rotated, `[B, H, S, D]`, over the first
+    /// `keys` keys and values of the stores, `[B, KV, capacity, D]`, and
+    /// returns the heads merged, `[B, S, H * D]`. A query at absolute position
+    /// `position_offset + s` sees the keys up to it that the mask allows.
+    pub fn attend(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        q_rotated: &GpuTensor,
+        k_store: &GpuTensor,
+        v_store: &GpuTensor,
+        attention_mask: &GpuTensor,
+        position_offset: usize,
+        keys: usize,
+        pool: &mut GpuTensorPool,
+    ) -> GpuTensor {
+        let (batch, heads, seq) = (
+            q_rotated.shape()[0],
+            q_rotated.shape()[1],
+            q_rotated.shape()[2],
+        );
+        let kv_heads = self.ops.num_kv_heads() as usize;
+        let head_dim = self.ops.head_dim() as usize;
         let mask_shape = attention_mask.shape();
         let info = RoPEAttendInfo {
             batch: batch as u32,
@@ -303,28 +285,21 @@ impl GpuRoPEAttention {
             &self.context,
             encoder,
             &uniforms,
-            &[&q_rotated, &k_store, attention_mask, &scores],
+            &[q_rotated, k_store, attention_mask, &scores],
             rows * keys,
         );
         self.softmax
             .encode(encoder, &scores, self.ops.scale_factor());
 
-        let attended = pool.get(vec![batch, seq, hidden]);
+        let attended = pool.get(vec![batch, seq, heads * head_dim]);
         self.output.encode(
             &self.context,
             encoder,
             &uniforms,
-            &[&scores, &v_store, &attended],
+            &[&scores, v_store, &attended],
             rows * head_dim,
         );
-
-        Ok(self.ops.project(
-            encoder,
-            &attended,
-            &weights.output_weight,
-            weights.output_bias.as_ref(),
-            pool,
-        ))
+        attended
     }
 
     fn encode_write_kv(

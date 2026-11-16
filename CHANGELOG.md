@@ -9,6 +9,15 @@
   (`Conversation::set_preserve_thinking`), and the second message of a
   conversation reuses the whole cached prompt. Chat renders as Qwen's own
   template does.
+- **Qwen 3.5 on the GPU.** The dense models run on the GPU with `--gpu`, in
+  `kjarni generate`, `chat` and now `agent`: gated attention, the Gated DeltaNet
+  convolution and delta rule, and their recurrent state, with snapshots so a
+  prompt that shares its start with the last one reuses the cache as it does on
+  the CPU. `qwen3.5-4b` (Q4_K_M) on an RTX A2000 decodes 26.8 tokens/s against
+  7.2 on four CPU cores, and prefills a 1,500-token prompt in 8.4 s against
+  66 s; an agent session of two messages and a tool call took 22 s against
+  75 s. The 0.8B matches transformers within 1e-3 and continues both reference
+  prompts token for token. The mixture-of-experts models stay on the CPU.
 - **Project notes.** The agent reads `KJARNI.md`, or else `AGENTS.md`, from the
   folder it starts in and from each folder above it up to the repository root,
   into its instructions (up to 16 KB): how the project builds, tests and is
