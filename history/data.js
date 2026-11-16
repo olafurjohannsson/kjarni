@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794782775176,
+  "lastUpdate": 1794818672154,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1308,6 +1308,66 @@ window.BENCHMARK_DATA = {
             "value": 20.44,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.991"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9204e947962c00d7ce71ee230906c1534a113901",
+          "message": "Add kjarni agent, tool calling, and faster K-quant kernels (#116)\n\n- kjarni agent: a terminal assistant with file, shell, web and memory\n  tools, approvals for writes/commands/network, saved sessions\n  (-c, --resume), one-shot -p, and summary folding past 16k tokens.\n  The agent is also a library module, kjarni::agent, with a Tool trait.\n- Tool calling: Qwen 3.5's template renders tools, calls and results as\n  transformers does; parse_tool_calls reads Qwen 3.5 XML and Qwen 2.5/3\n  JSON calls. Jinja templates that read `tools` receive them.\n- kjarni serve: /v1/chat/completions takes tools, tool_calls and tool\n  messages and returns tool_calls, streamed or not; tool_choice auto/none.\n- AVX2 Q5_K and Q6_K dot products and integer Q4_K accumulation, bit-exact\n  with the scalar code; a faster Gated DeltaNet recurrence.\n- GGUF K-quant token tables stay quantized: the 4B peaks at 4.0 GB, not 6.0.",
+          "timestamp": "2026-11-16T08:21:29Z",
+          "tree_id": "796af0b07f3565db3443de0aab7de7fd51a64ff6",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/9204e947962c00d7ce71ee230906c1534a113901"
+        },
+        "date": 1794818671576,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 443.92,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.997"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 35.77,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.454"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 659.69,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.056"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 44.54,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.976"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 687.84,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 0.994"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 28.94,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.338"
           }
         ]
       }
