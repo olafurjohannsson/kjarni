@@ -110,6 +110,34 @@ fn agent_in(dir: &std::path::Path, model: Arc<ScriptedModel>) -> Agent {
     )
 }
 
+/// The prompt for a new message starts with the prompt that produced the last
+/// reply and that reply, tool calls included, so a model's prefix cache
+/// reuses the whole earlier conversation.
+#[tokio::test]
+async fn a_new_message_extends_the_last_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "buy milk\n").unwrap();
+    let read = call("read_file", &[("path", "notes.txt")]);
+    let model = ScriptedModel::new(&[
+        &format!("Let me check.\n\n{read}"),
+        "It says: buy milk.",
+        "You're welcome.",
+    ]);
+    let mut agent = agent_in(dir.path(), model.clone());
+    let mut events = Recorder::default();
+
+    agent.send("What's in notes.txt?", &mut events).await.unwrap();
+    agent.send("Thanks!", &mut events).await.unwrap();
+
+    let prompts = model.prompts();
+    assert!(prompts[1].starts_with(&format!("{}Let me check.\n\n{read}", prompts[0])));
+    assert!(
+        prompts[2].starts_with(&format!("{}It says: buy milk.<|im_end|>\n", prompts[1])),
+        "{}",
+        prompts[2]
+    );
+}
+
 #[tokio::test]
 async fn reads_a_file_and_answers_from_it() {
     let dir = tempfile::tempdir().unwrap();

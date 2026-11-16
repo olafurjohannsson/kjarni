@@ -259,6 +259,9 @@ impl Agent {
     pub fn conversation(&self) -> Conversation {
         let mut c = Conversation::with_system(self.system_prompt());
         c.set_tools(self.specs.clone());
+        // Earlier turns render as they did when they were the latest, so the
+        // next prompt starts with the last one and its cache is reused.
+        c.set_preserve_thinking(true);
         for m in &self.messages {
             c.push(m.clone());
         }
