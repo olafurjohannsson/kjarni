@@ -54,7 +54,7 @@ impl ChatTemplate for MistralChatTemplate {
         for (i, msg) in msg_iter.enumerate() {
             let i = i + usize::from(system_content.is_some());
             match msg.role {
-                Role::User => {
+                Role::User | Role::Tool => {
                     prompt.push_str("[INST] ");
                     if Some(i) == last_user
                         && let Some(sys) = system_content

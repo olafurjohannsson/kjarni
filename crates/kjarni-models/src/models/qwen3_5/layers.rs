@@ -233,16 +233,13 @@ impl GatedDeltaNet {
                     let mut delta = vec![0f32; dv];
                     for t in 0..seq {
                         let row = qkv.slice(s![bi, t, ..]);
-                        for i in 0..dk {
-                            q[i] = row[kh * dk + i];
-                            k[i] = row[key_width + kh * dk + i];
-                        }
+                        let row = row.as_slice().expect("qkv rows are contiguous");
+                        q.copy_from_slice(&row[kh * dk..(kh + 1) * dk]);
+                        k.copy_from_slice(&row[key_width + kh * dk..key_width + (kh + 1) * dk]);
                         l2_normalize(&mut q);
                         l2_normalize(&mut k);
                         q.iter_mut().for_each(|v| *v *= scale);
-                        let v = row.slice(s![
-                            2 * key_width + head * dv..2 * key_width + (head + 1) * dv
-                        ]);
+                        let v = &row[2 * key_width + head * dv..2 * key_width + (head + 1) * dv];
 
                         let r = bi * seq + t;
                         let beta = sigmoid(b[[r, head]]);
@@ -252,24 +249,24 @@ impl GatedDeltaNet {
                         // S <- g S;  delta = beta (v - Sᵀk);  S <- S + k deltaᵀ;  o = Sᵀq
                         st.iter_mut().for_each(|s| *s *= g);
                         delta.iter_mut().for_each(|d| *d = 0.0);
-                        for i in 0..dk {
-                            let ki = k[i];
-                            let srow = &st[i * dv..(i + 1) * dv];
-                            for j in 0..dv {
-                                delta[j] += srow[j] * ki;
+                        for (srow, &ki) in st.chunks_exact(dv).zip(k.iter()) {
+                            for (d, &s) in delta.iter_mut().zip(srow) {
+                                *d += s * ki;
                             }
                         }
-                        for j in 0..dv {
-                            delta[j] = (v[j] - delta[j]) * beta;
+                        for (d, &vj) in delta.iter_mut().zip(v) {
+                            *d = (vj - *d) * beta;
                         }
-                        let mut o = out_h.slice_mut(s![t, ..]);
+                        let mut o_view = out_h.slice_mut(s![t, ..]);
+                        let o = o_view.as_slice_mut().expect("output rows are contiguous");
                         o.fill(0.0);
-                        for i in 0..dk {
-                            let (ki, qi) = (k[i], q[i]);
-                            let srow = &mut st[i * dv..(i + 1) * dv];
-                            for j in 0..dv {
-                                srow[j] += ki * delta[j];
-                                o[j] += srow[j] * qi;
+                        for (srow, (&ki, &qi)) in
+                            st.chunks_exact_mut(dv).zip(k.iter().zip(q.iter()))
+                        {
+                            for ((s, &d), oj) in srow.iter_mut().zip(delta.iter()).zip(o.iter_mut())
+                            {
+                                *s += ki * d;
+                                *oj += *s * qi;
                             }
                         }
                         if capture == Some(t + 1) {

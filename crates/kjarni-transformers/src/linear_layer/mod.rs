@@ -4,7 +4,7 @@ mod builder;
 mod linear_layer;
 
 pub use builder::LinearLayerBuilder;
-pub use linear_layer::{F32MatmulStrategy, LinearData, LinearLayer};
+pub use linear_layer::{F32MatmulStrategy, KQuantMatrix, LinearData, LinearLayer};
 
 #[cfg(test)]
 mod tests;

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::audio::{Format, audio_format, srt, vtt};
-use super::generation::{InMessage, Sampling, messages};
+use super::generation::{InMessage, Sampling, messages, offered_tools};
 use super::models::{Defaults, Models, resolve};
 use super::stop::{StopFilter, Trim};
 use super::{AppState, RouterOptions, router};
@@ -215,7 +215,7 @@ mod message_conversion {
 
     fn convert(body: Value) -> Result<Vec<(Role, String)>, String> {
         let input: Vec<InMessage> = serde_json::from_value(body).unwrap();
-        messages(input)
+        messages(input, &|c| c.to_qwen_xml())
             .map(|m| m.into_iter().map(|m| (m.role, m.content)).collect())
             .map_err(|e| e.message)
     }
@@ -249,10 +249,79 @@ mod message_conversion {
             { "type": "image_url", "image_url": { "url": "data:," } },
         ]}]);
         assert!(convert(image).unwrap_err().contains("image_url"));
-        let tool = json!([{ "role": "tool", "content": "42", "tool_call_id": "a" }]);
-        assert!(convert(tool).unwrap_err().contains("tool"));
+        let legacy = json!([{ "role": "function", "content": "42", "name": "f" }]);
+        assert!(convert(legacy).unwrap_err().contains("function"));
         assert!(convert(json!([{ "role": "robot", "content": "x" }])).is_err());
         assert!(convert(json!([])).is_err());
+    }
+}
+
+mod tool_messages {
+    use super::*;
+    use kjarni::chat::Role;
+
+    #[test]
+    fn an_assistant_call_and_its_result_become_the_model_s_own_format() {
+        let input: Vec<InMessage> = serde_json::from_value(json!([
+            { "role": "user", "content": "Weather in Reykjavik?" },
+            { "role": "assistant", "content": null, "tool_calls": [{
+                "id": "call_1", "type": "function",
+                "function": { "name": "weather", "arguments": "{\"city\": \"Reykjavik\"}" },
+            }]},
+            { "role": "tool", "tool_call_id": "call_1", "content": "4°C, windy" },
+        ]))
+        .unwrap();
+        let got = messages(input, &|c| c.to_qwen_xml()).unwrap();
+        assert_eq!(got[1].role, Role::Assistant);
+        assert_eq!(
+            got[1].content,
+            "<tool_call>\n<function=weather>\n<parameter=city>\nReykjavik\n</parameter>\n</function>\n</tool_call>"
+        );
+        assert_eq!(
+            (got[2].role, got[2].content.as_str()),
+            (Role::Tool, "4°C, windy")
+        );
+    }
+
+    #[test]
+    fn text_before_calls_is_kept_and_calls_are_separated() {
+        let input: Vec<InMessage> = serde_json::from_value(json!([
+            { "role": "assistant", "content": "Checking.", "tool_calls": [
+                { "function": { "name": "a", "arguments": {} } },
+                { "function": { "name": "b", "arguments": {} } },
+            ]},
+        ]))
+        .unwrap();
+        let got = messages(input, &|c| format!("[{}]", c.name)).unwrap();
+        assert_eq!(got[0].content, "Checking.\n\n[a]\n[b]");
+    }
+
+    #[test]
+    fn tool_choice_auto_and_none() {
+        let tools = vec![json!({ "type": "function", "function": {
+            "name": "weather", "description": "Current weather.",
+            "parameters": { "type": "object", "properties": { "city": { "type": "string" } } },
+        }})];
+        let auto = offered_tools(Some(&tools), None).unwrap();
+        assert_eq!(auto[0].name, "weather");
+        assert_eq!(auto[0].description, "Current weather.");
+        assert!(
+            offered_tools(Some(&tools), Some(&json!("none")))
+                .unwrap()
+                .is_empty()
+        );
+        let forced = json!({ "type": "function", "function": { "name": "weather" } });
+        assert_eq!(
+            offered_tools(Some(&tools), Some(&forced))
+                .unwrap_err()
+                .param,
+            Some("tool_choice")
+        );
+        let nameless = vec![json!({ "type": "function", "function": {} })];
+        assert_eq!(
+            offered_tools(Some(&nameless), None).unwrap_err().param,
+            Some("tools")
+        );
     }
 }
 
@@ -460,7 +529,12 @@ mod http {
         let cases = [
             (
                 "/v1/chat/completions",
-                json!({ "messages": user, "tools": [{ "type": "function", "function": { "name": "f" } }] }),
+                json!({ "messages": user, "tools": [{ "type": "function", "function": { "name": "f" } }], "tool_choice": "required" }),
+                "tool_choice",
+            ),
+            (
+                "/v1/chat/completions",
+                json!({ "messages": user, "tools": [{ "type": "function", "function": {} }] }),
                 "tools",
             ),
             (
@@ -821,6 +895,93 @@ mod with_models {
         let last = chunks.last().unwrap();
         assert_eq!(last["choices"], json!([]));
         assert_eq!(last["usage"], whole["usage"]);
+    }
+
+    fn weather_request(messages: Value, stream: bool) -> Value {
+        json!({
+            "model": "qwen3.5-0.8b",
+            "messages": messages,
+            "tools": [{ "type": "function", "function": {
+                "name": "get_weather",
+                "description": "Get the current weather in a city.",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "city": { "type": "string", "description": "The city name." } },
+                    "required": ["city"],
+                },
+            }}],
+            "temperature": 0,
+            "max_tokens": 80,
+            "stream": stream,
+        })
+    }
+
+    /// A whole tool round trip through the API, as an OpenAI client makes it:
+    /// the model calls the tool, the client runs it and sends the result, and
+    /// the model answers from it. Streamed and not, the call is the same.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "downloads qwen3.5-0.8b"]
+    async fn a_tool_round_trip() {
+        let app = app();
+        let ask =
+            json!([{ "role": "user", "content": "What is the weather in Reykjavik right now?" }]);
+        let (status, first) = post(
+            app.clone(),
+            "/v1/chat/completions",
+            weather_request(ask.clone(), false),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        let choice = &first["choices"][0];
+        assert_eq!(choice["finish_reason"], "tool_calls", "{first}");
+        let call = &choice["message"]["tool_calls"][0];
+        assert_eq!(call["type"], "function");
+        assert_eq!(call["function"]["name"], "get_weather");
+        let args: Value =
+            serde_json::from_str(call["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args, json!({ "city": "Reykjavik" }));
+
+        let request = Request::post("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(weather_request(ask.clone(), true).to_string()))
+            .unwrap();
+        let (status, body) = send(app.clone(), request).await;
+        assert_eq!(status, StatusCode::OK);
+        let chunks: Vec<Value> = sse_data(&body)
+            .iter()
+            .filter(|e| *e != "[DONE]")
+            .map(|e| serde_json::from_str(e).unwrap())
+            .collect();
+        let streamed_call = chunks
+            .iter()
+            .find_map(|c| c["choices"][0]["delta"]["tool_calls"].get(0).cloned())
+            .expect("a tool_calls delta");
+        assert_eq!(streamed_call["index"], 0);
+        assert_eq!(streamed_call["function"], call["function"]);
+        // No markup leaks into the streamed text.
+        let text: String = chunks
+            .iter()
+            .filter_map(|c| c["choices"][0]["delta"]["content"].as_str())
+            .collect();
+        assert!(!text.contains("<tool_call>"), "{text}");
+        assert_eq!(
+            chunks.last().unwrap()["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+
+        let mut history = ask.as_array().unwrap().clone();
+        history.push(choice["message"].clone());
+        history.push(json!({ "role": "tool", "tool_call_id": call["id"], "content": "{\"temperature_c\": -3, \"sky\": \"snowing\"}" }));
+        let (status, answer) = post(
+            app,
+            "/v1/chat/completions",
+            weather_request(json!(history), false),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        assert_eq!(answer["choices"][0]["finish_reason"], "stop", "{answer}");
+        let text = answer["choices"][0]["message"]["content"].as_str().unwrap();
+        assert!(text.contains("-3") || text.contains("snow"), "{text}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

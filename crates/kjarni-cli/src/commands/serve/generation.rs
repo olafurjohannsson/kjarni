@@ -10,6 +10,7 @@ use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures::{Stream, StreamExt};
+use kjarni::agent::{ToolCall, ToolSpec, displayable_prefix_len, parse_tool_calls};
 use kjarni::chat::Message;
 use kjarni::generation::GenerationOverrides;
 use serde::Deserialize;
@@ -137,6 +138,109 @@ pub struct InMessage {
     pub role: String,
     #[serde(default)]
     pub content: Option<Content>,
+    /// The calls an earlier assistant message made.
+    #[serde(default)]
+    pub tool_calls: Vec<InToolCall>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InToolCall {
+    pub function: InFunction,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InFunction {
+    pub name: String,
+    /// A JSON object, or a string holding one, as OpenAI sends it.
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+impl InToolCall {
+    fn into_call(self) -> Result<ToolCall, ApiError> {
+        let arguments = match self.function.arguments {
+            Value::Null => serde_json::Map::new(),
+            Value::Object(map) => map,
+            Value::String(s) if s.trim().is_empty() => serde_json::Map::new(),
+            Value::String(s) => match serde_json::from_str(&s) {
+                Ok(Value::Object(map)) => map,
+                _ => {
+                    return Err(ApiError::invalid(
+                        "messages",
+                        format!(
+                            "the arguments of the call to '{}' are not a JSON object",
+                            self.function.name
+                        ),
+                    ));
+                }
+            },
+            _ => {
+                return Err(ApiError::invalid(
+                    "messages",
+                    format!(
+                        "the arguments of the call to '{}' are not a JSON object",
+                        self.function.name
+                    ),
+                ));
+            }
+        };
+        Ok(ToolCall {
+            name: self.function.name,
+            arguments,
+        })
+    }
+}
+
+/// OpenAI's `tools` as the definitions a template renders. Only functions
+/// exist; each needs a name.
+pub fn tool_specs(tools: &[Value]) -> Result<Vec<ToolSpec>, ApiError> {
+    tools
+        .iter()
+        .map(|tool| {
+            if tool.get("type").and_then(Value::as_str) != Some("function") {
+                return Err(ApiError::unsupported(
+                    "tools",
+                    "only tools of type 'function' are supported",
+                ));
+            }
+            let function = tool.get("function").unwrap_or(&Value::Null);
+            let Some(name) = function.get("name").and_then(Value::as_str) else {
+                return Err(ApiError::invalid("tools", "every function needs a name"));
+            };
+            let parameters = match function.get("parameters") {
+                None | Some(Value::Null) => json!({"type": "object", "properties": {}}),
+                Some(p) => p.clone(),
+            };
+            Ok(ToolSpec::new(
+                name,
+                function
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                parameters,
+            ))
+        })
+        .collect()
+}
+
+/// The tools to offer under `tool_choice`: all of them for `auto` or none
+/// given, none for `none`. Forcing a call can't be guaranteed yet.
+pub fn offered_tools(
+    tools: Option<&[Value]>,
+    tool_choice: Option<&Value>,
+) -> Result<Vec<ToolSpec>, ApiError> {
+    match tool_choice {
+        None => {}
+        Some(c) if c == "auto" => {}
+        Some(c) if c == "none" => return Ok(Vec::new()),
+        Some(_) => {
+            return Err(ApiError::unsupported(
+                "tool_choice",
+                "only tool_choice \"auto\" and \"none\" are supported; a call can't be forced yet",
+            ));
+        }
+    }
+    tool_specs(tools.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,9 +258,13 @@ pub struct Part {
 }
 
 /// OpenAI's messages as Kjarni's. Roles and content Kjarni can't use yet are
-/// refused, never dropped: a model answering without the image or tool result
-/// it was sent would answer a different question.
-pub fn messages(input: Vec<InMessage>) -> Result<Vec<Message>, ApiError> {
+/// refused, never dropped: a model answering without the image it was sent
+/// would answer a different question. An assistant message's calls are written
+/// into its text by `format_call`, as the model writes them.
+pub fn messages(
+    input: Vec<InMessage>,
+    format_call: &dyn Fn(&ToolCall) -> String,
+) -> Result<Vec<Message>, ApiError> {
     if input.is_empty() {
         return Err(ApiError::invalid("messages", "messages must not be empty"));
     }
@@ -185,10 +293,23 @@ pub fn messages(input: Vec<InMessage>) -> Result<Vec<Message>, ApiError> {
             match m.role.as_str() {
                 "system" | "developer" => Ok(Message::system(content)),
                 "user" => Ok(Message::user(content)),
-                "assistant" => Ok(Message::assistant(content)),
-                "tool" | "function" => Err(ApiError::unsupported(
+                "assistant" => {
+                    let mut text = content;
+                    for (i, call) in m.tool_calls.into_iter().enumerate() {
+                        let call = call.into_call()?;
+                        if i > 0 {
+                            text.push('\n');
+                        } else if !text.trim().is_empty() {
+                            text.push_str("\n\n");
+                        }
+                        text.push_str(&format_call(&call));
+                    }
+                    Ok(Message::assistant(text))
+                }
+                "tool" => Ok(Message::tool(content)),
+                "function" => Err(ApiError::unsupported(
                     "messages",
-                    "tool calling is not supported yet",
+                    "the legacy 'function' role is not supported; send tool results with role 'tool'",
                 )),
                 other => Err(ApiError::invalid(
                     "messages",
@@ -466,14 +587,7 @@ pub async fn chat_completions(
     State(app): State<Arc<AppState>>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    if request.tools.as_ref().is_some_and(|t| !t.is_empty())
-        && request.tool_choice.as_ref().is_none_or(|c| c != "none")
-    {
-        return Err(ApiError::unsupported(
-            "tools",
-            "tool calling is not supported yet",
-        ));
-    }
+    let tools = offered_tools(request.tools.as_deref(), request.tool_choice.as_ref())?;
     if let Some(format) = &request.response_format
         && format.get("type").and_then(Value::as_str) != Some("text")
     {
@@ -483,7 +597,6 @@ pub async fn chat_completions(
         ));
     }
     let overrides = request.sampling.overrides()?;
-    let messages = messages(request.messages)?;
     let model = resolve(request.model.as_deref(), &app.models.defaults.chat)?;
     let decoder = app.models.decoder(&model).await?;
     let Some(chat) = decoder.chat() else {
@@ -492,8 +605,17 @@ pub async fn chat_completions(
             format!("'{model}' has no chat template; use /v1/completions with it instead"),
         ));
     };
+    if !tools.is_empty() && !chat.supports_tools() {
+        return Err(ApiError::invalid(
+            "tools",
+            format!(
+                "'{model}' has no tool-calling format; use a Qwen 3.5 model, such as qwen3.5-4b"
+            ),
+        ));
+    }
+    let messages = messages(request.messages, &|call| chat.format_tool_call(call))?;
     let prompt = chat
-        .render_messages(&messages)
+        .render_messages_with_tools(&messages, &tools)
         .map_err(|e| ApiError::invalid("messages", e.to_string()))?;
     let stops = request.stop.map(Stop::into_vec).unwrap_or_default();
     let mut run = start(decoder.clone(), model, prompt, overrides, stops, true).await?;
@@ -501,16 +623,70 @@ pub async fn chat_completions(
 
     if request.stream {
         let include_usage = request.stream_options.unwrap_or_default().include_usage;
-        let mut first = true;
-        let chunk = move |run: &Run, text: Option<&str>, finish: Option<&str>| {
-            let mut delta = json!({});
-            if first {
-                delta["role"] = json!("assistant");
-                first = false;
-            }
-            if let Some(text) = text {
-                delta["content"] = json!(text);
-            }
+        let stream = chat_events(run, include_usage, tools);
+        return Ok(Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response());
+    }
+
+    let (text, finish_reason, completion_tokens) = collect(&mut run).await?;
+    let reply = parse_tool_calls(&text, &tools);
+    let (message, finish_reason) = if tools.is_empty() || reply.tool_calls.is_empty() {
+        (
+            json!({ "role": "assistant", "content": text, "refusal": null }),
+            finish_reason,
+        )
+    } else {
+        let content = (!reply.content.is_empty()).then_some(reply.content);
+        (
+            json!({
+                "role": "assistant",
+                "content": content,
+                "refusal": null,
+                "tool_calls": reply.tool_calls.iter().map(|c| tool_call_json(c, None)).collect::<Vec<_>>(),
+            }),
+            "tool_calls",
+        )
+    };
+    Ok(Json(json!({
+        "id": run.id,
+        "object": "chat.completion",
+        "created": run.created,
+        "model": run.model,
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "logprobs": null,
+            "finish_reason": finish_reason,
+        }],
+        "usage": usage(run.prompt_tokens, completion_tokens),
+    }))
+    .into_response())
+}
+
+/// A call in OpenAI's shape, with `index` when it is a streamed delta.
+fn tool_call_json(call: &ToolCall, index: Option<usize>) -> Value {
+    let mut v = json!({
+        "id": new_id("call"),
+        "type": "function",
+        "function": { "name": call.name, "arguments": call.arguments_json() },
+    });
+    if let Some(i) = index {
+        v["index"] = json!(i);
+    }
+    v
+}
+
+/// The server-sent events of a chat run. Text streams as it comes; when tools
+/// were offered, text from a `<tool_call>` on is held back, read as calls at
+/// the end, and sent as `tool_calls` deltas.
+fn chat_events(
+    mut run: Run,
+    include_usage: bool,
+    tools: Vec<ToolSpec>,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream_events(move |tx| async move {
+        let chunk = |run: &Run, delta: Value, finish: Option<&str>| {
             json!({
                 "id": run.id,
                 "object": "chat.completion.chunk",
@@ -524,30 +700,74 @@ pub async fn chat_completions(
                 }],
             })
         };
-        let chunk = std::sync::Mutex::new(chunk);
-        let stream = events(run, include_usage, move |run, text, finish| {
-            (chunk.lock().expect("chunk builder"))(run, text, finish)
-        });
-        return Ok(Sse::new(stream)
-            .keep_alive(KeepAlive::default())
-            .into_response());
-    }
-
-    let (text, finish_reason, completion_tokens) = collect(&mut run).await?;
-    Ok(Json(json!({
-        "id": run.id,
-        "object": "chat.completion",
-        "created": run.created,
-        "model": run.model,
-        "choices": [{
-            "index": 0,
-            "message": { "role": "assistant", "content": text, "refusal": null },
-            "logprobs": null,
-            "finish_reason": finish_reason,
-        }],
-        "usage": usage(run.prompt_tokens, completion_tokens),
-    }))
-    .into_response())
+        if tx
+            .send(chunk(
+                &run,
+                json!({ "role": "assistant", "content": "" }),
+                None,
+            ))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut text = String::new();
+        let mut shown = 0;
+        while let Some(piece) = run.pieces.recv().await {
+            match piece {
+                Piece::Text(t) => {
+                    text.push_str(&t);
+                    let showable = if tools.is_empty() {
+                        text.len()
+                    } else {
+                        displayable_prefix_len(&text)
+                    };
+                    if showable > shown {
+                        let delta = json!({ "content": &text[shown..showable] });
+                        shown = showable;
+                        if tx.send(chunk(&run, delta, None)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                Piece::Done {
+                    finish_reason,
+                    completion_tokens,
+                } => {
+                    let calls = if tools.is_empty() {
+                        Vec::new()
+                    } else {
+                        parse_tool_calls(&text, &tools).tool_calls
+                    };
+                    let finish = if calls.is_empty() {
+                        if shown < text.len() {
+                            let delta = json!({ "content": &text[shown..] });
+                            let _ = tx.send(chunk(&run, delta, None)).await;
+                        }
+                        finish_reason
+                    } else {
+                        for (i, call) in calls.iter().enumerate() {
+                            let delta = json!({ "tool_calls": [tool_call_json(call, Some(i))] });
+                            let _ = tx.send(chunk(&run, delta, None)).await;
+                        }
+                        "tool_calls"
+                    };
+                    let _ = tx.send(chunk(&run, json!({}), Some(finish))).await;
+                    if include_usage {
+                        let mut last = chunk(&run, json!({}), None);
+                        last["choices"] = json!([]);
+                        last["usage"] = usage(run.prompt_tokens, completion_tokens);
+                        let _ = tx.send(last).await;
+                    }
+                    break;
+                }
+                Piece::Failed(message) => {
+                    let _ = tx.send(ApiError::internal(message).body()).await;
+                    break;
+                }
+            }
+        }
+    })
 }
 
 pub async fn completions(

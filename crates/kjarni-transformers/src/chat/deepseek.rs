@@ -44,7 +44,7 @@ impl ChatTemplate for DeepSeekR1ChatTemplate {
         for message in messages {
             match message.role {
                 Role::System => {}
-                Role::User => {
+                Role::User | Role::Tool => {
                     prompt.push_str("<｜User｜>");
                     prompt.push_str(&message.content);
                 }

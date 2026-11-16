@@ -43,6 +43,54 @@ pub struct LinearLayer {
     pub f32_strategy: F32MatmulStrategy,
 }
 
+/// Weights in one of the K-quant formats GGUF files use.
+#[allow(non_camel_case_types)]
+#[derive(Clone, Debug)]
+pub enum KQuantMatrix {
+    Q4_K(Arc<QuantizedMatrix<BlockQ4_K>>),
+    Q5_K(Arc<QuantizedMatrix<BlockQ5_K>>),
+    Q6_K(Arc<QuantizedMatrix<BlockQ6_K>>),
+}
+
+impl KQuantMatrix {
+    /// `[rows, columns]`.
+    pub fn shape(&self) -> [usize; 2] {
+        match self {
+            Self::Q4_K(m) => m.shape,
+            Self::Q5_K(m) => m.shape,
+            Self::Q6_K(m) => m.shape,
+        }
+    }
+
+    pub fn dtype(&self) -> DType {
+        match self {
+            Self::Q4_K(_) => DType::Q4_K,
+            Self::Q5_K(_) => DType::Q5_K,
+            Self::Q6_K(_) => DType::Q6_K,
+        }
+    }
+
+    /// Row `row`, dequantized into `out`.
+    pub fn dequantize_row(&self, row: usize, out: &mut [f32]) {
+        fn rows<B: crate::tensor::Dequantizable>(
+            m: &QuantizedMatrix<B>,
+            row: usize,
+            out: &mut [f32],
+        ) {
+            let per_row = m.shape[1] / B::BLOCK_SIZE;
+            let blocks = &m.blocks[row * per_row..(row + 1) * per_row];
+            for (block, dest) in blocks.iter().zip(out.chunks_exact_mut(B::BLOCK_SIZE)) {
+                B::dequantize_block(block, dest);
+            }
+        }
+        match self {
+            Self::Q4_K(m) => rows(m, row, out),
+            Self::Q5_K(m) => rows(m, row, out),
+            Self::Q6_K(m) => rows(m, row, out),
+        }
+    }
+}
+
 /// Weight data storage for a linear layer.
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug)]
@@ -151,6 +199,20 @@ impl LinearLayer {
     ) -> Self {
         Self {
             data: LinearData::Q8_0(weights),
+            bias: bias.into(),
+            f32_strategy: F32MatmulStrategy::CustomSimd,
+        }
+    }
+
+    /// A layer over K-quant weights already in memory, shared rather than copied.
+    pub fn from_k_quant(weights: KQuantMatrix, bias: impl Into<Option<Array1<f32>>>) -> Self {
+        let data = match weights {
+            KQuantMatrix::Q4_K(m) => LinearData::Q4_K(m),
+            KQuantMatrix::Q5_K(m) => LinearData::Q5_K(m),
+            KQuantMatrix::Q6_K(m) => LinearData::Q6_K(m),
+        };
+        Self {
+            data,
             bias: bias.into(),
             f32_strategy: F32MatmulStrategy::CustomSimd,
         }

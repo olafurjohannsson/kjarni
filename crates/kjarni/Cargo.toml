@@ -46,8 +46,11 @@ c-bindings = []
 image-io = ["kjarni-models/image-io"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process", "time"] }
 tokio-stream = "0.1.18"
+# The agent: async tools, and its web-page fetch.
+async-trait = { workspace = true }
+reqwest = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # See the note in kjarni-models: the workspace tokio is not wasm-buildable.

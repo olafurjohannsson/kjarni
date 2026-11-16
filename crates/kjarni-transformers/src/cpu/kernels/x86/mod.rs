@@ -2,6 +2,8 @@
 pub(crate) mod bf16;
 mod common;
 pub(crate) mod f32;
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod k_quants;
 pub(crate) mod q4_k;
 pub(crate) mod q4k_q8k;
 pub(crate) mod q6_k;

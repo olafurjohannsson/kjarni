@@ -212,6 +212,38 @@ impl Chat {
             .map_err(ChatError::InvalidConfig)
     }
 
+    /// The prompt for `conversation` as the model's template renders it, tools
+    /// and tool results included. Fails when the conversation offers tools and
+    /// the template has no format for them.
+    pub fn render_conversation(&self, conversation: &Conversation) -> ChatResult<String> {
+        if !conversation.tools().is_empty() && !self.supports_tools() {
+            return Err(ChatError::InvalidConfig(format!(
+                "{} has no tool-calling format; use a model such as qwen3.5-4b",
+                self.model_name
+            )));
+        }
+        self.render_prompt(conversation)
+    }
+
+    /// `call` as this model writes calls, for putting an assistant message's
+    /// earlier calls back into its history.
+    pub fn format_tool_call(&self, call: &kjarni_transformers::ToolCall) -> String {
+        self.chat_template().format_tool_call(call)
+    }
+
+    /// Whether the model's chat template has a format for tools and their
+    /// results.
+    pub fn supports_tools(&self) -> bool {
+        self.chat_template().supports_tools()
+    }
+
+    /// The number of tokens `text` encodes to.
+    pub fn count_tokens(&self, text: &str) -> ChatResult<usize> {
+        self.generator
+            .count_tokens(text)
+            .map_err(|e| ChatError::GenerationFailed(e.into()))
+    }
+
     /// Create a Conversation with the configured system prompt.
     fn create_conversation(&self) -> Conversation {
         match &self.system_prompt {
@@ -234,6 +266,17 @@ impl Chat {
     /// a single system prompt. Without any, the chat's own system prompt or the
     /// template's default is used, as [`send`](Self::send) does.
     pub fn render_messages(&self, messages: &[super::types::Message]) -> ChatResult<String> {
+        self.render_messages_with_tools(messages, &[])
+    }
+
+    /// [`render_messages`](Self::render_messages) with `tools` offered to the
+    /// model. Fails when there are tools and the template has no format for
+    /// them.
+    pub fn render_messages_with_tools(
+        &self,
+        messages: &[super::types::Message],
+        tools: &[kjarni_transformers::ToolSpec],
+    ) -> ChatResult<String> {
         let system: Vec<&str> = messages
             .iter()
             .filter(|m| matches!(m.role, Role::System))
@@ -248,10 +291,14 @@ impl Chat {
             match message.role {
                 Role::User => conversation.push_user(&message.content),
                 Role::Assistant => conversation.push_assistant(&message.content),
+                Role::Tool => {
+                    conversation.push(kjarni_transformers::Message::tool(&message.content))
+                }
                 Role::System => {}
             }
         }
-        self.render_prompt(&conversation)
+        conversation.set_tools(tools.to_vec());
+        self.render_conversation(&conversation)
     }
 
     /// What [`generate_stream`](Self::generate_stream) sends before the first
@@ -275,6 +322,7 @@ impl Chat {
                 }
                 Role::User => conversation.push_user(&msg.content),
                 Role::Assistant => conversation.push_assistant(&msg.content),
+                Role::Tool => conversation.push(kjarni_transformers::Message::tool(&msg.content)),
             }
         }
 
@@ -287,6 +335,7 @@ impl Chat {
                     kjarni_transformers::Role::Assistant => {
                         with_system.push_assistant(&msg.content)
                     }
+                    kjarni_transformers::Role::Tool => with_system.push(msg.clone()),
                     _ => {}
                 }
             }

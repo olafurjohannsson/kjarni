@@ -332,6 +332,41 @@ async fn main() -> Result<()> {
             .await
         }
 
+        Commands::Agent {
+            model,
+            model_path,
+            full_precision,
+            dir,
+            yes,
+            continue_last,
+            resume,
+            sessions,
+            no_memory,
+            prompt,
+            temperature,
+            max_tokens,
+            max_steps,
+            quiet,
+        } => {
+            commands::agent::run(commands::agent::AgentArgs {
+                model,
+                model_path,
+                full_precision,
+                dir,
+                yes,
+                continue_last,
+                resume,
+                no_memory,
+                prompt,
+                temperature,
+                max_tokens,
+                max_steps,
+                quiet,
+                list_sessions: sessions,
+            })
+            .await
+        }
+
         Commands::Chat {
             model,
             model_path,

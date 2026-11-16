@@ -130,7 +130,7 @@ impl Llama3ChatTemplate {
     fn format_message(&self, role: &Role, content: &str) -> String {
         let role_str = match role {
             Role::System => "system",
-            Role::User => "user",
+            Role::User | Role::Tool => "user",
             Role::Assistant => "assistant",
         };
 
@@ -303,7 +303,7 @@ impl ChatTemplate for Llama2ChatTemplate {
 
         for msg in msg_iter {
             match msg.role {
-                Role::User => {
+                Role::User | Role::Tool => {
                     if self.add_bos || !is_first_user {
                         prompt.push_str(Self::BOS);
                     }
