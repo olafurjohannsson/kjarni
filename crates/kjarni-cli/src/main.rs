@@ -24,7 +24,10 @@ async fn main() -> Result<()> {
 
     env_logger::init();
 
-    match cli.command {
+    let mut command = cli.command;
+    commands::hub::resolve_models(&mut command).await?;
+
+    match command {
         Commands::Model { action } => commands::model::run(action).await,
 
         Commands::Inspect { path } => commands::inspect::run(path.as_ref()).await,

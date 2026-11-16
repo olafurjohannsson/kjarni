@@ -35,7 +35,25 @@ impl EntityRecognizer {
         EntityRecognizerBuilder::new("custom").model_path(path)
     }
 
-    pub(crate) async fn from_builder(b: EntityRecognizerBuilder) -> NerResult<Self> {
+    pub(crate) async fn from_builder(mut b: EntityRecognizerBuilder) -> NerResult<Self> {
+        // A Hugging Face repository named as the model is fetched into the
+        // cache and loaded as a folder.
+        if let Some(dir) = crate::hub::builder_folder(
+            &b.model,
+            &b.model_path,
+            &b.cache_dir,
+            b.download_policy,
+            &None,
+            b.quiet,
+            None,
+        )
+        .await
+        .map_err(|source| NerError::DownloadFailed {
+            model: b.model.clone(),
+            source,
+        })? {
+            b.model_path = Some(dir);
+        }
         let device = b.device.to_device();
         let context = match (device, b.context) {
             (Device::Wgpu, Some(ctx)) => Some(ctx),

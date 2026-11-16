@@ -46,7 +46,25 @@ impl Generator {
         GeneratorBuilder::new(model)
     }
 
-    pub(crate) async fn from_builder(builder: GeneratorBuilder) -> GeneratorResult<Self> {
+    pub(crate) async fn from_builder(mut builder: GeneratorBuilder) -> GeneratorResult<Self> {
+        // A Hugging Face repository named as the model is fetched into the
+        // cache and loaded as a folder.
+        if let Some(dir) = crate::hub::builder_folder(
+            &builder.model,
+            &builder.model_path,
+            &builder.cache_dir,
+            builder.download_policy,
+            &builder.load_config,
+            builder.quiet,
+            Some(decoder_folder_check),
+        )
+        .await
+        .map_err(|source| GeneratorError::DownloadFailed {
+            model: builder.model.clone(),
+            source,
+        })? {
+            builder.model_path = Some(dir);
+        }
         let cache_dir = builder
             .cache_dir
             .clone()
@@ -560,6 +578,12 @@ pub async fn load_decoder(
             model: name,
             source: e,
         })
+}
+
+/// Whether a folder holds a decoder Kjarni loads, by its `config.json`: the
+/// check a Hub download makes before fetching the weights.
+pub fn decoder_folder_check(dir: &std::path::Path) -> Result<(), String> {
+    DecoderFamily::of_folder(dir).map(|_| ())
 }
 
 /// The decoder architectures a model folder can hold, by its `config.json`.

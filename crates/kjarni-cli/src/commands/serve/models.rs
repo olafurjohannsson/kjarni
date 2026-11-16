@@ -140,11 +140,30 @@ pub struct Models {
 /// named none. An unknown name is an error, not a quiet fallback to the
 /// default, so a client never gets an answer from a model it didn't choose.
 pub fn resolve(requested: Option<&str>, default: &str) -> Result<String, ApiError> {
-    match requested.map(str::trim) {
-        None | Some("") | Some("default") => Ok(default.to_string()),
-        Some(name) => ModelType::from_cli_name(name)
-            .map(|m| m.cli_name().to_string())
-            .ok_or_else(|| ApiError::model_not_found(name)),
+    resolve_in(requested, default, None)
+}
+
+/// [`resolve`], with Hugging Face downloads looked for in `cache`. A request
+/// may name a Hub repository the server has already downloaded, or the one it
+/// was started with; never a new one, so a client cannot fill the server's
+/// disk with downloads.
+pub fn resolve_in(
+    requested: Option<&str>,
+    default: &str,
+    cache: Option<&std::path::Path>,
+) -> Result<String, ApiError> {
+    let name = match requested.map(str::trim) {
+        None | Some("") | Some("default") => return Ok(default.to_string()),
+        Some(name) => name,
+    };
+    if let Some(model) = ModelType::from_cli_name(name) {
+        return Ok(model.cli_name().to_string());
+    }
+    match kjarni::hub::HubRef::parse(name) {
+        Some(_) if name == default => Ok(name.to_string()),
+        Some(hub) if kjarni::hub::downloaded(&hub, false, cache).is_some() => Ok(name.to_string()),
+        Some(_) => Err(ApiError::hub_model_not_downloaded(name)),
+        None => Err(ApiError::model_not_found(name)),
     }
 }
 

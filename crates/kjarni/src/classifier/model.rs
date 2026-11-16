@@ -69,7 +69,25 @@ impl Classifier {
     }
 
     /// Internal: construct from builder.
-    pub(crate) async fn from_builder(builder: ClassifierBuilder) -> ClassifierResult<Self> {
+    pub(crate) async fn from_builder(mut builder: ClassifierBuilder) -> ClassifierResult<Self> {
+        // A Hugging Face repository named as the model is fetched into the
+        // cache and loaded as a folder.
+        if let Some(dir) = crate::hub::builder_folder(
+            &builder.model,
+            &builder.model_path,
+            &builder.cache_dir,
+            builder.download_policy,
+            &builder.load_config,
+            builder.quiet,
+            None,
+        )
+        .await
+        .map_err(|source| ClassifierError::DownloadFailed {
+            model: builder.model.clone(),
+            source,
+        })? {
+            builder.model_path = Some(dir);
+        }
         let device = builder.device.to_device();
 
         // Create GPU context if needed

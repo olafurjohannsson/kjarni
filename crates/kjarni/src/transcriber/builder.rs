@@ -111,7 +111,23 @@ impl TranscriberBuilder {
         self
     }
 
-    pub async fn build(self) -> TranscriberResult<Transcriber> {
+    pub async fn build(mut self) -> TranscriberResult<Transcriber> {
+        // A Hugging Face repository named as the model is fetched into the
+        // cache and loaded as a folder.
+        if let Some(dir) = crate::hub::builder_folder(
+            &self.model_id,
+            &self.model_path,
+            &None,
+            crate::common::DownloadPolicy::IfMissing,
+            &None,
+            self.quiet,
+            None,
+        )
+        .await
+        .map_err(TranscriberError::ModelLoadFailed)?
+        {
+            self.model_path = Some(dir);
+        }
         let model_type = match &self.model_path {
             Some(_) => None,
             None => Some(

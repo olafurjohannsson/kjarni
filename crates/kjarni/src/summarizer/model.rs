@@ -35,7 +35,25 @@ impl Summarizer {
     }
 
     /// Internal: construct from builder.
-    pub(crate) async fn from_builder(builder: SummarizerBuilder) -> SummarizerResult<Self> {
+    pub(crate) async fn from_builder(mut builder: SummarizerBuilder) -> SummarizerResult<Self> {
+        // A Hugging Face repository named as the model is fetched into the
+        // cache and loaded as a folder.
+        if let Some(dir) = crate::hub::builder_folder(
+            &builder.model,
+            &builder.model_path,
+            &builder.cache_dir,
+            builder.download_policy,
+            &builder.load_config,
+            builder.quiet,
+            None,
+        )
+        .await
+        .map_err(|source| crate::seq2seq::Seq2SeqError::DownloadFailed {
+            model: builder.model.clone(),
+            source,
+        })? {
+            builder.model_path = Some(dir);
+        }
         let architecture = match &builder.model_path {
             Some(path) => {
                 let architecture = folder_architecture(path)?;

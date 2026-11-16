@@ -100,6 +100,8 @@ pub mod kjarni_config_resolve;
 pub mod registry;
 
 pub mod generator;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hub;
 
 // FFI module (feature-gated and public)
 

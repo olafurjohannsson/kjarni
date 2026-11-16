@@ -25,8 +25,11 @@ pub async fn run(
     quiet: bool,
 ) -> Result<()> {
     // Fail on an unknown model here, with suggestions, rather than letting the
-    // builder report it without context.
-    let _ = crate::commands::util::resolve_model(model, Some("classifier"))?;
+    // builder report it without context. A path is loaded as it is, whatever
+    // `--model` says.
+    if model_path.is_none() {
+        let _ = crate::commands::util::resolve_model(model, Some("classifier"))?;
+    }
 
     // Resolve input text
     let text = if input.is_empty() {
