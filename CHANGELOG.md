@@ -56,6 +56,13 @@
   lengths. `PrefixCache` uses it, so a model with a recurrent state reuses what it
   can rather than reading state from the wrong position.
 
+- Per-model settings in `kjarni.toml` apply when the section names the model as
+  it is written, `[models."qwen3.5-4b"]`; only the dashed form
+  `[models.qwen3-5-4b]` matched before. A model's `quantize_embeddings` setting
+  is applied; it was read and ignored.
+- `/v1/completions` names `prompt`, not `messages`, when a prompt is longer than
+  the model's context.
+
 ## 0.5.1
 
 - **`kjarni serve`, an OpenAI-compatible HTTP server.** The OpenAI client libraries

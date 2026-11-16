@@ -297,6 +297,28 @@ mod tool_messages {
     }
 
     #[test]
+    fn call_arguments_are_an_object_or_a_string_holding_one() {
+        let convert = |arguments: Value| {
+            let input: Vec<InMessage> = serde_json::from_value(json!([
+                { "role": "assistant", "content": "", "tool_calls": [
+                    { "function": { "name": "f", "arguments": arguments } },
+                ]},
+            ]))
+            .unwrap();
+            messages(input, &|c| c.arguments_json()).map(|m| m[0].content.clone())
+        };
+        assert_eq!(convert(json!("{\"a\": 1}")).unwrap(), "{\"a\":1}");
+        assert_eq!(convert(json!({ "a": 1 })).unwrap(), "{\"a\":1}");
+        assert_eq!(convert(json!(null)).unwrap(), "{}");
+        assert_eq!(convert(json!("  ")).unwrap(), "{}");
+        for bad in [json!("[1, 2]"), json!("not json"), json!(7)] {
+            let err = convert(bad.clone()).unwrap_err();
+            assert_eq!(err.param, Some("messages"), "{bad}");
+            assert!(err.message.contains("'f'"), "{bad}: {}", err.message);
+        }
+    }
+
+    #[test]
     fn tool_choice_auto_and_none() {
         let tools = vec![json!({ "type": "function", "function": {
             "name": "weather", "description": "Current weather.",
@@ -317,6 +339,18 @@ mod tool_messages {
                 .param,
             Some("tool_choice")
         );
+        let retrieval = vec![json!({ "type": "retrieval" })];
+        assert_eq!(
+            offered_tools(Some(&retrieval), None).unwrap_err().param,
+            Some("tools")
+        );
+        // No parameters means a function that takes none.
+        let bare = vec![json!({ "type": "function", "function": { "name": "now" } })];
+        assert_eq!(
+            offered_tools(Some(&bare), Some(&json!("auto"))).unwrap()[0].parameters,
+            json!({ "type": "object", "properties": {} })
+        );
+        assert!(offered_tools(None, None).unwrap().is_empty());
         let nameless = vec![json!({ "type": "function", "function": {} })];
         assert_eq!(
             offered_tools(Some(&nameless), None).unwrap_err().param,
@@ -1055,6 +1089,59 @@ mod with_models {
             .unwrap();
         assert_eq!(body["choices"][0]["text"], want);
         assert_eq!(body["choices"][0]["finish_reason"], "length");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "downloads qwen2.5-0.5b-instruct"]
+    async fn streamed_completions_match_whole_ones() {
+        let body = |stream: bool| {
+            json!({
+                "model": CHAT_MODEL, "prompt": "The capital of France is", "max_tokens": 8,
+                "temperature": 0, "stream": stream, "stream_options": { "include_usage": true },
+            })
+        };
+        let app = app();
+        let (status, whole) = post(app.clone(), "/v1/completions", body(false)).await;
+        assert_eq!(status, StatusCode::OK, "{whole}");
+        let request = Request::post("/v1/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body(true).to_string()))
+            .unwrap();
+        let (status, raw) = send(app, request).await;
+        assert_eq!(status, StatusCode::OK);
+        let events = sse_data(&raw);
+        assert_eq!(events.last().unwrap(), "[DONE]");
+        let chunks: Vec<Value> = events[..events.len() - 1]
+            .iter()
+            .map(|e| serde_json::from_str(e).unwrap())
+            .collect();
+        assert!(chunks.iter().all(|c| c["object"] == "text_completion"));
+        let text: String = chunks
+            .iter()
+            .filter_map(|c| c["choices"][0]["text"].as_str())
+            .collect();
+        assert_eq!(text, whole["choices"][0]["text"].as_str().unwrap());
+        let finish = &chunks[chunks.len() - 2];
+        assert_eq!(finish["choices"][0]["finish_reason"], "length");
+        let last = chunks.last().unwrap();
+        assert_eq!(last["choices"], json!([]));
+        assert_eq!(last["usage"], whole["usage"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "downloads qwen2.5-0.5b-instruct"]
+    async fn a_prompt_longer_than_the_context_is_refused() {
+        // About 40k tokens against Qwen 2.5 0.5B's 32,768.
+        let prompt = "word ".repeat(40_000);
+        let (status, body) = post(
+            app(),
+            "/v1/completions",
+            json!({ "model": CHAT_MODEL, "prompt": prompt, "max_tokens": 1 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(body["error"]["code"], "context_length_exceeded");
+        assert_eq!(body["error"]["param"], "prompt");
     }
 
     #[tokio::test(flavor = "multi_thread")]

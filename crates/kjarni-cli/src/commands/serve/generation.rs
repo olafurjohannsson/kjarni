@@ -800,7 +800,15 @@ pub async fn completions(
     let model = resolve(request.model.as_deref(), &app.models.defaults.chat)?;
     let decoder = app.models.decoder(&model).await?;
     let stops = request.stop.map(Stop::into_vec).unwrap_or_default();
-    let mut run = start(decoder, model, prompt, overrides, stops, false).await?;
+    let mut run = start(decoder, model, prompt, overrides, stops, false)
+        .await
+        .map_err(|mut e| {
+            // This endpoint's input is `prompt`, not chat `messages`.
+            if e.param == Some("messages") {
+                e.param = Some("prompt");
+            }
+            e
+        })?;
     run.id = new_id("cmpl");
 
     let chunk = |run: &Run, text: Option<&str>, finish: Option<&str>| {

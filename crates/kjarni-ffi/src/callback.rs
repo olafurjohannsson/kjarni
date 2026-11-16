@@ -216,3 +216,33 @@ impl ProgressCallbackWrapper {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_token_cancels_resets_and_frees() {
+        let token = kjarni_cancel_token_new();
+        assert!(!token.is_null());
+        unsafe {
+            assert!(!kjarni_cancel_token_is_cancelled(token));
+            kjarni_cancel_token_cancel(token);
+            assert!(kjarni_cancel_token_is_cancelled(token));
+            kjarni_cancel_token_reset(token);
+            assert!(!kjarni_cancel_token_is_cancelled(token));
+            kjarni_cancel_token_free(token);
+        }
+    }
+
+    #[test]
+    fn a_null_token_is_never_cancelled_and_is_safe_to_pass() {
+        let null = std::ptr::null_mut();
+        unsafe {
+            kjarni_cancel_token_cancel(null);
+            kjarni_cancel_token_reset(null);
+            assert!(!kjarni_cancel_token_is_cancelled(null));
+            kjarni_cancel_token_free(null);
+        }
+    }
+}
