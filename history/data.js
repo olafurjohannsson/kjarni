@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794826387581,
+  "lastUpdate": 1794833519811,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1488,6 +1488,66 @@ window.BENCHMARK_DATA = {
             "value": 27.41,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.979"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b3328a13d71a6219c11aab1076e7f39b204c295b",
+          "message": "Tests/coverage (#118)\n\n* Add tests where coverage was thin; fix config overrides and a serve error\n\nCoverage over every test, ignored ones included, run single-threaded:\n84.2% of lines, 81.9% of production lines. Tests added where it was thin:\n\n- kjarni config: defaults, task settings, per-model overrides, load\n  settings, dtype parsing, loading files and the cache dir (was 0%).\n- agent tool helpers: default summary, argument parsing, access names.\n- agent on a real model: qwen3.5-0.8b reads a file and answers from it,\n  through Chat's AgentModel implementation (was 0%).\n- agent CLI slash commands: quit, clear, forget, sessions (was 0%).\n- serve: streamed /v1/completions (never tested), context overflow,\n  tool-call argument forms, tool and tool_choice validation.\n- ffi: cancel tokens and the reranker, with results matching the library\n  (both were 0%).\n\nFixes found while reading uncovered code:\n\n- [models.\"qwen3.5-4b\"] in kjarni.toml never matched; only the dashed\n  key did. Both forms now match.\n- A model's quantize_embeddings setting was parsed and ignored.\n- /v1/completions named `messages` instead of `prompt` on a context\n  overflow.\n\nRemoves streaming_prefill_matches_and_is_faster: its env switch is read\nonce per process, so it compared the streaming path with itself.\ndecoder_attention's own test compares the two paths.\n\n* Test Phi-3 and Mistral against transformers; fix LongRoPE past the trained context\n\n- Tiny random Phi-3 and Mistral checkpoints (about 460 KB each) with\n  what transformers computes on them, and the make.py that writes both.\n  A shared check compares every logit of a short prompt, the last logits\n  of a long one, and greedy continuations. Both model files were at 0%.\n- Phi-3.5 past 4,096 tokens: LongRoPE now uses its long factors for a\n  forward pass that reaches past the trained context, as transformers\n  decides per pass; Kjarni used the short factors at every length. Phi-3\n  keeps original_max_position_embeddings at the top level of config.json\n  and it was not passed to RoPE. The CPU switches; the GPU path still\n  uses the short factors.\n- FFI indexer and searcher through the C interface: create with progress\n  and cancellation, add, info, semantic, hybrid and keyword search,\n  delete, and null handling. Both files were at 0%.\n- CLI tests that run the kjarni binary: help, version, error messages,\n  model search and info, inspect on GGUF and safetensors, and generate on\n  the tiny Mistral, token for token what transformers gives.",
+          "timestamp": "2026-11-16T12:36:48Z",
+          "tree_id": "c4906194d9dbb34a7b6dd3f8def4c5c791fcfc23",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/b3328a13d71a6219c11aab1076e7f39b204c295b"
+        },
+        "date": 1794833518554,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 488.02,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.997"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 35.87,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.999"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 525.41,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.956"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 33.83,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.986"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 1002.56,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.003"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 55.57,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.039"
           }
         ]
       }
