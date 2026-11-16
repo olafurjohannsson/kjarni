@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794833519811,
+  "lastUpdate": 1794846805947,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1548,6 +1548,66 @@ window.BENCHMARK_DATA = {
             "value": 55.57,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.039"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "64af1b57868697a89a88d12bdb44b05e98b229d5",
+          "message": "Qwen 3.5 mixture of experts, thinking mode, 9B and 27B (#119)\n\n- Qwen 3.5 MoE (qwen3.5-35b-a3b): top-k softmax router over the experts plus\n  a sigmoid-gated shared expert in every layer. Experts load from\n  transformers' per-expert or fused tensors and from llama.cpp's stacked\n  ffn_*_exps; a tiny Qwen3_5Moe checkpoint matches transformers to 1e-4 from\n  safetensors and GGUF, greedy output included.\n- One-token MoE decode hands every chosen expert's rows to the threads in one\n  dispatch, through LinearLayer::rows_into and the existing per-row kernels.\n- ModelWeights reads name[start:end] row ranges of stacked tensors.\n- Thinking mode: chat --think, ChatBuilder::thinking, Conversation::set_thinking;\n  serve takes enable_thinking / reasoning_effort and returns reasoning_content.\n- The DeltaNet convolution has a one-token path: Qwen3.5-0.8B decodes 28.8 ->\n  31.8 tok/s. qwen2.5-0.5b and llama3.2-1b unchanged (A/B against main).\n- qwen3.5-9b and qwen3.5-27b registry entries.\n- generate --gguf no longer downloads the safetensors.",
+          "timestamp": "2026-11-16T16:09:07Z",
+          "tree_id": "a88e3cfd0e88772b11c13f70252666de88e7ba6c",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/64af1b57868697a89a88d12bdb44b05e98b229d5"
+        },
+        "date": 1794846805487,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 437.04,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.005"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 45.14,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.003"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 691.99,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M2 Pro (Virtual); vs previous commit: 1.064"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 35.85,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M2 Pro (Virtual); vs previous commit: 0.979"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 463.74,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.997"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 26.25,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.977"
           }
         ]
       }
