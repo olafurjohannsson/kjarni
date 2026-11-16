@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794858504343,
+  "lastUpdate": 1794865115998,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1668,6 +1668,66 @@ window.BENCHMARK_DATA = {
             "value": 39.27,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.009"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "89b05dea668f2cce858ed21bbbd1203e5960d27f",
+          "message": "The agent searches documents by meaning; 0.6.0 (#121)\n\n* The agent searches documents by meaning; 0.6.0\n\nsearch_documents finds the passages in the working folder, or a folder\ninside it, that answer a question: hybrid search, reranked by\nminilm-l6-v2-cross-encoder. A folder is indexed on its first search and\nonly changed files are embedded after that; a folder inside an indexed\none is searched through that index. A folder with more than 10,000\ndocuments is refused with its largest subfolders, so the model narrows\nthe search instead of indexing a whole home folder.\n\nThe indexing moves from the MCP server into kjarni::folder_search, which\nsearch_folder and the agent now share; indexes live in folder-indexes in\nthe model cache.\n\nVersions move to 0.6.0.\n\n* Keep the agent's prompt cache after remember\n\nThe system prompt listed the newest memory facts at every step, so a\nremember call changed the top of the prompt and the next step prefilled\nthe whole conversation again. The facts are now read when a conversation\nstarts or is summarized; facts saved in between are already in the\nconversation. A forgotten fact still leaves the prompt at once.\n\nA list, remember and answer run with qwen3.5-4b on four cores went from\n271 s to 112 s. The prefix cache logs how many prompt tokens it reused,\nat debug level.\n\n* Print paths with display() in the folder_search example",
+          "timestamp": "2026-11-16T21:18:54Z",
+          "tree_id": "ca88dd2b8fa5af1cb117f2c0e8ca0b851d25e496",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/89b05dea668f2cce858ed21bbbd1203e5960d27f"
+        },
+        "date": 1794865115261,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 440.32,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.001"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 45.17,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.996"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 652.22,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.997"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 42.85,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.878"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 560.25,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.017"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 38.65,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.014"
           }
         ]
       }
