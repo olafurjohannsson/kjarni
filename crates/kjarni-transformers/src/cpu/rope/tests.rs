@@ -702,10 +702,17 @@ fn longrope_uses_short_factors_inside_the_trained_context() {
 #[test]
 fn longrope_uses_long_factors_past_the_trained_context() {
     let head_dim = 96;
-    // 8192 is past 4096, so the long list applies and changing it must matter.
     let a = RoPE::new_with_scaling(head_dim, 8192, 10000.0, Some(&longrope(1.5, 8.0, 4096)));
     let b = RoPE::new_with_scaling(head_dim, 8192, 10000.0, Some(&longrope(1.5, 99.0, 4096)));
-    assert_ne!(a.cos_cache, b.cos_cache, "long_factor must be used here");
+    let x = ndarray::Array4::from_shape_fn((1, 1, 1, head_dim), |(_, _, _, d)| d as f32 * 0.1);
+    // A pass ending inside the 4096 trained positions uses the short list only.
+    assert_eq!(a.rotate_4d(&x, 100), b.rotate_4d(&x, 100));
+    // One ending past them uses the long list, so changing it must matter.
+    assert_ne!(
+        a.rotate_4d(&x, 5000),
+        b.rotate_4d(&x, 5000),
+        "long_factor must be used here"
+    );
 }
 
 #[test]
@@ -762,5 +769,56 @@ fn llama3_inv_freq_matches_transformers() {
     for (i, want) in expected {
         let rel = (inv[i] - want).abs() / want;
         assert!(rel < 1e-5, "pair {i}: {} vs {want}", inv[i]);
+    }
+}
+
+/// LongRoPE uses its short factors while a pass stays within the trained
+/// context and its long factors once it reaches past it, as transformers
+/// decides per forward pass from the last position.
+#[test]
+fn long_rope_switches_lists_at_the_trained_context_boundary() {
+    use crate::models::base::RopeScalingConfig;
+    let head_dim = 8;
+    let scaling = RopeScalingConfig {
+        rope_type: "longrope".into(),
+        original_max_position_embeddings: 16,
+        short_factor: Some(vec![1.0; 4]),
+        long_factor: Some(vec![4.0; 4]),
+        ..Default::default()
+    };
+    let rope = RoPE::new_with_scaling(head_dim, 64, 10000.0, Some(&scaling));
+    let plain = RoPE::new(head_dim, 64, 10000.0);
+    let x = ndarray::Array4::from_shape_fn((1, 1, 1, head_dim), |(_, _, _, d)| d as f32 + 1.0);
+
+    // Position 10, ending inside the 16 trained positions: short factors of 1,
+    // which is plain RoPE.
+    assert_eq!(rope.rotate_4d(&x, 10), plain.rotate_4d(&x, 10));
+
+    // Position 20, past them: every frequency divided by 4, so position 20 turns
+    // as far as position 5 does in plain RoPE.
+    let past = rope.rotate_4d(&x, 20);
+    let want = plain.rotate_4d(&x, 5);
+    for (a, b) in past.iter().zip(want.iter()) {
+        assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+    }
+
+    // A prompt that ends past the trained context is rotated with the long
+    // factors throughout, its early positions included.
+    let xs = ndarray::Array4::from_shape_fn((1, 1, 20, head_dim), |(_, _, s, d)| {
+        (s * head_dim + d) as f32 * 0.01
+    });
+    let mut inplace = xs.clone();
+    rope.rotate_4d_in_place(&mut inplace, 0);
+    let long_only = RoPE::new_with_scaling(
+        head_dim,
+        64,
+        10000.0,
+        Some(&RopeScalingConfig {
+            short_factor: Some(vec![4.0; 4]),
+            ..scaling.clone()
+        }),
+    );
+    for (a, b) in inplace.iter().zip(long_only.rotate_4d(&xs, 0).iter()) {
+        assert!((a - b).abs() < 1e-5, "{a} vs {b}");
     }
 }

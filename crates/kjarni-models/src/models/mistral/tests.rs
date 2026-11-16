@@ -33,3 +33,23 @@ mod tests {
         assert_eq!(config.model_type, "mistral");
     }
 }
+
+/// Mistral against transformers, on the tiny checkpoint in `testdata`.
+mod tiny {
+    use std::path::PathBuf;
+
+    use kjarni_transformers::Device;
+
+    use super::super::MistralModel;
+    use crate::models::tiny_fixture::assert_matches_transformers;
+
+    fn dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/models/mistral/testdata")
+    }
+
+    #[test]
+    fn logits_and_greedy_decoding_match_transformers() {
+        let model = MistralModel::from_pretrained(&dir(), Device::Cpu, None, None, None).unwrap();
+        assert_matches_transformers(&model, &dir(), 1e-4);
+    }
+}

@@ -60,6 +60,12 @@
   it is written, `[models."qwen3.5-4b"]`; only the dashed form
   `[models.qwen3-5-4b]` matched before. A model's `quantize_embeddings` setting
   is applied; it was read and ignored.
+- **Phi-3.5 past 4,096 tokens.** LongRoPE now switches to its long factors once a
+  forward pass reaches past the context the model was trained on, as
+  transformers does; Kjarni used the short factors at every length. The trained
+  length sits at the top level of Phi-3's config and was not passed on. A tiny
+  Phi-3 checkpoint now matches transformers logit for logit on both sides of the
+  switch. The GPU path still uses the short factors.
 - `/v1/completions` names `prompt`, not `messages`, when a prompt is longer than
   the model's context.
 
