@@ -596,14 +596,23 @@ impl DecoderFamily {
         match (architecture, model_type) {
             ("LlamaForCausalLM", _) | ("", "llama") => Ok(Self::Llama),
             ("Qwen2ForCausalLM", _) | ("", "qwen2") => Ok(Self::Qwen2),
-            ("Qwen3_5ForConditionalGeneration" | "Qwen3_5ForCausalLM", _)
-            | ("", "qwen3_5" | "qwen3_5_text") => Ok(Self::Qwen3_5),
+            (
+                "Qwen3_5ForConditionalGeneration"
+                | "Qwen3_5ForCausalLM"
+                | "Qwen3_5MoeForConditionalGeneration"
+                | "Qwen3_5MoeForCausalLM",
+                _,
+            )
+            | ("", "qwen3_5" | "qwen3_5_text" | "qwen3_5_moe" | "qwen3_5_moe_text") => {
+                Ok(Self::Qwen3_5)
+            }
             ("MistralForCausalLM", _) | ("", "mistral") => Ok(Self::Mistral),
             ("Phi3ForCausalLM", _) | ("", "phi3") => Ok(Self::Phi3),
             ("GPT2LMHeadModel", _) | ("", "gpt2") => Ok(Self::Gpt2),
             _ => Err(format!(
                 "it is a {} model; text generation supports LlamaForCausalLM, \
                  Qwen2ForCausalLM, Qwen3_5ForConditionalGeneration, Qwen3_5ForCausalLM, \
+                 Qwen3_5MoeForConditionalGeneration, Qwen3_5MoeForCausalLM, \
                  MistralForCausalLM, Phi3ForCausalLM and GPT2LMHeadModel",
                 if architecture.is_empty() {
                     model_type
@@ -681,6 +690,8 @@ mod family_tests {
             ("Qwen2ForCausalLM", DecoderFamily::Qwen2),
             ("Qwen3_5ForConditionalGeneration", DecoderFamily::Qwen3_5),
             ("Qwen3_5ForCausalLM", DecoderFamily::Qwen3_5),
+            ("Qwen3_5MoeForConditionalGeneration", DecoderFamily::Qwen3_5),
+            ("Qwen3_5MoeForCausalLM", DecoderFamily::Qwen3_5),
             ("MistralForCausalLM", DecoderFamily::Mistral),
             ("Phi3ForCausalLM", DecoderFamily::Phi3),
             ("GPT2LMHeadModel", DecoderFamily::Gpt2),
@@ -700,6 +711,8 @@ mod family_tests {
             ("qwen2", DecoderFamily::Qwen2),
             ("qwen3_5", DecoderFamily::Qwen3_5),
             ("qwen3_5_text", DecoderFamily::Qwen3_5),
+            ("qwen3_5_moe", DecoderFamily::Qwen3_5),
+            ("qwen3_5_moe_text", DecoderFamily::Qwen3_5),
             ("mistral", DecoderFamily::Mistral),
             ("phi3", DecoderFamily::Phi3),
             ("gpt2", DecoderFamily::Gpt2),

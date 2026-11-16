@@ -115,3 +115,48 @@ fn generate_from_a_local_folder_matches_transformers() {
         .collect();
     assert_eq!(stdout(&o).trim(), want.join(" "));
 }
+
+/// `generate --gguf` on a registry model reads the GGUF it has and downloads
+/// nothing else. It fetched the full-precision safetensors first whenever they
+/// were missing: 70 GB for qwen3.5-35b-a3b, none of it read. The cache here
+/// holds the tiny Qwen 3.5 GGUF under qwen3.5-0.8b's folder, and the network
+/// goes nowhere, so any download fails the run.
+#[test]
+fn generate_with_gguf_reads_the_cached_gguf_and_downloads_nothing() {
+    let cache = tempfile::tempdir().unwrap();
+    let folder = cache.path().join("Qwen_Qwen3.5-0.8B");
+    std::fs::create_dir(&folder).unwrap();
+    let tiny = testdata("qwen3_5");
+    std::fs::copy(tiny.join("tiny.gguf"), folder.join("model.gguf")).unwrap();
+    std::fs::copy(tiny.join("tokenizer.json"), folder.join("tokenizer.json")).unwrap();
+    std::fs::copy(tiny.join("config.json"), folder.join("config.json")).unwrap();
+
+    let o = Command::new(env!("CARGO_BIN_EXE_kjarni"))
+        .args([
+            "generate",
+            "--model",
+            "qwen3.5-0.8b",
+            "--gguf",
+            "--greedy",
+            "-n",
+            "4",
+            "-q",
+            "--no-stream",
+            "t5 t17 t99",
+        ])
+        .env("KJARNI_CACHE_DIR", cache.path())
+        .env("HTTPS_PROXY", "http://127.0.0.1:9")
+        .env("HTTP_PROXY", "http://127.0.0.1:9")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(stdout(&o).split_whitespace().count(), 4, "{}", stdout(&o));
+    let files: Vec<_> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(
+        !files.iter().any(|f| f.contains("safetensors")),
+        "{files:?}"
+    );
+}

@@ -378,6 +378,7 @@ async fn main() -> Result<()> {
             gguf,
             draft,
             draft_tokens,
+            think,
         } => {
             commands::chat::run(
                 &model,
@@ -390,6 +391,7 @@ async fn main() -> Result<()> {
                 gguf,
                 draft.as_deref(),
                 draft_tokens,
+                think,
             )
             .await
         }

@@ -253,9 +253,11 @@ impl ModelWeights {
         &self.inner.config_json
     }
 
-    /// Returns `true` if a tensor exists.
+    /// Returns `true` if a tensor exists. For `name[start:end]`, whether the
+    /// tensor it takes rows from does.
     pub fn contains(&self, name: &str) -> bool {
-        self.inner.loader.contains(name)
+        let base = super::parse_row_range(name).map_or(name, |(base, ..)| base);
+        self.inner.loader.contains(base)
     }
 
     /// Returns `true` if this is a GGUF file.
@@ -292,11 +294,21 @@ impl ModelWeights {
     }
 
     /// Processes a tensor's raw bytes through a callback.
+    ///
+    /// `name[start:end]` reads rows `start..end` of a tensor, counting every
+    /// dimension but the last as rows, so a 3-D `[experts, rows, cols]` tensor
+    /// has `experts * rows` of them. Every dtype, quantized ones included, stores
+    /// each row on its own, so the rows are borrowed rather than copied.
     pub fn with_raw_tensor<R, F>(&self, name: &str, f: F) -> Result<R>
     where
         F: FnOnce(TensorView<'_>) -> Result<R>,
     {
-        let view = self.inner.loader.get_raw(name)?;
+        let view = match super::parse_row_range(name) {
+            Some((base, start, end)) => {
+                rows_of(self.inner.loader.get_raw(base)?, name, start, end)?
+            }
+            None => self.inner.loader.get_raw(name)?,
+        };
         // Where the bytes sit in the mapped file, if they are borrowed from it.
         // Read before `f` takes the view, used after it has copied them out.
         let borrowed = match &view.bytes {
@@ -479,6 +491,41 @@ pub fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
 
         _ => Err(anyhow!("unsupported dtype for conversion: {:?}", raw.dtype)),
     }
+}
+
+/// Rows `start..end` of `view`, taking every dimension but the last as rows.
+fn rows_of<'a>(
+    view: TensorView<'a>,
+    name: &str,
+    start: usize,
+    end: usize,
+) -> Result<TensorView<'a>> {
+    let (cols, leading) = match view.shape.split_last() {
+        Some((&cols, leading)) if !leading.is_empty() => (cols, leading),
+        _ => anyhow::bail!(
+            "'{}' has shape {:?}; rows need two dimensions or more",
+            view.name,
+            view.shape
+        ),
+    };
+    let rows: usize = leading.iter().product();
+    anyhow::ensure!(
+        end <= rows && start < end && view.bytes.len().is_multiple_of(rows),
+        "rows {start}..{end} do not fit '{}' with {rows} rows",
+        view.name
+    );
+    let row_bytes = view.bytes.len() / rows;
+    let range = start * row_bytes..end * row_bytes;
+    let bytes = match view.bytes {
+        std::borrow::Cow::Borrowed(b) => std::borrow::Cow::Borrowed(&b[range]),
+        std::borrow::Cow::Owned(b) => std::borrow::Cow::Owned(b[range].to_vec()),
+    };
+    Ok(TensorView {
+        name: name.to_string(),
+        bytes,
+        shape: vec![end - start, cols],
+        dtype: view.dtype,
+    })
 }
 
 #[cfg(test)]

@@ -275,7 +275,9 @@ impl GgufLoader {
                     "self_attn.v_proj.bias" => "attn_v.bias",
                     "self_attn.o_proj.bias" => "attn_output.bias",
                     // Qwen 3.5 keeps the name; llama.cpp's llama and qwen2 call it ffn_norm.
-                    "post_attention_layernorm.weight" if self.architecture == "qwen35" => {
+                    "post_attention_layernorm.weight"
+                        if matches!(self.architecture.as_str(), "qwen35" | "qwen35moe") =>
+                    {
                         "post_attention_norm.weight"
                     }
                     "post_attention_layernorm.weight" => "ffn_norm.weight",
@@ -296,6 +298,17 @@ impl GgufLoader {
                     "mlp.gate_proj.weight" => "ffn_gate.weight",
                     "mlp.up_proj.weight" => "ffn_up.weight",
                     "mlp.down_proj.weight" => "ffn_down.weight",
+                    // Mixture of experts: the router, the shared expert and its
+                    // gate, and every expert's matrices stacked in one tensor of
+                    // [experts, rows, cols]; one expert is a row range of it.
+                    "mlp.gate.weight" => "ffn_gate_inp.weight",
+                    "mlp.shared_expert.gate_proj.weight" => "ffn_gate_shexp.weight",
+                    "mlp.shared_expert.up_proj.weight" => "ffn_up_shexp.weight",
+                    "mlp.shared_expert.down_proj.weight" => "ffn_down_shexp.weight",
+                    "mlp.shared_expert_gate.weight" => "ffn_gate_inp_shexp.weight",
+                    "mlp.experts.gate_proj" => "ffn_gate_exps.weight",
+                    "mlp.experts.up_proj" => "ffn_up_exps.weight",
+                    "mlp.experts.down_proj" => "ffn_down_exps.weight",
                     _ => suffix.as_str(),
                 };
 

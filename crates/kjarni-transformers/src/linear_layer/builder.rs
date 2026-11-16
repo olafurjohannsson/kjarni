@@ -97,7 +97,9 @@ impl<'a> LinearLayerBuilder<'a> {
     }
 
     pub fn build(self) -> Result<LinearLayer> {
-        let weight_name = if self.weight_name.ends_with(".weight") {
+        // A `name[start:end]` row range is already a full name.
+        let rows = crate::weights::parse_row_range(&self.weight_name).is_some();
+        let weight_name = if rows || self.weight_name.ends_with(".weight") {
             self.weight_name.clone().into_owned()
         } else {
             format!("{}.weight", self.weight_name)
@@ -168,6 +170,8 @@ impl<'a> LinearLayerBuilder<'a> {
         let bias = match &self.bias_loading {
             BiasLoading::Skip => None,
             BiasLoading::Explicit(name) => self.load_bias(name)?,
+            // Rows of a stacked tensor have no bias name to infer.
+            BiasLoading::Infer if rows => None,
             BiasLoading::Infer => {
                 let inferred_name = weight_name.replace(".weight", ".bias");
                 self.load_bias(&inferred_name)?

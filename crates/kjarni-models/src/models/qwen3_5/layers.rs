@@ -314,6 +314,32 @@ impl GatedDeltaNet {
         let kernel = self.conv_weight.ncols();
         let window = kernel - 1;
         let mut out = Array3::<f32>::zeros((batch, seq, channels));
+        // One token, the decode step: a few multiply-adds per channel, which
+        // a task and an allocation per channel cost many times over.
+        if seq == 1 && capture.is_none() {
+            for bi in 0..batch {
+                let mut conv = state.conv.slice_mut(s![bi, .., ..]);
+                for c in 0..channels {
+                    let w = self.conv_weight.row(c);
+                    let mut held = conv.row_mut(c);
+                    let input = x[[bi, 0, c]];
+                    // Oldest first, as the general path sums them.
+                    let mut acc = 0.0f32;
+                    for j in 0..window {
+                        acc += w[j] * held[j];
+                    }
+                    acc += w[window] * input;
+                    out[[bi, 0, c]] = silu(acc);
+                    for j in 1..window {
+                        held[j - 1] = held[j];
+                    }
+                    if window > 0 {
+                        held[window - 1] = input;
+                    }
+                }
+            }
+            return (out, None);
+        }
         let mut kept =
             Array3::<f32>::zeros((batch, channels, if capture.is_some() { window } else { 0 }));
         for bi in 0..batch {

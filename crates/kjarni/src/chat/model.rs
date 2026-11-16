@@ -71,6 +71,9 @@ pub struct Chat {
 
     /// Chat mode.
     mode: ChatMode,
+
+    /// Whether replies reason first; `None` leaves it to the template.
+    thinking: Option<bool>,
 }
 
 impl Chat {
@@ -187,6 +190,7 @@ impl Chat {
             generation_config,
             user_overrides: builder.generation_overrides,
             mode: builder.mode,
+            thinking: builder.thinking,
         })
     }
 
@@ -206,10 +210,25 @@ impl Chat {
 
     /// [`format_prompt`](Self::format_prompt), or why the model's template
     /// refuses the conversation.
+    /// The chat's own thinking setting applies unless the conversation has one.
     pub(crate) fn render_prompt(&self, conversation: &Conversation) -> ChatResult<String> {
+        let own;
+        let conversation = if conversation.thinking().is_none() && self.thinking.is_some() {
+            let mut c = conversation.clone();
+            c.set_thinking(self.thinking);
+            own = c;
+            &own
+        } else {
+            conversation
+        };
         self.chat_template()
             .try_apply(conversation)
             .map_err(ChatError::InvalidConfig)
+    }
+
+    /// Whether replies reason before answering, as the builder set it.
+    pub fn thinking(&self) -> Option<bool> {
+        self.thinking
     }
 
     /// The prompt for `conversation` as the model's template renders it, tools
@@ -277,6 +296,18 @@ impl Chat {
         messages: &[super::types::Message],
         tools: &[kjarni_transformers::ToolSpec],
     ) -> ChatResult<String> {
+        self.render_messages_thinking(messages, tools, None)
+    }
+
+    /// [`render_messages_with_tools`](Self::render_messages_with_tools), with
+    /// `thinking` deciding whether the reply reasons first; `None` keeps the
+    /// chat's setting.
+    pub fn render_messages_thinking(
+        &self,
+        messages: &[super::types::Message],
+        tools: &[kjarni_transformers::ToolSpec],
+        thinking: Option<bool>,
+    ) -> ChatResult<String> {
         let system: Vec<&str> = messages
             .iter()
             .filter(|m| matches!(m.role, Role::System))
@@ -298,6 +329,7 @@ impl Chat {
             }
         }
         conversation.set_tools(tools.to_vec());
+        conversation.set_thinking(thinking);
         self.render_conversation(&conversation)
     }
 
@@ -533,8 +565,7 @@ impl Chat {
 /// What the reply to `prompt` starts with that the model will not generate. A prompt not
 /// built by the template may not end with the prefix, and then has none.
 pub(crate) fn reply_prefix<'a>(template: &'a dyn ChatTemplate, prompt: &str) -> &'a str {
-    let prefix = template.reply_prefix();
-    if prompt.ends_with(prefix) { prefix } else { "" }
+    template.reply_prefix_for(prompt)
 }
 
 /// Send a single message with default settings.

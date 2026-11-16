@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use kjarni_transformers::{
     activations::Activation,
     decoder::prelude::*,
-    feedforward::SwiGluFeedForward,
+    feedforward::{MoeFeedForward, SharedExpert, SwiGluFeedForward},
     linear_layer::LinearLayer,
     normalization::RMSNorm,
     rope::RoPE,
@@ -29,11 +29,25 @@ pub enum Mixer {
     DeltaNet(GatedDeltaNet, usize),
 }
 
+pub enum FeedForward {
+    Dense(SwiGluFeedForward),
+    Experts(MoeFeedForward),
+}
+
+impl FeedForward {
+    fn forward(&self, x: &Array3<f32>) -> Result<Array3<f32>> {
+        match self {
+            FeedForward::Dense(mlp) => mlp.forward(x),
+            FeedForward::Experts(moe) => moe.forward(x),
+        }
+    }
+}
+
 pub struct Qwen3_5Layer {
     pub input_norm: RMSNorm,
     pub mixer: Mixer,
     pub post_norm: RMSNorm,
-    pub mlp: SwiGluFeedForward,
+    pub mlp: FeedForward,
 }
 
 pub struct Qwen3_5CpuDecoder {
@@ -143,16 +157,61 @@ impl Qwen3_5CpuDecoder {
                     Mixer::DeltaNet(net, linear_slot - 1)
                 }
             };
+            let swiglu = |gate: String, up: String, down: String| -> Result<SwiGluFeedForward> {
+                Ok(SwiGluFeedForward::new(
+                    linear(gate)?,
+                    linear(up)?,
+                    linear(down)?,
+                    Activation::SilU,
+                ))
+            };
+            let mlp = match c.moe {
+                None => FeedForward::Dense(swiglu(
+                    t("mlp.gate_proj.weight"),
+                    t("mlp.up_proj.weight"),
+                    t("mlp.down_proj.weight"),
+                )?),
+                Some(moe) => {
+                    let experts = (0..moe.num_experts)
+                        .map(|e| {
+                            let [gate, up, down] = expert_names(c, i, e, moe.expert_size, weights);
+                            swiglu(gate, up, down)
+                                .with_context(|| format!("expert {e} of layer {i}"))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let shared = if moe.shared_size > 0 {
+                        let name = t("mlp.shared_expert_gate.weight");
+                        // `[1, hidden]`, or `[hidden]` from llama.cpp.
+                        let gate = if weights.tensor_shape(&name)?.len() == 2 {
+                            weights.get_array2(&name)?.row(0).to_owned()
+                        } else {
+                            vector(name)?
+                        };
+                        Some(SharedExpert {
+                            mlp: swiglu(
+                                t("mlp.shared_expert.gate_proj.weight"),
+                                t("mlp.shared_expert.up_proj.weight"),
+                                t("mlp.shared_expert.down_proj.weight"),
+                            )?,
+                            gate: Some(gate),
+                        })
+                    } else {
+                        None
+                    };
+                    FeedForward::Experts(MoeFeedForward {
+                        router: linear(t("mlp.gate.weight"))?,
+                        experts,
+                        top_k: moe.top_k,
+                        normalize_top_k: true,
+                        shared,
+                    })
+                }
+            };
             layers.push(Qwen3_5Layer {
                 input_norm: norm(vector(t("input_layernorm.weight"))?),
                 mixer,
                 post_norm: norm(vector(t("post_attention_layernorm.weight"))?),
-                mlp: SwiGluFeedForward::new(
-                    linear(t("mlp.gate_proj.weight"))?,
-                    linear(t("mlp.up_proj.weight"))?,
-                    linear(t("mlp.down_proj.weight"))?,
-                    Activation::SilU,
-                ),
+                mlp,
             });
         }
 
@@ -221,6 +280,46 @@ impl Qwen3_5CpuDecoder {
             }
         }
         Ok(hidden)
+    }
+}
+
+/// The gate, up and down matrices of expert `e` in layer `i`, as names the
+/// weights resolve. A checkpoint may hold one tensor per expert, or all of a
+/// layer's experts stacked in one, whose rows for expert `e` are named with a
+/// `[start:end]` range: transformers stacks gate over up in `gate_up_proj`, and
+/// llama.cpp keeps `gate`, `up` and `down` apart.
+fn expert_names(
+    c: &Qwen3_5Config,
+    i: usize,
+    e: usize,
+    size: usize,
+    weights: &ModelWeights,
+) -> [String; 3] {
+    let t = |name: &str| c.layer_tensor(i, name);
+    let one = |part: &str| t(&format!("mlp.experts.{e}.{part}.weight"));
+    if weights.contains(&one("gate_proj")) {
+        return [one("gate_proj"), one("up_proj"), one("down_proj")];
+    }
+    let hidden = c.hidden_size;
+    let down = format!(
+        "{}[{}:{}]",
+        t("mlp.experts.down_proj"),
+        e * hidden,
+        (e + 1) * hidden
+    );
+    let rows = |name: &str, from: usize| format!("{}[{from}:{}]", t(name), from + size);
+    if c.llama_cpp_layout {
+        [
+            rows("mlp.experts.gate_proj", e * size),
+            rows("mlp.experts.up_proj", e * size),
+            down,
+        ]
+    } else {
+        [
+            rows("mlp.experts.gate_up_proj", 2 * e * size),
+            rows("mlp.experts.gate_up_proj", 2 * e * size + size),
+            down,
+        ]
     }
 }
 

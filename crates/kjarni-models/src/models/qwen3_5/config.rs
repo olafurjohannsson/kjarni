@@ -61,6 +61,8 @@ struct TextConfig {
     num_attention_heads: usize,
     num_key_value_heads: usize,
     head_dim: Option<usize>,
+    // A mixture-of-experts config has expert sizes instead.
+    #[serde(default)]
     intermediate_size: usize,
     vocab_size: usize,
     max_position_embeddings: usize,
@@ -99,6 +101,24 @@ struct TextConfig {
     tie_word_embeddings: Option<bool>,
     #[serde(default)]
     num_experts: Option<usize>,
+    #[serde(default)]
+    num_experts_per_tok: Option<usize>,
+    #[serde(default)]
+    moe_intermediate_size: Option<usize>,
+    #[serde(default)]
+    shared_expert_intermediate_size: Option<usize>,
+}
+
+/// The feed-forward of a mixture-of-experts model, used in every layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoeDims {
+    pub num_experts: usize,
+    /// Experts each token goes through.
+    pub top_k: usize,
+    /// Each expert's intermediate width.
+    pub expert_size: usize,
+    /// The shared expert's intermediate width; 0 for none.
+    pub shared_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +129,9 @@ pub struct Qwen3_5Config {
     pub num_key_value_heads: usize,
     pub head_dim: usize,
     pub intermediate_size: usize,
+    /// Set for a mixture-of-experts model, whose layers have experts in place of
+    /// a dense feed-forward.
+    pub moe: Option<MoeDims>,
     pub vocab_size: usize,
     pub max_position_embeddings: usize,
     pub rms_norm_eps: f32,
@@ -158,9 +181,26 @@ impl Qwen3_5Config {
         let text: TextConfig = serde_json::from_value(text_value.clone())
             .context("config.json does not describe a Qwen 3.5 text decoder")?;
 
-        if text.num_experts.is_some_and(|n| n > 0) {
-            bail!("Qwen 3.5 mixture-of-experts models are not supported yet; the dense ones are");
-        }
+        let moe = match text.num_experts.filter(|&n| n > 0) {
+            Some(num_experts) => {
+                let field = |v: Option<usize>, name: &str| {
+                    v.filter(|&n| n > 0)
+                        .with_context(|| format!("a mixture-of-experts config needs {name}"))
+                };
+                let top_k = field(text.num_experts_per_tok, "num_experts_per_tok")?;
+                if top_k > num_experts {
+                    bail!("each token cannot go through {top_k} of {num_experts} experts");
+                }
+                Some(MoeDims {
+                    num_experts,
+                    top_k,
+                    expert_size: field(text.moe_intermediate_size, "moe_intermediate_size")?,
+                    shared_size: text.shared_expert_intermediate_size.unwrap_or(0),
+                })
+            }
+            None if text.intermediate_size == 0 => bail!("config.json has no intermediate_size"),
+            None => None,
+        };
         if !text.attn_output_gate {
             bail!(
                 "this Qwen 3.5 config turns off the attention output gate, which Kjarni does not implement"
@@ -257,6 +297,7 @@ impl Qwen3_5Config {
             num_key_value_heads: text.num_key_value_heads,
             head_dim,
             intermediate_size: text.intermediate_size,
+            moe,
             vocab_size: text.vocab_size,
             max_position_embeddings: text.max_position_embeddings,
             rms_norm_eps: text.rms_norm_eps,
@@ -281,25 +322,23 @@ impl Qwen3_5Config {
     pub fn from_gguf(weights: &ModelWeights) -> Result<Self> {
         let loader = weights.loader();
         let arch = loader.get_string("general.architecture").unwrap_or("");
-        match arch {
-            "qwen35" => {}
-            "qwen35moe" => {
-                bail!(
-                    "Qwen 3.5 mixture-of-experts models are not supported yet; the dense ones are"
-                )
-            }
-            other => bail!("this GGUF holds a '{other}' model, not Qwen 3.5"),
+        // The dense models are `qwen35`, the mixture-of-experts ones `qwen35moe`,
+        // and each names its metadata after itself.
+        if !matches!(arch, "qwen35" | "qwen35moe") {
+            bail!("this GGUF holds a '{arch}' model, not Qwen 3.5");
         }
         let int = |key: &str| {
             loader
-                .get_u32(&format!("qwen35.{key}"))
+                .get_u32(&format!("{arch}.{key}"))
                 .map(|v| v as usize)
-                .with_context(|| format!("the GGUF has no qwen35.{key}"))
+                .with_context(|| format!("the GGUF has no {arch}.{key}"))
         };
-        let float = |key: &str| loader.get_f32(&format!("qwen35.{key}"));
+        let float = |key: &str| loader.get_f32(&format!("{arch}.{key}"));
 
         // Converters that keep the multi-token-prediction head count it as blocks.
-        let mtp = loader.get_u32("qwen35.nextn_predict_layers").unwrap_or(0) as usize;
+        let mtp = loader
+            .get_u32(&format!("{arch}.nextn_predict_layers"))
+            .unwrap_or(0) as usize;
         let num_hidden_layers = int("block_count")?
             .checked_sub(mtp)
             .context("qwen35.nextn_predict_layers exceeds the block count")?;
@@ -310,7 +349,10 @@ impl Qwen3_5Config {
         let listed = loader
             .as_any()
             .downcast_ref::<kjarni_transformers::weights::GgufLoader>()
-            .and_then(|g| g.metadata().get("qwen35.attention.recurrent_layers"));
+            .and_then(|g| {
+                g.metadata()
+                    .get(&format!("{arch}.attention.recurrent_layers"))
+            });
         #[cfg(target_arch = "wasm32")]
         let listed: Option<&serde_json::Value> = None;
         let recurrent: Option<Vec<bool>> = listed
@@ -320,7 +362,7 @@ impl Qwen3_5Config {
                     .iter()
                     .map(|f| f.as_bool().or_else(|| f.as_u64().map(|n| n != 0)))
                     .collect::<Option<Vec<bool>>>()
-                    .context("qwen35.attention.recurrent_layers is not a list of booleans")
+                    .context("attention.recurrent_layers is not a list of booleans")
             })
             .transpose()?;
         let interval = int("full_attention_interval").unwrap_or(4);
@@ -353,6 +395,21 @@ impl Qwen3_5Config {
             .first()
             .context("the token embedding has no shape")?;
         let eos = loader.get_u32("tokenizer.ggml.eos_token_id");
+        let moe = if arch == "qwen35moe" {
+            let num_experts = int("expert_count")?;
+            let top_k = int("expert_used_count")?;
+            if top_k == 0 || top_k > num_experts {
+                bail!("each token cannot go through {top_k} of {num_experts} experts");
+            }
+            Some(MoeDims {
+                num_experts,
+                top_k,
+                expert_size: int("expert_feed_forward_length")?,
+                shared_size: int("expert_shared_feed_forward_length").unwrap_or(0),
+            })
+        } else {
+            None
+        };
 
         Ok(Self {
             hidden_size: int("embedding_length")?,
@@ -360,7 +417,11 @@ impl Qwen3_5Config {
             num_attention_heads: int("attention.head_count")?,
             num_key_value_heads: int("attention.head_count_kv")?,
             head_dim,
-            intermediate_size: int("feed_forward_length")?,
+            intermediate_size: match moe {
+                Some(_) => 0,
+                None => int("feed_forward_length")?,
+            },
+            moe,
             vocab_size,
             max_position_embeddings: int("context_length")?,
             rms_norm_eps: float("attention.layer_norm_rms_epsilon")

@@ -320,11 +320,14 @@ mod tiny {
     }
 
     fn expected() -> serde_json::Value {
-        serde_json::from_str(&std::fs::read_to_string(dir().join("expected.json")).unwrap())
-            .unwrap()
+        expected_in(&dir())
     }
 
-    fn ids(v: &serde_json::Value) -> Vec<u32> {
+    pub(super) fn expected_in(dir: &std::path::Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(dir.join("expected.json")).unwrap()).unwrap()
+    }
+
+    pub(super) fn ids(v: &serde_json::Value) -> Vec<u32> {
         v.as_array()
             .unwrap()
             .iter()
@@ -332,7 +335,7 @@ mod tiny {
             .collect()
     }
 
-    fn floats(v: &serde_json::Value) -> Vec<f32> {
+    pub(super) fn floats(v: &serde_json::Value) -> Vec<f32> {
         v.as_array()
             .unwrap()
             .iter()
@@ -344,7 +347,7 @@ mod tiny {
         Qwen3_5Model::from_pretrained(&dir(), Device::Cpu, None, None, None).unwrap()
     }
 
-    fn greedy(model: &Qwen3_5Model, prompt: &[u32], n: usize) -> Vec<u32> {
+    pub(super) fn greedy(model: &Qwen3_5Model, prompt: &[u32], n: usize) -> Vec<u32> {
         let mut cache = model.new_cache(1, 256, 1).unwrap();
         let mut next = argmax(logits(model, prompt, cache.as_mut()).row(prompt.len() - 1));
         let mut out = vec![next];
@@ -455,6 +458,73 @@ mod tiny {
             1e-4,
         );
         assert_eq!(greedy(&m, &prompt, 12), ids(&e["short_greedy"]));
+    }
+}
+
+/// The tiny mixture-of-experts model in `testdata/moe`, which its `make.py`
+/// describes: eight experts, two per token, and a gated shared expert. Layers 0
+/// and 1 store a tensor per expert, layers 2 and 3 the experts stacked.
+mod tiny_moe {
+    use super::tiny::{expected_in, floats, greedy, ids};
+    use super::*;
+    use crate::models::qwen3_5::config::MoeDims;
+
+    fn dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/models/qwen3_5/testdata/moe")
+    }
+
+    fn check(m: &Qwen3_5Model) {
+        let e = expected_in(&dir());
+        let prompt = ids(&e["short_ids"]);
+        let mut cache = m.new_cache(1, 64, 1).unwrap();
+        let got = logits(m, &prompt, cache.as_mut());
+        for (pos, row) in e["short_logits"].as_array().unwrap().iter().enumerate() {
+            assert_close(got.row(pos), &floats(row), 1e-4);
+        }
+        let long = ids(&e["long_ids"]);
+        let mut cache = m.new_cache(1, 128, 1).unwrap();
+        let got = logits(m, &long, cache.as_mut());
+        assert_close(
+            got.row(long.len() - 1),
+            &floats(&e["long_last_logits"]),
+            1e-4,
+        );
+        assert_eq!(greedy(m, &prompt, 12), ids(&e["short_greedy"]));
+        assert_eq!(greedy(m, &long, 12), ids(&e["long_greedy"]));
+    }
+
+    #[test]
+    fn reads_the_experts_from_the_config() {
+        let m = Qwen3_5Model::from_pretrained(&dir(), Device::Cpu, None, None, None).unwrap();
+        assert_eq!(
+            m.config().moe,
+            Some(MoeDims {
+                num_experts: 8,
+                top_k: 2,
+                expert_size: 32,
+                shared_size: 48
+            })
+        );
+    }
+
+    #[test]
+    fn matches_transformers() {
+        check(&Qwen3_5Model::from_pretrained(&dir(), Device::Cpu, None, None, None).unwrap());
+    }
+
+    /// As llama.cpp's converter lays it out; see `make_gguf.py`. Each expert is
+    /// read as its rows of the layer's stacked `ffn_*_exps` tensors.
+    #[test]
+    fn the_gguf_matches_transformers() {
+        let m =
+            Qwen3_5Model::from_pretrained(&dir().join("tiny.gguf"), Device::Cpu, None, None, None)
+                .unwrap();
+        assert!(m.config().llama_cpp_layout);
+        assert_eq!(
+            m.config().moe.map(|d| (d.num_experts, d.top_k)),
+            Some((8, 2))
+        );
+        check(&m);
     }
 }
 

@@ -1,7 +1,7 @@
 //! CPU-based linear layer with multi-dtype support.
 
 use crate::cpu::{
-    kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0},
+    kernels::q_common::{BlockQ4_K, BlockQ5_K, BlockQ6_K, BlockQ8_0, BlockQ8_K, QK_K},
     ops,
 };
 #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
@@ -88,6 +88,31 @@ impl KQuantMatrix {
             Self::Q5_K(m) => rows(m, row, out),
             Self::Q6_K(m) => rows(m, row, out),
         }
+    }
+}
+
+/// One input row for [`LinearLayer::rows_into`], quantised once for every
+/// K-quant layer it meets rather than once per call.
+pub struct RowInput<'a> {
+    values: &'a [f32],
+    q8_k: std::sync::OnceLock<Vec<BlockQ8_K>>,
+}
+
+impl<'a> RowInput<'a> {
+    pub fn new(values: &'a [f32]) -> Self {
+        Self {
+            values,
+            q8_k: std::sync::OnceLock::new(),
+        }
+    }
+
+    pub fn values(&self) -> &[f32] {
+        self.values
+    }
+
+    fn q8_k(&self) -> &[BlockQ8_K] {
+        self.q8_k
+            .get_or_init(|| crate::cpu::kernels::quantize::quantize_row_q8_k(self.values))
     }
 }
 
@@ -287,6 +312,46 @@ impl LinearLayer {
                 // Fall back to allocating and copy
                 let result = self.matmul(input);
                 output.assign(&result);
+            }
+        }
+    }
+
+    /// Output rows `first..first + out.len()` for one input row, computed on
+    /// the calling thread. [`matmul`](Self::matmul) spreads one row's output
+    /// over every thread; a caller multiplying many small layers at once, such
+    /// as a mixture of experts, spreads all their rows in one go with this.
+    pub fn rows_into(&self, x: &RowInput, first: usize, out: &mut [f32]) {
+        use crate::cpu::ops::matmul::rows as r;
+        let k = self.in_features();
+        let rows = first..first + out.len();
+        let blocks = |per_row: usize| rows.start * per_row..rows.end * per_row;
+        match &self.data {
+            LinearData::F32(w) => {
+                r::f32_rows_into(out, x.values(), w.slice(ndarray::s![rows.clone(), ..]))
+            }
+            LinearData::BF16(w) => {
+                r::bf16_rows_into(out, x.values(), w.slice(ndarray::s![rows.clone(), ..]))
+            }
+            LinearData::F16(w) => {
+                for (o, row) in out
+                    .iter_mut()
+                    .zip(w.slice(ndarray::s![rows.clone(), ..]).outer_iter())
+                {
+                    *o = row
+                        .iter()
+                        .zip(x.values())
+                        .map(|(w, x)| w.to_f32() * x)
+                        .sum();
+                }
+            }
+            LinearData::Q8_0(w) => r::q8_0_rows_into(out, x.values(), &w.blocks[blocks(k / 32)], k),
+            LinearData::Q4_K(w) => r::q4_k_rows_into(out, x.q8_k(), &w.blocks[blocks(k / QK_K)], k),
+            LinearData::Q5_K(w) => r::q5_k_rows_into(out, x.q8_k(), &w.blocks[blocks(k / QK_K)], k),
+            LinearData::Q6_K(w) => r::q6_k_rows_into(out, x.q8_k(), &w.blocks[blocks(k / QK_K)], k),
+        }
+        if let Some(b) = &self.bias {
+            for (o, b) in out.iter_mut().zip(b.slice(ndarray::s![rows]).iter()) {
+                *o += b;
             }
         }
     }

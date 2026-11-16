@@ -55,8 +55,10 @@ pub async fn run(
         ));
     }
 
-    // A path is loaded as it is; the registry copy would go unread.
-    if model_path.is_none() && !registry::is_model_downloaded(model)? {
+    // A path is loaded as it is; the registry copy would go unread. With
+    // --gguf the loader fetches the GGUF itself, and the full-precision weights
+    // this would download go unread too.
+    if model_path.is_none() && !gguf && !registry::is_model_downloaded(model)? {
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }

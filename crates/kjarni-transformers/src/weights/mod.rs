@@ -343,6 +343,45 @@ mod more_tests {
         Ok(())
     }
 
+    /// `name[start:end]` reads rows of a tensor, counting every dimension but
+    /// the last, so one expert of a stacked `[experts, rows, cols]` tensor is a
+    /// range of its rows.
+    #[test]
+    fn a_row_range_reads_rows_of_a_stacked_tensor() -> Result<()> {
+        let dir = TempDir::new()?;
+        // [2 experts, 3 rows, 2 cols]; each value is 10 * expert + row + col / 2.
+        let data: Vec<f32> = (0..2)
+            .flat_map(|e| {
+                (0..3).flat_map(move |r| (0..2).map(move |c| (10 * e + r) as f32 + c as f32 / 2.0))
+            })
+            .collect();
+        create_test_safetensors(dir.path(), vec![("experts", data, vec![2, 3, 2])])?;
+        let weights = ModelWeights::new(dir.path())?;
+
+        assert!(weights.contains("experts[3:6]"));
+        assert!(!weights.contains("missing[0:1]"));
+        assert_eq!(
+            weights.get_array2("experts[3:6]")?,
+            ndarray::array![[10.0, 10.5], [11.0, 11.5], [12.0, 12.5]]
+        );
+        // A range may cross from one expert into the next.
+        assert_eq!(
+            weights.get_array2("experts[2:4]")?,
+            ndarray::array![[2.0, 2.5], [10.0, 10.5]]
+        );
+        assert!(
+            weights.get_array2("experts[5:7]").is_err(),
+            "past the last row"
+        );
+
+        // A linear layer over a range infers no bias, though the name it would
+        // have tried exists.
+        let layer = crate::linear_layer::LinearLayer::builder(&weights, "experts[0:3]").build()?;
+        assert_eq!(layer.shape(), [3, 2]);
+        assert!(layer.bias.is_none());
+        Ok(())
+    }
+
     #[test]
     fn test_model_weights_new_valid_path() -> Result<()> {
         let dir = TempDir::new()?;

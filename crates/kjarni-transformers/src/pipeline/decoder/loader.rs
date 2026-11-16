@@ -391,10 +391,8 @@ fn chat_template_for(mt: ModelType) -> Option<Box<dyn ChatTemplate>> {
         ModelType::Qwen2_5_0_5B_Instruct | ModelType::Qwen2_5_1_5B_Instruct => {
             Box::new(ChatMLTemplate::qwen2_5())
         }
-        ModelType::Qwen3_5_0_8B | ModelType::Qwen3_5_2B | ModelType::Qwen3_5_4B => {
-            Box::new(Qwen3_5ChatTemplate::new())
-        }
         _ => match mt.architecture() {
+            ModelArchitecture::Qwen3_5 => Box::new(Qwen3_5ChatTemplate::new()),
             ModelArchitecture::Llama => Box::new(Llama3ChatTemplate::for_generation()),
             ModelArchitecture::Qwen2 => Box::new(ChatMLTemplate::new()),
             ModelArchitecture::Mistral => Box::new(MistralChatTemplate::new()),

@@ -4,7 +4,10 @@ use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use std::io::{self, BufRead, Write};
 
+use colored::Colorize;
 use kjarni::chat::Chat;
+
+use crate::commands::reasoning::ReasoningSplit;
 
 /// Slash commands available in chat mode
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +47,7 @@ pub async fn run(
     gguf: bool,
     draft: Option<&str>,
     draft_tokens: usize,
+    think: bool,
 ) -> Result<()> {
     // Fail on an unknown model here, with suggestions, rather than letting the
     // builder report it without context. A folder is checked by loading it.
@@ -54,7 +58,8 @@ pub async fn run(
     // Initialize the Chat instance using the Builder
     let mut builder = Chat::builder(model)
         .temperature(temperature)
-        .max_tokens(max_tokens);
+        .max_tokens(max_tokens)
+        .thinking(think);
     if let Some(path) = model_path {
         builder = builder.model_path(path);
     }
@@ -149,13 +154,20 @@ pub async fn run(
             }
         };
 
-        // Collect and print tokens
+        // Collect and print tokens; reasoning, when the model thinks, dimmed.
         let mut full_response = String::new();
+        let mut split = think.then(ReasoningSplit::default);
 
         while let Some(token_result) = stream.next().await {
             match token_result {
                 Ok(text) => {
-                    print!("{}", text);
+                    match &mut split {
+                        Some(split) => {
+                            let out = split.push(&text);
+                            print!("{}{}", out.reasoning.dimmed(), out.answer);
+                        }
+                        None => print!("{}", text),
+                    }
                     stdout.flush()?;
                     full_response.push_str(&text);
                 }

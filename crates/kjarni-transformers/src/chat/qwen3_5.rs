@@ -1,10 +1,12 @@
 use crate::{ChatTemplate, Conversation, Role};
 
-/// Qwen 3.5's chat template in its default, non-thinking mode, for text.
+/// Qwen 3.5's chat template, for text.
 ///
 /// ChatML, with three differences from Qwen 2.5's: no default system turn,
-/// every message trimmed, and a generation prompt that closes an empty
-/// `<think>` block so the model answers directly. Reasoning in an earlier
+/// every message trimmed, and a generation prompt that opens the reply with a
+/// `<think>` block. Unless the conversation asks for thinking, the block is
+/// closed empty so the model answers directly; Qwen's own template thinks
+/// unless told not to, and Kjarni answers directly unless told to think. Reasoning in an earlier
 /// assistant turn is dropped from the history, as the model's own template
 /// drops it; a turn after the last user message keeps it in a think block.
 #[derive(Clone, Debug, Default)]
@@ -102,8 +104,18 @@ impl ChatTemplate for Qwen3_5ChatTemplate {
                 }
             }
         }
-        prompt.push_str("<|im_start|>assistant\n<think>\n\n</think>\n\n");
+        if conversation.thinking() == Some(true) {
+            prompt.push_str("<|im_start|>assistant\n<think>\n");
+        } else {
+            prompt.push_str("<|im_start|>assistant\n<think>\n\n</think>\n\n");
+        }
         prompt
+    }
+
+    /// A thinking reply starts inside the block the prompt opened. A direct
+    /// one's prompt ends with the block closed, so it has no prefix.
+    fn reply_prefix(&self) -> &str {
+        "<think>\n"
     }
 
     fn supports_tools(&self) -> bool {
@@ -141,6 +153,26 @@ mod tests {
             "<|im_start|>system\nBe brief.<|im_end|>\n<|im_start|>user\nWhat is Rust?<|im_end|>\n\
              <|im_start|>assistant\n<think>\n\n</think>\n\n"
         );
+    }
+
+    /// transformers with enable_thinking=True.
+    #[test]
+    fn a_thinking_reply_opens_the_think_block_and_starts_inside_it() {
+        let mut c = Conversation::new();
+        c.push_user("Hello!");
+        c.set_thinking(Some(true));
+        let t = Qwen3_5ChatTemplate::new();
+        let prompt = t.apply(&c);
+        assert_eq!(
+            prompt,
+            "<|im_start|>user\nHello!<|im_end|>\n<|im_start|>assistant\n<think>\n"
+        );
+        assert_eq!(t.reply_prefix_for(&prompt), "<think>\n");
+        // Asking for no thinking is the default.
+        c.set_thinking(Some(false));
+        let direct = t.apply(&c);
+        assert!(direct.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+        assert_eq!(t.reply_prefix_for(&direct), "");
     }
 
     #[test]
