@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - **Models straight from Hugging Face.** Anywhere a model name goes, a Hub
   repository works too: `kjarni chat --model Qwen/Qwen3.5-9B`, a
@@ -27,6 +27,23 @@
   conversation outgrows 16k tokens, its older part is folded into a summary the
   model writes. Defaults to `qwen3.5-4b` from GGUF. The same agent is a library
   module, `kjarni::agent`, with the `Tool` trait for adding tools of your own.
+- **The agent searches documents by meaning.** `search_documents` finds the
+  passages in the working folder, or a folder inside it, that answer a question,
+  by meaning and keywords together, reranked by a cross-encoder
+  (`minilm-l6-v2-cross-encoder`). A folder is indexed on its first search and only
+  changed files are embedded after that; a folder inside an indexed one uses that
+  index. A folder with more than 10,000 documents, such as a whole home folder, is
+  refused with the subfolders that hold the most, so the model searches one of
+  those. Text and code files are read, not PDF or Word.
+- **The agent reuses its prompt cache after `remember`.** The system prompt lists
+  the memory's facts as they were when the conversation started, so saving a fact
+  no longer makes the model read the whole conversation again; a forgotten fact
+  still leaves at once. A list, remember and answer run went from 271 s to 112 s
+  on four cores with `qwen3.5-4b`.
+- **`kjarni::folder_search`.** The folder search behind `search_documents` and the
+  MCP server's `search_folder`, as a library module. The two share their indexes,
+  now kept in `folder-indexes` in the model cache; the old `mcp-indexes` folder
+  there is no longer read and can be deleted.
 - **Tool calling.** Qwen 3.5's chat template renders tools, calls and tool results
   as transformers renders them, and `parse_tool_calls` reads calls back in both
   Qwen 3.5's XML form and the JSON form of Qwen 2.5 and 3. Jinja templates that

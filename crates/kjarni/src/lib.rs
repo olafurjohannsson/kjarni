@@ -4,6 +4,8 @@ pub mod chat;
 pub mod classifier;
 pub mod common;
 pub mod embedder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod folder_search;
 pub mod generation;
 pub mod indexer;
 pub mod ner;

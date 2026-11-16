@@ -197,7 +197,7 @@ async fn build_indexer(
         .chunk_overlap(chunk_overlap)
         .max_file_size(usize::MAX)
         .quiet(quiet);
-    for pattern in super::mcp::EXCLUDED {
+    for pattern in kjarni::folder_search::EXCLUDED {
         builder = builder.exclude(pattern);
     }
     if gpu {
@@ -516,7 +516,10 @@ fn document_loader(chunk_size: usize, chunk_overlap: usize, quiet: bool) -> Docu
             clean_markdown: true,
         },
         quiet,
-        exclude_patterns: super::mcp::EXCLUDED.iter().map(|p| p.to_string()).collect(),
+        exclude_patterns: kjarni::folder_search::EXCLUDED
+            .iter()
+            .map(|p| p.to_string())
+            .collect(),
         ..Default::default()
     })
 }

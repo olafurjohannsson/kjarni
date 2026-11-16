@@ -107,6 +107,10 @@ impl PrefixCache {
         // in the cache to be read as context by the next prompt.
         self.cache.set_seq_length(keep);
         self.tokens.truncate(keep);
+        log::debug!(
+            "prefix cache: reused {keep} of {} prompt tokens",
+            wanted.len()
+        );
         keep
     }
 

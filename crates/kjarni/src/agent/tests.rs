@@ -291,11 +291,14 @@ async fn folds_old_messages_into_a_summary_and_saves_it() {
     assert!(restored.messages[0].content.starts_with("Is it fast?"));
 }
 
+/// The system prompt lists saved facts and stays the same through a
+/// conversation, so the prompt cache is reused after `remember`. A fact saved
+/// now joins it in the next conversation; a forgotten fact leaves at once.
 #[tokio::test]
 async fn saved_facts_appear_in_the_system_prompt() {
     let dir = tempfile::tempdir().unwrap();
     let memory = Arc::new(Memory::open(dir.path(), None).unwrap());
-    memory
+    let short = memory
         .remember("The user prefers short answers.")
         .await
         .unwrap();
@@ -317,14 +320,27 @@ async fn saved_facts_appear_in_the_system_prompt() {
 
     agent.send("My dog is Loki", &mut events).await.unwrap();
 
-    assert!(model.prompts()[0].contains(
+    let prompts = model.prompts();
+    let system = |p: &str| p[..p.find("<|im_end|>").unwrap()].to_string();
+    assert!(system(&prompts[0]).ends_with(
         "What you remember from earlier conversations:\n- The user prefers short answers."
     ));
     assert_eq!(memory.len(), 2);
+    assert_eq!(system(&prompts[1]), system(&prompts[0]));
+    assert!(prompts[1].starts_with(&prompts[0]));
+
+    agent.start_over(None);
     assert!(
         agent
             .system_prompt()
             .ends_with("- The user prefers short answers.\n- The user's dog is Loki.")
+    );
+
+    memory.forget(short.id).unwrap();
+    assert!(
+        agent
+            .system_prompt()
+            .ends_with("What you remember from earlier conversations:\n- The user's dog is Loki.")
     );
 }
 
@@ -378,4 +394,61 @@ async fn a_real_model_reads_a_file_and_answers_from_it() {
     );
     assert!(!reply.text.contains("<tool_call>"), "{}", reply.text);
     assert!(!reply.stopped_early);
+}
+
+/// `search_documents` indexes the working folder on its first call, names
+/// files relative to it, and searches a subfolder through the same index.
+#[tokio::test(flavor = "multi_thread")]
+async fn search_documents_finds_passages_by_meaning() {
+    use crate::folder_search::FolderSearch;
+    use tool::Tool;
+
+    let cache = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("notes")).unwrap();
+    std::fs::write(
+        dir.path().join("notes/boat.md"),
+        "The ferry leaves the harbour at nine.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("notes/bread.md"),
+        "Knead the dough and let it rise.",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("todo.txt"), "Pump the bicycle tyres.").unwrap();
+    let search = FolderSearch::new()
+        .cache_dir(cache.path())
+        .reranker(tools::documents::RERANK_MODEL);
+    let tool = tools::SearchDocuments::new(
+        Arc::new(tools::Workspace::new(dir.path())),
+        Arc::new(search),
+    );
+    let args = |pairs: serde_json::Value| pairs.as_object().unwrap().clone();
+    let boat = std::path::Path::new("notes").join("boat.md");
+
+    let first = tool
+        .call(&args(
+            serde_json::json!({"query": "when does the boat sail", "limit": 1}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        first,
+        format!(
+            "(Indexed the working folder (3 files).)\n\n1. {}\nThe ferry leaves the harbour at nine.",
+            boat.display()
+        )
+    );
+
+    let inside = tool
+        .call(&args(
+            serde_json::json!({"query": "tyres", "path": "notes", "limit": 5}),
+        ))
+        .await
+        .unwrap();
+    assert!(!inside.contains("Indexed"), "{inside}");
+    assert!(!inside.contains("todo.txt"), "{inside}");
+    assert!(inside.starts_with("1. notes"), "{inside}");
+    assert_eq!(inside.matches("\n\n").count(), 1, "{inside}");
 }
