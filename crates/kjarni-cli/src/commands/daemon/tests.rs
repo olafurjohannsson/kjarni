@@ -395,7 +395,7 @@ async fn a_message_streams_its_reply_and_is_saved() {
     assert_eq!(status, StatusCode::ACCEPTED);
 
     let events = d.follow(&id, 0, ends_turn).await;
-    assert_eq!(types(&events), ["user", "done"]);
+    assert_eq!(types(&events), ["user", "context", "done"]);
     assert_eq!(events[0]["text"], "Hi");
     let streamed: String = events.iter().filter_map(|e| e["delta"].as_str()).collect();
     assert_eq!(streamed, "<think>easy</think>Hello there.");
@@ -466,15 +466,7 @@ async fn a_write_waits_for_approval_from_the_client() {
     assert_eq!(open["messages"], json!([]));
     assert_eq!(open["events"].as_array().unwrap().len(), events.len());
 
-    // A second message while it waits is refused; so is a wrong approval.
-    let (busy, _) = d
-        .api(
-            "POST",
-            &format!("/api/conversations/{id}/messages"),
-            Some(json!({"text": "and?"})),
-        )
-        .await;
-    assert_eq!(busy, StatusCode::CONFLICT);
+    // A wrong approval is refused.
     let path = format!("/api/conversations/{id}/approvals/{}", approval + 100);
     assert_eq!(
         d.api("POST", &path, Some(json!({"decision": "once"})))
@@ -500,7 +492,7 @@ async fn a_write_waits_for_approval_from_the_client() {
     let rest = d.follow(&id, last, ends_turn).await;
     assert_eq!(
         types(&rest),
-        ["approved", "file_changed", "tool_result", "done"]
+        ["approved", "file_changed", "tool_result", "context", "done"]
     );
     assert_eq!(rest[0]["decision"], "once");
     assert_eq!(rest[2]["ok"], true);
@@ -618,7 +610,7 @@ async fn the_files_a_conversation_changed_are_listed_with_their_diffs() {
     let rest = d.follow(&id, last, ends_turn).await;
     assert_eq!(
         types(&rest),
-        ["approved", "file_changed", "tool_result", "done"]
+        ["approved", "file_changed", "tool_result", "context", "done"]
     );
     assert_eq!(rest[1]["path"], "note.txt");
 
@@ -646,6 +638,139 @@ async fn the_files_a_conversation_changed_are_listed_with_their_diffs() {
         .await;
     assert!(!saved.exists());
     assert_eq!(d.api("GET", &changes, None).await.0, StatusCode::NOT_FOUND);
+}
+
+/// A message sent while the agent works is queued, then read before its
+/// next step, in the same turn.
+#[tokio::test]
+async fn a_message_sent_mid_turn_joins_the_turn() {
+    let d = daemon(
+        Scripted::new(&[Some(WRITE_CALL), Some("Saved, and noted.")]),
+        false,
+    );
+    let id = d.new_conversation().await;
+    let messages = format!("/api/conversations/{id}/messages");
+    let (_, sent) = d
+        .api("POST", &messages, Some(json!({"text": "Save hello"})))
+        .await;
+    assert_eq!(sent, json!({"queued": false}));
+    let events = d.follow(&id, 0, |e| e["type"] == "approval").await;
+    let approval = events.last().unwrap()["approval"].as_u64().unwrap();
+
+    let (status, sent) = d
+        .api("POST", &messages, Some(json!({"text": " also add bread "})))
+        .await;
+    assert_eq!(
+        (status, sent),
+        (StatusCode::ACCEPTED, json!({"queued": true}))
+    );
+    d.api(
+        "POST",
+        &format!("/api/conversations/{id}/approvals/{approval}"),
+        Some(json!({"decision": "once"})),
+    )
+    .await;
+
+    let all = d.follow(&id, 0, ends_turn).await;
+    let steps: Vec<_> = types(&all).into_iter().filter(|t| *t != "text").collect();
+    assert_eq!(
+        steps,
+        [
+            "user",
+            "tool_call",
+            "approval",
+            "queued",
+            "approved",
+            "file_changed",
+            "tool_result",
+            "user",
+            "context",
+            "done"
+        ]
+    );
+    let users: Vec<_> = all
+        .iter()
+        .filter(|e| e["type"] == "user")
+        .map(|e| e["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(users, ["Save hello", "also add bread"]);
+    let (_, open) = d
+        .api("GET", &format!("/api/conversations/{id}"), None)
+        .await;
+    let roles: Vec<_> = open["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, ["user", "assistant", "tool", "user", "assistant"]);
+    assert!(open["context"]["used"].as_u64().is_some());
+}
+
+/// Stopping a turn discards the messages queued for it, and says which.
+#[tokio::test]
+async fn stopping_drops_the_messages_queued_for_the_turn() {
+    let d = daemon(Scripted::new(&[None]), false);
+    let id = d.new_conversation().await;
+    let messages = format!("/api/conversations/{id}/messages");
+    d.api("POST", &messages, Some(json!({"text": "Think hard"})))
+        .await;
+    d.follow(&id, 0, |e| e["type"] == "text").await;
+    d.api("POST", &messages, Some(json!({"text": "never mind"})))
+        .await;
+
+    d.api("POST", &format!("/api/conversations/{id}/stop"), None)
+        .await;
+
+    let all = d.follow(&id, 0, ends_turn).await;
+    let stopped = all.last().unwrap();
+    assert_eq!(stopped["type"], "stopped");
+    assert_eq!(stopped["dropped"], json!(["never mind"]));
+}
+
+/// Compacting by hand summarizes the earlier messages now and reports how
+/// full the prompt is; while a turn runs it is refused.
+#[tokio::test]
+async fn a_conversation_can_be_compacted_by_hand() {
+    let d = daemon(
+        Scripted::new(&[
+            Some("One."),
+            Some("Two."),
+            Some("Three."),
+            Some("Four."),
+            Some("The user counted to four."),
+            None,
+        ]),
+        false,
+    );
+    let id = d.new_conversation().await;
+    let compact = format!("/api/conversations/{id}/compact");
+    let (status, body) = d.api("POST", &compact, None).await;
+    assert_eq!(
+        (status, body["compacted"].clone()),
+        (StatusCode::OK, json!(false))
+    );
+
+    for text in ["1", "2", "3", "4"] {
+        d.ask_in(&id, text).await;
+    }
+    let (status, body) = d.api("POST", &compact, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["compacted"], true);
+    assert!(body["context"]["budget"].as_u64().unwrap() > 0);
+    let (_, open) = d
+        .api("GET", &format!("/api/conversations/{id}"), None)
+        .await;
+    assert_eq!(open["summary"], "The user counted to four.");
+    assert_eq!(open["messages"].as_array().unwrap().len(), 6);
+
+    d.api(
+        "POST",
+        &format!("/api/conversations/{id}/messages"),
+        Some(json!({"text": "5"})),
+    )
+    .await;
+    assert_eq!(d.api("POST", &compact, None).await.0, StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -837,6 +962,57 @@ async fn the_token_signs_in_a_browser_on_another_device() {
     assert_eq!(d.call(forged).await.0, StatusCode::FORBIDDEN);
 }
 
+/// A signed-in device shows an eight-digit code; typed on another device's
+/// sign-in page, it signs that browser in once.
+#[tokio::test]
+async fn a_device_code_signs_another_browser_in_once() {
+    let d = daemon(Scripted::new(&[]), true);
+    let (status, made) = d.api("POST", "/api/device-code", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let code = made["code"].as_str().unwrap().to_string();
+    assert_eq!(code.len(), 8);
+    assert!(code.chars().all(|c| c.is_ascii_digit()), "{code}");
+    assert_eq!(made["expires_in"], 120);
+
+    let sign_in = |code: &str| {
+        request("POST", "/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "code": code }).to_string()))
+            .unwrap()
+    };
+    let typed = format!("{} {}", &code[..4], &code[4..]);
+    let response = d.app.clone().oneshot(sign_in(&typed)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        response.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .starts_with(&format!("kjarni_token={TOKEN};"))
+    );
+    let again = d.app.clone().oneshot(sign_in(&code)).await.unwrap();
+    assert_eq!(again.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// Ten wrong codes in a row cancel every pending one, so a short code cannot
+/// be found by guessing.
+#[test]
+fn wrong_codes_cancel_the_pending_ones() {
+    let guard = Guard::new(TOKEN.into(), false);
+    let code = guard.new_device_code();
+    for _ in 0..9 {
+        assert!(!guard.redeem("00000000x"));
+    }
+    let kept = guard.new_device_code();
+    assert!(guard.redeem(&code));
+    for _ in 0..10 {
+        assert!(!guard.redeem("nope"));
+    }
+    assert!(!guard.redeem(&kept));
+
+    let fresh = guard.new_device_code();
+    assert!(guard.redeem(&fresh));
+}
+
 #[tokio::test]
 async fn the_web_ui_is_served_without_signing_in() {
     let d = daemon(Scripted::new(&[]), false);
@@ -892,6 +1068,11 @@ async fn the_web_ui_is_served_without_signing_in() {
 async fn an_allowed_host_name_works_over_https_as_tailscale_serve_sends_it() {
     let guard = Guard::new(TOKEN.into(), false).allow_hosts(vec!["box.tail1234.ts.net".into()]);
     let d = daemon_with_guard(Scripted::new(&[]), guard);
+    // The web UI offers these names when it signs in another device.
+    assert_eq!(
+        d.api("GET", "/api/status", None).await.1["allowed_hosts"],
+        json!(["box.tail1234.ts.net"])
+    );
     let status = |host: &str, origin: Option<&str>| {
         let mut r = Request::builder()
             .method("POST")
@@ -1083,6 +1264,7 @@ async fn a_scheduled_run_uses_only_the_tools_it_allows_and_notifies() {
             "notice",
             "approved",
             "tool_result",
+            "context",
             "done"
         ]
     );
@@ -1283,6 +1465,11 @@ impl Daemon {
     /// Sends `text` in a new conversation and returns the reply.
     async fn ask(&self, text: &str) -> String {
         let id = self.new_conversation().await;
+        self.ask_in(&id, text).await
+    }
+
+    /// The answer to `text` in conversation `id`, once its turn ends.
+    async fn ask_in(&self, id: &str, text: &str) -> String {
         let (status, _) = self
             .api(
                 "POST",
@@ -1291,7 +1478,7 @@ impl Daemon {
             )
             .await;
         assert_eq!(status, StatusCode::ACCEPTED);
-        let events = self.follow(&id, 0, ends_turn).await;
+        let events = self.follow(id, 0, ends_turn).await;
         events.last().unwrap()["text"].as_str().unwrap().to_string()
     }
 

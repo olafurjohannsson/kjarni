@@ -113,6 +113,13 @@ pub trait AgentEvents: Send {
     /// Something the user should know about, such as earlier messages being
     /// summarized.
     async fn notice(&mut self, _message: &str) {}
+
+    /// Messages the user sent while the turn ran, taken once each. Asked
+    /// after each step; the model reads them before its next one, and a
+    /// final answer is followed by another step when there are any.
+    async fn interjections(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Events that go nowhere, and no approvals.
@@ -310,7 +317,10 @@ impl Agent {
             self.push(Message::assistant(raw.trim()))?;
             if parsed.tool_calls.is_empty() && parsed.malformed.is_empty() {
                 reply.text = parsed.content;
-                return Ok(reply);
+                if !self.take_interjections(events).await? {
+                    return Ok(reply);
+                }
+                continue;
             }
             for call in &parsed.tool_calls {
                 reply.tool_calls += 1;
@@ -325,6 +335,7 @@ impl Agent {
                 );
                 self.push(Message::tool(output))?;
             }
+            self.take_interjections(events).await?;
         }
         reply.stopped_early = true;
         events
@@ -334,6 +345,40 @@ impl Agent {
             ))
             .await;
         Ok(reply)
+    }
+
+    /// Adds the messages the user sent meanwhile; false when there were none.
+    async fn take_interjections(&mut self, events: &mut dyn AgentEvents) -> anyhow::Result<bool> {
+        let texts = events.interjections().await;
+        let mut any = false;
+        for text in texts {
+            let text = text.trim();
+            if !text.is_empty() {
+                self.push(Message::user(text))?;
+                any = true;
+            }
+        }
+        Ok(any)
+    }
+
+    /// Tokens the next prompt would take, and how many the agent lets it
+    /// reach before it summarizes earlier messages.
+    pub fn context_usage(&self) -> anyhow::Result<(usize, usize)> {
+        let prompt = self.model.render(&self.conversation())?;
+        let budget = self.config.context_budget.min(self.model.context_size());
+        Ok((self.model.count_tokens(&prompt)?, budget))
+    }
+
+    /// Summarizes the earlier messages now, keeping the most recent. False
+    /// when there are too few to summarize.
+    pub async fn compact(&mut self, events: &mut dyn AgentEvents) -> anyhow::Result<bool> {
+        match fold_point(&self.messages, self.config.keep_recent) {
+            Some(cut) => {
+                self.fold(cut, events).await?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     /// The model's reply to `prompt`, with its prose streamed to `events` as
@@ -446,6 +491,11 @@ impl Agent {
         let Some(cut) = fold_point(&self.messages, self.config.keep_recent) else {
             return Ok(());
         };
+        self.fold(cut, events).await
+    }
+
+    /// Replaces the first `cut` messages with a summary.
+    async fn fold(&mut self, cut: usize, events: &mut dyn AgentEvents) -> anyhow::Result<()> {
         events
             .notice(&format!("Summarizing {cut} earlier messages to make room."))
             .await;

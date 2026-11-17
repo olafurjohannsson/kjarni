@@ -12,6 +12,7 @@
   import Settings from './components/Settings.svelte';
   import Changes from './components/Changes.svelte';
   import { countLabel } from './lib/changes.js';
+  import { contextShare, describeContext, takeQueued } from './lib/turn.js';
   import Icon from './components/Icon.svelte';
   import Mark from './components/Mark.svelte';
 
@@ -32,6 +33,13 @@
   let changedFiles = $state(0);
   let changesVersion = $state(0);
   let showChanges = $state(false);
+  // Messages sent while Kjarni works that it has not read yet.
+  let queued = $state([]);
+  // How full the prompt is: { used, budget } tokens.
+  let context = $state(null);
+  let contextOpen = $state(false);
+  let compacting = $state(false);
+  let compactNote = $state('');
   // 'chat', or one of PAGES.
   let page = $state('chat');
 
@@ -143,6 +151,10 @@
     summary = null;
     changedFiles = 0;
     showChanges = false;
+    queued = [];
+    context = null;
+    contextOpen = false;
+    compactNote = '';
     turn = newTurnState([]);
     if (push && location.pathname !== (id ? `/c/${id}` : '/')) {
       history.pushState(null, '', id ? `/c/${id}` : '/');
@@ -157,10 +169,18 @@
       const c = await api.conversation(id);
       if (mine !== visit) return;
       const state = newTurnState(fromHistory(c.messages));
-      for (const e of c.events ?? []) applyEvent(state, e);
+      let waiting = [];
+      for (const e of c.events ?? []) {
+        applyEvent(state, e);
+        if (e.type === 'queued') waiting = [...waiting, e.text];
+        if (e.type === 'user') waiting = takeQueued(waiting, e.text).queued;
+        if (e.type === 'context') c.context ??= { used: e.used, budget: e.budget };
+      }
+      queued = waiting;
       turn = state;
       summary = c.summary;
       changedFiles = c.changed_files ?? 0;
+      context = c.context ?? null;
       busy = c.busy;
       if (busy) startFollowing(id, turn.lastSeq);
       await scrollToEnd(true);
@@ -177,6 +197,22 @@
   }
 
   function onEvent(event) {
+    if (event.type === 'queued') {
+      queued = [...queued, event.text];
+      turn.lastSeq = Math.max(turn.lastSeq, event.seq);
+      return;
+    }
+    if (event.type === 'context') {
+      context = { used: event.used, budget: event.budget };
+    }
+    if (event.type === 'user') {
+      queued = takeQueued(queued, event.text).queued;
+      busy = true;
+    }
+    if (event.type === 'stopped' && event.dropped?.length) {
+      for (const text of event.dropped) queued = takeQueued(queued, text).queued;
+      if (!draft.trim()) draft = event.dropped.join('\n\n');
+    }
     // The page shows the user's message as soon as it is sent.
     const last = turn.blocks.at(-1);
     if (event.type === 'user' && last?.type === 'user' && last.pending && last.text === event.text.trim()) {
@@ -188,9 +224,12 @@
     if (event.type === 'file_changed') countChanges();
     trouble = '';
     if (turn.ended) {
-      busy = false;
-      stopFollowing();
       refreshList();
+      // Messages the agent did not get to start the next turn.
+      if (!queued.length || turn.ended === 'stopped') {
+        busy = false;
+        stopFollowing();
+      }
     }
     scrollToEnd();
   }
@@ -209,6 +248,16 @@
   }
 
   async function send(text) {
+    if (busy && current) {
+      try {
+        const sent = await api.send(current, text);
+        if (sent?.queued && !unfollow) startFollowing(current, turn.lastSeq);
+      } catch (e) {
+        draft = text;
+        guard(e);
+      }
+      return;
+    }
     try {
       let id = current;
       if (!id) {
@@ -235,6 +284,27 @@
       if (last?.pending) turn.blocks.pop();
       draft = text;
       guard(e);
+    }
+  }
+
+  async function compactNow() {
+    const id = current;
+    compacting = true;
+    compactNote = '';
+    try {
+      const r = await api.compact(id);
+      if (id !== current) return;
+      context = r.context ?? context;
+      if (r.compacted) {
+        contextOpen = false;
+        await show(id, false);
+      } else {
+        compactNote = 'Too few messages to summarize yet.';
+      }
+    } catch (e) {
+      guard(e);
+    } finally {
+      compacting = false;
     }
   }
 
@@ -359,11 +429,44 @@
             <button class="jump" onclick={() => scrollToEnd(true)} aria-label="Jump to the latest"><Icon name="arrowdown" size={17} /></button>
           {/if}
           {#if trouble}<div class="trouble"><Icon name="alert" size={15} /> {trouble}</div>{/if}
-          {#if current && changedFiles > 0}
-            <button class="changed" onclick={() => (showChanges = true)}>
-              <Icon name="diff" size={15} />
-              {countLabel(changedFiles)}
-            </button>
+          {#if queued.length}
+            <ul class="queued" aria-label="Messages Kjarni has not read yet">
+              {#each queued as text}
+                <li><Icon name="clock" size={14} /><span class="text">{text}</span><span class="when">next step</span></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if current && (changedFiles > 0 || contextShare(context) !== null)}
+            <div class="chips">
+              {#if changedFiles > 0}
+                <button class="chip" onclick={() => (showChanges = true)}>
+                  <Icon name="diff" size={15} />
+                  {countLabel(changedFiles)}
+                </button>
+              {/if}
+              {#if contextShare(context) !== null}
+                {@const share = contextShare(context)}
+                <button
+                  class="chip meter"
+                  class:high={share >= 80}
+                  onclick={() => ((contextOpen = !contextOpen), (compactNote = ''))}
+                  aria-expanded={contextOpen}
+                  title="How full the conversation's context is"
+                >
+                  <span class="bar"><span style="width: {share}%"></span></span>
+                  {share}%
+                </button>
+              {/if}
+            </div>
+            {#if contextOpen && context}
+              <div class="context">
+                <p>{describeContext(context)}</p>
+                {#if compactNote}<p class="note">{compactNote}</p>{/if}
+                <button onclick={compactNow} disabled={busy || compacting}>
+                  {compacting ? 'Summarizing…' : 'Summarize now'}
+                </button>
+              </div>
+            {/if}
           {/if}
           <Composer bind:this={composer} bind:value={draft} {busy} onsend={send} onstop={stop} />
           <div class="footnote">Runs on your computer. Nothing leaves it.</div>
@@ -440,11 +543,16 @@
     position: relative;
     padding-top: 24px;
   }
-  .changed {
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 8px 2px;
+  }
+  .chip {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    margin: 0 0 8px 2px;
     padding: 5px 11px 5px 9px;
     border-radius: 99px;
     border: 1px solid var(--border-strong);
@@ -453,7 +561,91 @@
     font-size: 13px;
     transition: background 0.12s, border-color 0.12s;
   }
-  .changed:hover {
+  .meter {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .meter .bar {
+    width: 34px;
+    height: 5px;
+    border-radius: 99px;
+    background: var(--bg4);
+    overflow: hidden;
+  }
+  .meter .bar span {
+    display: block;
+    height: 100%;
+    background: var(--ok);
+    border-radius: inherit;
+  }
+  .meter.high .bar span {
+    background: var(--core);
+  }
+  .context {
+    margin: 0 0 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg2);
+    display: grid;
+    gap: 10px;
+    justify-items: start;
+    font-size: 13.5px;
+    color: var(--text2);
+    line-height: 1.5;
+  }
+  .context .note {
+    color: var(--muted);
+  }
+  .context button {
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 9px;
+    border: 1px solid var(--border-strong);
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  .context button:not(:disabled):hover {
+    background: var(--bg3);
+  }
+  .context button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .queued {
+    list-style: none;
+    display: grid;
+    gap: 6px;
+    margin: 0 0 10px;
+  }
+  .queued li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    border: 1px dashed var(--border-strong);
+    color: var(--text2);
+    font-size: 14px;
+  }
+  .queued li :global(svg) {
+    flex: none;
+    color: var(--subtle);
+  }
+  .queued .text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .queued .when {
+    flex: none;
+    font-size: 12px;
+    color: var(--subtle);
+  }
+  .chip:hover {
     background: var(--bg3);
     border-color: var(--core-line);
   }

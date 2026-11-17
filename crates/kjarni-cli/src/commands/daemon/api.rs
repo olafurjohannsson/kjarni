@@ -16,7 +16,7 @@ use serde_json::json;
 use tokio::sync::broadcast::error::RecvError;
 
 use super::auth::{COOKIE, Guard};
-use super::conversations::{Conversations, Event, Live, SendError};
+use super::conversations::{CompactError, Conversations, Event, Live, SendError, Sent};
 use super::model::{Models, SwitchError};
 use super::schedules::{self, Notify, Schedule, Spec, StartError, Store};
 
@@ -54,6 +54,7 @@ pub fn routes() -> Router<AppState> {
         .route("/login", get(login).post(login_with_token))
         .route("/api/status", get(status))
         .route("/api/login-code", post(login_code))
+        .route("/api/device-code", post(device_code))
         .route(
             "/api/conversations",
             get(list_conversations).post(create_conversation),
@@ -70,6 +71,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/api/conversations/{id}/stop", post(stop))
         .route("/api/conversations/{id}/changes", get(list_changes))
+        .route("/api/conversations/{id}/compact", post(compact))
         .route("/api/models", get(list_models))
         .route("/api/models/current", put(switch_model))
         .route("/api/memory", get(list_memory).post(remember))
@@ -92,6 +94,7 @@ async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
         "gpu": state.gpu,
         "workdir": setup.workdir,
         "memory": state.memory.is_some(),
+        "allowed_hosts": state.guard.allowed_hosts(),
     }))
 }
 
@@ -108,6 +111,14 @@ async fn login_code(State(state): State<AppState>, headers: HeaderMap) -> Json<s
     }))
 }
 
+/// An eight-digit code to type on another device's sign-in page.
+async fn device_code(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({
+        "code": state.guard.new_device_code(),
+        "expires_in": 120,
+    }))
+}
+
 #[derive(Deserialize)]
 struct LoginQuery {
     code: String,
@@ -117,7 +128,7 @@ async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> Re
     if !state.guard.redeem(&q.code) {
         return error(
             StatusCode::UNAUTHORIZED,
-            "this sign-in link has expired or was used already; run `kjarni daemon open` for a new one",
+            "this sign-in link has expired or was used already; show a new one in Kjarni's Settings, or run `kjarni daemon open`",
         );
     }
     (
@@ -138,14 +149,26 @@ fn sign_in_cookie(guard: &Guard) -> String {
 
 #[derive(Deserialize)]
 struct TokenBody {
-    token: String,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Signs in a browser on another device, where `kjarni daemon open` cannot
-/// run, with the token the user copied from the daemon's token file.
+/// run: with a code shown on a signed-in device, or the token the user
+/// copied from the daemon's token file.
 async fn login_with_token(State(state): State<AppState>, Json(body): Json<TokenBody>) -> Response {
-    if !state.guard.is_token(body.token.trim()) {
-        return error(StatusCode::UNAUTHORIZED, "that is not the daemon's token");
+    match (body.code.as_deref(), body.token.as_deref()) {
+        (Some(code), _) if !state.guard.redeem(code) => {
+            return error(
+                StatusCode::UNAUTHORIZED,
+                "that code did not work; codes last two minutes and work once",
+            );
+        }
+        (Some(_), _) => {}
+        (None, Some(token)) if state.guard.is_token(token.trim()) => {}
+        _ => return error(StatusCode::UNAUTHORIZED, "that is not the daemon's token"),
     }
     (
         StatusCode::NO_CONTENT,
@@ -204,6 +227,7 @@ async fn get_conversation(State(state): State<AppState>, Path(id): Path<String>)
         "events": snap.events,
         "pending_approval": snap.pending_approval,
         "changed_files": live.changes.len(),
+        "context": live.context().map(|(used, budget)| json!({"used": used, "budget": budget})),
     }))
     .into_response()
 }
@@ -231,7 +255,11 @@ async fn send_message(
         Err(r) => return *r,
     };
     match live.send(&body.text) {
-        Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Ok(sent) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "queued": sent == Sent::Queued })),
+        )
+            .into_response(),
         Err(SendError::Busy) => error(
             StatusCode::CONFLICT,
             "the conversation is still answering the last message",
@@ -300,6 +328,34 @@ fn event_stream(
 
 /// The most a reason given with a decline may hold.
 const MAX_REASON_CHARS: usize = 2000;
+
+/// Summarizes the conversation's earlier messages now, to free room in the
+/// prompt.
+async fn compact(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    let live = match find(&state, &id) {
+        Ok(live) => live,
+        Err(r) => return *r,
+    };
+    // In its own task, so a client that goes away does not cut it short.
+    let task = tokio::spawn({
+        let live = live.clone();
+        async move { live.compact().await }
+    });
+    match task.await {
+        Ok(Ok(compacted)) => Json(json!({
+            "compacted": compacted,
+            "context": live.context().map(|(used, budget)| json!({"used": used, "budget": budget})),
+        }))
+        .into_response(),
+        Ok(Err(CompactError::Busy)) => error(
+            StatusCode::CONFLICT,
+            "the conversation is answering; wait for it to finish",
+        ),
+        Ok(Err(CompactError::Held)) => error(StatusCode::CONFLICT, SWITCHING),
+        Ok(Err(CompactError::Failed(e))) => internal(e),
+        Err(e) => internal(anyhow::anyhow!("{e}")),
+    }
+}
 
 /// The files the conversation changed, each with its diff from before the
 /// conversation first wrote it.

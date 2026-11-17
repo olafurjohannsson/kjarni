@@ -3,26 +3,41 @@
   import { api } from '../lib/api.js';
 
   // Shown when this browser has no sign-in. On the daemon's own computer,
-  // `kjarni daemon open` signs in; from anywhere else, the token does.
+  // `kjarni daemon open` signs in; from another device, a code shown on a
+  // signed-in one does, or the token from the daemon's token file.
   let { onsignedin } = $props();
 
+  let code = $state('');
   let token = $state('');
   let error = $state('');
   let busy = $state(false);
+  let withToken = $state(false);
 
-  async function submit(e) {
-    e.preventDefault();
-    if (!token.trim()) return;
+  let digits = $derived(code.replace(/\D/g, ''));
+
+  async function attempt(call, message) {
     busy = true;
     error = '';
     try {
-      await api.signIn(token.trim());
+      await call();
       onsignedin();
     } catch {
-      error = 'That token did not work. Copy it again from the token file.';
+      error = message;
     } finally {
       busy = false;
     }
+  }
+
+  function submitCode(e) {
+    e.preventDefault();
+    if (digits.length !== 8) return;
+    attempt(() => api.signInWithCode(digits), 'That code did not work. Codes last two minutes and work once; show a new one.');
+  }
+
+  function submitToken(e) {
+    e.preventDefault();
+    if (!token.trim()) return;
+    attempt(() => api.signIn(token.trim()), 'That token did not work. Copy it again from the token file.');
   }
 </script>
 
@@ -33,12 +48,31 @@
     <p>On the computer Kjarni runs on, this signs you in:</p>
     <pre>kjarni daemon open</pre>
     <div class="or"><span>or, from another device</span></div>
-    <form onsubmit={submit}>
-      <label for="token">Paste the token from the daemon's <code>token</code> file</label>
-      <input id="token" type="password" bind:value={token} autocomplete="current-password" spellcheck="false" placeholder="Token" />
-      {#if error}<div class="error">{error}</div>{/if}
-      <button type="submit" disabled={busy || !token.trim()}>Sign in</button>
-    </form>
+    {#if !withToken}
+      <form onsubmit={submitCode}>
+        <label for="code">Enter the code from <b>Settings → Other devices</b> on a signed-in device</label>
+        <input
+          id="code"
+          class="code"
+          bind:value={code}
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="9"
+          placeholder="0000 0000"
+        />
+        {#if error}<div class="error">{error}</div>{/if}
+        <button type="submit" disabled={busy || digits.length !== 8}>Sign in</button>
+      </form>
+      <button class="link" onclick={() => ((withToken = true), (error = ''))}>Use the token file instead</button>
+    {:else}
+      <form onsubmit={submitToken}>
+        <label for="token">Paste the token from the daemon's <code>token</code> file</label>
+        <input id="token" type="password" bind:value={token} autocomplete="current-password" spellcheck="false" placeholder="Token" />
+        {#if error}<div class="error">{error}</div>{/if}
+        <button type="submit" disabled={busy || !token.trim()}>Sign in</button>
+      </form>
+      <button class="link" onclick={() => ((withToken = false), (error = ''))}>Use a code instead</button>
+    {/if}
   </div>
 </main>
 
@@ -129,6 +163,30 @@
   button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .code {
+    font-family: var(--mono);
+    font-size: 22px;
+    letter-spacing: 0.18em;
+    text-align: center;
+    height: 54px;
+  }
+  label b {
+    color: var(--text2);
+    font-weight: 600;
+  }
+  .link {
+    height: auto;
+    background: none;
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 14px;
+    justify-self: center;
+    padding: 4px;
+  }
+  .link:not(:disabled):hover {
+    background: none;
+    color: var(--text);
   }
   .error {
     color: var(--bad);

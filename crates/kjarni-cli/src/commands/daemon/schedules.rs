@@ -528,7 +528,7 @@ async fn finish(state: Arc<DaemonState>, id: String, schedule: Schedule, live: A
     let end = wait_for_end(&live).await;
     let (result, message) = match end {
         EventKind::Done { text, .. } => ("done", text),
-        EventKind::Stopped => ("stopped", "The run was stopped.".to_string()),
+        EventKind::Stopped { .. } => ("stopped", "The run was stopped.".to_string()),
         EventKind::Error { message } => ("error", format!("The run failed: {message}")),
         _ => ("error", "The run ended without an answer.".to_string()),
     };

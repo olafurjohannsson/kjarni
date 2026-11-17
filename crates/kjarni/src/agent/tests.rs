@@ -74,6 +74,8 @@ struct Recorder {
     answers: VecDeque<Approval>,
     notices: Vec<String>,
     changes: Vec<FileChange>,
+    /// What `interjections` returns each time it is asked, in order.
+    interjections: VecDeque<Vec<String>>,
 }
 
 #[async_trait]
@@ -93,6 +95,9 @@ impl AgentEvents for Recorder {
     }
     async fn file_changed(&mut self, _call: &ToolCall, change: &FileChange) {
         self.changes.push(change.clone());
+    }
+    async fn interjections(&mut self) -> Vec<String> {
+        self.interjections.pop_front().unwrap_or_default()
     }
 }
 
@@ -375,6 +380,89 @@ async fn stops_after_max_steps() {
         events.notices,
         ["Stopped after 3 steps without a final answer."]
     );
+}
+
+/// A message sent while the agent works is read before its next step, after
+/// the results of the calls it made.
+#[tokio::test]
+async fn a_message_sent_mid_turn_is_read_before_the_next_step() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "buy milk\n").unwrap();
+    let read = call("read_file", &[("path", "notes.txt")]);
+    let model = ScriptedModel::new(&[&read, "Only the milk, then."]);
+    let mut agent = agent_in(dir.path(), model.clone());
+    let mut events = Recorder {
+        interjections: VecDeque::from([vec!["  only the first item ".into()]]),
+        ..Default::default()
+    };
+
+    let reply = agent.send("What do I need?", &mut events).await.unwrap();
+
+    assert_eq!(reply.text, "Only the milk, then.");
+    let roles: Vec<_> = agent
+        .messages()
+        .iter()
+        .map(|m| m.role.to_string())
+        .collect();
+    assert_eq!(roles, ["user", "assistant", "tool", "user", "assistant"]);
+    assert_eq!(agent.messages()[3].content, "only the first item");
+    let second = &model.prompts()[1];
+    assert!(second.find("buy milk").unwrap() < second.find("only the first item").unwrap());
+}
+
+/// A message that arrives while the final answer is written gets an answer
+/// of its own in the same turn.
+#[tokio::test]
+async fn a_message_sent_during_the_answer_is_answered_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = ScriptedModel::new(&["Hello!", "It is Tuesday."]);
+    let mut agent = agent_in(dir.path(), model);
+    let mut events = Recorder {
+        interjections: VecDeque::from([vec!["what day is it?".into()], vec![" ".into()]]),
+        ..Default::default()
+    };
+
+    let reply = agent.send("Hi", &mut events).await.unwrap();
+
+    assert_eq!(reply.text, "It is Tuesday.");
+    assert_eq!(reply.steps, 2);
+    assert_eq!(agent.messages().len(), 4);
+    assert_eq!(agent.messages()[2].content, "what day is it?");
+}
+
+/// Compacting by hand summarizes all but the latest exchange, whatever the
+/// budget, and the prompt shrinks.
+#[tokio::test]
+async fn compacting_summarizes_now_and_shrinks_the_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = ScriptedModel::new(&[
+        "Hello!",
+        "More.",
+        "<think>\n\n</think>\n\nThe user said hi at length.",
+    ]);
+    let config = AgentConfig {
+        keep_recent: 1,
+        ..Default::default()
+    };
+    let workspace = Arc::new(tools::Workspace::new(dir.path()));
+    let mut agent = Agent::new(model, tools::builtin(workspace, None), config);
+    let mut events = Recorder::default();
+    assert!(!agent.compact(&mut events).await.unwrap());
+
+    agent
+        .send(&format!("Hi {}", "there ".repeat(400)), &mut events)
+        .await
+        .unwrap();
+    agent.send("Tell me more", &mut events).await.unwrap();
+    let (before, budget) = agent.context_usage().unwrap();
+    assert_eq!(budget, AgentConfig::default().context_budget);
+
+    assert!(agent.compact(&mut events).await.unwrap());
+
+    assert_eq!(agent.summary(), Some("The user said hi at length."));
+    assert_eq!(agent.messages().len(), 2);
+    let (after, _) = agent.context_usage().unwrap();
+    assert!(after + 300 < before, "{after} vs {before}");
 }
 
 #[tokio::test]

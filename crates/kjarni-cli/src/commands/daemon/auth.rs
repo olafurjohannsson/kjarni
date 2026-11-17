@@ -30,6 +30,10 @@ pub const COOKIE: &str = "kjarni_token";
 /// How long a login code works for.
 const CODE_LIFETIME: Duration = Duration::from_secs(120);
 
+/// Wrong codes tried before every pending code stops working, so a short
+/// code cannot be guessed by trying many.
+const MAX_WRONG_CODES: u32 = 10;
+
 /// `n` random bytes as lowercase hex.
 pub fn random_hex(n: usize) -> String {
     let mut bytes = vec![0u8; n];
@@ -81,7 +85,24 @@ pub struct Guard {
     any_host: bool,
     /// Names besides loopback the daemon answers to, lowercase, no port.
     allowed_hosts: Vec<String>,
-    codes: Mutex<HashMap<String, Instant>>,
+    codes: Mutex<Codes>,
+}
+
+/// Login codes not yet used, and wrong codes tried since the last reset.
+#[derive(Default)]
+struct Codes {
+    live: HashMap<String, Instant>,
+    wrong: u32,
+}
+
+impl Codes {
+    fn add(&mut self, code: String) {
+        self.live.retain(|_, made| made.elapsed() < CODE_LIFETIME);
+        if self.live.is_empty() {
+            self.wrong = 0;
+        }
+        self.live.insert(code, Instant::now());
+    }
 }
 
 impl Guard {
@@ -90,11 +111,16 @@ impl Guard {
             token,
             any_host,
             allowed_hosts: Vec::new(),
-            codes: Mutex::new(HashMap::new()),
+            codes: Mutex::new(Codes::default()),
         }
     }
 
     /// Also answers to `hosts`, as [`allowed_host`] wrote them.
+    /// The names besides loopback the daemon answers to.
+    pub fn allowed_hosts(&self) -> &[String] {
+        &self.allowed_hosts
+    }
+
     pub fn allow_hosts(mut self, hosts: Vec<String>) -> Self {
         self.allowed_hosts = hosts;
         self
@@ -115,16 +141,46 @@ impl Guard {
     /// A code that signs one browser in, once, within two minutes.
     pub fn new_login_code(&self) -> String {
         let code = random_hex(16);
-        let mut codes = self.codes.lock().expect("login codes lock");
-        codes.retain(|_, made| made.elapsed() < CODE_LIFETIME);
-        codes.insert(code.clone(), Instant::now());
+        self.codes
+            .lock()
+            .expect("login codes lock")
+            .add(code.clone());
+        code
+    }
+
+    /// An eight-digit code to type on another device, which signs it in
+    /// once, within two minutes.
+    pub fn new_device_code(&self) -> String {
+        let mut bytes = [0u8; 8];
+        getrandom::fill(&mut bytes).expect("the system's random number generator failed");
+        let code = format!("{:08}", u64::from_le_bytes(bytes) % 100_000_000);
+        self.codes
+            .lock()
+            .expect("login codes lock")
+            .add(code.clone());
         code
     }
 
     /// Whether `code` is a live login code, which it no longer is after this.
+    /// Spaces and dashes are ignored. After [`MAX_WRONG_CODES`] wrong ones,
+    /// every pending code stops working.
     pub fn redeem(&self, code: &str) -> bool {
+        let code: String = code
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '-')
+            .collect();
         let mut codes = self.codes.lock().expect("login codes lock");
-        matches!(codes.remove(code), Some(made) if made.elapsed() < CODE_LIFETIME)
+        match codes.live.remove(&code) {
+            Some(made) if made.elapsed() < CODE_LIFETIME => true,
+            _ => {
+                codes.wrong += 1;
+                if codes.wrong >= MAX_WRONG_CODES {
+                    codes.live.clear();
+                    codes.wrong = 0;
+                }
+                false
+            }
+        }
     }
 
     /// Whether `candidate` is the token.
