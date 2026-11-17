@@ -171,6 +171,21 @@ impl GpuTensor {
             return GpuTensor::from_raw(ctx, &view, label);
         }
 
+        // Q5_K reads packed as well: its 176-byte block is a whole number of
+        // words, so the blocks go up as they are.
+        if weights.tensor_dtype(name).ok() == Some(DType::Q5_K)
+            && target_dt.is_none_or(|t| t == DType::Q5_K)
+            && let CpuTensor::Q5_K(matrix) = weights.get_typed_tensor(name)?
+        {
+            let view = TensorView {
+                name: name.to_string(),
+                bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+                shape: matrix.shape.to_vec(),
+                dtype: DType::Q5_K,
+            };
+            return GpuTensor::from_raw(ctx, &view, label);
+        }
+
         // Q8_0 reads packed too, but its 34-byte block puts `qs` two bytes out of
         // word alignment, so a straight copy would make the shader reassemble every
         // value across a word boundary. Repacking to 9 words -- d alone, then the 32

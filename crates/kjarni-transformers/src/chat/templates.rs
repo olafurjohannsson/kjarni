@@ -73,6 +73,7 @@ pub struct Conversation {
     messages: Vec<Message>,
     tools: Vec<ToolSpec>,
     thinking: Option<bool>,
+    preserve_thinking: bool,
 }
 
 impl Conversation {
@@ -124,6 +125,19 @@ impl Conversation {
 
     pub fn thinking(&self) -> Option<bool> {
         self.thinking
+    }
+
+    /// Whether assistant turns before the last user message keep their think
+    /// blocks, for templates that otherwise drop them. Keeping them makes
+    /// each prompt start with the previous one, so a prefix cache can reuse
+    /// all of it; the rendering then differs from the model's own template
+    /// in those earlier turns. Others ignore it.
+    pub fn set_preserve_thinking(&mut self, preserve: bool) {
+        self.preserve_thinking = preserve;
+    }
+
+    pub fn preserve_thinking(&self) -> bool {
+        self.preserve_thinking
     }
 
     /// Get all messages

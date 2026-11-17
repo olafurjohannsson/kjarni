@@ -8,7 +8,8 @@ use crate::{ChatTemplate, Conversation, Role};
 /// closed empty so the model answers directly; Qwen's own template thinks
 /// unless told not to, and Kjarni answers directly unless told to think. Reasoning in an earlier
 /// assistant turn is dropped from the history, as the model's own template
-/// drops it; a turn after the last user message keeps it in a think block.
+/// drops it; a turn after the last user message keeps it in a think block,
+/// and so does every turn when the conversation asks to preserve thinking.
 #[derive(Clone, Debug, Default)]
 pub struct Qwen3_5ChatTemplate;
 
@@ -81,7 +82,7 @@ impl ChatTemplate for Qwen3_5ChatTemplate {
                 }
                 Role::Assistant => {
                     let (reasoning, answer) = split_reasoning(content);
-                    if last_user.is_some_and(|u| i > u) {
+                    if conversation.preserve_thinking() || last_user.is_some_and(|u| i > u) {
                         prompt.push_str(&format!(
                             "<|im_start|>assistant\n<think>\n{}\n</think>\n\n{answer}<|im_end|>\n",
                             reasoning.trim()
@@ -211,6 +212,37 @@ mod tests {
         let prompt = Qwen3_5ChatTemplate::new().apply(&c);
         let expected = "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nHello<|im_end|>\n";
         assert!(prompt.starts_with(expected), "{prompt:?}");
+    }
+
+    /// With preserve_thinking, the prompt for the next user message starts
+    /// with the prompt that produced the last reply, followed by that reply.
+    #[test]
+    fn preserved_thinking_keeps_each_prompt_a_prefix_of_the_next() {
+        let t = Qwen3_5ChatTemplate::new();
+        let mut c = Conversation::new();
+        c.set_preserve_thinking(true);
+        c.push_user("Hi");
+        let first = t.apply(&c);
+        c.push_assistant("Hello!");
+        c.push_user("Bye");
+        let second = t.apply(&c);
+        assert!(
+            second.starts_with(&format!("{first}Hello!<|im_end|>\n")),
+            "{second:?}"
+        );
+
+        // Reasoning in an earlier turn stays too.
+        let mut c = Conversation::new();
+        c.set_preserve_thinking(true);
+        c.push_user("Hi");
+        c.push_assistant("<think>\nThe user greets.\n</think>\n\nHello!");
+        c.push_user("Bye");
+        assert_eq!(
+            t.apply(&c),
+            "<|im_start|>user\nHi<|im_end|>\n\
+             <|im_start|>assistant\n<think>\nThe user greets.\n</think>\n\nHello!<|im_end|>\n\
+             <|im_start|>user\nBye<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        );
     }
 
     #[test]

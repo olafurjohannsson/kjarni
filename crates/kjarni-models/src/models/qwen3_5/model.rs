@@ -24,6 +24,10 @@ use kjarni_transformers::{
 use super::cache::HybridCache;
 use super::config::Qwen3_5Config;
 use super::cpu_decoder::Qwen3_5CpuDecoder;
+#[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+use super::gpu_decoder::Qwen3_5GpuDecoder;
+#[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
 
 /// Qwen 3.5: Qwen's hybrid decoder, three Gated DeltaNet layers to every
 /// attention layer. Text only; a multimodal checkpoint loads its decoder.
@@ -55,15 +59,34 @@ impl DecoderModelFactory for Qwen3_5Model {
         _layout: &ModelLayout,
         rope: &LoadedRoPE,
         load_config: ModelLoadConfig,
-        _context: Option<&Arc<WgpuContext>>,
+        context: Option<&Arc<WgpuContext>>,
         device: Device,
     ) -> Result<(Option<Box<dyn CpuDecoder>>, Option<Box<dyn GpuDecoder>>)> {
-        if device.is_gpu() {
-            return Err(anyhow!(
-                "Qwen 3.5 runs on the CPU for now; its Gated DeltaNet layers have no GPU kernels yet"
-            ));
-        }
         let config = Qwen3_5Config::from_weights(weights)?;
+        if device.is_gpu() {
+            #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+            {
+                let context =
+                    context.ok_or_else(|| anyhow!("Qwen 3.5 on the GPU needs a GPU context"))?;
+                let rope = rope
+                    .gpu
+                    .clone()
+                    .ok_or_else(|| anyhow!("Qwen 3.5 on the GPU needs the rotary tables there"))?;
+                let decoder = Qwen3_5GpuDecoder::new(
+                    context,
+                    weights,
+                    config,
+                    rope,
+                    load_config.target_dtype,
+                )?;
+                return Ok((None, Some(Box::new(decoder))));
+            }
+            #[cfg(all(target_arch = "wasm32", not(feature = "wasm-gpu")))]
+            {
+                let _ = context;
+                return Err(anyhow!("GPU decoding is not available in WebAssembly"));
+            }
+        }
         let decoder =
             Qwen3_5CpuDecoder::new(weights, config, rope.cpu.clone(), load_config.target_dtype)?;
         Ok((Some(Box::new(decoder)), None))
@@ -151,6 +174,18 @@ impl LanguageModel for Qwen3_5Model {
         max_len: usize,
         _beams: usize,
     ) -> Result<Box<dyn Cache>> {
+        #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+        if self.pipeline.gpu_decoder().is_some() {
+            let context = self
+                .context()
+                .ok_or_else(|| anyhow!("GPU context required"))?;
+            return Ok(Box::new(Qwen3_5GpuDecoder::new_cache(
+                &context,
+                &self.config,
+                batch_size,
+                max_len,
+            )?));
+        }
         Ok(Box::new(HybridCache::new(
             &Qwen3_5CpuDecoder::cache_dims(&self.config),
             batch_size,
@@ -212,7 +247,9 @@ impl DecoderLanguageModel for Qwen3_5Model {
     }
     #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
-        None
+        self.pipeline
+            .gpu_decoder()
+            .map(|_| self as &dyn GpuDecoderOps)
     }
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
@@ -262,5 +299,33 @@ impl CpuDecoderOps for Qwen3_5Model {
     }
     fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
         self.pipeline.embeddings().embed_cpu(tokens, None, pos)
+    }
+}
+
+#[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
+impl GpuDecoderOps for Qwen3_5Model {
+    fn decoder(&self) -> &dyn GpuDecoder {
+        self.pipeline
+            .gpu_decoder()
+            .expect("decoder_gpu_ops only hands this out with a GPU decoder")
+    }
+    /// A padding mask: the attention kernels add causality themselves.
+    fn get_attention_mask(
+        &self,
+        ctx: &mut GpuFrameContext,
+        seq: usize,
+        max: usize,
+    ) -> Result<GpuTensor> {
+        let mask: Vec<f32> = (0..max).map(|i| if i < seq { 1.0 } else { 0.0 }).collect();
+        GpuTensor::create(ctx.context, &mask, vec![1, max], "AttentionMask")
+    }
+    fn project_to_logits(&self, ctx: &mut GpuFrameContext, h: &GpuTensor) -> Result<GpuTensor> {
+        let lm = self.pipeline.lm_head();
+        anyhow::ensure!(
+            lm.has_gpu(),
+            "Qwen 3.5 on the GPU needs its LM head there too"
+        );
+        let (encoder, pool) = ctx.resources();
+        lm.forward_gpu(encoder, pool, h)
     }
 }

@@ -42,6 +42,9 @@ pub struct AgentConfig {
     pub facts_in_prompt: usize,
     /// The folder the tools work in, as the prompt names it.
     pub workdir: Option<String>,
+    /// Notes on the project in that folder, such as
+    /// [`ProjectNotes::text`](super::ProjectNotes::text).
+    pub project_notes: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -54,6 +57,7 @@ impl Default for AgentConfig {
             keep_recent: 6,
             facts_in_prompt: 20,
             workdir: None,
+            project_notes: None,
         }
     }
 }
@@ -223,8 +227,8 @@ impl Agent {
         self.read_facts();
     }
 
-    /// The system prompt: instructions, where and when, saved facts, and the
-    /// summary of earlier messages.
+    /// The system prompt: instructions, where and when, project notes, saved
+    /// facts, and the summary of earlier messages.
     pub fn system_prompt(&self) -> String {
         let mut prompt = self
             .config
@@ -234,6 +238,10 @@ impl Agent {
         prompt.push_str(&format!("\n\nToday's date: {}.", today()));
         if let Some(dir) = &self.config.workdir {
             prompt.push_str(&format!(" Working directory: {dir}."));
+        }
+        if let Some(notes) = &self.config.project_notes {
+            prompt.push_str("\n\nNotes on this project; follow them when you work on it.\n\n");
+            prompt.push_str(notes);
         }
         let kept: Vec<&MemoryEntry> = match &self.memory {
             Some(memory) => {
@@ -259,6 +267,9 @@ impl Agent {
     pub fn conversation(&self) -> Conversation {
         let mut c = Conversation::with_system(self.system_prompt());
         c.set_tools(self.specs.clone());
+        // Earlier turns render as they did when they were the latest, so the
+        // next prompt starts with the last one and its cache is reused.
+        c.set_preserve_thinking(true);
         for m in &self.messages {
             c.push(m.clone());
         }

@@ -29,6 +29,12 @@ struct LinearInfo {
 // costs 5.9% of the buffer and buys an aligned `unpack4xI8` per word.
 @group(0) @binding(10) var<storage, read> W_Q8: array<u32>;
 
+// Q5_K weights, read as raw words. A block is 176 bytes covering 256 weights:
+// d (f16), dmin (f16), scales[12], qh[32], qs[128] -- Q4_K's layout with the
+// fifth bit of every weight in qh. 176 is a multiple of four, so the words are
+// the bytes as stored.
+@group(0) @binding(11) var<storage, read> W_Q5K: array<u32>;
+
 // Reduction cache for Wide kernel
 var<workgroup> wg_sum: array<f32, 256>;
 
@@ -336,11 +342,39 @@ fn gemm64_q8(
     gemm64_tile(wg, lid, GEMM64_Q8);
 }
 
+/// The same GEMM over packed Q5_K weights, which a Q4_K_M file uses for some
+/// tensors (Qwen 3.5's attn_qkv and ssm_out).
+@compute @workgroup_size(16, 16)
+fn gemm64_q5k(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm64_tile(wg, lid, GEMM64_Q5K);
+}
+
 const GEMM64_F32: u32 = 0u;
 const GEMM64_BF16: u32 = 1u;
 const GEMM64_Q4K: u32 = 2u;
 const GEMM64_Q6K: u32 = 3u;
 const GEMM64_Q8: u32 = 4u;
+const GEMM64_Q5K: u32 = 5u;
+
+/// Loads the weight tile for k0..k0+16 from Q5_K blocks, as the Q4_K load
+/// does, with each weight's fifth bit from qh.
+fn gemm64_load_w_q5k(tid: u32, col0: u32, k0: u32) {
+    let r = tid / 4u;
+    let q = tid % 4u;
+    let gn = col0 + r;
+    var vals = vec4<f32>(0.0);
+    if (gn < info.N) {
+        vals = q5k_four(gn, k0 + q * 4u);
+    }
+    let kk = q * 4u;
+    gemm64_w[kk * GEMM64_BN + r] = vals.x;
+    gemm64_w[(kk + 1u) * GEMM64_BN + r] = vals.y;
+    gemm64_w[(kk + 2u) * GEMM64_BN + r] = vals.z;
+    gemm64_w[(kk + 3u) * GEMM64_BN + r] = vals.w;
+}
 
 /// Loads the weight tile for k0..k0+16 from Q8_0 blocks.
 ///
@@ -469,7 +503,7 @@ fn gemm64_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
             if (gr < info.M && gk < info.K) { a = Input[gr * info.K + gk]; }
             gemm64_a[kk * GEMM64_BM + r] = a;
 
-            if (mode == GEMM64_Q4K || mode == GEMM64_Q6K || mode == GEMM64_Q8) { continue; }
+            if (mode == GEMM64_Q4K || mode == GEMM64_Q5K || mode == GEMM64_Q6K || mode == GEMM64_Q8) { continue; }
             let gn = col0 + r;
             var w = 0.0;
             if (gn < info.N && gk < info.K) {
@@ -485,6 +519,7 @@ fn gemm64_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
             gemm64_w[kk * GEMM64_BN + r] = w;
         }
         if (mode == GEMM64_Q4K) { gemm64_load_w_q4k(tid, col0, k0); }
+        if (mode == GEMM64_Q5K) { gemm64_load_w_q5k(tid, col0, k0); }
         if (mode == GEMM64_Q6K) { gemm64_load_w_q6k(tid, col0, k0); }
         if (mode == GEMM64_Q8) { gemm64_load_w_q8(tid, col0, k0); }
         workgroupBarrier();
@@ -571,6 +606,34 @@ fn gemm_q4k(
     gemm_tile(wg, lid, GEMM_Q4K);
 }
 
+/// The same GEMM over packed Q5_K weights.
+@compute @workgroup_size(16, 16)
+fn gemm_q5k(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    gemm_tile(wg, lid, GEMM_Q5K);
+}
+
+/// Loads the weight tile for k0..k0+16 from Q5_K blocks: two four-weight
+/// words of one row per thread, as the Q4_K load does.
+fn gemm_load_w_q5k(tid: u32, col0: u32, k0: u32) {
+    let q = tid % 4u;
+    for (var l = 0u; l < 2u; l++) {
+        let r = (tid + l * 256u) / 4u;
+        let gn = col0 + r;
+        var vals = vec4<f32>(0.0);
+        if (gn < info.N) {
+            vals = q5k_four(gn, k0 + q * 4u);
+        }
+        let kk = q * 4u;
+        gemm_w[kk * GEMM_BN + r] = vals.x;
+        gemm_w[(kk + 1u) * GEMM_BN + r] = vals.y;
+        gemm_w[(kk + 2u) * GEMM_BN + r] = vals.z;
+        gemm_w[(kk + 3u) * GEMM_BN + r] = vals.w;
+    }
+}
+
 /// The same GEMM over packed Q6_K weights, which a Q4_K_M file uses for some
 /// of its tensors (attn_v and half the ffn_down).
 @compute @workgroup_size(16, 16)
@@ -593,6 +656,7 @@ fn gemm_q8(
 const GEMM_F32: u32 = 0u;
 const GEMM_BF16: u32 = 1u;
 const GEMM_Q4K: u32 = 2u;
+const GEMM_Q5K: u32 = 5u;
 const GEMM_Q6K: u32 = 3u;
 const GEMM_Q8: u32 = 4u;
 
@@ -735,7 +799,7 @@ fn gemm_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
             if (gr < info.M && gk < info.K) { a = Input[gr * info.K + gk]; }
             gemm_a[kk * GEMM_BM + r] = a;
 
-            if (mode == GEMM_Q4K || mode == GEMM_Q6K || mode == GEMM_Q8) { continue; }
+            if (mode == GEMM_Q4K || mode == GEMM_Q5K || mode == GEMM_Q6K || mode == GEMM_Q8) { continue; }
             let gn = col0 + r;
             var w = 0.0;
             if (gn < info.N && gk < info.K) {
@@ -751,6 +815,7 @@ fn gemm_tile(wg: vec3<u32>, lid: vec3<u32>, mode: u32) {
             gemm_w[kk * GEMM_BN + r] = w;
         }
         if (mode == GEMM_Q4K) { gemm_load_w_q4k(tid, col0, k0); }
+        if (mode == GEMM_Q5K) { gemm_load_w_q5k(tid, col0, k0); }
         if (mode == GEMM_Q6K) { gemm_load_w_q6k(tid, col0, k0); }
         if (mode == GEMM_Q8) { gemm_load_w_q8(tid, col0, k0); }
         workgroupBarrier();
@@ -1289,5 +1354,189 @@ fn gemv_q6k(
         if (row0 + 1u < info.N) { Output[out0 + 1u] = r.y; }
         if (row0 + 2u < info.N) { Output[out0 + 2u] = r.z; }
         if (row0 + 3u < info.N) { Output[out0 + 3u] = r.w; }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Q5_K
+//
+// Block layout, 44 u32 words:
+//   word  0     : d, dmin (f16 each)
+//   words 1..3  : scales[12], as Q4_K's
+//   words 4..11 : qh[32], the fifth bits: bit 2j of qh[l] is weight l of
+//                 sub-block 2j, bit 2j+1 is weight l of sub-block 2j+1
+//   words 12..43: qs[128], low nibbles then high nibbles per 64, as Q4_K's
+//
+// Unpacking matches `dequantize_q5_k_block`.
+// ---------------------------------------------------------------------------
+
+const Q5K_WORDS: u32 = 44u;
+
+/// The four weights of row `n` from column `k`, a multiple of four.
+fn q5k_four(n: u32, k: u32) -> vec4<f32> {
+    let blk = k / 256u;
+    let t = k % 256u;
+    let g = t / 64u;
+    let within = t % 64u;
+    let hi = within >= 32u;
+    let l = within % 32u;
+    let base = (n * (info.K / 256u) + blk) * Q5K_WORDS;
+    let dd = unpack2x16float(W_Q5K[base]);
+    let sub = g * 2u + select(0u, 1u, hi);
+    let sm = q4k_scale_min(W_Q5K[base + 1u], W_Q5K[base + 2u], W_Q5K[base + 3u], sub);
+    let qword = W_Q5K[base + 12u + g * 8u + l / 4u];
+    let nib = select(qword & 0x0F0F0F0Fu, (qword >> 4u) & 0x0F0F0F0Fu, hi);
+    let high = ((W_Q5K[base + 4u + l / 4u] >> sub) & 0x01010101u) << 4u;
+    return vec4<f32>(unpack4xU8(nib | high)) * (dd.x * sm.x) - vec4<f32>(dd.y * sm.y);
+}
+
+// d * scale and d * min for sub-blocks `2j` and `2j + 1`, as q4k_pair_scales.
+fn q5k_pair_scales(base: u32, j: u32) -> vec4<f32> {
+    let dd = unpack2x16float(W_Q5K[base]);
+    let s0 = W_Q5K[base + 1u];
+    let s1 = W_Q5K[base + 2u];
+    let s2 = W_Q5K[base + 3u];
+    let lo = q4k_scale_min(s0, s1, s2, j * 2u);
+    let hi = q4k_scale_min(s0, s1, s2, j * 2u + 1u);
+    return vec4<f32>(lo.x * dd.x, lo.y * dd.y, hi.x * dd.x, hi.y * dd.y);
+}
+
+/// The low and high five-bit weights of one qs word and its qh word, for
+/// sub-blocks 2j and 2j+1.
+fn q5k_lo(q: u32, h: u32, j: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4xU8((q & 0x0F0F0F0Fu) | (((h >> (2u * j)) & 0x01010101u) << 4u)));
+}
+
+fn q5k_hi(q: u32, h: u32, j: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4xU8(((q >> 4u) & 0x0F0F0F0Fu) | (((h >> (2u * j + 1u)) & 0x01010101u) << 4u)));
+}
+
+/// q4k_chunk over Q5_K blocks: the same chunks, rows and sums, with the qh
+/// word beside each qs word.
+fn q5k_chunk(row_a: vec4<u32>, row_b: vec4<u32>, chunk: u32, input_row: u32) -> Q4KRows {
+    let blk = chunk / 8u;
+    let j = (chunk % 8u) / 2u;
+    let block = vec4<u32>(blk * Q5K_WORDS);
+    let ba = row_a + block;
+    let bb = row_b + block;
+
+    let sa0 = q5k_pair_scales(ba.x, j);
+    let sa1 = q5k_pair_scales(ba.y, j);
+    let sa2 = q5k_pair_scales(ba.z, j);
+    let sa3 = q5k_pair_scales(ba.w, j);
+    let sb0 = q5k_pair_scales(bb.x, j);
+    let sb1 = q5k_pair_scales(bb.y, j);
+    let sb2 = q5k_pair_scales(bb.z, j);
+    let sb3 = q5k_pair_scales(bb.w, j);
+
+    let first_q = vec4<u32>(12u + (chunk % 8u) * 4u);
+    let first_h = vec4<u32>(4u + (chunk % 2u) * 4u);
+    let qa = ba + first_q;
+    let qb = bb + first_q;
+    let ha = ba + first_h;
+    let hb = bb + first_h;
+    let l0 = input_row + blk * 256u + j * 64u + (chunk % 2u) * 16u;
+
+    var lo_a = vec4<f32>(0.0);
+    var hi_a = vec4<f32>(0.0);
+    var lo_b = vec4<f32>(0.0);
+    var hi_b = vec4<f32>(0.0);
+    var sum_lo = 0.0;
+    var sum_hi = 0.0;
+    for (var i = 0u; i < 4u; i++) {
+        let l = l0 + i * 4u;
+        let a_lo = vec4<f32>(Input[l], Input[l + 1u], Input[l + 2u], Input[l + 3u]);
+        let a_hi = vec4<f32>(Input[l + 32u], Input[l + 33u], Input[l + 34u], Input[l + 35u]);
+        sum_lo += a_lo.x + a_lo.y + a_lo.z + a_lo.w;
+        sum_hi += a_hi.x + a_hi.y + a_hi.z + a_hi.w;
+
+        let q0 = W_Q5K[qa.x + i];
+        let q1 = W_Q5K[qa.y + i];
+        let q2 = W_Q5K[qa.z + i];
+        let q3 = W_Q5K[qa.w + i];
+        let q4 = W_Q5K[qb.x + i];
+        let q5 = W_Q5K[qb.y + i];
+        let q6 = W_Q5K[qb.z + i];
+        let q7 = W_Q5K[qb.w + i];
+        let h0 = W_Q5K[ha.x + i];
+        let h1 = W_Q5K[ha.y + i];
+        let h2 = W_Q5K[ha.z + i];
+        let h3 = W_Q5K[ha.w + i];
+        let h4 = W_Q5K[hb.x + i];
+        let h5 = W_Q5K[hb.y + i];
+        let h6 = W_Q5K[hb.z + i];
+        let h7 = W_Q5K[hb.w + i];
+        lo_a += q4k_dots(a_lo, q5k_lo(q0, h0, j), q5k_lo(q1, h1, j), q5k_lo(q2, h2, j), q5k_lo(q3, h3, j));
+        hi_a += q4k_dots(a_hi, q5k_hi(q0, h0, j), q5k_hi(q1, h1, j), q5k_hi(q2, h2, j), q5k_hi(q3, h3, j));
+        lo_b += q4k_dots(a_lo, q5k_lo(q4, h4, j), q5k_lo(q5, h5, j), q5k_lo(q6, h6, j), q5k_lo(q7, h7, j));
+        hi_b += q4k_dots(a_hi, q5k_hi(q4, h4, j), q5k_hi(q5, h5, j), q5k_hi(q6, h6, j), q5k_hi(q7, h7, j));
+    }
+
+    var out: Q4KRows;
+    out.a = q4k_scaled(lo_a, hi_a, sum_lo, sum_hi, sa0, sa1, sa2, sa3);
+    out.b = q4k_scaled(lo_b, hi_b, sum_lo, sum_hi, sb0, sb1, sb2, sb3);
+    return out;
+}
+
+/// gemv_q4k over Q5_K blocks: eight rows per workgroup.
+@compute @workgroup_size(Q4K_THREADS)
+fn gemv_q5k(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>
+) {
+    let row0 = (wg_id.y * grid.x + wg_id.x) * Q4K_ROWS_PER_WG;
+    let tid = local_id.x;
+    if (row0 >= info.N) { return; }
+    let input_row = wg_id.z * info.K;
+    let out0 = wg_id.z * info.N + row0;
+
+    let blocks_per_row = info.K / 256u;
+    let words_per_row = blocks_per_row * Q5K_WORDS;
+    let total_chunks = blocks_per_row * 8u;
+
+    let last = info.N - 1u;
+    let bases_a = vec4<u32>(
+        row0,
+        min(row0 + 1u, last),
+        min(row0 + 2u, last),
+        min(row0 + 3u, last),
+    ) * words_per_row;
+    let bases_b = vec4<u32>(
+        min(row0 + 4u, last),
+        min(row0 + 5u, last),
+        min(row0 + 6u, last),
+        min(row0 + 7u, last),
+    ) * words_per_row;
+
+    var acc_a = vec4<f32>(0.0);
+    var acc_b = vec4<f32>(0.0);
+    for (var chunk = tid; chunk < total_chunks; chunk += Q4K_THREADS) {
+        let rows = q5k_chunk(bases_a, bases_b, chunk, input_row);
+        acc_a += rows.a;
+        acc_b += rows.b;
+    }
+
+    wg_q4k_a[tid] = acc_a;
+    wg_q4k_b[tid] = acc_b;
+    workgroupBarrier();
+    for (var s = Q4K_THREADS / 2u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            wg_q4k_a[tid] += wg_q4k_a[tid + s];
+            wg_q4k_b[tid] += wg_q4k_b[tid + s];
+        }
+        workgroupBarrier();
+    }
+    if (tid == 0u) {
+        let a = wg_q4k_a[0];
+        let b = wg_q4k_b[0];
+        Output[out0 + 0u] = a.x;
+        if (row0 + 1u < info.N) { Output[out0 + 1u] = a.y; }
+        if (row0 + 2u < info.N) { Output[out0 + 2u] = a.z; }
+        if (row0 + 3u < info.N) { Output[out0 + 3u] = a.w; }
+        if (row0 + 4u < info.N) { Output[out0 + 4u] = b.x; }
+        if (row0 + 5u < info.N) { Output[out0 + 5u] = b.y; }
+        if (row0 + 6u < info.N) { Output[out0 + 6u] = b.z; }
+        if (row0 + 7u < info.N) { Output[out0 + 7u] = b.w; }
     }
 }

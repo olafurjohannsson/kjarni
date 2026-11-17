@@ -795,3 +795,81 @@ async fn q6k_batched_matches_expanded() -> Result<()> {
     }
     Ok(())
 }
+
+/// Packed Q5_K on the GPU against the same blocks dequantised by
+/// `dequantize_q5_k_block` and multiplied in f32. The blocks are random bytes,
+/// so every scale, min, nibble and fifth bit pattern turns up; rows that are
+/// not a multiple of the eight a GEMV workgroup owns cover its tail, and the
+/// row counts reach the GEMV, the 64-wide tile and the 128-wide one.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q5k_matches_its_dequantisation() -> Result<()> {
+    use crate::cpu::kernels::q_common::BlockQ5_K;
+    use crate::tensor::QuantizedMatrix;
+    use crate::tensor::raw_tensor::TensorView;
+    use half::f16;
+    use std::borrow::Cow;
+
+    let mut state = 0x9E3779B97F4A7C15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let context = WgpuContext::new().await?;
+    let linear = GpuLinearLayer::new(&context);
+
+    for (n, k) in [(13usize, 256usize), (64, 512), (257, 768)] {
+        let blocks: Vec<BlockQ5_K> = (0..n * k / 256)
+            .map(|_| {
+                let mut bytes = [0u8; 176];
+                for b in bytes.iter_mut() {
+                    *b = next() as u8;
+                }
+                let mut block: BlockQ5_K = bytemuck::cast(bytes);
+                block.d = f16::from_f32(0.002 + (next() % 1000) as f32 * 1e-5);
+                block.dmin = f16::from_f32((next() % 1000) as f32 * 1e-5);
+                block
+            })
+            .collect();
+        let matrix = QuantizedMatrix {
+            blocks,
+            shape: [n, k],
+        };
+        let dequantized = matrix.dequantize()?;
+        let view = TensorView {
+            name: "q5k".into(),
+            bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+            shape: vec![n, k],
+            dtype: DType::Q5_K,
+        };
+        let packed = GpuTensor::from_raw(&context, &view, "q5k")?;
+
+        for m in [1usize, 3, 10, 67, 300] {
+            let input = Array2::from_shape_fn((m, k), |(i, j)| {
+                ((i * 37 + j * 11) % 29) as f32 / 29.0 - 0.5
+            });
+            let want = input.dot(&dequantized.t());
+            let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+            let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
+            let mut enc = context.device.create_command_encoder(&Default::default());
+            linear.encode(&mut enc, &gpu_in, &packed, &out);
+            context.queue.submit(std::iter::once(enc.finish()));
+            let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+
+            let mut worst = 0.0f32;
+            let mut scale = 0.0f32;
+            for (g, w) in got.iter().zip(want.iter()) {
+                worst = worst.max((g - w).abs());
+                scale = scale.max(w.abs());
+            }
+            println!("  q5k [{m}x{k} @ {n}]: max abs diff {worst:.3e}, |want| up to {scale:.3}");
+            assert!(
+                worst < 1e-5 * scale.max(1.0) * (k as f32).sqrt(),
+                "[{m}x{k} @ {n}]: {worst:.3e}"
+            );
+        }
+    }
+    Ok(())
+}

@@ -1,6 +1,7 @@
 use crate::WgpuContext;
 use crate::cache::Cache;
 use crate::gpu::GpuTensor;
+use crate::gpu::cache::GpuRecurrentState;
 use crate::gpu_ops::blocks::cache::GpuUpdateCache;
 use anyhow::{Result, anyhow};
 use std::any::Any;
@@ -16,6 +17,9 @@ pub struct GpuKVCache {
     seq_length: usize,
     // The specialized kernel for performing in-place updates
     update_kernel: GpuUpdateCache,
+    /// The recurrent states of a hybrid decoder's other layers, which move
+    /// with the KV cache.
+    recurrent: Option<GpuRecurrentState>,
 }
 
 impl GpuKVCache {
@@ -61,7 +65,23 @@ impl GpuKVCache {
             v_tensors,
             seq_length: 0,
             update_kernel: GpuUpdateCache::new(context),
+            recurrent: None,
         })
+    }
+
+    /// This cache with `recurrent` states alongside, for a hybrid decoder whose
+    /// attention layers use the KV half.
+    pub fn with_recurrent(mut self, recurrent: GpuRecurrentState) -> Self {
+        self.recurrent = Some(recurrent);
+        self
+    }
+
+    pub fn recurrent(&self) -> Option<&GpuRecurrentState> {
+        self.recurrent.as_ref()
+    }
+
+    pub fn recurrent_mut(&mut self) -> Option<&mut GpuRecurrentState> {
+        self.recurrent.as_mut()
     }
 
     /// Encodes a GPU command to append new key and value tensors to the cache
@@ -151,18 +171,32 @@ impl Cache for GpuKVCache {
             v_tensors: new_v_tensors,
             seq_length: self.seq_length,
             update_kernel: self.update_kernel.clone(),
+            recurrent: self.recurrent.as_ref().map(|r| r.deep_clone()),
         };
         Box::new(new_cache)
     }
     fn clear(&mut self) {
         self.seq_length = 0;
+        if let Some(recurrent) = &mut self.recurrent {
+            recurrent.clear();
+        }
     }
 
     fn as_any(&self) -> &dyn Any {
         self
     }
     fn set_seq_length(&mut self, len: usize) {
+        if let Some(recurrent) = &mut self.recurrent {
+            recurrent.set_len(self.seq_length, len);
+        }
         self.seq_length = len;
+    }
+
+    fn reusable_prefix(&self, len: usize) -> usize {
+        match &self.recurrent {
+            Some(recurrent) => recurrent.reusable_prefix(self.seq_length, len),
+            None => len,
+        }
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self

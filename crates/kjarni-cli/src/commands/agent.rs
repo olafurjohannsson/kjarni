@@ -23,6 +23,7 @@ pub struct AgentArgs {
     pub model: String,
     pub model_path: Option<String>,
     pub full_precision: bool,
+    pub gpu: bool,
     pub dir: Option<String>,
     pub yes: bool,
     pub continue_last: bool,
@@ -55,9 +56,11 @@ pub async fn run(args: AgentArgs) -> Result<()> {
     if args.model_path.is_none() {
         let _ = crate::commands::util::resolve_model(&args.model, Some("decoder"))?;
     }
+    let notes = kjarni::agent::project_notes(&workdir);
     let config = AgentConfig {
         max_steps: args.max_steps,
         workdir: Some(workdir.display().to_string()),
+        project_notes: notes.as_ref().map(|n| n.text.clone()),
         ..Default::default()
     };
 
@@ -75,8 +78,19 @@ pub async fn run(args: AgentArgs) -> Result<()> {
         .temperature(args.temperature)
         .max_tokens(args.max_tokens)
         .prefix_cache_tokens(config.context_budget + args.max_tokens)
-        .cpu()
         .quiet();
+    if args.gpu {
+        // Refuse before the loader starts uploading; an out-of-VRAM upload loses
+        // the device and takes the terminal with it.
+        if args.model_path.is_none()
+            && let Some(mt) = kjarni::ModelType::from_cli_name(&args.model)
+        {
+            crate::commands::util::check_gpu_capacity(mt, !args.full_precision)?;
+        }
+        builder = builder.gpu();
+    } else {
+        builder = builder.cpu();
+    }
     if let Some(path) = &args.model_path {
         builder = builder.model_path(path);
     }
@@ -159,7 +173,14 @@ pub async fn run(args: AgentArgs) -> Result<()> {
     }
 
     if !args.quiet {
-        print_welcome(&model_name, &workdir, &agent, memory.as_deref(), args.yes);
+        print_welcome(
+            &model_name,
+            &workdir,
+            &agent,
+            memory.as_deref(),
+            notes.as_ref(),
+            args.yes,
+        );
     }
 
     let stdin = io::stdin();
@@ -280,11 +301,20 @@ fn print_welcome(
     workdir: &std::path::Path,
     agent: &Agent,
     memory: Option<&Memory>,
+    notes: Option<&kjarni::agent::ProjectNotes>,
     yes: bool,
 ) {
     println!();
     println!("  {}  {}", "kjarni agent".bold(), model.dimmed());
     println!("  {} {}", "folder".dimmed(), workdir.display());
+    if let Some(notes) = notes {
+        let names: Vec<String> = notes
+            .files
+            .iter()
+            .map(|f| f.strip_prefix(workdir).unwrap_or(f).display().to_string())
+            .collect();
+        println!("  {} {}", "notes".dimmed(), names.join(", "));
+    }
     if let Some(m) = memory {
         println!("  {} {} facts", "memory".dimmed(), m.len());
     }
