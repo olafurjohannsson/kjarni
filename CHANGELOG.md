@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`kjarni daemon run`.** The agent as a background service with a local
+  HTTP API: conversations, their events streamed as server-sent events (reply
+  text, tool calls, results), approvals answered over HTTP, stopping a turn,
+  and the agent's memory. The OpenAI-compatible endpoints of `kjarni serve`
+  sit beside it on the same loaded model, taking turns with the agent. It
+  listens on 127.0.0.1 only unless given `--listen`, and every request needs
+  the token in its folder: as a bearer token, or as the cookie a browser gets
+  from the one-time link `kjarni daemon open` opens. Requests naming another
+  host or sent from another web origin are refused. `kjarni daemon status`
+  shows what it runs. The agent works in `~/kjarni` unless given `--dir`.
 - **The agent answers a new message without re-reading the conversation.**
   Qwen 3.5's template drops the think blocks of earlier turns, which changed
   the prompt from the last reply on, so each new message re-read the previous

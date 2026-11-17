@@ -38,6 +38,13 @@ pub enum Commands {
         action: ModelCommands,
     },
 
+    /// Run Kjarni as a background assistant: the agent, its memory and the
+    /// OpenAI-compatible API behind one local web address
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonCommands,
+    },
+
     /// Generate text from a prompt
     Generate {
         /// The prompt (or file path, or stdin if not provided)
@@ -724,6 +731,62 @@ pub enum Commands {
         #[arg(short, long)]
         quiet: bool,
     },
+}
+
+/// The port the daemon listens on unless told otherwise.
+pub const DEFAULT_DAEMON_PORT: u16 = 7710;
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum DaemonCommands {
+    /// Run the daemon in the foreground, until Ctrl+C
+    Run {
+        /// Chat model the agent and /v1/chat/completions use
+        #[arg(short, long, default_value = DEFAULT_AGENT_MODEL)]
+        model: String,
+
+        /// Run the model on the GPU
+        #[arg(long)]
+        gpu: bool,
+
+        /// Load full-precision safetensors instead of the Q4_K_M GGUF
+        #[arg(long)]
+        full_precision: bool,
+
+        /// Port to listen on
+        #[arg(short, long, default_value_t = DEFAULT_DAEMON_PORT)]
+        port: u16,
+
+        /// Listen on this address instead of loopback only, such as 0.0.0.0.
+        /// Every request still needs the token
+        #[arg(long, value_name = "ADDRESS")]
+        listen: Option<String>,
+
+        /// Folder the agent works in. Default: ~/kjarni
+        #[arg(short = 'C', long)]
+        dir: Option<String>,
+
+        /// Run every tool call without asking first
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Neither read nor save long-term memory
+        #[arg(long)]
+        no_memory: bool,
+
+        /// Model replies per message at most
+        #[arg(long, default_value_t = 16)]
+        max_steps: usize,
+
+        /// Don't log each request
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
+    /// Sign this computer's browser in to the running daemon and open it
+    Open,
+
+    /// Show whether the daemon is running, and with what
+    Status,
 }
 
 #[derive(Subcommand, Debug, PartialEq)]

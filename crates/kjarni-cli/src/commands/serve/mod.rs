@@ -32,8 +32,7 @@ use serde_json::json;
 use tower_http::cors::CorsLayer;
 
 use error::ApiError;
-pub use models::Defaults;
-use models::Models;
+pub use models::{Defaults, LoadedDecoder, Models};
 
 /// Large enough for long recordings: OpenAI's own limit is 25 MB.
 const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
