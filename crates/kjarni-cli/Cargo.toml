@@ -32,11 +32,18 @@ tower-http = { version = "0.7.1", features = ["cors"] }
 serde = { workspace = true, features = ["derive"] }
 base64 = "0.23.1"
 async-trait = { workspace = true }
+dirs = { workspace = true }
+getrandom = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 # `kjarni mcp` points stdout at stderr, keeping the real stdout for protocol
 # messages only.
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# The daemon's log redirection and the machine's memory size.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_SystemInformation"] }
+
 [lints]
 workspace = true
 

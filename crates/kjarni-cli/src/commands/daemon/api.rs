@@ -1,0 +1,360 @@
+//! The daemon's own routes, under `/api`, and the sign-in page.
+
+use std::convert::Infallible;
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::routing::{delete, get, post};
+use axum::{Json, Router};
+use futures::Stream;
+use kjarni::agent::{Approval, Memory};
+use serde::Deserialize;
+use serde_json::json;
+use tokio::sync::broadcast::error::RecvError;
+
+use super::auth::{COOKIE, Guard};
+use super::conversations::{Conversations, Event, Live, SendError};
+
+pub struct DaemonState {
+    pub conversations: Conversations,
+    pub guard: Arc<Guard>,
+    pub memory: Option<Arc<Memory>>,
+    pub model: String,
+    pub gpu: bool,
+}
+
+type AppState = Arc<DaemonState>;
+
+fn error(status: StatusCode, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(json!({ "error": { "message": message.into() } })),
+    )
+        .into_response()
+}
+
+fn internal(e: anyhow::Error) -> Response {
+    error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
+}
+
+fn not_found(what: &str) -> Response {
+    error(StatusCode::NOT_FOUND, format!("there is no {what}"))
+}
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/", get(home))
+        .route("/login", get(login))
+        .route("/api/status", get(status))
+        .route("/api/login-code", post(login_code))
+        .route(
+            "/api/conversations",
+            get(list_conversations).post(create_conversation),
+        )
+        .route(
+            "/api/conversations/{id}",
+            get(get_conversation).delete(delete_conversation),
+        )
+        .route("/api/conversations/{id}/messages", post(send_message))
+        .route("/api/conversations/{id}/events", get(events))
+        .route(
+            "/api/conversations/{id}/approvals/{approval}",
+            post(answer_approval),
+        )
+        .route("/api/conversations/{id}/stop", post(stop))
+        .route("/api/memory", get(list_memory).post(remember))
+        .route("/api/memory/{id}", delete(forget))
+}
+
+/// Stands in for the web UI until it is built.
+async fn home() -> Html<&'static str> {
+    Html(
+        "<!doctype html><meta charset=utf-8><title>Kjarni</title>\
+         <p>The Kjarni daemon is running. Its API is under <code>/api</code>.</p>",
+    )
+}
+
+async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let setup = state.conversations.setup();
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "model": state.model,
+        "gpu": state.gpu,
+        "workdir": setup.workdir,
+        "memory": state.memory.is_some(),
+    }))
+}
+
+/// A one-time code that signs a browser in at `/login?code=...`.
+async fn login_code(State(state): State<AppState>, headers: HeaderMap) -> Json<serde_json::Value> {
+    let code = state.guard.new_login_code();
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("127.0.0.1");
+    Json(json!({
+        "code": code,
+        "url": format!("http://{host}/login?code={code}"),
+    }))
+}
+
+#[derive(Deserialize)]
+struct LoginQuery {
+    code: String,
+}
+
+async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> Response {
+    if !state.guard.redeem(&q.code) {
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "this sign-in link has expired or was used already; run `kjarni daemon open` for a new one",
+        );
+    }
+    // A year: the browser stays signed in until the token changes.
+    let cookie = format!(
+        "{COOKIE}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
+        state.guard.token()
+    );
+    ([(header::SET_COOKIE, cookie)], Redirect::to("/")).into_response()
+}
+
+async fn list_conversations(State(state): State<AppState>) -> Response {
+    match state.conversations.list() {
+        Ok(list) => {
+            let items: Vec<_> = list
+                .iter()
+                .map(|s| {
+                    json!({
+                        "id": s.id,
+                        "title": s.title,
+                        "modified": s.modified,
+                        "busy": state.conversations.busy(&s.id),
+                    })
+                })
+                .collect();
+            Json(json!({ "conversations": items })).into_response()
+        }
+        Err(e) => internal(e),
+    }
+}
+
+async fn create_conversation(State(state): State<AppState>) -> Response {
+    match state.conversations.create() {
+        Ok(live) => (StatusCode::CREATED, Json(json!({ "id": live.id }))).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// The error is boxed: a `Response` is large to pass back by value.
+fn find(state: &DaemonState, id: &str) -> Result<Arc<Live>, Box<Response>> {
+    match state.conversations.get(id) {
+        Ok(Some(live)) => Ok(live),
+        Ok(None) => Err(Box::new(not_found("such conversation"))),
+        Err(e) => Err(Box::new(internal(e))),
+    }
+}
+
+async fn get_conversation(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    let live = match find(&state, &id) {
+        Ok(live) => live,
+        Err(r) => return *r,
+    };
+    let snap = live.snapshot();
+    Json(json!({
+        "id": live.id,
+        "busy": snap.busy,
+        "summary": snap.transcript["summary"],
+        "messages": snap.transcript["messages"],
+        "events": snap.events,
+        "pending_approval": snap.pending_approval,
+    }))
+    .into_response()
+}
+
+async fn delete_conversation(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    match state.conversations.delete(&id) {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found("such conversation"),
+        Err(e) => error(StatusCode::CONFLICT, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct SendBody {
+    text: String,
+}
+
+async fn send_message(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SendBody>,
+) -> Response {
+    let live = match find(&state, &id) {
+        Ok(live) => live,
+        Err(r) => return *r,
+    };
+    match live.send(&body.text) {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Err(SendError::Busy) => error(
+            StatusCode::CONFLICT,
+            "the conversation is still answering the last message",
+        ),
+        Err(SendError::Empty) => error(StatusCode::BAD_REQUEST, "the message is empty"),
+    }
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    after: Option<u64>,
+}
+
+/// The conversation's events as server-sent events: those of the current
+/// turn after `after` (or the `Last-Event-ID` a reconnecting browser sends),
+/// then new ones as they happen.
+async fn events(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<EventsQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let live = match find(&state, &id) {
+        Ok(live) => live,
+        Err(r) => return *r,
+    };
+    let after = q.after.or_else(|| {
+        headers
+            .get("last-event-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+    });
+    let (past, rx) = live.follow(after.unwrap_or(0));
+    Sse::new(event_stream(past, rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+fn sse(event: &Event) -> SseEvent {
+    SseEvent::default()
+        .id(event.seq.to_string())
+        .json_data(event)
+        .expect("events serialize")
+}
+
+fn event_stream(
+    past: Vec<Event>,
+    rx: tokio::sync::broadcast::Receiver<Event>,
+) -> impl Stream<Item = Result<SseEvent, Infallible>> {
+    let last = past.last().map_or(0, |e| e.seq);
+    let past = futures::stream::iter(past.into_iter().map(|e| Ok(sse(&e))));
+    let live = futures::stream::unfold((rx, last), |(mut rx, last)| async move {
+        loop {
+            match rx.recv().await {
+                // Already sent from the log.
+                Ok(e) if e.seq <= last => continue,
+                Ok(e) => return Some((Ok(sse(&e)), (rx, e.seq))),
+                // A client too slow to keep up reconnects and reads the log.
+                Err(RecvError::Lagged(_)) | Err(RecvError::Closed) => return None,
+            }
+        }
+    });
+    futures::StreamExt::chain(past, live)
+}
+
+#[derive(Deserialize)]
+struct ApprovalBody {
+    decision: String,
+}
+
+async fn answer_approval(
+    State(state): State<AppState>,
+    Path((id, approval)): Path<(String, u64)>,
+    Json(body): Json<ApprovalBody>,
+) -> Response {
+    let live = match find(&state, &id) {
+        Ok(live) => live,
+        Err(r) => return *r,
+    };
+    let decision = match body.decision.as_str() {
+        "once" => Approval::Once,
+        "always" => Approval::Always,
+        "deny" => Approval::Deny,
+        other => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                format!("decision must be once, always or deny, not '{other}'"),
+            );
+        }
+    };
+    if live.answer(approval, decision) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        not_found("such approval waiting")
+    }
+}
+
+async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    let live = match find(&state, &id) {
+        Ok(live) => live,
+        Err(r) => return *r,
+    };
+    if live.stop() {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        error(StatusCode::CONFLICT, "the conversation is not answering")
+    }
+}
+
+fn memory(state: &DaemonState) -> Result<&Memory, Box<Response>> {
+    state
+        .memory
+        .as_deref()
+        .ok_or_else(|| Box::new(error(StatusCode::NOT_FOUND, "memory is off (--no-memory)")))
+}
+
+async fn list_memory(State(state): State<AppState>) -> Response {
+    let memory = match memory(&state) {
+        Ok(m) => m,
+        Err(r) => return *r,
+    };
+    let facts: Vec<_> = memory
+        .entries()
+        .into_iter()
+        .map(|e| json!({ "id": e.id, "text": e.text, "created": e.created }))
+        .collect();
+    Json(json!({ "facts": facts })).into_response()
+}
+
+#[derive(Deserialize)]
+struct RememberBody {
+    text: String,
+}
+
+async fn remember(State(state): State<AppState>, Json(body): Json<RememberBody>) -> Response {
+    let memory = match memory(&state) {
+        Ok(m) => m,
+        Err(r) => return *r,
+    };
+    match memory.remember(&body.text).await {
+        Ok(e) => (
+            StatusCode::CREATED,
+            Json(json!({ "id": e.id, "text": e.text, "created": e.created })),
+        )
+            .into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+async fn forget(State(state): State<AppState>, Path(id): Path<u64>) -> Response {
+    let memory = match memory(&state) {
+        Ok(m) => m,
+        Err(r) => return *r,
+    };
+    match memory.forget(id) {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found("such fact"),
+        Err(e) => internal(e),
+    }
+}

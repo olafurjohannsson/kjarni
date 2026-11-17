@@ -169,7 +169,7 @@ fn weights_to_load(files: &[(String, u64)], prefer_gguf: bool) -> WeightsToLoad 
 }
 
 /// Free VRAM in bytes, or `None` when it cannot be determined.
-fn free_vram_bytes() -> Option<u64> {
+pub(crate) fn free_vram_bytes() -> Option<u64> {
     let out = std::process::Command::new("nvidia-smi")
         .args(["--query-gpu=memory.free", "--format=csv,noheader,nounits"])
         .output()

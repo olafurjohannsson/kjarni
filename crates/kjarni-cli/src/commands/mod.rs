@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod chat;
 pub mod classify;
+pub mod daemon;
 pub mod display;
 pub mod embed;
 pub mod generate;

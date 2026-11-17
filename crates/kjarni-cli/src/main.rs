@@ -29,6 +29,7 @@ async fn main() -> Result<()> {
 
     match command {
         Commands::Model { action } => commands::model::run(action).await,
+        Commands::Daemon { action } => commands::daemon::run(action).await,
 
         Commands::Inspect { path } => commands::inspect::run(path.as_ref()).await,
 

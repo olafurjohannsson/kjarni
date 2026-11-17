@@ -111,6 +111,16 @@ impl<T> Pool<T> {
             .map_err(|message| ApiError::bad_request(format!("could not load '{name}': {message}")))
     }
 
+    /// Holds `value` as model `name`, as if a request had loaded it.
+    fn insert(&self, name: &str, value: T) -> Arc<T> {
+        let value = Arc::new(value);
+        self.slots.lock().expect("model pool lock").insert(
+            name.to_string(),
+            Arc::new(OnceCell::new_with(Some(value.clone()))),
+        );
+        value
+    }
+
     fn loaded(&self) -> Vec<String> {
         self.slots
             .lock()
@@ -208,6 +218,18 @@ impl Models {
         names.extend(self.summarizers.loaded());
         names.extend(self.recognizers.loaded());
         names
+    }
+
+    /// Serves `chat`, loaded by the caller with settings of its own, as
+    /// model `name`.
+    pub fn insert_chat(&self, name: &str, chat: Chat) -> Arc<LoadedDecoder> {
+        self.decoders.insert(
+            name,
+            LoadedDecoder {
+                decoder: Decoder::Chat(Box::new(chat)),
+                turn: Arc::new(Semaphore::new(1)),
+            },
+        )
     }
 
     pub async fn decoder(&self, name: &str) -> Result<Arc<LoadedDecoder>, ApiError> {
