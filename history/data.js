@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794867562703,
+  "lastUpdate": 1794903173653,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -1788,6 +1788,66 @@ window.BENCHMARK_DATA = {
             "value": 24.51,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 106 Stepping 6, GenuineIntel; vs previous commit: 1.348"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c6ae2f4ec2524b74325d98308fb0f5cbc7e1b0c9",
+          "message": "Q5_K stays packed on the GPU (#122)\n\n* The agent reuses its prompt cache across messages\n\nQwen 3.5's template drops think blocks from turns before the last user\nmessage, so each new message changed the prompt from the previous reply on\nand the model re-read it. Conversation::set_preserve_thinking keeps those\nblocks; the agent sets it, chat keeps the model's own rendering.\n\n* The agent reads project notes from KJARNI.md or AGENTS.md\n\nFrom the working folder and each folder above it up to the repository\nroot, outermost first, at most 16 KB, into the system prompt.\n\n* Qwen 3.5 on the GPU\n\nThe dense models run on wgpu: the shared projections, norms and SwiGLU,\nand kernels for what only Qwen 3.5 has (per-head norm and partial rotary\non q and k, the output gate, the causal convolution, the delta rule and\nthe gated norm). GpuKVCache can carry recurrent states with snapshots,\nso prefix reuse works as on the CPU. The attention's scores, softmax and\noutput are now callable on their own as GpuRoPEAttention::attend, and\nits kernel helper is the public ComputeKernel. kjarni agent takes --gpu.\n\n* Q5_K stays packed on the GPU\n\nThe linear layer reads Q5_K blocks in the shader: a GEMV that does eight\nrows per workgroup like the Q4_K one, and tile loads for both GEMMs. The\n176-byte block is word-aligned, so it uploads as stored. Before, Q5_K\ntensors were expanded to BF16 on upload.",
+          "timestamp": "2026-11-17T07:50:15Z",
+          "tree_id": "6c51db7453f913d2d6e6eacf79863e6022af1c71",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/c6ae2f4ec2524b74325d98308fb0f5cbc7e1b0c9"
+        },
+        "date": 1794903172849,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 490.79,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.001"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 36.13,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.000"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 319.6,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.044"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 18.51,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.006"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 475.76,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.005"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 27.94,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.993"
           }
         ]
       }
