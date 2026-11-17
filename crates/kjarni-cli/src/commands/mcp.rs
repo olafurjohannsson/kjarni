@@ -16,10 +16,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
+use kjarni::agent::tools::media;
 use kjarni::classifier::Classifier;
 use kjarni::common::{DownloadPolicy, ensure_model_downloaded};
 use kjarni::embedder::Embedder;
-use kjarni::folder_search::{FolderSearch, folder_key, scan};
+use kjarni::folder_search::FolderSearch;
 use kjarni::reranker::Reranker;
 use kjarni::transcriber::Transcriber;
 use kjarni::{ImageIndex, ModelType, SearchMode};
@@ -34,10 +35,9 @@ const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 /// more than the last few points of quality when an agent is waiting.
 const SEARCH_MODEL: &str = kjarni::folder_search::DEFAULT_MODEL;
 const RERANK_MODEL: &str = "minilm-l6-v2-cross-encoder";
-const TRANSCRIBE_MODEL: &str = "whisper-small";
+const TRANSCRIBE_MODEL: &str = media::TRANSCRIBE_MODEL;
 const CLASSIFY_MODEL: &str = "distilbert-sentiment";
-/// CLIP, which puts photos and descriptions in one space for `search_images`.
-const IMAGE_MODEL: ModelType = ModelType::ClipVitBase32;
+const IMAGE_MODEL: ModelType = media::IMAGE_MODEL;
 
 const INSTRUCTIONS: &str = "Kjarni runs AI models locally on the user's machine; nothing leaves it. \
 Use search_folder to find passages in a folder of documents or code by meaning, not just by \
@@ -230,61 +230,9 @@ impl Server {
         }
         let images = self.images.as_mut().expect("loaded above");
 
-        // Vectors are cached per folder like search_folder's indexes, and
-        // recomputed when the folder's files change.
-        let root = kjarni::registry::cache_dir().join("mcp-image-indexes");
-        let saved = root.join(format!("{}.json", folder_key(&folder)));
-        let stamp_file = saved.with_extension("stamp");
-        let stamp = scan(&folder, IMAGE_MODEL.cli_name()).stamp;
-        let current = std::fs::read_to_string(&stamp_file).ok();
-
-        let mut text = String::new();
-        if saved.exists() && current.as_deref() == Some(stamp.as_str()) {
-            images.load_entries(&saved)?;
-        } else {
-            images.clear();
-            // Seconds per hundred photos on the CPU: keep it off the runtime's
-            // other threads, as transcribe does.
-            let report = tokio::task::block_in_place(|| images.add_directory(&folder))?;
-            std::fs::create_dir_all(&root)?;
-            images.save(&saved)?;
-            std::fs::write(&stamp_file, stamp)?;
-            text.push_str(&format!(
-                "(Indexed {} photos in {} for this search.",
-                report.added,
-                folder.display()
-            ));
-            if report.skipped > 0 {
-                text.push_str(&format!(" {} could not be read.", report.skipped));
-            }
-            let unsupported: usize = report.unsupported.values().sum();
-            if unsupported > 0 {
-                let kinds: Vec<String> = report
-                    .unsupported
-                    .iter()
-                    .map(|(ext, n)| format!("{n} .{ext}"))
-                    .collect();
-                text.push_str(&format!(
-                    " Skipped, format not supported: {}.",
-                    kinds.join(", ")
-                ));
-            }
-            text.push_str(")\n\n");
-        }
-
-        let hits = images.search(query, top_k)?;
-        if hits.is_empty() {
-            text.push_str("No JPEG or PNG photos in this folder.");
-        }
-        for (i, hit) in hits.iter().enumerate() {
-            text.push_str(&format!(
-                "{}. {}  (score {:.3})\n",
-                i + 1,
-                hit.path.display(),
-                hit.score
-            ));
-        }
-        Ok(text.trim_end().to_string())
+        // Seconds per hundred photos on the CPU the first time: keep it off
+        // the runtime's other threads, as transcribe does.
+        tokio::task::block_in_place(|| media::search_photos(images, &folder, query, top_k))
     }
 
     async fn transcribe(&mut self, args: &Value) -> Result<String> {
@@ -305,17 +253,7 @@ impl Server {
         // runtime's other threads.
         let result = tokio::task::block_in_place(|| transcriber.transcribe_file(&path))?;
 
-        let mut text = format!(
-            "Language: {}. Duration: {:.0} s.\n\n",
-            result.language, result.duration_secs
-        );
-        for s in &result.segments {
-            text.push_str(&format!("[{}] {}\n", timestamp(s.start), s.text.trim()));
-        }
-        if result.segments.is_empty() {
-            text.push_str(result.text.trim());
-        }
-        Ok(text.trim_end().to_string())
+        Ok(media::transcript_text(&result))
     }
 
     async fn classify(&mut self, args: &Value) -> Result<String> {
@@ -522,11 +460,6 @@ fn optional_string<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
-fn timestamp(secs: f32) -> String {
-    let s = secs.max(0.0) as u64;
-    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
-}
-
 fn clip(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
@@ -719,7 +652,6 @@ mod tests {
 
     #[test]
     fn helpers() {
-        assert_eq!(timestamp(3725.5), "01:02:05");
         assert_eq!(clip("abcdef", 3), "abc…");
     }
 }

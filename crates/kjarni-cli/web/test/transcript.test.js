@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  declineReason,
   applyEvent,
   callDetail,
   fromHistory,
@@ -141,4 +142,28 @@ test('a denial and a stop end their calls', () => {
   assert.equal(s.blocks[1].status, 'failed');
   assert.equal(s.blocks.at(-1).type, 'stopped');
   assert.equal(s.ended, 'stopped');
+});
+
+test('a decline keeps what the user said, live and from history', () => {
+  const said =
+    'The user declined this call, so it did not run. They said: "use "notes/" instead"\nFollow what they said; do not make the same call again unless they ask for it.';
+  assert.equal(declineReason(said), 'use "notes/" instead');
+  assert.equal(declineReason('The user declined this call, so it did not run. Ask them what to do instead.'), null);
+  assert.equal(declineReason('They said: "x"\n'), null);
+
+  const history = fromHistory([
+    { role: 'assistant', text: '', tool_calls: [{ name: 'write_file', arguments: { path: 'a' } }] },
+    { role: 'tool', text: said },
+  ]);
+  assert.equal(history[0].status, 'denied');
+  assert.equal(history[0].reason, 'use "notes/" instead');
+
+  const state = newTurnState([]);
+  applyEvent(state, { seq: 1, type: 'tool_call', call: 1, name: 'write_file', arguments: {} });
+  applyEvent(state, { seq: 2, type: 'approval', approval: 9, call: 1 });
+  applyEvent(state, { seq: 3, type: 'approved', approval: 9, decision: 'deny', reason: 'not now' });
+  applyEvent(state, { seq: 4, type: 'file_changed', call: 1, path: 'a' });
+  assert.equal(state.blocks[0].status, 'denied');
+  assert.equal(state.blocks[0].reason, 'not now');
+  assert.equal(state.lastSeq, 4);
 });

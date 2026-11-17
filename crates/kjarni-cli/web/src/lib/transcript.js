@@ -4,8 +4,9 @@
 // Blocks:
 //   { type: 'user', text }
 //   { type: 'assistant', raw, reasoning, text, thinking }
-//   { type: 'tool', call, name, summary, access, arguments, status, output, approval }
+//   { type: 'tool', call, name, summary, access, arguments, status, output, approval, reason }
 //       status: running | waiting | done | failed | denied
+//       reason: what the user said when they declined it
 //   { type: 'notice', text } · { type: 'error', text } · { type: 'stopped' }
 
 const THINK_OPEN = '<think>';
@@ -87,6 +88,14 @@ export function summarize(name, args) {
 }
 
 const DECLINED = 'The user declined this call';
+const SAID = /They said: "([\s\S]*)"\n/;
+
+/** What the user said when declining, from the result the model was given;
+ * null for a plain decline. */
+export function declineReason(output) {
+  if (!output?.startsWith(DECLINED)) return null;
+  return output.match(SAID)?.[1] ?? null;
+}
 
 /** Blocks for the saved messages of a conversation. */
 export function fromHistory(messages) {
@@ -119,7 +128,10 @@ export function fromHistory(messages) {
       const block = unanswered.shift();
       if (block) {
         block.output = m.text;
-        if (m.text?.startsWith(DECLINED)) block.status = 'denied';
+        if (m.text?.startsWith(DECLINED)) {
+          block.status = 'denied';
+          block.reason = declineReason(m.text);
+        }
       }
     }
   }
@@ -187,6 +199,7 @@ export function applyEvent(state, e) {
       if (block) {
         block.status = e.decision === 'deny' ? 'denied' : 'running';
         block.approval = null;
+        block.reason = e.reason ?? null;
       }
       break;
     }

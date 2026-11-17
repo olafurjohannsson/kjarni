@@ -69,6 +69,7 @@ pub fn routes() -> Router<AppState> {
             post(answer_approval),
         )
         .route("/api/conversations/{id}/stop", post(stop))
+        .route("/api/conversations/{id}/changes", get(list_changes))
         .route("/api/models", get(list_models))
         .route("/api/models/current", put(switch_model))
         .route("/api/memory", get(list_memory).post(remember))
@@ -202,6 +203,7 @@ async fn get_conversation(State(state): State<AppState>, Path(id): Path<String>)
         "messages": snap.transcript["messages"],
         "events": snap.events,
         "pending_approval": snap.pending_approval,
+        "changed_files": live.changes.len(),
     }))
     .into_response()
 }
@@ -296,9 +298,24 @@ fn event_stream(
     futures::StreamExt::chain(past, live)
 }
 
+/// The most a reason given with a decline may hold.
+const MAX_REASON_CHARS: usize = 2000;
+
+/// The files the conversation changed, each with its diff from before the
+/// conversation first wrote it.
+async fn list_changes(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    match find(&state, &id) {
+        Ok(live) => Json(json!({ "changes": live.changes.list(&live.workdir) })).into_response(),
+        Err(r) => *r,
+    }
+}
+
 #[derive(Deserialize)]
 struct ApprovalBody {
     decision: String,
+    /// With `deny`: why, or what to do instead, which the model is told.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 async fn answer_approval(
@@ -313,7 +330,16 @@ async fn answer_approval(
     let decision = match body.decision.as_str() {
         "once" => Approval::Once,
         "always" => Approval::Always,
-        "deny" => Approval::Deny,
+        "deny" => match body.reason.as_deref().map(str::trim) {
+            Some(r) if r.chars().count() > MAX_REASON_CHARS => {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    format!("the reason is longer than {MAX_REASON_CHARS} characters"),
+                );
+            }
+            Some(r) if !r.is_empty() => Approval::DenyWith(r.to_string()),
+            _ => Approval::Deny,
+        },
         other => {
             return error(
                 StatusCode::BAD_REQUEST,

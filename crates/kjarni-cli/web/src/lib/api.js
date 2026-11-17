@@ -31,8 +31,9 @@ export const api = {
   conversation: (id) => request('GET', `/api/conversations/${encodeURIComponent(id)}`),
   remove: (id) => request('DELETE', `/api/conversations/${encodeURIComponent(id)}`),
   send: (id, text) => request('POST', `/api/conversations/${encodeURIComponent(id)}/messages`, { text }),
-  answer: (id, approval, decision) =>
-    request('POST', `/api/conversations/${encodeURIComponent(id)}/approvals/${approval}`, { decision }),
+  answer: (id, approval, decision, reason) =>
+    request('POST', `/api/conversations/${encodeURIComponent(id)}/approvals/${approval}`, { decision, reason }),
+  changes: (id) => request('GET', `/api/conversations/${encodeURIComponent(id)}/changes`).then((r) => r.changes),
   stop: (id) => request('POST', `/api/conversations/${encodeURIComponent(id)}/stop`),
   signIn: (token) => request('POST', '/login', { token }),
   schedules: () => request('GET', '/api/schedules'),

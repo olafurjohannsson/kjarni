@@ -29,6 +29,8 @@ bincode = "1"
 walkdir = "2.5.0"
 tempfile = "3.23.0"
 axum = { version = "0.8.9", features = ["multipart"] }
+# Line diffs of the files a daemon conversation changed.
+similar = "2.7"
 tower-http = { version = "0.7.1", features = ["cors"] }
 serde = { workspace = true, features = ["derive"] }
 base64 = "0.23.1"
