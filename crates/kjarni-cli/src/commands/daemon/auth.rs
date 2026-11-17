@@ -108,6 +108,11 @@ impl Guard {
         matches!(codes.remove(code), Some(made) if made.elapsed() < CODE_LIFETIME)
     }
 
+    /// Whether `candidate` is the token.
+    pub fn is_token(&self, candidate: &str) -> bool {
+        same(candidate.as_bytes(), self.token.as_bytes())
+    }
+
     fn signed_in(&self, headers: &HeaderMap) -> bool {
         let bearer = headers
             .get(header::AUTHORIZATION)

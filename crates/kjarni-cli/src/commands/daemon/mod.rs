@@ -15,6 +15,7 @@ mod machine;
 mod service;
 #[cfg(test)]
 mod tests;
+mod web;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -208,6 +209,7 @@ pub fn router(state: Arc<DaemonState>, serve_state: Arc<serve::AppState>, log: b
     api::routes()
         .with_state(state)
         .merge(api)
+        .fallback(web::serve)
         .layer(axum::middleware::from_fn_with_state(guard, auth::guard))
 }
 

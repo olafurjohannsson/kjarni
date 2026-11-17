@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::Stream;
@@ -46,8 +46,7 @@ fn not_found(what: &str) -> Response {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/", get(home))
-        .route("/login", get(login))
+        .route("/login", get(login).post(login_with_token))
         .route("/api/status", get(status))
         .route("/api/login-code", post(login_code))
         .route(
@@ -67,14 +66,6 @@ pub fn routes() -> Router<AppState> {
         .route("/api/conversations/{id}/stop", post(stop))
         .route("/api/memory", get(list_memory).post(remember))
         .route("/api/memory/{id}", delete(forget))
-}
-
-/// Stands in for the web UI until it is built.
-async fn home() -> Html<&'static str> {
-    Html(
-        "<!doctype html><meta charset=utf-8><title>Kjarni</title>\
-         <p>The Kjarni daemon is running. Its API is under <code>/api</code>.</p>",
-    )
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -113,12 +104,38 @@ async fn login(State(state): State<AppState>, Query(q): Query<LoginQuery>) -> Re
             "this sign-in link has expired or was used already; run `kjarni daemon open` for a new one",
         );
     }
-    // A year: the browser stays signed in until the token changes.
-    let cookie = format!(
+    (
+        [(header::SET_COOKIE, sign_in_cookie(&state.guard))],
+        Redirect::to("/"),
+    )
+        .into_response()
+}
+
+/// The cookie that signs a browser in. It lasts a year: the browser stays
+/// signed in until the token changes.
+fn sign_in_cookie(guard: &Guard) -> String {
+    format!(
         "{COOKIE}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
-        state.guard.token()
-    );
-    ([(header::SET_COOKIE, cookie)], Redirect::to("/")).into_response()
+        guard.token()
+    )
+}
+
+#[derive(Deserialize)]
+struct TokenBody {
+    token: String,
+}
+
+/// Signs in a browser on another device, where `kjarni daemon open` cannot
+/// run, with the token the user copied from the daemon's token file.
+async fn login_with_token(State(state): State<AppState>, Json(body): Json<TokenBody>) -> Response {
+    if !state.guard.is_token(body.token.trim()) {
+        return error(StatusCode::UNAUTHORIZED, "that is not the daemon's token");
+    }
+    (
+        StatusCode::NO_CONTENT,
+        [(header::SET_COOKIE, sign_in_cookie(&state.guard))],
+    )
+        .into_response()
 }
 
 async fn list_conversations(State(state): State<AppState>) -> Response {

@@ -597,3 +597,82 @@ fn install_downloads_only_what_the_cache_lacks() {
     assert!(super::is_cached_in(cache.path(), "qwen3.5-4b", false));
     assert!(!super::is_cached_in(cache.path(), "no-such-model", false));
 }
+
+#[tokio::test]
+async fn the_token_signs_in_a_browser_on_another_device() {
+    let d = daemon(Scripted::new(&[]), true);
+    let sign_in = |token: &str| {
+        request("POST", "/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "token": token }).to_string()))
+            .unwrap()
+    };
+    let response = d.app.clone().oneshot(sign_in(TOKEN)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        response.headers()[header::SET_COOKIE].to_str().unwrap(),
+        format!("kjarni_token={TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+    );
+    let wrong = d.app.clone().oneshot(sign_in("guess")).await.unwrap();
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    assert!(wrong.headers().get(header::SET_COOKIE).is_none());
+
+    // Another web page cannot sign the user's browser in to its own choice.
+    let forged = request("POST", "/login")
+        .header(header::ORIGIN, "http://evil.example")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "token": TOKEN }).to_string()))
+        .unwrap();
+    assert_eq!(d.call(forged).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn the_web_ui_is_served_without_signing_in() {
+    let d = daemon(Scripted::new(&[]), false);
+    let get = |path: &str| request("GET", path).body(Body::empty()).unwrap();
+
+    for path in ["/", "/c/abc123"] {
+        let response = d.app.clone().oneshot(get(path)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let headers = response.headers();
+        assert_eq!(headers[header::CONTENT_TYPE], "text/html; charset=utf-8");
+        let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(csp.contains("script-src 'self'"), "{csp}");
+        assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("/assets/app.js"));
+    }
+
+    let js = d.app.clone().oneshot(get("/assets/app.js")).await.unwrap();
+    assert_eq!(js.status(), StatusCode::OK);
+    assert_eq!(
+        js.headers()[header::CONTENT_TYPE],
+        "text/javascript; charset=utf-8"
+    );
+    let font = d
+        .app
+        .clone()
+        .oneshot(get("/fonts/martian-mono-latin.woff2"))
+        .await
+        .unwrap();
+    assert_eq!(font.headers()[header::CONTENT_TYPE], "font/woff2");
+    assert!(
+        font.headers()[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .contains("immutable")
+    );
+
+    assert_eq!(
+        d.call(get("/assets/missing.js")).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // The API's own paths never fall through to the page.
+    assert_eq!(
+        d.api("GET", "/api/no-such-thing", None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(d.call(get("/api/status")).await.0, StatusCode::UNAUTHORIZED);
+}
