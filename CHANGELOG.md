@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The daemon's web UI.** `kjarni daemon open` now opens a chat page served
+  by the daemon itself, built into the binary and working with no internet
+  connection: conversations listed on the side, replies streamed in, each
+  tool call shown as a step with its result folded under it, and calls that
+  change files, run commands or go online waiting for Allow once, Always
+  allow or Decline in the page. Edits show as the lines they take out and
+  put in. It works on a phone as on a laptop. A browser on another device
+  signs in with the daemon's token. The page sanitizes model output and
+  sends a Content-Security-Policy that lets it load and talk to nothing but
+  the daemon, and refuses to be framed by other sites.
+- **`kjarni daemon run --allow-host <name>`** (and `install`). The daemon
+  also answers to that name, over HTTP or HTTPS, so `tailscale serve` can
+  put it on your tailnet while it still listens on 127.0.0.1 only. A request
+  naming any other host is refused with the `--allow-host` that would allow
+  it.
 - **`kjarni daemon run`.** The agent as a background service with a local
   HTTP API: conversations, their events streamed as server-sent events (reply
   text, tool calls, results), approvals answered over HTTP, stopping a turn,

@@ -1,0 +1,21 @@
+{
+  "name": "kjarni-daemon-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The Kjarni daemon's web UI. Built into dist/, which the kjarni binary embeds.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "marked": "18.1.2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "5.1.1",
+    "svelte": "5.57.3",
+    "vite": "6.4.5"
+  }
+}

@@ -69,6 +69,10 @@ struct Daemon {
 }
 
 fn daemon(model: Arc<dyn AgentModel>, any_host: bool) -> Daemon {
+    daemon_with_guard(model, Guard::new(TOKEN.into(), any_host))
+}
+
+fn daemon_with_guard(model: Arc<dyn AgentModel>, guard: Guard) -> Daemon {
     let workdir = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
     let memory = Arc::new(Memory::open(data.path(), None).unwrap());
@@ -83,7 +87,7 @@ fn daemon(model: Arc<dyn AgentModel>, any_host: bool) -> Daemon {
             },
             data.path().join("sessions"),
         ),
-        guard: Arc::new(Guard::new(TOKEN.into(), any_host)),
+        guard: Arc::new(guard),
         memory: Some(memory),
         model: "scripted".into(),
         gpu: false,
@@ -596,4 +600,190 @@ fn install_downloads_only_what_the_cache_lacks() {
     std::fs::write(dir.join("model.safetensors"), "").unwrap();
     assert!(super::is_cached_in(cache.path(), "qwen3.5-4b", false));
     assert!(!super::is_cached_in(cache.path(), "no-such-model", false));
+}
+
+#[tokio::test]
+async fn the_token_signs_in_a_browser_on_another_device() {
+    let d = daemon(Scripted::new(&[]), true);
+    let sign_in = |token: &str| {
+        request("POST", "/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "token": token }).to_string()))
+            .unwrap()
+    };
+    let response = d.app.clone().oneshot(sign_in(TOKEN)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        response.headers()[header::SET_COOKIE].to_str().unwrap(),
+        format!("kjarni_token={TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+    );
+    let wrong = d.app.clone().oneshot(sign_in("guess")).await.unwrap();
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    assert!(wrong.headers().get(header::SET_COOKIE).is_none());
+
+    // Another web page cannot sign the user's browser in to its own choice.
+    let forged = request("POST", "/login")
+        .header(header::ORIGIN, "http://evil.example")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "token": TOKEN }).to_string()))
+        .unwrap();
+    assert_eq!(d.call(forged).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn the_web_ui_is_served_without_signing_in() {
+    let d = daemon(Scripted::new(&[]), false);
+    let get = |path: &str| request("GET", path).body(Body::empty()).unwrap();
+
+    for path in ["/", "/c/abc123"] {
+        let response = d.app.clone().oneshot(get(path)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let headers = response.headers();
+        assert_eq!(headers[header::CONTENT_TYPE], "text/html; charset=utf-8");
+        let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(csp.contains("script-src 'self'"), "{csp}");
+        assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("/assets/app.js"));
+    }
+
+    let js = d.app.clone().oneshot(get("/assets/app.js")).await.unwrap();
+    assert_eq!(js.status(), StatusCode::OK);
+    assert_eq!(
+        js.headers()[header::CONTENT_TYPE],
+        "text/javascript; charset=utf-8"
+    );
+    let font = d
+        .app
+        .clone()
+        .oneshot(get("/fonts/martian-mono-latin.woff2"))
+        .await
+        .unwrap();
+    assert_eq!(font.headers()[header::CONTENT_TYPE], "font/woff2");
+    assert!(
+        font.headers()[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .contains("immutable")
+    );
+
+    assert_eq!(
+        d.call(get("/assets/missing.js")).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // The API's own paths never fall through to the page.
+    assert_eq!(
+        d.api("GET", "/api/no-such-thing", None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(d.call(get("/api/status")).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_allowed_host_name_works_over_https_as_tailscale_serve_sends_it() {
+    let guard = Guard::new(TOKEN.into(), false).allow_hosts(vec!["box.tail1234.ts.net".into()]);
+    let d = daemon_with_guard(Scripted::new(&[]), guard);
+    let status = |host: &str, origin: Option<&str>| {
+        let mut r = Request::builder()
+            .method("POST")
+            .uri("/api/conversations")
+            .header(header::HOST, host)
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
+        if let Some(o) = origin {
+            r = r.header(header::ORIGIN, o);
+        }
+        r.body(Body::empty()).unwrap()
+    };
+
+    for host in [
+        "box.tail1234.ts.net",
+        "BOX.tail1234.ts.net:443",
+        "127.0.0.1:7710",
+    ] {
+        assert_eq!(
+            d.call(status(host, None)).await.0,
+            StatusCode::CREATED,
+            "{host}"
+        );
+    }
+    assert_eq!(
+        d.call(status(
+            "box.tail1234.ts.net",
+            Some("https://box.tail1234.ts.net")
+        ))
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+
+    // Another name is refused, with what to do if it is this computer's.
+    let (code, body) = d.call(status("other.tail1234.ts.net", None)).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--allow-host other.tail1234.ts.net")
+    );
+    // A page on another site still cannot use the allowed name.
+    assert_eq!(
+        d.call(status("box.tail1234.ts.net", Some("https://evil.example")))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        d.call(status(
+            "box.tail1234.ts.net",
+            Some("https://box.tail1234.ts.net.evil.example")
+        ))
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[test]
+fn allow_host_takes_a_name_or_a_pasted_address() {
+    assert_eq!(
+        auth::allowed_host("box.tail1234.ts.net").unwrap(),
+        "box.tail1234.ts.net"
+    );
+    assert_eq!(
+        auth::allowed_host(" https://Box.Tail1234.ts.net/ ").unwrap(),
+        "box.tail1234.ts.net"
+    );
+    assert_eq!(auth::allowed_host("box.lan:7710").unwrap(), "box.lan");
+    for bad in ["", "https://box.ts.net/path", "box ts net", "user@box"] {
+        assert!(auth::allowed_host(bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn install_carries_allowed_hosts_into_the_startup_entry() {
+    let options = super::InstallOptions {
+        model: None,
+        gpu: false,
+        cpu: false,
+        full_precision: false,
+        port: 7710,
+        allow_hosts: vec!["box.tail1234.ts.net".into()],
+        dir: None,
+        yes: false,
+        no_memory: false,
+        max_steps: 16,
+        no_linger: false,
+    };
+    let args = super::run_arguments(
+        &options,
+        "qwen3.5-4b",
+        true,
+        std::path::Path::new("/home/ada/kjarni"),
+        std::path::Path::new("/tmp/daemon.log"),
+    );
+    let at = args.iter().position(|a| a == "--allow-host").unwrap();
+    assert_eq!(args[at + 1], "box.tail1234.ts.net");
+    assert!(args.contains(&"--gpu".to_string()));
 }
