@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794947190284,
+  "lastUpdate": 1794956674596,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2088,6 +2088,66 @@ window.BENCHMARK_DATA = {
             "value": 27.07,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.995"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "748159850042e2db1053e1fbafd70d6e69f60e93",
+          "message": "Switch the daemon's model from the web UI, and a Memory page (#126)\n\n* Schedules and ntfy notifications in the daemon\n\nA schedule is a saved message the daemon sends itself at set times, daily\nat a time (optionally on chosen weekdays) or every so many minutes or\nhours. Each run is a new conversation. With nobody there to approve calls,\na schedule lists the tools that may run; any other call that needs\napproval is declined with a notice, and read-only tools always run. A run\nmissed while the computer was off happens once on the next check.\n\nWhen a run ends, the daemon can publish its reply to an ntfy topic the\nuser set, with an optional access token, linking back to the run's\nconversation. The token stays in the daemon; clients only see that one is\nset. Schedules and settings live in schedules.json in the daemon's folder,\nreadable by the user only.\n\nThe web UI gets a Schedules page: the list with next and last runs, a form\nfor making and editing schedules, and the notification settings with a\ntest button.\n\n* Declare rust-version 1.90; compare translation on the same model\n\nwgpu pulls in ordered-float 5.5, which needs Rust 1.90, so an older\ncompiler failed inside a dependency with no word about kjarni's own\nrequirement. Every crate now inherits rust-version = \"1.90\" from the\nworkspace; the workspace checks clean on 1.90.0.\n\nThe seq2seq benchmark gave PyTorch flan-t5-base while Kjarni's Translator,\nsince it began picking Opus-MT for English to German, ran a different\nmodel, so the timing and the same-output check compared two models.\nKjarni now names flan-t5-base; both engines give the same German again.\n\nThe README's Python example prints POSITIVE, as the label comes back.\n\n* Version 0.7.0\n\n* daemon run downloads its models with progress before loading\n\n`daemon install` fetched a missing model first, where the progress shows,\nbut `daemon run` left it to the loader, which downloads quietly, so a first\nrun sat at \"Loading qwen3.5-4b...\" for the whole download. Both now go\nthrough one step that downloads the chat model with progress and the memory\nmodel quietly, whichever the cache lacks.\n\n* Switch the daemon's model from the web UI, and a Memory page\n\nThe Settings page lists the Qwen 3.5 models the agent can run and switches\nbetween them while the daemon runs: it downloads the new model if needed,\nwaits for replies in progress, holds new messages and schedules, unloads the\nold model and loads the new one, falling back to the old one if the load\nfails. The choice is saved in settings.json in the daemon's folder and loaded\nat the next start unless --model is given; install saves its model there\ninstead of passing --model in the startup entry.\n\nThe Memory page lists, searches, adds and forgets memories through the\nexisting /api/memory routes.",
+          "timestamp": "2026-11-17T20:02:12Z",
+          "tree_id": "b3a07e1361ef23aa0323fb0a57122c5b5567f37c",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/748159850042e2db1053e1fbafd70d6e69f60e93"
+        },
+        "date": 1794956673729,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 650.59,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 1.005"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 60.11,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 0.995"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 452.28,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.874"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 28.91,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.953"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 471.86,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.997"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 27.97,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
           }
         ]
       }
