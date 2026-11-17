@@ -12,6 +12,15 @@
   from the one-time link `kjarni daemon open` opens. Requests naming another
   host or sent from another web origin are refused. `kjarni daemon status`
   shows what it runs. The agent works in `~/kjarni` unless given `--dir`.
+- **`kjarni daemon install`.** Starts the daemon at every login, as the user,
+  with no admin rights: a systemd user unit on Linux (kept running after
+  logout with `loginctl enable-linger` unless `--no-linger`), a LaunchAgent
+  on macOS, a logon task on Windows. Each restarts the daemon after a crash.
+  Without `--model` it picks a Qwen 3.5 model for the machine from free GPU
+  memory and system memory, and downloads it before starting. `start`,
+  `stop`, `uninstall` (`--purge` also deletes the token, logs, memory and
+  conversations) and `logs` (`-f` to follow) work the same on all three; the
+  log is `logs/daemon.log` in the daemon's folder, rotated at 10 MB.
 - **The agent answers a new message without re-reading the conversation.**
   Qwen 3.5's template drops the think blocks of earlier turns, which changed
   the prompt from the last reply on, so each new message re-read the previous

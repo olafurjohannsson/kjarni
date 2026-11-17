@@ -780,12 +780,88 @@ pub enum DaemonCommands {
         /// Don't log each request
         #[arg(short, long)]
         quiet: bool,
+
+        /// Send all output to this file, as the startup entry does
+        #[arg(long, hide = true)]
+        log_file: Option<String>,
+    },
+
+    /// Start the daemon at every login, and start it now
+    ///
+    /// Without --model, picks a model for this machine from its memory and
+    /// GPU. Running it again replaces the settings.
+    Install {
+        /// Chat model to use instead of the one picked for this machine
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Run the model on the GPU
+        #[arg(long, conflicts_with = "cpu")]
+        gpu: bool,
+
+        /// Run the model on the CPU, even when a GPU is free
+        #[arg(long)]
+        cpu: bool,
+
+        /// Load full-precision safetensors instead of the Q4_K_M GGUF
+        #[arg(long)]
+        full_precision: bool,
+
+        /// Port to listen on
+        #[arg(short, long, default_value_t = DEFAULT_DAEMON_PORT)]
+        port: u16,
+
+        /// Folder the agent works in. Default: ~/kjarni
+        #[arg(short = 'C', long)]
+        dir: Option<String>,
+
+        /// Run every tool call without asking first
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Neither read nor save long-term memory
+        #[arg(long)]
+        no_memory: bool,
+
+        /// Model replies per message at most
+        #[arg(long, default_value_t = 16)]
+        max_steps: usize,
+
+        /// Linux: stop the daemon when you log out, instead of keeping it
+        /// running (loginctl enable-linger)
+        #[arg(long)]
+        no_linger: bool,
+    },
+
+    /// Stop starting the daemon at login, and stop it
+    Uninstall {
+        /// Also delete the daemon's token and logs, and the agent's memory
+        /// and conversations
+        #[arg(long)]
+        purge: bool,
+    },
+
+    /// Start the installed daemon
+    Start,
+
+    /// Stop the installed daemon until the next login or `start`
+    Stop,
+
+    /// Show the daemon's log
+    Logs {
+        /// Lines from the end to show
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+
+        /// Keep showing new lines as they are written
+        #[arg(short, long)]
+        follow: bool,
     },
 
     /// Sign this computer's browser in to the running daemon and open it
     Open,
 
-    /// Show whether the daemon is running, and with what
+    /// Show whether the daemon is installed and running, and with what
     Status,
 }
 

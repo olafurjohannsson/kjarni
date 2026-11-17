@@ -1,5 +1,5 @@
 //! `kjarni daemon`: the agent, its memory and the OpenAI-compatible API
-//! behind one local web address.
+//! behind one local web address, started at login once installed.
 //!
 //! The daemon listens on loopback only unless told otherwise, and every
 //! request needs the token kept in the daemon's folder (see [`auth`]). The
@@ -10,6 +10,9 @@ mod api;
 mod auth;
 mod conversations;
 mod display;
+mod logs;
+mod machine;
+mod service;
 #[cfg(test)]
 mod tests;
 
@@ -78,7 +81,11 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
             no_memory,
             max_steps,
             quiet,
+            log_file,
         } => {
+            if let Some(path) = &log_file {
+                logs::redirect_output(Path::new(path))?;
+            }
             serve_daemon(RunOptions {
                 model,
                 gpu,
@@ -90,8 +97,41 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
                 no_memory,
                 max_steps,
                 quiet,
+                background: log_file.is_some(),
             })
             .await
+        }
+        DaemonCommands::Install {
+            model,
+            gpu,
+            cpu,
+            full_precision,
+            port,
+            dir,
+            yes,
+            no_memory,
+            max_steps,
+            no_linger,
+        } => {
+            install(InstallOptions {
+                model,
+                gpu,
+                cpu,
+                full_precision,
+                port,
+                dir,
+                yes,
+                no_memory,
+                max_steps,
+                no_linger,
+            })
+            .await
+        }
+        DaemonCommands::Uninstall { purge } => uninstall(purge),
+        DaemonCommands::Start => start(),
+        DaemonCommands::Stop => stop(),
+        DaemonCommands::Logs { lines, follow } => {
+            logs::show(&logs::log_path(&daemon_dir()), lines, follow)
         }
         DaemonCommands::Open => open(),
         DaemonCommands::Status => status(),
@@ -109,6 +149,8 @@ struct RunOptions {
     no_memory: bool,
     max_steps: usize,
     quiet: bool,
+    /// Started by the startup entry, with no terminal to press Ctrl+C in.
+    background: bool,
 }
 
 /// The chat model the server loaded, as the agent uses it. A reply holds the
@@ -202,18 +244,24 @@ async fn load_chat(options: &RunOptions) -> Result<Chat> {
     Ok(chat)
 }
 
-async fn serve_daemon(options: RunOptions) -> Result<()> {
-    let dir = daemon_dir();
-    let token = auth::load_or_create_token(&dir.join("token"))?;
-
-    let workdir = match &options.dir {
+/// The folder the agent works in, `~/kjarni` unless given, created if
+/// missing.
+fn working_folder(dir: Option<&str>) -> Result<PathBuf> {
+    let workdir = match dir {
         Some(d) => PathBuf::from(d),
         None => dirs::home_dir()
             .ok_or_else(|| anyhow!("no home folder; pass --dir"))?
             .join("kjarni"),
     };
     std::fs::create_dir_all(&workdir).with_context(|| format!("creating {}", workdir.display()))?;
-    let workdir = workdir.canonicalize()?;
+    Ok(workdir.canonicalize()?)
+}
+
+async fn serve_daemon(options: RunOptions) -> Result<()> {
+    let dir = daemon_dir();
+    let token = auth::load_or_create_token(&dir.join("token"))?;
+
+    let workdir = working_folder(options.dir.as_deref())?;
 
     let host = options.listen.clone().unwrap_or_else(|| "127.0.0.1".into());
     let address: SocketAddr = format!("{host}:{}", options.port)
@@ -292,7 +340,14 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
         "Kjarni daemon at http://127.0.0.1:{port}, with {model}, working in {}",
         workdir.display()
     );
-    eprintln!("Sign in from this computer with `kjarni daemon open`. Ctrl+C stops it.");
+    eprintln!(
+        "Sign in from this computer with `kjarni daemon open`. {} stops it.",
+        if options.background {
+            "`kjarni daemon stop`"
+        } else {
+            "Ctrl+C"
+        }
+    );
 
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -319,14 +374,40 @@ async fn shutdown_signal() {
     }
 }
 
+fn not_running() -> anyhow::Error {
+    if service::is_installed() {
+        anyhow!(
+            "the daemon is not running; start it with `kjarni daemon start`, and see `kjarni daemon logs` if it stopped by itself"
+        )
+    } else {
+        anyhow!(
+            "the daemon is not running; install it with `kjarni daemon install`, or run it here with `kjarni daemon run`"
+        )
+    }
+}
+
+/// What the running daemon wrote about itself, if anything.
+fn read_running(dir: &Path) -> Option<Running> {
+    let text = std::fs::read_to_string(running_path(dir)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 /// The running daemon's port and token, or why there is none.
 fn find_running(dir: &Path) -> Result<(u16, String)> {
-    let not_running = || anyhow!("the daemon is not running; start it with `kjarni daemon run`");
-    let text = std::fs::read_to_string(running_path(dir)).map_err(|_| not_running())?;
-    let running: Running = serde_json::from_str(&text).map_err(|_| not_running())?;
+    let running = read_running(dir).ok_or_else(not_running)?;
     let token = std::fs::read_to_string(dir.join("token"))
         .with_context(|| format!("reading {}", dir.join("token").display()))?;
     Ok((running.port, token.trim().to_string()))
+}
+
+/// The daemon's `/api/status`, when one is running and answering.
+fn running_status(dir: &Path) -> Option<(Running, serde_json::Value)> {
+    let running = read_running(dir)?;
+    let token = std::fs::read_to_string(dir.join("token")).ok()?;
+    match local_request(running.port, "GET", "/api/status", token.trim()) {
+        Ok((200, body)) => Some((running, serde_json::from_str(&body).ok()?)),
+        _ => None,
+    }
 }
 
 /// A request to the daemon on this machine: `(status, body)`.
@@ -394,31 +475,350 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 }
 
 fn status() -> Result<()> {
-    let (port, token) = find_running(&daemon_dir())?;
-    let (code, body) = local_request(port, "GET", "/api/status", &token)?;
-    if code != 200 {
-        bail!("the daemon answered {code}: {body}");
+    let dir = daemon_dir();
+    let installed = service::is_installed();
+    match running_status(&dir) {
+        Some((running, s)) => {
+            println!("Running at http://127.0.0.1:{}", running.port);
+            println!(
+                "  model    {}{}",
+                s["model"].as_str().unwrap_or("?"),
+                if s["gpu"].as_bool() == Some(true) {
+                    " (GPU)"
+                } else {
+                    ""
+                }
+            );
+            println!("  folder   {}", s["workdir"].as_str().unwrap_or("?"));
+            println!(
+                "  memory   {}",
+                if s["memory"].as_bool() == Some(true) {
+                    "on"
+                } else {
+                    "off"
+                }
+            );
+            println!("  version  {}", s["version"].as_str().unwrap_or("?"));
+        }
+        None if installed => {
+            println!("Not running, or still loading its model.");
+            println!("  `kjarni daemon logs` shows which; `kjarni daemon start` starts it.");
+        }
+        None => println!("Not running."),
     }
-    let s: serde_json::Value = serde_json::from_str(&body)?;
-    println!("Running at http://127.0.0.1:{port}");
-    println!(
-        "  model    {}{}",
-        s["model"].as_str().unwrap_or("?"),
-        if s["gpu"].as_bool() == Some(true) {
-            " (GPU)"
-        } else {
-            ""
-        }
-    );
-    println!("  folder   {}", s["workdir"].as_str().unwrap_or("?"));
-    println!(
-        "  memory   {}",
-        if s["memory"].as_bool() == Some(true) {
-            "on"
-        } else {
-            "off"
-        }
-    );
-    println!("  version  {}", s["version"].as_str().unwrap_or("?"));
+    if installed {
+        println!("Starts at login: yes ({})", service::describe());
+    } else {
+        println!("Starts at login: no (`kjarni daemon install` sets that up)");
+    }
     Ok(())
+}
+
+struct InstallOptions {
+    model: Option<String>,
+    gpu: bool,
+    cpu: bool,
+    full_precision: bool,
+    port: u16,
+    dir: Option<String>,
+    yes: bool,
+    no_memory: bool,
+    max_steps: usize,
+    no_linger: bool,
+}
+
+/// Variables that move Kjarni's folders, carried into the startup entry so
+/// the daemon uses the same folders as the command that installed it.
+const CARRIED_VARIABLES: [&str; 3] = ["KJARNI_DAEMON_DIR", "KJARNI_AGENT_DIR", "KJARNI_CACHE_DIR"];
+
+/// Records that install turned linger on, so uninstall turns it off again
+/// and leaves it alone when the user had it on already.
+const LINGER_MARKER: &str = "linger-enabled-by-install";
+
+/// The command line the startup entry runs.
+fn run_arguments(
+    options: &InstallOptions,
+    model: &str,
+    gpu: bool,
+    workdir: &Path,
+    log: &Path,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "daemon".into(),
+        "run".into(),
+        "--model".into(),
+        model.into(),
+        "--port".into(),
+        options.port.to_string(),
+        "--dir".into(),
+        workdir.to_string_lossy().into_owned(),
+        "--max-steps".into(),
+        options.max_steps.to_string(),
+        "--log-file".into(),
+        log.to_string_lossy().into_owned(),
+    ];
+    for (on, flag) in [
+        (gpu, "--gpu"),
+        (options.full_precision, "--full-precision"),
+        (options.yes, "--yes"),
+        (options.no_memory, "--no-memory"),
+    ] {
+        if on {
+            args.push(flag.into());
+        }
+    }
+    args
+}
+
+async fn install(options: InstallOptions) -> Result<()> {
+    let dir = daemon_dir();
+    let installed = service::is_installed();
+    let before = running_status(&dir);
+    if let Some((running, _)) = &before
+        && !installed
+    {
+        bail!(
+            "a daemon started by hand is running (process {}, port {}); stop it with Ctrl+C first",
+            running.pid,
+            running.port
+        );
+    }
+
+    let (model, gpu) = match &options.model {
+        Some(m) => (m.clone(), options.gpu),
+        None => {
+            let pick = machine::pick(machine::Machine::this(), options.gpu, options.cpu);
+            println!(
+                "Picked {} on the {} for this machine ({}). `--model` picks another.",
+                pick.model,
+                if pick.gpu { "GPU" } else { "CPU" },
+                pick.because
+            );
+            (pick.model.to_string(), pick.gpu)
+        }
+    };
+    crate::commands::util::resolve_model(&model, Some("decoder"))?;
+
+    // Downloaded now, where the user sees the progress, rather than by the
+    // daemon in the background.
+    if !is_cached(&model, !options.full_precision) {
+        crate::commands::model::download(&model, !options.full_precision, false).await?;
+    }
+    if !options.no_memory && !is_cached(MEMORY_MODEL, false) {
+        crate::commands::model::download(MEMORY_MODEL, false, true).await?;
+    }
+
+    auth::load_or_create_token(&dir.join("token"))?;
+    let workdir = working_folder(options.dir.as_deref())?;
+    let log = logs::log_path(&dir);
+    if let Some(logs_dir) = log.parent() {
+        std::fs::create_dir_all(logs_dir)
+            .with_context(|| format!("creating {}", logs_dir.display()))?;
+    }
+    let program = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .context("finding this program's path")?;
+    let mut env = Vec::new();
+    for name in CARRIED_VARIABLES {
+        if let Ok(value) = std::env::var(name) {
+            let path = std::path::absolute(&value).unwrap_or_else(|_| value.clone().into());
+            env.push((name.to_string(), path.to_string_lossy().into_owned()));
+        }
+    }
+    if cfg!(windows) && !env.is_empty() {
+        eprintln!(
+            "Warning: a logon task cannot carry {}; the daemon will use the default folders.",
+            env.iter()
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let entry = service::Entry {
+        program,
+        args: run_arguments(&options, &model, gpu, &workdir, &log),
+        env,
+        log,
+    };
+    // A stale record from a daemon that was killed would look like the new one.
+    if before.is_none() {
+        let _ = std::fs::remove_file(running_path(&dir));
+    }
+    service::install(&entry)?;
+    println!("Kjarni will start at login ({}).", service::describe());
+
+    if let Some(on) = service::linger() {
+        let marker = dir.join(LINGER_MARKER);
+        if options.no_linger {
+            if marker.exists() {
+                service::set_linger(false)?;
+                let _ = std::fs::remove_file(&marker);
+            }
+            println!("It stops when you log out (--no-linger).");
+        } else if on {
+            println!("It keeps running after you log out.");
+        } else {
+            match service::set_linger(true) {
+                Ok(()) => {
+                    std::fs::write(&marker, "")?;
+                    println!(
+                        "It keeps running after you log out (loginctl enable-linger; --no-linger turns that off)."
+                    );
+                }
+                Err(e) => eprintln!("It stops when you log out: could not turn on linger: {e:#}"),
+            }
+        }
+    }
+
+    println!("Loading {model}...");
+    let old_pid = before.map(|(r, _)| r.pid);
+    let ready = wait_until_ready(&dir, old_pid, Duration::from_secs(300));
+    match ready {
+        Some(port) => {
+            println!(
+                "Ready at http://127.0.0.1:{port}, working in {}.",
+                workdir.display()
+            );
+            println!("Sign in with `kjarni daemon open`.");
+            Ok(())
+        }
+        None => bail!(
+            "the daemon has not answered after five minutes; `kjarni daemon logs` shows what it is doing"
+        ),
+    }
+}
+
+/// Whether registry model `name` is downloaded in the format a load picks:
+/// the GGUF when `gguf` and the model has one, otherwise safetensors.
+fn is_cached(name: &str, gguf: bool) -> bool {
+    is_cached_in(&kjarni::registry::cache_dir(), name, gguf)
+}
+
+fn is_cached_in(cache: &Path, name: &str, gguf: bool) -> bool {
+    let Some(model) = kjarni::ModelType::from_cli_name(name) else {
+        return false;
+    };
+    if gguf && model.info().paths.gguf_url.is_some() {
+        let dir = model.cache_dir(cache);
+        dir.join("config.json").exists() && dir.join("model.gguf").exists()
+    } else {
+        model.is_downloaded(cache)
+    }
+}
+
+/// Waits for a daemon other than process `old_pid` to answer, returning its
+/// port, or `None` after `limit`.
+fn wait_until_ready(dir: &Path, old_pid: Option<u32>, limit: Duration) -> Option<u16> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < limit {
+        if let Some((running, _)) = running_status(dir)
+            && Some(running.pid) != old_pid
+        {
+            return Some(running.port);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    None
+}
+
+/// Waits up to `limit` for the daemon to stop answering, then clears its
+/// record if it left one: a task ended on Windows gets no chance to.
+fn wait_until_stopped(dir: &Path, limit: Duration) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < limit {
+        if running_status(dir).is_none() {
+            let _ = std::fs::remove_file(running_path(dir));
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+fn uninstall(purge: bool) -> Result<()> {
+    let dir = daemon_dir();
+    if service::uninstall()? {
+        wait_until_stopped(&dir, Duration::from_secs(15));
+        println!("Kjarni no longer starts at login, and is stopped.");
+    } else {
+        println!("The daemon was not installed.");
+    }
+    let marker = dir.join(LINGER_MARKER);
+    if marker.exists() {
+        match service::set_linger(false) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&marker);
+                println!("Turned linger back off (loginctl disable-linger).");
+            }
+            Err(e) => eprintln!("Could not turn linger back off: {e:#}"),
+        }
+    }
+    if !purge {
+        println!(
+            "Memory and conversations stay in {}; `--purge` deletes them.",
+            kjarni::agent::data_dir().display()
+        );
+        return Ok(());
+    }
+    let agent = kjarni::agent::data_dir();
+    let doomed: Vec<(&Path, &str)> = [
+        (dir.as_path(), "token and logs"),
+        (
+            agent.as_path(),
+            "memory and conversations, shared with `kjarni agent`",
+        ),
+    ]
+    .into_iter()
+    .filter(|(p, _)| p.exists())
+    .collect();
+    if doomed.is_empty() {
+        println!("Nothing to delete.");
+        return Ok(());
+    }
+    println!("This deletes, for good:");
+    for (path, what) in &doomed {
+        println!("  {}  ({what})", path.display());
+    }
+    print!("Delete them? [y/N] ");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if answer.trim().eq_ignore_ascii_case("y") {
+        for (path, _) in doomed {
+            std::fs::remove_dir_all(path)
+                .with_context(|| format!("deleting {}", path.display()))?;
+            println!("Deleted {}", path.display());
+        }
+        println!(
+            "Downloaded models stay in {}, shared with the other kjarni commands; `kjarni model remove` deletes one.",
+            kjarni::registry::cache_dir().display()
+        );
+    } else {
+        println!("Kept them.");
+    }
+    Ok(())
+}
+
+fn start() -> Result<()> {
+    let dir = daemon_dir();
+    if let Some((running, _)) = running_status(&dir) {
+        println!("Already running at http://127.0.0.1:{}.", running.port);
+        return Ok(());
+    }
+    service::start()?;
+    println!(
+        "Starting. `kjarni daemon status` shows when it is ready; `kjarni daemon logs -f` shows it loading."
+    );
+    Ok(())
+}
+
+fn stop() -> Result<()> {
+    let dir = daemon_dir();
+    service::stop()?;
+    if wait_until_stopped(&dir, Duration::from_secs(15)) {
+        println!("Stopped. It starts again at the next login, or with `kjarni daemon start`.");
+        Ok(())
+    } else {
+        bail!("the daemon is still answering after 15 seconds")
+    }
 }

@@ -279,7 +279,7 @@ fn has_gguf_downloaded(model_type: &ModelType) -> bool {
     model_dir.join("model.gguf").exists()
 }
 
-async fn download(name: &str, prefer_gguf: bool, quiet: bool) -> Result<()> {
+pub(crate) async fn download(name: &str, prefer_gguf: bool, quiet: bool) -> Result<()> {
     let options = kjarni::hub::FetchOptions {
         prefer_gguf,
         quiet,

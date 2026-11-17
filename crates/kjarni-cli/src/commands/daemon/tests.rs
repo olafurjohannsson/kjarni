@@ -579,3 +579,21 @@ async fn memory_can_be_listed_added_to_and_forgotten() {
     let (_, list) = d.api("GET", "/api/memory", None).await;
     assert_eq!(list["facts"], json!([]));
 }
+
+#[test]
+fn install_downloads_only_what_the_cache_lacks() {
+    let cache = tempfile::tempdir().unwrap();
+    let model = kjarni::ModelType::from_cli_name("qwen3.5-4b").unwrap();
+    let dir = model.cache_dir(cache.path());
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(!super::is_cached_in(cache.path(), "qwen3.5-4b", true));
+    for file in ["config.json", "tokenizer.json", "model.gguf"] {
+        std::fs::write(dir.join(file), "").unwrap();
+    }
+    assert!(super::is_cached_in(cache.path(), "qwen3.5-4b", true));
+    // Full precision loads safetensors, which are not there.
+    assert!(!super::is_cached_in(cache.path(), "qwen3.5-4b", false));
+    std::fs::write(dir.join("model.safetensors"), "").unwrap();
+    assert!(super::is_cached_in(cache.path(), "qwen3.5-4b", false));
+    assert!(!super::is_cached_in(cache.path(), "no-such-model", false));
+}
