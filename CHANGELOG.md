@@ -18,6 +18,18 @@ but the API and the settings files may still change.
   always works. A run missed while the computer was off happens once when
   the daemon is back. Make and edit them on the new Schedules page, or
   through `/api/schedules`.
+- **Switch the daemon's model from the web UI.** The new Settings page lists
+  the models the agent can run (the Qwen 3.5 sizes, from 0.8B to 35B-A3B),
+  which are downloaded, and which one is running. Picking another downloads
+  it if needed, waits for replies in progress to finish, unloads the old
+  model and loads the new one, holding new messages and schedules until it
+  is ready; if it will not load, the old one is loaded again. The choice is
+  saved in the daemon's folder and loaded at the next start, unless
+  `daemon run` is given `--model`. `daemon install` saves its model there
+  too instead of putting `--model` in the startup entry. Also at
+  `GET /api/models` and `PUT /api/models/current`.
+- **A Memory page.** Everything Kjarni remembers, newest first, with a search
+  once the list grows. Add a memory by hand, or forget one that is wrong.
 - **Phone notifications through ntfy.** When a schedule finishes, the
   daemon can publish its reply to an ntfy topic you choose, on ntfy.sh or
   your own server, with an access token if it needs one. Tapping the

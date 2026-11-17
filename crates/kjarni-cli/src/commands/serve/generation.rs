@@ -622,7 +622,7 @@ pub async fn chat_completions(
         ));
     }
     let overrides = request.sampling.overrides()?;
-    let model = resolve(request.model.as_deref(), &app.models.defaults.chat)?;
+    let model = resolve(request.model.as_deref(), &app.models.default_chat())?;
     let decoder = app.models.decoder(&model).await?;
     let Some(chat) = decoder.chat() else {
         return Err(ApiError::invalid(
@@ -858,7 +858,7 @@ pub async fn completions(
         }
     };
     let overrides = request.sampling.overrides()?;
-    let model = resolve(request.model.as_deref(), &app.models.defaults.chat)?;
+    let model = resolve(request.model.as_deref(), &app.models.default_chat())?;
     let decoder = app.models.decoder(&model).await?;
     let stops = request.stop.map(Stop::into_vec).unwrap_or_default();
     let mut run = start(decoder, model, prompt, overrides, stops, false)

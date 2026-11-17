@@ -8,6 +8,8 @@
   import Welcome from './components/Welcome.svelte';
   import SignIn from './components/SignIn.svelte';
   import Schedules from './components/Schedules.svelte';
+  import Memory from './components/Memory.svelte';
+  import Settings from './components/Settings.svelte';
   import Icon from './components/Icon.svelte';
   import Mark from './components/Mark.svelte';
 
@@ -23,8 +25,11 @@
   let drawer = $state(false);
   let trouble = $state('');
   let atBottom = $state(true);
-  // 'chat', or 'schedules' for the schedules page.
+  // 'chat', or one of PAGES.
   let page = $state('chat');
+
+  // The pages besides chat, by their address.
+  const PAGES = { schedules: 'Schedules', memory: 'Memory', settings: 'Settings' };
 
   let scroller = $state();
   let composer = $state();
@@ -33,8 +38,8 @@
   let visit = 0;
 
   let title = $derived(
-    page === 'schedules'
-      ? 'Schedules'
+    page !== 'chat'
+      ? PAGES[page]
       : conversations.find((c) => c.id === current)?.title || (current ? 'Conversation' : 'Kjarni'),
   );
 
@@ -67,18 +72,27 @@
 
   /** Shows the page the address names. */
   async function route() {
-    if (location.pathname === '/schedules') openSchedules(false);
+    const name = location.pathname.slice(1);
+    if (Object.hasOwn(PAGES, name)) openPage(name, false);
     else await show(idFromPath(), false);
   }
 
-  function openSchedules(push = true) {
+  function openPage(name, push = true) {
     ++visit;
     stopFollowing();
     drawer = false;
     current = null;
     busy = false;
-    page = 'schedules';
-    if (push && location.pathname !== '/schedules') history.pushState(null, '', '/schedules');
+    page = name;
+    if (push && location.pathname !== `/${name}`) history.pushState(null, '', `/${name}`);
+  }
+
+  async function refreshStatus() {
+    try {
+      status = await api.status();
+    } catch (e) {
+      guard(e);
+    }
   }
 
   async function refreshList() {
@@ -256,7 +270,7 @@
 </script>
 
 <svelte:head>
-  <title>{current || page === 'schedules' ? `${title} · Kjarni` : 'Kjarni'}</title>
+  <title>{current || page !== 'chat' ? `${title} · Kjarni` : 'Kjarni'}</title>
 </svelte:head>
 
 {#if signedIn === false}
@@ -276,7 +290,7 @@
         {page}
         onselect={(id) => show(id)}
         onnew={() => show(null)}
-        onschedules={() => openSchedules()}
+        onpage={(name) => openPage(name)}
         ondelete={remove}
       />
     </div>
@@ -289,10 +303,16 @@
         <button class="icon-button" onclick={() => show(null)} aria-label="New conversation"><Icon name="plus" size={20} /></button>
       </header>
 
-      {#if page === 'schedules'}
+      {#if page !== 'chat'}
         <div class="scroll">
           <div class="column">
-            <Schedules onopen={(id) => (refreshList(), show(id))} onsignedout={() => (signedIn = false)} />
+            {#if page === 'schedules'}
+              <Schedules onopen={(id) => (refreshList(), show(id))} onsignedout={() => (signedIn = false)} />
+            {:else if page === 'memory'}
+              <Memory onsignedout={() => (signedIn = false)} />
+            {:else}
+              <Settings {status} onchange={refreshStatus} onsignedout={() => (signedIn = false)} />
+            {/if}
           </div>
         </div>
       {:else}

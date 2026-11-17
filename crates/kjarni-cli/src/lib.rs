@@ -740,9 +740,10 @@ pub const DEFAULT_DAEMON_PORT: u16 = 7710;
 pub enum DaemonCommands {
     /// Run the daemon in the foreground, until Ctrl+C
     Run {
-        /// Chat model the agent and /v1/chat/completions use
-        #[arg(short, long, default_value = DEFAULT_AGENT_MODEL)]
-        model: String,
+        /// Chat model the agent and /v1/chat/completions use. Default: the
+        /// one last picked in the web UI or by `install`, else qwen3.5-4b
+        #[arg(short, long)]
+        model: Option<String>,
 
         /// Run the model on the GPU
         #[arg(long)]

@@ -42,6 +42,11 @@ export const api = {
   runSchedule: (id) => request('POST', `/api/schedules/${encodeURIComponent(id)}/run`).then((r) => r.conversation),
   setNotifications: (settings) => request('PUT', '/api/notifications', settings),
   testNotification: () => request('POST', '/api/notifications/test'),
+  memory: () => request('GET', '/api/memory').then((r) => r.facts),
+  remember: (text) => request('POST', '/api/memory', { text }),
+  forget: (id) => request('DELETE', `/api/memory/${id}`),
+  models: () => request('GET', '/api/models'),
+  switchModel: (model) => request('PUT', '/api/models/current', { model }),
 };
 
 /** Follows a conversation's events after `after`, calling `onEvent` for
