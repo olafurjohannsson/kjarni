@@ -12,6 +12,11 @@
   signs in with the daemon's token. The page sanitizes model output and
   sends a Content-Security-Policy that lets it load and talk to nothing but
   the daemon, and refuses to be framed by other sites.
+- **`kjarni daemon run --allow-host <name>`** (and `install`). The daemon
+  also answers to that name, over HTTP or HTTPS, so `tailscale serve` can
+  put it on your tailnet while it still listens on 127.0.0.1 only. A request
+  naming any other host is refused with the `--allow-host` that would allow
+  it.
 - **`kjarni daemon run`.** The agent as a background service with a local
   HTTP API: conversations, their events streamed as server-sent events (reply
   text, tool calls, results), approvals answered over HTTP, stopping a turn,

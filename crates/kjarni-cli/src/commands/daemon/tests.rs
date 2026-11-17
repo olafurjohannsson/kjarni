@@ -69,6 +69,10 @@ struct Daemon {
 }
 
 fn daemon(model: Arc<dyn AgentModel>, any_host: bool) -> Daemon {
+    daemon_with_guard(model, Guard::new(TOKEN.into(), any_host))
+}
+
+fn daemon_with_guard(model: Arc<dyn AgentModel>, guard: Guard) -> Daemon {
     let workdir = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
     let memory = Arc::new(Memory::open(data.path(), None).unwrap());
@@ -83,7 +87,7 @@ fn daemon(model: Arc<dyn AgentModel>, any_host: bool) -> Daemon {
             },
             data.path().join("sessions"),
         ),
-        guard: Arc::new(Guard::new(TOKEN.into(), any_host)),
+        guard: Arc::new(guard),
         memory: Some(memory),
         model: "scripted".into(),
         gpu: false,
@@ -675,4 +679,111 @@ async fn the_web_ui_is_served_without_signing_in() {
         StatusCode::NOT_FOUND
     );
     assert_eq!(d.call(get("/api/status")).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_allowed_host_name_works_over_https_as_tailscale_serve_sends_it() {
+    let guard = Guard::new(TOKEN.into(), false).allow_hosts(vec!["box.tail1234.ts.net".into()]);
+    let d = daemon_with_guard(Scripted::new(&[]), guard);
+    let status = |host: &str, origin: Option<&str>| {
+        let mut r = Request::builder()
+            .method("POST")
+            .uri("/api/conversations")
+            .header(header::HOST, host)
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
+        if let Some(o) = origin {
+            r = r.header(header::ORIGIN, o);
+        }
+        r.body(Body::empty()).unwrap()
+    };
+
+    for host in [
+        "box.tail1234.ts.net",
+        "BOX.tail1234.ts.net:443",
+        "127.0.0.1:7710",
+    ] {
+        assert_eq!(
+            d.call(status(host, None)).await.0,
+            StatusCode::CREATED,
+            "{host}"
+        );
+    }
+    assert_eq!(
+        d.call(status(
+            "box.tail1234.ts.net",
+            Some("https://box.tail1234.ts.net")
+        ))
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+
+    // Another name is refused, with what to do if it is this computer's.
+    let (code, body) = d.call(status("other.tail1234.ts.net", None)).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--allow-host other.tail1234.ts.net")
+    );
+    // A page on another site still cannot use the allowed name.
+    assert_eq!(
+        d.call(status("box.tail1234.ts.net", Some("https://evil.example")))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        d.call(status(
+            "box.tail1234.ts.net",
+            Some("https://box.tail1234.ts.net.evil.example")
+        ))
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[test]
+fn allow_host_takes_a_name_or_a_pasted_address() {
+    assert_eq!(
+        auth::allowed_host("box.tail1234.ts.net").unwrap(),
+        "box.tail1234.ts.net"
+    );
+    assert_eq!(
+        auth::allowed_host(" https://Box.Tail1234.ts.net/ ").unwrap(),
+        "box.tail1234.ts.net"
+    );
+    assert_eq!(auth::allowed_host("box.lan:7710").unwrap(), "box.lan");
+    for bad in ["", "https://box.ts.net/path", "box ts net", "user@box"] {
+        assert!(auth::allowed_host(bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn install_carries_allowed_hosts_into_the_startup_entry() {
+    let options = super::InstallOptions {
+        model: None,
+        gpu: false,
+        cpu: false,
+        full_precision: false,
+        port: 7710,
+        allow_hosts: vec!["box.tail1234.ts.net".into()],
+        dir: None,
+        yes: false,
+        no_memory: false,
+        max_steps: 16,
+        no_linger: false,
+    };
+    let args = super::run_arguments(
+        &options,
+        "qwen3.5-4b",
+        true,
+        std::path::Path::new("/home/ada/kjarni"),
+        std::path::Path::new("/tmp/daemon.log"),
+    );
+    let at = args.iter().position(|a| a == "--allow-host").unwrap();
+    assert_eq!(args[at + 1], "box.tail1234.ts.net");
+    assert!(args.contains(&"--gpu".to_string()));
 }

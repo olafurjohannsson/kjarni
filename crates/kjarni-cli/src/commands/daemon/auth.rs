@@ -5,17 +5,19 @@
 //! one-time login code, so the token itself never appears in a URL or in the
 //! browser's history.
 //!
-//! Requests must also name the daemon by a loopback host, and a browser
-//! request must come from the daemon's own origin. Together these stop a web
-//! page the user visits from driving the daemon through their browser,
-//! directly or by pointing its own domain at 127.0.0.1 (DNS rebinding).
+//! Requests must also name the daemon by a loopback host, or by a name the
+//! user allowed with `--allow-host` (such as the one `tailscale serve` gives
+//! the computer), and a browser request must come from the daemon's own
+//! origin. Together these stop a web page the user visits from driving the
+//! daemon through their browser, directly or by pointing its own domain at
+//! 127.0.0.1 (DNS rebinding).
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
@@ -77,6 +79,8 @@ pub struct Guard {
     token: String,
     /// Accept any `Host`, for a daemon listening on a network address.
     any_host: bool,
+    /// Names besides loopback the daemon answers to, lowercase, no port.
+    allowed_hosts: Vec<String>,
     codes: Mutex<HashMap<String, Instant>>,
 }
 
@@ -85,8 +89,23 @@ impl Guard {
         Self {
             token,
             any_host,
+            allowed_hosts: Vec::new(),
             codes: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Also answers to `hosts`, as [`allowed_host`] wrote them.
+    pub fn allow_hosts(mut self, hosts: Vec<String>) -> Self {
+        self.allowed_hosts = hosts;
+        self
+    }
+
+    /// Whether a request naming `host` is for this daemon.
+    fn answers_to(&self, host: &str) -> bool {
+        if self.any_host || is_loopback_host(host) {
+            return true;
+        }
+        host_name(host).is_some_and(|name| self.allowed_hosts.contains(&name))
     }
 
     pub fn token(&self) -> &str {
@@ -142,24 +161,53 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Whether `host`, a `Host` header or an origin's host part, names this
-/// machine's loopback interface.
-pub fn is_loopback_host(host: &str) -> bool {
+/// The name in `host`, a `Host` header or an origin's host part, without its
+/// port and in lowercase. `None` when it is not a host.
+pub fn host_name(host: &str) -> Option<String> {
     let name = if let Some(rest) = host.strip_prefix('[') {
         // [::1] or [::1]:port
         match rest.split_once(']') {
-            Some((name, tail)) if tail.is_empty() || tail.starts_with(':') => name,
-            _ => return false,
+            Some((name, tail)) if tail.is_empty() || port(tail) => name,
+            _ => return None,
         }
     } else {
-        match host.rsplit_once(':') {
-            Some((name, port)) if port.chars().all(|c| c.is_ascii_digit()) => name,
-            Some(_) => return false,
+        match host.split_once(':') {
+            Some((name, tail)) if port(&format!(":{tail}")) => name,
+            Some(_) => return None,
             None => host,
         }
     };
-    let name = name.to_ascii_lowercase();
-    name == "localhost" || name == "127.0.0.1" || name == "::1"
+    let valid = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+    valid.then(|| name.to_ascii_lowercase())
+}
+
+/// Whether `tail` is `:` and a port number.
+fn port(tail: &str) -> bool {
+    tail.strip_prefix(':')
+        .is_some_and(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Whether `host` names this machine's loopback interface.
+pub fn is_loopback_host(host: &str) -> bool {
+    host_name(host).is_some_and(|name| name == "localhost" || name == "127.0.0.1" || name == "::1")
+}
+
+/// A name for `--allow-host`, as the guard compares it. Takes a pasted
+/// address too: `https://box.tail1234.ts.net/` gives `box.tail1234.ts.net`.
+pub fn allowed_host(text: &str) -> Result<String> {
+    let trimmed = text.trim();
+    let bare = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let bare = bare.strip_suffix('/').unwrap_or(bare);
+    match host_name(bare) {
+        Some(name) if !bare.contains('/') => Ok(name),
+        _ => bail!("'{text}' is not a host name, such as mybox.tail1234.ts.net"),
+    }
 }
 
 fn refuse(status: StatusCode, message: &str) -> Response {
@@ -184,15 +232,23 @@ pub async fn guard(State(guard): State<Arc<Guard>>, request: Request, next: Next
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if !guard.any_host && !is_loopback_host(host) {
-        return refuse(
-            StatusCode::FORBIDDEN,
-            "the daemon answers only to localhost, 127.0.0.1 or [::1]",
-        );
+    if !guard.answers_to(host) {
+        let message = match host_name(host) {
+            Some(name) => format!(
+                "the daemon does not answer to '{name}'. If that is this computer, start the daemon with --allow-host {name}"
+            ),
+            None => "the daemon answers only to localhost, 127.0.0.1, [::1] and names given with --allow-host".into(),
+        };
+        return refuse(StatusCode::FORBIDDEN, &message);
     }
+    // Over HTTPS when a proxy such as `tailscale serve` adds it.
     if let Some(origin) = headers.get(header::ORIGIN) {
-        let expected = format!("http://{host}");
-        if origin.to_str().ok() != Some(expected.as_str()) {
+        let origin = origin.to_str().unwrap_or_default();
+        let ours = origin
+            .strip_prefix("http://")
+            .or_else(|| origin.strip_prefix("https://"))
+            .is_some_and(|rest| rest == host);
+        if !ours {
             return refuse(
                 StatusCode::FORBIDDEN,
                 "requests from other web pages are refused",

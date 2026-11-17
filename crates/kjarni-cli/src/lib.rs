@@ -761,6 +761,12 @@ pub enum DaemonCommands {
         #[arg(long, value_name = "ADDRESS")]
         listen: Option<String>,
 
+        /// Also answer to this host name, such as the one `tailscale serve`
+        /// gives this computer (mybox.tail1234.ts.net). Can be given more
+        /// than once
+        #[arg(long = "allow-host", value_name = "NAME")]
+        allow_host: Vec<String>,
+
         /// Folder the agent works in. Default: ~/kjarni
         #[arg(short = 'C', long)]
         dir: Option<String>,
@@ -810,6 +816,12 @@ pub enum DaemonCommands {
         /// Port to listen on
         #[arg(short, long, default_value_t = DEFAULT_DAEMON_PORT)]
         port: u16,
+
+        /// Also answer to this host name, such as the one `tailscale serve`
+        /// gives this computer (mybox.tail1234.ts.net). Can be given more
+        /// than once
+        #[arg(long = "allow-host", value_name = "NAME")]
+        allow_host: Vec<String>,
 
         /// Folder the agent works in. Default: ~/kjarni
         #[arg(short = 'C', long)]

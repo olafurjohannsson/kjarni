@@ -77,6 +77,7 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
             full_precision,
             port,
             listen,
+            allow_host,
             dir,
             yes,
             no_memory,
@@ -84,6 +85,7 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
             quiet,
             log_file,
         } => {
+            let allow_hosts = allowed_hosts(&allow_host)?;
             if let Some(path) = &log_file {
                 logs::redirect_output(Path::new(path))?;
             }
@@ -93,6 +95,7 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
                 full_precision,
                 port,
                 listen,
+                allow_hosts,
                 dir,
                 yes,
                 no_memory,
@@ -108,6 +111,7 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
             cpu,
             full_precision,
             port,
+            allow_host,
             dir,
             yes,
             no_memory,
@@ -115,6 +119,7 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
             no_linger,
         } => {
             install(InstallOptions {
+                allow_hosts: allowed_hosts(&allow_host)?,
                 model,
                 gpu,
                 cpu,
@@ -145,6 +150,8 @@ struct RunOptions {
     full_precision: bool,
     port: u16,
     listen: Option<String>,
+    /// Names besides loopback the daemon answers to.
+    allow_hosts: Vec<String>,
     dir: Option<String>,
     yes: bool,
     no_memory: bool,
@@ -246,6 +253,11 @@ async fn load_chat(options: &RunOptions) -> Result<Chat> {
     Ok(chat)
 }
 
+/// `--allow-host` names as the guard compares them.
+fn allowed_hosts(given: &[String]) -> Result<Vec<String>> {
+    given.iter().map(|h| auth::allowed_host(h)).collect()
+}
+
 /// The folder the agent works in, `~/kjarni` unless given, created if
 /// missing.
 fn working_folder(dir: Option<&str>) -> Result<PathBuf> {
@@ -315,7 +327,9 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
             },
             agent_home.join("sessions"),
         ),
-        guard: Arc::new(Guard::new(token, options.listen.is_some())),
+        guard: Arc::new(
+            Guard::new(token, options.listen.is_some()).allow_hosts(options.allow_hosts.clone()),
+        ),
         memory,
         model: model.clone(),
         gpu: options.gpu,
@@ -332,6 +346,12 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
         })?,
     )?;
 
+    if !options.allow_hosts.is_empty() {
+        eprintln!(
+            "Also answering to {}, for a proxy such as `tailscale serve` that forwards to this port.",
+            options.allow_hosts.join(", ")
+        );
+    }
     if options.listen.is_some() {
         eprintln!(
             "Warning: listening on {address}, reachable from other machines. Every request needs the token in {}.",
@@ -522,6 +542,7 @@ struct InstallOptions {
     cpu: bool,
     full_precision: bool,
     port: u16,
+    allow_hosts: Vec<String>,
     dir: Option<String>,
     yes: bool,
     no_memory: bool,
@@ -559,6 +580,10 @@ fn run_arguments(
         "--log-file".into(),
         log.to_string_lossy().into_owned(),
     ];
+    for host in &options.allow_hosts {
+        args.push("--allow-host".into());
+        args.push(host.clone());
+    }
     for (on, flag) in [
         (gpu, "--gpu"),
         (options.full_precision, "--full-precision"),
