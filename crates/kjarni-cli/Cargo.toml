@@ -1,6 +1,7 @@
 [package]
 name = "kjarni-cli"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 description = "Kjarni from the shell: classification, embeddings, reranking, search, chat, summarization, translation and speech-to-text as commands, and an MCP server for AI agents. Same output as PyTorch."
 license.workspace = true

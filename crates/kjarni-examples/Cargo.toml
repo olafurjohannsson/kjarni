@@ -1,6 +1,7 @@
 [package]
 name = "kjarni-examples"
 version.workspace = true
+rust-version.workspace = true
 edition = "2021"
 description = "Examples for the Kjarni inference engine"
 publish = false

@@ -33,7 +33,8 @@ if ENGINE == "kjarni":
         # from the checkpoint in both.
         m = kjarni.Summarizer(min_length=56, max_length=142, quiet=True); run = lambda: m.summarize(ARTICLE)
     else:
-        m = kjarni.Translator(source="en", target="de", quiet=True); run = lambda: m.translate(SENTENCE)
+        # Named, because en to de picks Opus-MT by default and PyTorch runs flan-t5.
+        m = kjarni.Translator(model="flan-t5-base", source="en", target="de", quiet=True); run = lambda: m.translate(SENTENCE)
 else:
     import torch
     from transformers import AutoTokenizer, AutoModelForSeq2SeqLM

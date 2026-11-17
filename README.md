@@ -192,7 +192,7 @@ fmt.Println(sim)                                                 // 0.8598
 from kjarni import Classifier
 
 classifier = Classifier("distilbert-sentiment")
-print(classifier.classify("i love kjarni").label)                # positive
+print(classifier.classify("i love kjarni").label)                # POSITIVE
 ```
 
 **Rust**

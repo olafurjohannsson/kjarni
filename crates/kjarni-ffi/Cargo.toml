@@ -1,6 +1,7 @@
 [package]
 name = "kjarni-ffi"
 version.workspace = true
+rust-version.workspace = true
 edition = "2024"
 description = "C FFI bindings for Kjarni"
 

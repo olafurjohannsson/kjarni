@@ -2,6 +2,7 @@
 name = "kjarni-transformers"
 description = "Low-level transformer operations for Kjarni"
 version.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

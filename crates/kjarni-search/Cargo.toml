@@ -1,6 +1,7 @@
 [package]
 name = "kjarni-search"
 version.workspace = true
+rust-version.workspace = true
 edition = "2024"
 description = "Vector search primitives for the Kjarni inference engine"
 license.workspace = true
