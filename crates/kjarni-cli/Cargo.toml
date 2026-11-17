@@ -34,6 +34,8 @@ base64 = "0.23.1"
 async-trait = { workspace = true }
 dirs = { workspace = true }
 getrandom = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+reqwest = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # `kjarni mcp` points stdout at stderr, keeping the real stdout for protocol

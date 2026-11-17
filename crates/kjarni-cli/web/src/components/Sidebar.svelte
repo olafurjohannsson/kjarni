@@ -2,7 +2,7 @@
   import Mark from './Mark.svelte';
   import Icon from './Icon.svelte';
 
-  let { conversations, current, status, onselect, onnew, ondelete } = $props();
+  let { conversations, current, status, page, onselect, onnew, onschedules, ondelete } = $props();
 
   let confirming = $state(null);
 
@@ -37,6 +37,10 @@
   <button class="new" onclick={onnew}>
     <Icon name="plus" size={17} />
     New conversation
+  </button>
+  <button class="link" class:active={page === 'schedules'} onclick={onschedules}>
+    <Icon name="clock" size={17} />
+    Schedules
   </button>
 
   <nav aria-label="Conversations">
@@ -122,6 +126,28 @@
   .new:hover {
     background: var(--bg4);
     border-color: var(--border-strong);
+  }
+  .link {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    height: 38px;
+    margin-top: 6px;
+    padding: 0 12px;
+    border-radius: 10px;
+    font-size: 14.5px;
+    color: var(--text2);
+    transition: background 0.12s;
+  }
+  .link :global(svg) {
+    color: var(--subtle);
+  }
+  .link:hover,
+  .link.active {
+    background: var(--bg3);
+  }
+  .link.active :global(svg) {
+    color: var(--accent);
   }
   nav {
     flex: 1;

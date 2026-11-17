@@ -4,7 +4,8 @@
 //! The daemon listens on loopback only unless told otherwise, and every
 //! request needs the token kept in the daemon's folder (see [`auth`]). The
 //! chat model is loaded once and shared: the agent's conversations and
-//! `/v1/chat/completions` take turns on it.
+//! `/v1/chat/completions` take turns on it. Schedules (see [`schedules`])
+//! start conversations by themselves at set times.
 
 mod api;
 mod auth;
@@ -12,6 +13,7 @@ mod conversations;
 mod display;
 mod logs;
 mod machine;
+mod schedules;
 mod service;
 #[cfg(test)]
 mod tests;
@@ -333,7 +335,9 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
         memory,
         model: model.clone(),
         gpu: options.gpu,
+        schedules: Arc::new(schedules::Store::open(dir.join("schedules.json"))?),
     });
+    tokio::spawn(schedules::run(state.clone()));
     let app = router(state, Arc::new(serve::AppState { models }), !options.quiet);
 
     let running = running_path(&dir);
