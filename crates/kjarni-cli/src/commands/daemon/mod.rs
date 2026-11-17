@@ -290,6 +290,7 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
             format!("could not listen on {address}; is the daemon running already?")
         })?;
 
+    download_missing(&options.model, !options.full_precision, !options.no_memory).await?;
     eprintln!("Loading {}...", options.model);
     let chat = load_chat(&options).await?;
     let model = chat.model_name().to_string();
@@ -632,12 +633,7 @@ async fn install(options: InstallOptions) -> Result<()> {
 
     // Downloaded now, where the user sees the progress, rather than by the
     // daemon in the background.
-    if !is_cached(&model, !options.full_precision) {
-        crate::commands::model::download(&model, !options.full_precision, false).await?;
-    }
-    if !options.no_memory && !is_cached(MEMORY_MODEL, false) {
-        crate::commands::model::download(MEMORY_MODEL, false, true).await?;
-    }
+    download_missing(&model, !options.full_precision, !options.no_memory).await?;
 
     auth::load_or_create_token(&dir.join("token"))?;
     let workdir = working_folder(options.dir.as_deref())?;
@@ -721,8 +717,31 @@ async fn install(options: InstallOptions) -> Result<()> {
 
 /// Whether registry model `name` is downloaded in the format a load picks:
 /// the GGUF when `gguf` and the model has one, otherwise safetensors.
-fn is_cached(name: &str, gguf: bool) -> bool {
-    is_cached_in(&kjarni::registry::cache_dir(), name, gguf)
+/// Downloads what the daemon needs and the cache lacks, with progress: the
+/// chat model, and the memory model unless memory is off.
+async fn download_missing(model: &str, gguf: bool, memory: bool) -> Result<()> {
+    for (name, gguf, quiet) in missing(&kjarni::registry::cache_dir(), model, gguf, memory) {
+        crate::commands::model::download(name, gguf, quiet).await?;
+    }
+    Ok(())
+}
+
+/// The models `download_missing` fetches, each with whether to prefer GGUF
+/// and whether to download quietly. The memory model is small and quiet.
+fn missing<'a>(
+    cache: &Path,
+    model: &'a str,
+    gguf: bool,
+    memory: bool,
+) -> Vec<(&'a str, bool, bool)> {
+    let mut out = Vec::new();
+    if !is_cached_in(cache, model, gguf) {
+        out.push((model, gguf, false));
+    }
+    if memory && !is_cached_in(cache, MEMORY_MODEL, false) {
+        out.push((MEMORY_MODEL, false, true));
+    }
+    out
 }
 
 fn is_cached_in(cache: &Path, name: &str, gguf: bool) -> bool {

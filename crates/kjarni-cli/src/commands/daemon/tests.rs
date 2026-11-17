@@ -603,6 +603,44 @@ fn install_downloads_only_what_the_cache_lacks() {
     assert!(!super::is_cached_in(cache.path(), "no-such-model", false));
 }
 
+#[test]
+fn the_daemon_downloads_its_models_with_progress_before_loading() {
+    let cache = tempfile::tempdir().unwrap();
+    // An empty cache: the chat model with progress, then the memory model quietly.
+    assert_eq!(
+        super::missing(cache.path(), "qwen3.5-4b", true, true),
+        vec![
+            ("qwen3.5-4b", true, false),
+            (super::MEMORY_MODEL, false, true)
+        ]
+    );
+    // Without memory, only the chat model.
+    assert_eq!(
+        super::missing(cache.path(), "qwen3.5-4b", true, false),
+        vec![("qwen3.5-4b", true, false)]
+    );
+    // Nothing once both are cached.
+    for (name, files) in [
+        (
+            "qwen3.5-4b",
+            &["config.json", "tokenizer.json", "model.gguf"][..],
+        ),
+        (
+            super::MEMORY_MODEL,
+            &["config.json", "tokenizer.json", "model.safetensors"][..],
+        ),
+    ] {
+        let dir = kjarni::ModelType::from_cli_name(name)
+            .unwrap()
+            .cache_dir(cache.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        for file in files {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+    }
+    assert!(super::missing(cache.path(), "qwen3.5-4b", true, true).is_empty());
+}
+
 #[tokio::test]
 async fn the_token_signs_in_a_browser_on_another_device() {
     let d = daemon(Scripted::new(&[]), true);
