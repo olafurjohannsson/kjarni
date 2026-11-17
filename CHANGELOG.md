@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
+The daemon, its web UI and schedules are a preview: they work and are tested,
+but the API and the settings files may still change.
+
+- **Kjarni declares the Rust it needs.** Every crate now says
+  `rust-version = "1.90"`, the oldest Rust the GPU library builds with, so an
+  older compiler gets a plain message naming the version instead of an error
+  from a dependency.
 - **Schedules in the daemon.** A schedule is a message the daemon sends
   itself at set times: every day at 07:30, on chosen weekdays, or every few
   minutes or hours. Each run is a new conversation in the web UI's list.
