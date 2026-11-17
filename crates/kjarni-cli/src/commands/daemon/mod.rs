@@ -13,6 +13,7 @@ mod conversations;
 mod display;
 mod logs;
 mod machine;
+mod model;
 mod schedules;
 mod service;
 #[cfg(test)]
@@ -147,7 +148,8 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
 }
 
 struct RunOptions {
-    model: String,
+    /// `--model`; without it, the saved choice.
+    model: Option<String>,
     gpu: bool,
     full_precision: bool,
     port: u16,
@@ -222,30 +224,30 @@ pub fn router(state: Arc<DaemonState>, serve_state: Arc<serve::AppState>, log: b
         .layer(axum::middleware::from_fn_with_state(guard, auth::guard))
 }
 
-async fn load_chat(options: &RunOptions) -> Result<Chat> {
-    let _ = crate::commands::util::resolve_model(&options.model, Some("decoder"))?;
-    let mut builder = Chat::builder(&options.model)
+async fn load_chat(model: &str, gpu: bool, full_precision: bool) -> Result<Chat> {
+    let _ = crate::commands::util::resolve_model(model, Some("decoder"))?;
+    let mut builder = Chat::builder(model)
         .temperature(0.7)
         .max_tokens(AGENT_MAX_TOKENS)
         .prefix_cache_tokens(
             kjarni::agent::AgentConfig::default().context_budget + AGENT_MAX_TOKENS,
         )
         .quiet();
-    if options.gpu {
-        if let Some(mt) = kjarni::ModelType::from_cli_name(&options.model) {
-            crate::commands::util::check_gpu_capacity(mt, !options.full_precision)?;
+    if gpu {
+        if let Some(mt) = kjarni::ModelType::from_cli_name(model) {
+            crate::commands::util::check_gpu_capacity(mt, !full_precision)?;
         }
         builder = builder.gpu();
     } else {
         builder = builder.cpu();
     }
-    if !options.full_precision {
+    if !full_precision {
         builder = builder.with_load_config(|c| c.prefer_gguf(true));
     }
     let chat = builder
         .build()
         .await
-        .map_err(|e| anyhow!("failed to load {}: {e}", options.model))?;
+        .map_err(|e| anyhow!("failed to load {model}: {e}"))?;
     if !chat.supports_tools() {
         bail!(
             "{} has no tool-calling format. Use a Qwen 3.5 model, such as qwen3.5-4b.",
@@ -253,6 +255,59 @@ async fn load_chat(options: &RunOptions) -> Result<Chat> {
         );
     }
     Ok(chat)
+}
+
+/// Loads chat models into the API's pool for [`model::Models`], with the
+/// device and precision the daemon was started with.
+struct DaemonLoader {
+    app: Arc<serve::AppState>,
+    gpu: bool,
+    full_precision: bool,
+}
+
+#[async_trait]
+impl model::Loader for DaemonLoader {
+    fn downloaded(&self, name: &str) -> bool {
+        is_cached_in(&kjarni::registry::cache_dir(), name, !self.full_precision)
+    }
+
+    fn bytes_on_disk(&self, name: &str) -> u64 {
+        kjarni::ModelType::from_cli_name(name)
+            .map(|m| dir_size(&m.cache_dir(&kjarni::registry::cache_dir())))
+            .unwrap_or(0)
+    }
+
+    async fn download(&self, name: &str) -> Result<()> {
+        kjarni::registry::download_model(name, !self.full_precision, true).await
+    }
+
+    async fn unload(&self, name: &str) {
+        if let Some(decoder) = self.app.models.remove_chat(name) {
+            let _done = decoder.turn.acquire().await;
+        }
+    }
+
+    async fn load(&self, name: &str) -> Result<Arc<dyn AgentModel>> {
+        let chat = serve::compute(load_chat(name, self.gpu, self.full_precision)).await?;
+        let decoder = self.app.models.insert_chat(name, chat);
+        self.app.models.set_default_chat(name);
+        Ok(Arc::new(SharedChat(decoder)))
+    }
+}
+
+/// The bytes of the files under `dir`, partly downloaded ones included.
+fn dir_size(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_size(&e.path()),
+            Ok(_) => e.metadata().map_or(0, |m| m.len()),
+            Err(_) => 0,
+        })
+        .sum()
 }
 
 /// `--allow-host` names as the guard compares them.
@@ -290,19 +345,35 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
             format!("could not listen on {address}; is the daemon running already?")
         })?;
 
-    download_missing(&options.model, !options.full_precision, !options.no_memory).await?;
-    eprintln!("Loading {}...", options.model);
-    let chat = load_chat(&options).await?;
+    let settings = model::settings_path(&dir);
+    let model = model::starting_model(options.model.as_deref(), &model::Settings::load(&settings));
+    download_missing(&model, !options.full_precision, !options.no_memory).await?;
+    eprintln!("Loading {model}...");
+    let chat = load_chat(&model, options.gpu, options.full_precision).await?;
     let model = chat.model_name().to_string();
-    let models = serve::Models::new(
-        serve::Defaults {
-            chat: model.clone(),
-            ..Default::default()
-        },
-        options.gpu,
-        true,
-    );
-    let decoder = models.insert_chat(&model, chat);
+    let serve_state = Arc::new(serve::AppState {
+        models: serve::Models::new(
+            serve::Defaults {
+                chat: model.clone(),
+                ..Default::default()
+            },
+            options.gpu,
+            true,
+        ),
+    });
+    let decoder = serve_state.models.insert_chat(&model, chat);
+    let slot = Arc::new(model::Slot::new(Arc::new(SharedChat(decoder))));
+    let models = Arc::new(model::Models::new(
+        slot.clone(),
+        Arc::new(DaemonLoader {
+            app: serve_state.clone(),
+            gpu: options.gpu,
+            full_precision: options.full_precision,
+        }),
+        model.clone(),
+        settings,
+        options.model.clone(),
+    ));
 
     let agent_home = kjarni::agent::data_dir();
     let memory = if options.no_memory {
@@ -320,26 +391,26 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
     };
 
     let state = Arc::new(DaemonState {
-        conversations: Conversations::new(
+        conversations: Arc::new(Conversations::new(
             AgentSetup {
-                model: Arc::new(SharedChat(decoder)),
+                model: slot,
                 memory: memory.clone(),
                 workdir: workdir.clone(),
                 max_steps: options.max_steps,
                 approve_all: options.yes,
             },
             agent_home.join("sessions"),
-        ),
+        )),
         guard: Arc::new(
             Guard::new(token, options.listen.is_some()).allow_hosts(options.allow_hosts.clone()),
         ),
         memory,
-        model: model.clone(),
+        models,
         gpu: options.gpu,
         schedules: Arc::new(schedules::Store::open(dir.join("schedules.json"))?),
     });
     tokio::spawn(schedules::run(state.clone()));
-    let app = router(state, Arc::new(serve::AppState { models }), !options.quiet);
+    let app = router(state, serve_state, !options.quiet);
 
     let running = running_path(&dir);
     let port = listener.local_addr()?.port();
@@ -563,19 +634,12 @@ const CARRIED_VARIABLES: [&str; 3] = ["KJARNI_DAEMON_DIR", "KJARNI_AGENT_DIR", "
 /// and leaves it alone when the user had it on already.
 const LINGER_MARKER: &str = "linger-enabled-by-install";
 
-/// The command line the startup entry runs.
-fn run_arguments(
-    options: &InstallOptions,
-    model: &str,
-    gpu: bool,
-    workdir: &Path,
-    log: &Path,
-) -> Vec<String> {
+/// The command line the startup entry runs. The model is not on it: the
+/// daemon loads the saved one, so a change made in the web UI lasts.
+fn run_arguments(options: &InstallOptions, gpu: bool, workdir: &Path, log: &Path) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "daemon".into(),
         "run".into(),
-        "--model".into(),
-        model.into(),
         "--port".into(),
         options.port.to_string(),
         "--dir".into(),
@@ -636,6 +700,10 @@ async fn install(options: InstallOptions) -> Result<()> {
     download_missing(&model, !options.full_precision, !options.no_memory).await?;
 
     auth::load_or_create_token(&dir.join("token"))?;
+    model::Settings {
+        model: Some(model.clone()),
+    }
+    .save(&model::settings_path(&dir))?;
     let workdir = working_folder(options.dir.as_deref())?;
     let log = logs::log_path(&dir);
     if let Some(logs_dir) = log.parent() {
@@ -663,7 +731,7 @@ async fn install(options: InstallOptions) -> Result<()> {
     }
     let entry = service::Entry {
         program,
-        args: run_arguments(&options, &model, gpu, &workdir, &log),
+        args: run_arguments(&options, gpu, &workdir, &log),
         env,
         log,
     };
@@ -715,8 +783,6 @@ async fn install(options: InstallOptions) -> Result<()> {
     }
 }
 
-/// Whether registry model `name` is downloaded in the format a load picks:
-/// the GGUF when `gguf` and the model has one, otherwise safetensors.
 /// Downloads what the daemon needs and the cache lacks, with progress: the
 /// chat model, and the memory model unless memory is off.
 async fn download_missing(model: &str, gguf: bool, memory: bool) -> Result<()> {
@@ -744,6 +810,8 @@ fn missing<'a>(
     out
 }
 
+/// Whether registry model `name` is downloaded in the format a load picks:
+/// the GGUF when `gguf` and the model has one, otherwise safetensors.
 fn is_cached_in(cache: &Path, name: &str, gguf: bool) -> bool {
     let Some(model) = kjarni::ModelType::from_cli_name(name) else {
         return false;

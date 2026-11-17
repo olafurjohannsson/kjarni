@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use kjarni::chat::Chat;
 use kjarni::classifier::{Classifier, ClassifierBuilder};
@@ -121,6 +121,12 @@ impl<T> Pool<T> {
         value
     }
 
+    /// Stops holding model `name`, returning it if it was loaded.
+    fn remove(&self, name: &str) -> Option<Arc<T>> {
+        let slot = self.slots.lock().expect("model pool lock").remove(name)?;
+        slot.get().cloned()
+    }
+
     fn loaded(&self) -> Vec<String> {
         self.slots
             .lock()
@@ -134,6 +140,8 @@ impl<T> Pool<T> {
 
 pub struct Models {
     pub defaults: Defaults,
+    /// The chat model a request naming none gets; starts as `defaults.chat`.
+    default_chat: RwLock<String>,
     device: KjarniDevice,
     prefix_cache: bool,
     decoders: Pool<LoadedDecoder>,
@@ -186,6 +194,7 @@ pub async fn compute<F: Future>(work: F) -> F::Output {
 impl Models {
     pub fn new(defaults: Defaults, gpu: bool, prefix_cache: bool) -> Self {
         Self {
+            default_chat: RwLock::new(defaults.chat.clone()),
             defaults,
             device: if gpu {
                 KjarniDevice::Gpu
@@ -218,6 +227,20 @@ impl Models {
         names.extend(self.summarizers.loaded());
         names.extend(self.recognizers.loaded());
         names
+    }
+
+    pub fn default_chat(&self) -> String {
+        self.default_chat.read().expect("default chat lock").clone()
+    }
+
+    pub fn set_default_chat(&self, name: &str) {
+        *self.default_chat.write().expect("default chat lock") = name.to_string();
+    }
+
+    /// Stops serving chat model `name`, returning it if it was loaded. It is
+    /// freed once the generations still holding it end.
+    pub fn remove_chat(&self, name: &str) -> Option<Arc<LoadedDecoder>> {
+        self.decoders.remove(name)
     }
 
     /// Serves `chat`, loaded by the caller with settings of its own, as

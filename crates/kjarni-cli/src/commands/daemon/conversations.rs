@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -138,10 +138,15 @@ pub struct Live {
     hub: Arc<Hub>,
 }
 
-/// The sequence numbers events and approvals share.
+/// What the conversations share: the sequence numbers of events and
+/// approvals, and whether new turns are held back.
 #[derive(Default)]
 struct Hub {
     seq: Mutex<u64>,
+    /// True while new turns wait, such as during a change of model. A turn
+    /// starts under a read lock, so taking the write lock waits out turns
+    /// that are starting.
+    held: RwLock<bool>,
 }
 
 impl Hub {
@@ -167,6 +172,17 @@ pub enum Answers {
 pub enum SendError {
     Busy,
     Empty,
+    /// New turns are held back for now.
+    Held,
+}
+
+/// Holds new turns back until dropped.
+pub struct Hold(Arc<Hub>);
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        *self.0.held.write().expect("hold lock") = false;
+    }
 }
 
 impl Live {
@@ -239,6 +255,10 @@ impl Live {
             return Err(SendError::Empty);
         }
         {
+            let held = self.hub.held.read().expect("hold lock");
+            if *held {
+                return Err(SendError::Held);
+            }
             let mut turn = self.turn.lock().expect("turn lock");
             if turn.busy {
                 return Err(SendError::Busy);
@@ -454,6 +474,31 @@ impl Conversations {
             .expect("conversations lock")
             .get(id)
             .is_some_and(|l| l.busy())
+    }
+
+    /// Whether any conversation is in the middle of a turn.
+    pub fn any_busy(&self) -> bool {
+        self.live
+            .lock()
+            .expect("conversations lock")
+            .values()
+            .any(|l| l.busy())
+    }
+
+    /// Whether new turns are held back now.
+    pub fn held(&self) -> bool {
+        *self.hub.held.read().expect("hold lock")
+    }
+
+    /// Holds new turns back until the returned [`Hold`] is dropped. `None`
+    /// while a turn is running, or turns are held already.
+    pub fn hold(&self) -> Option<Hold> {
+        let mut held = self.hub.held.write().expect("hold lock");
+        if *held || self.any_busy() {
+            return None;
+        }
+        *held = true;
+        Some(Hold(self.hub.clone()))
     }
 
     /// A new, empty conversation.

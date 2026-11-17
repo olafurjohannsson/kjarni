@@ -17,13 +17,14 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::auth::{COOKIE, Guard};
 use super::conversations::{Conversations, Event, Live, SendError};
+use super::model::{Models, SwitchError};
 use super::schedules::{self, Notify, Schedule, Spec, StartError, Store};
 
 pub struct DaemonState {
-    pub conversations: Conversations,
+    pub conversations: Arc<Conversations>,
     pub guard: Arc<Guard>,
     pub memory: Option<Arc<Memory>>,
-    pub model: String,
+    pub models: Arc<Models>,
     pub gpu: bool,
     pub schedules: Arc<Store>,
 }
@@ -41,6 +42,8 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
 fn internal(e: anyhow::Error) -> Response {
     error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
 }
+
+const SWITCHING: &str = "Kjarni is switching models; try again once the new one has loaded";
 
 fn not_found(what: &str) -> Response {
     error(StatusCode::NOT_FOUND, format!("there is no {what}"))
@@ -66,6 +69,8 @@ pub fn routes() -> Router<AppState> {
             post(answer_approval),
         )
         .route("/api/conversations/{id}/stop", post(stop))
+        .route("/api/models", get(list_models))
+        .route("/api/models/current", put(switch_model))
         .route("/api/memory", get(list_memory).post(remember))
         .route("/api/memory/{id}", delete(forget))
         .route("/api/schedules", get(list_schedules).post(create_schedule))
@@ -82,7 +87,7 @@ async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
     let setup = state.conversations.setup();
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
-        "model": state.model,
+        "model": state.models.current(),
         "gpu": state.gpu,
         "workdir": setup.workdir,
         "memory": state.memory.is_some(),
@@ -230,6 +235,7 @@ async fn send_message(
             "the conversation is still answering the last message",
         ),
         Err(SendError::Empty) => error(StatusCode::BAD_REQUEST, "the message is empty"),
+        Err(SendError::Held) => error(StatusCode::CONFLICT, SWITCHING),
     }
 }
 
@@ -331,6 +337,52 @@ async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> Response
         StatusCode::NO_CONTENT.into_response()
     } else {
         error(StatusCode::CONFLICT, "the conversation is not answering")
+    }
+}
+
+/// The model running, the ones the user can switch to, and how a switch
+/// is going.
+async fn list_models(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let models = &state.models;
+    let choices: Vec<_> = models
+        .choices()
+        .into_iter()
+        .map(|(name, downloaded)| {
+            let params = kjarni::ModelType::from_cli_name(name).map(|m| m.info().params_millions);
+            json!({ "name": name, "params_millions": params, "downloaded": downloaded })
+        })
+        .collect();
+    Json(json!({
+        "current": models.current(),
+        "gpu": state.gpu,
+        "pinned": models.pinned,
+        "phase": models.phase(),
+        "downloaded_bytes": models.download_progress(),
+        "choices": choices,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SwitchBody {
+    model: String,
+}
+
+async fn switch_model(State(state): State<AppState>, Json(body): Json<SwitchBody>) -> Response {
+    match state.models.switch(body.model.trim(), &state.conversations) {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Err(SwitchError::Unknown) => error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "'{}' is not a model the agent can run; it needs one with tool calls, such as qwen3.5-4b",
+                body.model.trim()
+            ),
+        ),
+        Err(SwitchError::Same) => error(StatusCode::CONFLICT, "that model is running already"),
+        Err(SwitchError::Switching) => error(StatusCode::CONFLICT, "a switch is under way already"),
+        Err(SwitchError::Busy) => error(
+            StatusCode::CONFLICT,
+            "a conversation is answering; switch once it is done, or stop it",
+        ),
     }
 }
 
@@ -453,6 +505,7 @@ async fn run_schedule(State(state): State<AppState>, Path(id): Path<String>) -> 
             .into_response(),
         Err(StartError::NotFound) => not_found("such schedule"),
         Err(StartError::Running) => error(StatusCode::CONFLICT, "that schedule is running now"),
+        Err(StartError::Held) => error(StatusCode::CONFLICT, SWITCHING),
         Err(StartError::Failed(e)) => internal(e),
     }
 }

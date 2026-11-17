@@ -464,6 +464,8 @@ impl Store {
 pub enum StartError {
     NotFound,
     Running,
+    /// New conversations are held back for now, as during a change of model.
+    Held,
     Failed(anyhow::Error),
 }
 
@@ -472,6 +474,9 @@ pub enum StartError {
 pub fn start(state: &Arc<DaemonState>, id: &str) -> Result<String, StartError> {
     let store = &state.schedules;
     let schedule = store.get(id).ok_or(StartError::NotFound)?;
+    if state.conversations.held() {
+        return Err(StartError::Held);
+    }
     if !store
         .running
         .lock()
@@ -578,7 +583,8 @@ pub async fn run(state: Arc<DaemonState>) {
     let mut tick = tokio::time::interval(TICK);
     loop {
         tick.tick().await;
-        if state.schedules.any_running() {
+        // A schedule due during a change of model runs once it is loaded.
+        if state.schedules.any_running() || state.conversations.held() {
             continue;
         }
         let Some(due) = state.schedules.next_due(&Local::now()) else {
@@ -592,7 +598,7 @@ pub async fn run(state: Arc<DaemonState>) {
             Err(StartError::Failed(e)) => {
                 eprintln!("Schedule '{}' could not run: {e:#}", due.spec.name)
             }
-            Err(StartError::NotFound | StartError::Running) => {}
+            Err(StartError::NotFound | StartError::Running | StartError::Held) => {}
         }
     }
 }

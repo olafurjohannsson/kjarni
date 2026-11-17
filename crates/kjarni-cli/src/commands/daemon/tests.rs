@@ -1,6 +1,6 @@
 //! The daemon's API end to end, with a scripted model in place of a real one.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 
 use axum::body::Body;
@@ -62,10 +62,56 @@ impl AgentModel for Scripted {
     }
 }
 
+/// Loads models from a list for a change of model, and logs what it does.
+/// A model not on the list fails to load. While `blocked`, loads wait for
+/// it to be released.
+#[derive(Default)]
+struct FakeLoader {
+    models: HashMap<String, Arc<dyn AgentModel>>,
+    downloaded: Mutex<HashSet<String>>,
+    log: Mutex<Vec<String>>,
+    blocked: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+impl FakeLoader {
+    fn log(&self, line: String) {
+        self.log.lock().unwrap().push(line);
+    }
+}
+
+#[async_trait]
+impl model::Loader for FakeLoader {
+    fn downloaded(&self, name: &str) -> bool {
+        self.downloaded.lock().unwrap().contains(name)
+    }
+    fn bytes_on_disk(&self, _: &str) -> u64 {
+        0
+    }
+    async fn download(&self, name: &str) -> Result<()> {
+        self.log(format!("download {name}"));
+        self.downloaded.lock().unwrap().insert(name.to_string());
+        Ok(())
+    }
+    async fn unload(&self, name: &str) {
+        self.log(format!("unload {name}"));
+    }
+    async fn load(&self, name: &str) -> Result<Arc<dyn AgentModel>> {
+        self.log(format!("load {name}"));
+        let blocked = self.blocked.lock().unwrap().take();
+        if let Some(rx) = blocked {
+            let _ = rx.await;
+        }
+        self.models
+            .get(name)
+            .cloned()
+            .ok_or_else(|| anyhow!("{name} would not load"))
+    }
+}
+
 struct Daemon {
     app: Router,
     workdir: tempfile::TempDir,
-    _data: tempfile::TempDir,
+    data: tempfile::TempDir,
 }
 
 fn daemon(model: Arc<dyn AgentModel>, any_host: bool) -> Daemon {
@@ -73,23 +119,35 @@ fn daemon(model: Arc<dyn AgentModel>, any_host: bool) -> Daemon {
 }
 
 fn daemon_with_guard(model: Arc<dyn AgentModel>, guard: Guard) -> Daemon {
+    daemon_with(model, guard, Arc::new(FakeLoader::default()))
+}
+
+/// A daemon running `model` as "scripted", that changes model with `loader`.
+fn daemon_with(model: Arc<dyn AgentModel>, guard: Guard, loader: Arc<FakeLoader>) -> Daemon {
     let workdir = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
     let memory = Arc::new(Memory::open(data.path(), None).unwrap());
+    let slot = Arc::new(model::Slot::new(model));
     let state = Arc::new(DaemonState {
-        conversations: Conversations::new(
+        conversations: Arc::new(Conversations::new(
             AgentSetup {
-                model,
+                model: slot.clone(),
                 memory: Some(memory.clone()),
                 workdir: workdir.path().to_path_buf(),
                 max_steps: 4,
                 approve_all: false,
             },
             data.path().join("sessions"),
-        ),
+        )),
         guard: Arc::new(guard),
         memory: Some(memory),
-        model: "scripted".into(),
+        models: Arc::new(model::Models::new(
+            slot,
+            loader,
+            "scripted".into(),
+            model::settings_path(data.path()),
+            None,
+        )),
         gpu: false,
         schedules: Arc::new(schedules::Store::open(data.path().join("schedules.json")).unwrap()),
     });
@@ -99,7 +157,7 @@ fn daemon_with_guard(model: Arc<dyn AgentModel>, guard: Guard) -> Daemon {
     Daemon {
         app: router(state, serve_state, false),
         workdir,
-        _data: data,
+        data,
     }
 }
 
@@ -817,7 +875,6 @@ fn install_carries_allowed_hosts_into_the_startup_entry() {
     };
     let args = super::run_arguments(
         &options,
-        "qwen3.5-4b",
         true,
         std::path::Path::new("/home/ada/kjarni"),
         std::path::Path::new("/tmp/daemon.log"),
@@ -825,6 +882,8 @@ fn install_carries_allowed_hosts_into_the_startup_entry() {
     let at = args.iter().position(|a| a == "--allow-host").unwrap();
     assert_eq!(args[at + 1], "box.tail1234.ts.net");
     assert!(args.contains(&"--gpu".to_string()));
+    // The daemon loads the saved model, so a change in the web UI lasts.
+    assert!(!args.contains(&"--model".to_string()));
 }
 
 const RUN_CALL: &str = "Let me look.\n<tool_call>\n<function=run_command>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>";
@@ -1107,4 +1166,233 @@ fn schedules_can_allow_exactly_the_tools_that_ask() {
         .collect();
     listed.sort();
     assert_eq!(asking, listed);
+}
+
+impl Daemon {
+    /// Sends `text` in a new conversation and returns the reply.
+    async fn ask(&self, text: &str) -> String {
+        let id = self.new_conversation().await;
+        let (status, _) = self
+            .api(
+                "POST",
+                &format!("/api/conversations/{id}/messages"),
+                Some(json!({ "text": text })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let events = self.follow(&id, 0, ends_turn).await;
+        events.last().unwrap()["text"].as_str().unwrap().to_string()
+    }
+
+    /// `/api/models` once `phase` is no longer downloading or loading.
+    async fn settled_models(&self) -> Json {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let (_, body) = self.api("GET", "/api/models", None).await;
+            let state = body["phase"]["state"].as_str().unwrap();
+            if state == "idle" || state == "failed" {
+                return body;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "the switch ended");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn switching_models_frees_the_old_one_before_loading_and_saves_the_choice() {
+    let (release, blocked) = tokio::sync::oneshot::channel();
+    let loader = Arc::new(FakeLoader {
+        models: HashMap::from([(
+            "qwen3.5-9b".to_string(),
+            Scripted::new(&[Some("From the new model.")]) as Arc<dyn AgentModel>,
+        )]),
+        blocked: Mutex::new(Some(blocked)),
+        ..Default::default()
+    });
+    let d = daemon_with(
+        Scripted::new(&[]),
+        Guard::new(TOKEN.into(), false),
+        loader.clone(),
+    );
+
+    let (_, body) = d.api("GET", "/api/models", None).await;
+    assert_eq!(body["current"], "scripted");
+    let names: Vec<_> = body["choices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, model::CHOICES);
+    assert_eq!(body["choices"][3]["params_millions"], 9653);
+
+    let (status, _) = d
+        .api(
+            "PUT",
+            "/api/models/current",
+            Some(json!({ "model": "qwen3.5-9b" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    // While it loads, messages and a second switch wait.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while d.api("GET", "/api/models", None).await.1["phase"]["state"] != "loading" {
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let id = d.new_conversation().await;
+    let (status, body) = d
+        .api(
+            "POST",
+            &format!("/api/conversations/{id}/messages"),
+            Some(json!({ "text": "Hello?" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("switching models")
+    );
+    let (status, _) = d
+        .api(
+            "PUT",
+            "/api/models/current",
+            Some(json!({ "model": "qwen3.5-2b" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    release.send(()).unwrap();
+    let body = d.settled_models().await;
+    assert_eq!(body["phase"]["state"], "idle");
+    assert_eq!(body["current"], "qwen3.5-9b");
+    assert_eq!(
+        *loader.log.lock().unwrap(),
+        ["download qwen3.5-9b", "unload scripted", "load qwen3.5-9b"]
+    );
+    assert_eq!(
+        d.api("GET", "/api/status", None).await.1["model"],
+        "qwen3.5-9b"
+    );
+    assert_eq!(
+        model::Settings::load(&model::settings_path(d.data.path()))
+            .model
+            .as_deref(),
+        Some("qwen3.5-9b")
+    );
+    assert_eq!(d.ask("Hello?").await, "From the new model.");
+}
+
+#[tokio::test]
+async fn a_model_that_will_not_load_leaves_the_old_one_running() {
+    let loader = Arc::new(FakeLoader {
+        // Loaded again after the new one fails.
+        models: HashMap::from([(
+            "scripted".to_string(),
+            Scripted::new(&[Some("Still here.")]) as Arc<dyn AgentModel>,
+        )]),
+        downloaded: Mutex::new(HashSet::from(["qwen3.5-9b".to_string()])),
+        ..Default::default()
+    });
+    let d = daemon_with(
+        Scripted::new(&[]),
+        Guard::new(TOKEN.into(), false),
+        loader.clone(),
+    );
+    let (status, _) = d
+        .api(
+            "PUT",
+            "/api/models/current",
+            Some(json!({ "model": "qwen3.5-9b" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let body = d.settled_models().await;
+    assert_eq!(body["phase"]["state"], "failed");
+    assert_eq!(body["phase"]["model"], "qwen3.5-9b");
+    assert!(
+        body["phase"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("would not load")
+    );
+    assert_eq!(body["current"], "scripted");
+    assert_eq!(
+        *loader.log.lock().unwrap(),
+        ["unload scripted", "load qwen3.5-9b", "load scripted"]
+    );
+    assert!(!model::settings_path(d.data.path()).exists());
+    assert_eq!(d.ask("Hello?").await, "Still here.");
+}
+
+#[tokio::test]
+async fn only_tool_models_are_offered_and_not_while_a_conversation_answers() {
+    let d = daemon(Scripted::new(&[None]), false);
+    let (status, body) = d
+        .api(
+            "PUT",
+            "/api/models/current",
+            Some(json!({ "model": "llama3.2-1b-instruct" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("tool calls")
+    );
+
+    // A reply that never finishes keeps the conversation answering.
+    let id = d.new_conversation().await;
+    d.api(
+        "POST",
+        &format!("/api/conversations/{id}/messages"),
+        Some(json!({ "text": "Go on" })),
+    )
+    .await;
+    let (status, body) = d
+        .api(
+            "PUT",
+            "/api/models/current",
+            Some(json!({ "model": "qwen3.5-2b" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("answering")
+    );
+    assert_eq!(
+        d.api("GET", "/api/models", None).await.1["phase"]["state"],
+        "idle"
+    );
+}
+
+#[test]
+fn the_model_given_wins_over_the_saved_one_and_the_saved_one_over_the_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = model::settings_path(dir.path());
+    let none = model::Settings::load(&path);
+    assert_eq!(
+        model::starting_model(None, &none),
+        kjarni_cli::DEFAULT_AGENT_MODEL
+    );
+    model::Settings {
+        model: Some("qwen3.5-9b".into()),
+    }
+    .save(&path)
+    .unwrap();
+    let saved = model::Settings::load(&path);
+    assert_eq!(model::starting_model(None, &saved), "qwen3.5-9b");
+    assert_eq!(
+        model::starting_model(Some("qwen3.5-2b"), &saved),
+        "qwen3.5-2b"
+    );
 }

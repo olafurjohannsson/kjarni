@@ -1,0 +1,288 @@
+<script>
+  import { onMount } from 'svelte';
+  import Icon from './Icon.svelte';
+  import { api, SignedOut } from '../lib/api.js';
+  import { describePhase, formatParams, switching } from '../lib/settings.js';
+
+  // The model the daemon runs, with the others it can switch to, and what
+  // else it was started with.
+  let { status, onchange, onsignedout } = $props();
+
+  let models = $state(null);
+  let problem = $state('');
+  let asked = $state(null);
+
+  let busy = $derived(switching(models?.phase));
+  let line = $derived(models ? describePhase(models.phase, models.downloaded_bytes, models.current) : '');
+
+  async function load() {
+    try {
+      const before = models;
+      models = await api.models();
+      // A change just ended: the sidebar shows the model too.
+      if (before && switching(before.phase) && !switching(models.phase)) onchange?.();
+    } catch (e) {
+      if (e instanceof SignedOut) onsignedout?.();
+      else problem = e.message;
+    }
+  }
+
+  async function pick(name) {
+    asked = name;
+    problem = '';
+    try {
+      await api.switchModel(name);
+      await load();
+    } catch (e) {
+      if (e instanceof SignedOut) onsignedout?.();
+      else problem = e.message;
+    } finally {
+      asked = null;
+    }
+  }
+
+  onMount(() => {
+    load();
+    // Quickly while a change runs, to show its progress.
+    let timer;
+    const poll = async () => {
+      await load();
+      timer = setTimeout(poll, switching(models?.phase) ? 1000 : 10000);
+    };
+    timer = setTimeout(poll, 1000);
+    return () => clearTimeout(timer);
+  });
+</script>
+
+<div class="page">
+  <header>
+    <h1>Settings</h1>
+    <p>The model Kjarni runs, and what else it was started with.</p>
+  </header>
+
+  <section>
+    <h2>Model</h2>
+    {#if models}
+      {#if line}
+        <div class="phase" class:failed={models.phase.state === 'failed'}>
+          {#if busy}<span class="spinner"></span>{:else}<Icon name="alert" size={16} />{/if}
+          <span>{line}</span>
+        </div>
+      {/if}
+      {#if problem}<div class="problem"><Icon name="alert" size={15} /> {problem}</div>{/if}
+
+      <div class="choices" role="radiogroup" aria-label="Model">
+        {#each models.choices as c (c.name)}
+          {@const current = c.name === models.current}
+          {@const target = busy && models.phase.model === c.name}
+          <button
+            class="choice"
+            class:current
+            role="radio"
+            aria-checked={current}
+            disabled={current || busy || asked !== null}
+            onclick={() => pick(c.name)}
+          >
+            <span class="mark">
+              {#if target}<span class="spinner"></span>{:else if current}<Icon name="check" size={15} />{/if}
+            </span>
+            <span class="name mono">{c.name}</span>
+            <span class="size">{formatParams(c.params_millions)}</span>
+            <span class="state">
+              {#if current}
+                Running on the {models.gpu ? 'GPU' : 'CPU'}
+              {:else if c.downloaded}
+                Downloaded
+              {:else}
+                Downloads first
+              {/if}
+            </span>
+          </button>
+        {/each}
+      </div>
+      <p class="hint">
+        Larger models answer better and need more memory: the 4B runs in about 3 GB, the 9B in about 6 GB. A switch waits
+        for replies in progress to finish, and new messages wait until the model is loaded.
+      </p>
+      {#if models.pinned && models.pinned !== models.current}
+        <p class="hint">
+          The daemon was started with <code>--model {models.pinned}</code>, so it loads that again at its next start.
+        </p>
+      {/if}
+    {:else if problem}
+      <div class="problem"><Icon name="alert" size={15} /> {problem}</div>
+    {/if}
+  </section>
+
+  {#if status}
+    <section>
+      <h2>This daemon</h2>
+      <dl>
+        <dt>Working folder</dt>
+        <dd class="mono">{status.workdir}</dd>
+        <dt>Runs on</dt>
+        <dd>{status.gpu ? 'GPU' : 'CPU'}</dd>
+        <dt>Memory</dt>
+        <dd>{status.memory ? 'On' : 'Off'}</dd>
+        <dt>Version</dt>
+        <dd class="mono">{status.version}</dd>
+      </dl>
+      <p class="hint">These are set when the daemon starts: see <code>kjarni daemon install --help</code>.</p>
+    </section>
+  {/if}
+</div>
+
+<style>
+  .page {
+    display: grid;
+    gap: 28px;
+    padding-bottom: 48px;
+    animation: kj-rise 0.25s ease-out;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 32px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+  }
+  header p {
+    color: var(--muted);
+    font-size: 15px;
+    margin-top: 4px;
+  }
+  section {
+    display: grid;
+    gap: 12px;
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--subtle);
+  }
+  .mono,
+  code {
+    font-family: var(--code);
+    font-size: 0.92em;
+  }
+  .phase {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--core-line);
+    background: linear-gradient(var(--core-soft), var(--core-soft)), var(--bg2);
+    font-size: 14px;
+  }
+  .phase.failed {
+    border-color: rgba(229, 115, 95, 0.4);
+    background: rgba(229, 115, 95, 0.08);
+  }
+  .phase.failed :global(svg) {
+    color: var(--bad);
+    flex: none;
+  }
+  .problem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--bad);
+    font-size: 14px;
+  }
+  .choices {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg2);
+    overflow: hidden;
+  }
+  .choice {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-areas: 'mark name size' 'mark state state';
+    align-items: center;
+    gap: 2px 12px;
+    padding: 12px 16px 12px 14px;
+    text-align: left;
+    transition: background 0.12s;
+  }
+  .choice + .choice {
+    border-top: 1px solid var(--border);
+  }
+  .choice:not(:disabled):hover {
+    background: var(--bg3);
+  }
+  .choice:disabled {
+    cursor: default;
+  }
+  .choice.current {
+    background: var(--bg3);
+  }
+  .mark {
+    grid-area: mark;
+    display: grid;
+    place-items: center;
+    color: var(--ok);
+  }
+  .name {
+    grid-area: name;
+    font-size: 14px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .size {
+    grid-area: size;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .state {
+    grid-area: state;
+    font-size: 12.5px;
+    color: var(--subtle);
+  }
+  .current .state {
+    color: var(--ok);
+  }
+  .spinner {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    border-radius: 50%;
+    border: 1.75px solid var(--border-strong);
+    border-top-color: var(--core);
+    animation: kj-spin 0.7s linear infinite;
+  }
+  .hint {
+    font-size: 13px;
+    color: var(--subtle);
+    line-height: 1.55;
+  }
+  dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 10px 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg2);
+    padding: 14px 16px;
+    font-size: 14px;
+  }
+  dt {
+    color: var(--muted);
+  }
+  dd {
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 560px) {
+    dl {
+      grid-template-columns: 1fr;
+      gap: 2px;
+    }
+    dd + dt {
+      margin-top: 8px;
+    }
+  }
+</style>

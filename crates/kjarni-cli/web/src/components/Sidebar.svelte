@@ -2,7 +2,13 @@
   import Mark from './Mark.svelte';
   import Icon from './Icon.svelte';
 
-  let { conversations, current, status, page, onselect, onnew, onschedules, ondelete } = $props();
+  let { conversations, current, status, page, onselect, onnew, onpage, ondelete } = $props();
+
+  const links = [
+    { page: 'schedules', icon: 'clock', label: 'Schedules' },
+    { page: 'memory', icon: 'bookmark', label: 'Memory' },
+    { page: 'settings', icon: 'sliders', label: 'Settings' },
+  ];
 
   let confirming = $state(null);
 
@@ -38,10 +44,14 @@
     <Icon name="plus" size={17} />
     New conversation
   </button>
-  <button class="link" class:active={page === 'schedules'} onclick={onschedules}>
-    <Icon name="clock" size={17} />
-    Schedules
-  </button>
+  <div class="links">
+    {#each links as l}
+      <button class="link" class:active={page === l.page} aria-current={page === l.page ? 'page' : undefined} onclick={() => onpage(l.page)}>
+        <Icon name={l.icon} size={17} />
+        {l.label}
+      </button>
+    {/each}
+  </div>
 
   <nav aria-label="Conversations">
     {#if conversations.length}
@@ -73,11 +83,11 @@
 
   {#if status}
     <footer>
-      <div class="model">
+      <button class="model" onclick={() => onpage('settings')} title="Change the model">
         <Icon name="chip" size={15} />
         <span class="mono">{status.model}</span>
         <span class="where">{status.gpu ? 'GPU' : 'CPU'}</span>
-      </div>
+      </button>
       <div class="folder" title={status.workdir}>
         <Icon name="folder" size={15} />
         <span>{shortPath(status.workdir)}</span>
@@ -127,12 +137,16 @@
     background: var(--bg4);
     border-color: var(--border-strong);
   }
+  .links {
+    display: grid;
+    gap: 2px;
+    margin-top: 6px;
+  }
   .link {
     display: flex;
     align-items: center;
     gap: 9px;
     height: 38px;
-    margin-top: 6px;
     padding: 0 12px;
     border-radius: 10px;
     font-size: 14.5px;
@@ -274,7 +288,8 @@
     font-size: 12.5px;
     color: var(--muted);
   }
-  footer > div {
+  footer > div,
+  footer > button {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -283,6 +298,17 @@
   footer :global(svg) {
     flex: none;
     color: var(--subtle);
+  }
+  .model {
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border-radius: 7px;
+    text-align: left;
+    color: inherit;
+    font-size: inherit;
+  }
+  .model:hover {
+    background: var(--bg3);
   }
   .model .mono {
     font-size: 11.5px;
