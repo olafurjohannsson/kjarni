@@ -1,6 +1,7 @@
 [package]
 name = "kjarni-cli"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 description = "Kjarni from the shell: classification, embeddings, reranking, search, chat, summarization, translation and speech-to-text as commands, and an MCP server for AI agents. Same output as PyTorch."
 license.workspace = true
@@ -34,6 +35,8 @@ base64 = "0.23.1"
 async-trait = { workspace = true }
 dirs = { workspace = true }
 getrandom = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+reqwest = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # `kjarni mcp` points stdout at stderr, keeping the real stdout for protocol

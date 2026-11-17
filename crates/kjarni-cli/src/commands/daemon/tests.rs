@@ -91,6 +91,7 @@ fn daemon_with_guard(model: Arc<dyn AgentModel>, guard: Guard) -> Daemon {
         memory: Some(memory),
         model: "scripted".into(),
         gpu: false,
+        schedules: Arc::new(schedules::Store::open(data.path().join("schedules.json")).unwrap()),
     });
     let serve_state = Arc::new(serve::AppState {
         models: serve::Models::new(serve::Defaults::default(), false, false),
@@ -602,6 +603,44 @@ fn install_downloads_only_what_the_cache_lacks() {
     assert!(!super::is_cached_in(cache.path(), "no-such-model", false));
 }
 
+#[test]
+fn the_daemon_downloads_its_models_with_progress_before_loading() {
+    let cache = tempfile::tempdir().unwrap();
+    // An empty cache: the chat model with progress, then the memory model quietly.
+    assert_eq!(
+        super::missing(cache.path(), "qwen3.5-4b", true, true),
+        vec![
+            ("qwen3.5-4b", true, false),
+            (super::MEMORY_MODEL, false, true)
+        ]
+    );
+    // Without memory, only the chat model.
+    assert_eq!(
+        super::missing(cache.path(), "qwen3.5-4b", true, false),
+        vec![("qwen3.5-4b", true, false)]
+    );
+    // Nothing once both are cached.
+    for (name, files) in [
+        (
+            "qwen3.5-4b",
+            &["config.json", "tokenizer.json", "model.gguf"][..],
+        ),
+        (
+            super::MEMORY_MODEL,
+            &["config.json", "tokenizer.json", "model.safetensors"][..],
+        ),
+    ] {
+        let dir = kjarni::ModelType::from_cli_name(name)
+            .unwrap()
+            .cache_dir(cache.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        for file in files {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+    }
+    assert!(super::missing(cache.path(), "qwen3.5-4b", true, true).is_empty());
+}
+
 #[tokio::test]
 async fn the_token_signs_in_a_browser_on_another_device() {
     let d = daemon(Scripted::new(&[]), true);
@@ -786,4 +825,286 @@ fn install_carries_allowed_hosts_into_the_startup_entry() {
     let at = args.iter().position(|a| a == "--allow-host").unwrap();
     assert_eq!(args[at + 1], "box.tail1234.ts.net");
     assert!(args.contains(&"--gpu".to_string()));
+}
+
+const RUN_CALL: &str = "Let me look.\n<tool_call>\n<function=run_command>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>";
+
+/// A stand-in ntfy server: each publish arrives on the channel as its
+/// `Authorization` header and JSON body.
+async fn fake_ntfy() -> (
+    String,
+    tokio::sync::mpsc::UnboundedReceiver<(Option<String>, Json)>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(move |headers: axum::http::HeaderMap, body: String| {
+            let tx = tx.clone();
+            async move {
+                let auth = headers
+                    .get(header::AUTHORIZATION)
+                    .map(|v| v.to_str().unwrap().to_string());
+                tx.send((auth, serde_json::from_str(&body).unwrap()))
+                    .unwrap();
+                "{}"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{address}"), rx)
+}
+
+#[tokio::test]
+async fn a_scheduled_run_uses_only_the_tools_it_allows_and_notifies() {
+    let d = daemon(
+        Scripted::new(&[Some(WRITE_CALL), Some(RUN_CALL), Some("Saved the note.")]),
+        false,
+    );
+    let (ntfy, mut published) = fake_ntfy().await;
+    let (status, _) = d
+        .api(
+            "PUT",
+            "/api/notifications",
+            Some(json!({
+                "url": format!("{ntfy}/kjarni-test"),
+                "token": "tk_secret",
+                "open_url": "https://box.tail1234.ts.net/",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, made) = d
+        .api(
+            "POST",
+            "/api/schedules",
+            Some(json!({
+                "name": "Morning note",
+                "prompt": "Save hello",
+                "when": {"kind": "daily", "time": "07:00", "days": ["mon", "fri"]},
+                "allow": ["write_file"],
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    assert_eq!(made["running"], false);
+    assert_eq!(made["notify"], true);
+    assert!(made["next_run"].as_i64().unwrap() > made["created"].as_i64().unwrap());
+    let id = made["id"].as_str().unwrap();
+
+    let (status, run) = d
+        .api("POST", &format!("/api/schedules/{id}/run"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let conversation = run["conversation"].as_str().unwrap();
+    let events = d.follow(conversation, 0, ends_turn).await;
+    assert_eq!(
+        types(&events),
+        [
+            "user",
+            "tool_call",
+            "approval",
+            "approved",
+            "tool_result",
+            "tool_call",
+            "approval",
+            "notice",
+            "approved",
+            "tool_result",
+            "done"
+        ]
+    );
+    let decisions: Vec<_> = events
+        .iter()
+        .filter(|e| e["type"] == "approved")
+        .map(|e| e["decision"].as_str().unwrap())
+        .collect();
+    assert_eq!(decisions, ["once", "deny"]);
+    let notice = events.iter().find(|e| e["type"] == "notice").unwrap();
+    assert!(
+        notice["message"]
+            .as_str()
+            .unwrap()
+            .contains("run_command is not allowed")
+    );
+    assert_eq!(
+        std::fs::read_to_string(d.workdir.path().join("note.txt")).unwrap(),
+        "hello"
+    );
+
+    let (auth, body) = tokio::time::timeout(Duration::from_secs(10), published.recv())
+        .await
+        .expect("a notification")
+        .unwrap();
+    assert_eq!(auth.as_deref(), Some("Bearer tk_secret"));
+    assert_eq!(body["topic"], "kjarni-test");
+    assert_eq!(body["title"], "Morning note");
+    assert_eq!(body["message"], "Saved the note.");
+    assert_eq!(
+        body["click"],
+        format!("https://box.tail1234.ts.net/c/{conversation}")
+    );
+
+    let (_, listed) = d.api("GET", "/api/schedules", None).await;
+    let s = &listed["schedules"][0];
+    assert_eq!(s["last_result"], "done");
+    assert_eq!(s["last_conversation"], conversation);
+    assert_eq!(s["running"], false);
+    // Clients learn a token is set, never the token.
+    assert_eq!(listed["notify"]["has_token"], true);
+    assert!(!listed.to_string().contains("tk_secret"));
+    assert_eq!(
+        listed["tools"],
+        json!([
+            "fetch_url",
+            "write_file",
+            "edit_file",
+            "run_command",
+            "remember",
+            "forget"
+        ])
+    );
+}
+
+#[tokio::test]
+async fn a_running_schedule_cannot_start_twice_and_a_stop_is_recorded() {
+    let d = daemon(Scripted::new(&[None]), false);
+    let (_, made) = d
+        .api(
+            "POST",
+            "/api/schedules",
+            Some(json!({
+                "name": "Slow",
+                "prompt": "Take your time",
+                "when": {"kind": "every", "minutes": 30},
+                "notify": false,
+            })),
+        )
+        .await;
+    let id = made["id"].as_str().unwrap();
+    let (_, run) = d
+        .api("POST", &format!("/api/schedules/{id}/run"), None)
+        .await;
+    let conversation = run["conversation"].as_str().unwrap();
+    d.follow(conversation, 0, |e| e["type"] == "text").await;
+
+    let (again, _) = d
+        .api("POST", &format!("/api/schedules/{id}/run"), None)
+        .await;
+    assert_eq!(again, StatusCode::CONFLICT);
+    let (_, listed) = d.api("GET", "/api/schedules", None).await;
+    assert_eq!(listed["schedules"][0]["running"], true);
+    assert_eq!(listed["schedules"][0]["last_result"], "running");
+
+    let (stopped, _) = d
+        .api(
+            "POST",
+            &format!("/api/conversations/{conversation}/stop"),
+            None,
+        )
+        .await;
+    assert_eq!(stopped, StatusCode::NO_CONTENT);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let (_, listed) = d.api("GET", "/api/schedules", None).await;
+        if listed["schedules"][0]["last_result"] == "stopped" {
+            assert_eq!(listed["schedules"][0]["running"], false);
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{listed}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn schedules_and_notification_settings_are_checked() {
+    let d = daemon(Scripted::new(&[]), false);
+    let base = json!({"name": "X", "prompt": "Y", "when": {"kind": "every", "minutes": 60}});
+
+    let mut reads = base.clone();
+    reads["allow"] = json!(["read_file"]);
+    let (status, body) = d.api("POST", "/api/schedules", Some(reads)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("fetch_url")
+    );
+
+    let mut often = base.clone();
+    often["when"] = json!({"kind": "every", "minutes": 1});
+    let (status, _) = d.api("POST", "/api/schedules", Some(often)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = d
+        .api("PUT", "/api/schedules/nope", Some(base.clone()))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = d.api("POST", "/api/schedules/nope/run", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = d.api("DELETE", "/api/schedules/nope", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, _) = d.api("POST", "/api/notifications/test", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    for bad in [
+        json!({"url": "ntfy.sh/topic"}),
+        json!({"url": "https://ntfy.sh/"}),
+        json!({"url": "https://ntfy.sh/t", "open_url": "javascript:alert(1)"}),
+    ] {
+        let (status, _) = d.api("PUT", "/api/notifications", Some(bad.clone())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+
+    // Leaving the token out keeps it while the address stays the same.
+    d.api(
+        "PUT",
+        "/api/notifications",
+        Some(json!({"url": "https://ntfy.sh/t", "token": "tk"})),
+    )
+    .await;
+    d.api(
+        "PUT",
+        "/api/notifications",
+        Some(json!({"url": "https://ntfy.sh/t"})),
+    )
+    .await;
+    let (_, listed) = d.api("GET", "/api/schedules", None).await;
+    assert_eq!(listed["notify"]["has_token"], true);
+    d.api(
+        "PUT",
+        "/api/notifications",
+        Some(json!({"url": "https://ntfy.sh/u"})),
+    )
+    .await;
+    let (_, listed) = d.api("GET", "/api/schedules", None).await;
+    assert_eq!(listed["notify"]["has_token"], false);
+    let (status, _) = d
+        .api("PUT", "/api/notifications", Some(json!({"url": ""})))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, listed) = d.api("GET", "/api/schedules", None).await;
+    assert_eq!(listed["notify"], Json::Null);
+}
+
+#[test]
+fn schedules_can_allow_exactly_the_tools_that_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let memory = Arc::new(Memory::open(dir.path(), None).unwrap());
+    let workspace = Arc::new(kjarni::agent::tools::Workspace::new(dir.path()));
+    let mut asking: Vec<String> = kjarni::agent::tools::builtin(workspace, Some(memory))
+        .iter()
+        .filter(|t| t.access() != kjarni::agent::Access::Read)
+        .map(|t| t.spec().name.clone())
+        .collect();
+    asking.sort();
+    let mut listed: Vec<String> = schedules::ASKING_TOOLS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    listed.sort();
+    assert_eq!(asking, listed);
 }

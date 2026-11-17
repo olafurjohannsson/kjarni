@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use futures::Stream;
 use kjarni::agent::{Approval, Memory};
@@ -17,6 +17,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::auth::{COOKIE, Guard};
 use super::conversations::{Conversations, Event, Live, SendError};
+use super::schedules::{self, Notify, Schedule, Spec, StartError, Store};
 
 pub struct DaemonState {
     pub conversations: Conversations,
@@ -24,6 +25,7 @@ pub struct DaemonState {
     pub memory: Option<Arc<Memory>>,
     pub model: String,
     pub gpu: bool,
+    pub schedules: Arc<Store>,
 }
 
 type AppState = Arc<DaemonState>;
@@ -66,6 +68,14 @@ pub fn routes() -> Router<AppState> {
         .route("/api/conversations/{id}/stop", post(stop))
         .route("/api/memory", get(list_memory).post(remember))
         .route("/api/memory/{id}", delete(forget))
+        .route("/api/schedules", get(list_schedules).post(create_schedule))
+        .route(
+            "/api/schedules/{id}",
+            put(update_schedule).delete(delete_schedule),
+        )
+        .route("/api/schedules/{id}/run", post(run_schedule))
+        .route("/api/notifications", put(set_notifications))
+        .route("/api/notifications/test", post(test_notification))
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -373,5 +383,145 @@ async fn forget(State(state): State<AppState>, Path(id): Path<u64>) -> Response 
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found("such fact"),
         Err(e) => internal(e),
+    }
+}
+
+/// A schedule as clients see it: its settings, when it runs next and
+/// whether it is running now.
+fn schedule_json(store: &Store, s: &Schedule) -> serde_json::Value {
+    let mut value = serde_json::to_value(s).expect("schedules serialize");
+    value["next_run"] = json!(s.next_run(&chrono::Local).timestamp());
+    value["running"] = json!(store.is_running(&s.id));
+    value
+}
+
+async fn list_schedules(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let store = &state.schedules;
+    let list: Vec<_> = store
+        .list()
+        .iter()
+        .map(|s| schedule_json(store, s))
+        .collect();
+    // The token stays in the daemon; clients only learn there is one.
+    let notify = store
+        .notify()
+        .map(|n| json!({ "url": n.url, "has_token": n.token.is_some(), "open_url": n.open_url }));
+    Json(json!({
+        "schedules": list,
+        "notify": notify,
+        "tools": schedules::ASKING_TOOLS,
+    }))
+}
+
+async fn create_schedule(State(state): State<AppState>, Json(spec): Json<Spec>) -> Response {
+    let store = &state.schedules;
+    match store.create(spec, chrono::Utc::now().timestamp()) {
+        Ok(s) => (StatusCode::CREATED, Json(schedule_json(store, &s))).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+async fn update_schedule(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(spec): Json<Spec>,
+) -> Response {
+    let store = &state.schedules;
+    match store.update(&id, spec) {
+        Ok(Some(s)) => Json(schedule_json(store, &s)).into_response(),
+        Ok(None) => not_found("such schedule"),
+        Err(e) => error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+async fn delete_schedule(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    match state.schedules.delete(&id) {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found("such schedule"),
+        Err(e) => internal(e),
+    }
+}
+
+/// Runs a schedule now. The answer names the run's conversation, which
+/// the client can follow like any other.
+async fn run_schedule(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    match schedules::start(&state, &id) {
+        Ok(conversation) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "conversation": conversation })),
+        )
+            .into_response(),
+        Err(StartError::NotFound) => not_found("such schedule"),
+        Err(StartError::Running) => error(StatusCode::CONFLICT, "that schedule is running now"),
+        Err(StartError::Failed(e)) => internal(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct NotifyBody {
+    /// Empty turns notifications off.
+    url: String,
+    /// Absent keeps the saved token while the address stays the same;
+    /// empty removes it.
+    token: Option<String>,
+    open_url: Option<String>,
+}
+
+async fn set_notifications(
+    State(state): State<AppState>,
+    Json(body): Json<NotifyBody>,
+) -> Response {
+    let store = &state.schedules;
+    let url = body.url.trim().to_string();
+    if url.is_empty() {
+        return match store.set_notify(None) {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(e) => internal(e),
+        };
+    }
+    if let Err(e) = schedules::split_topic(&url) {
+        return error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+    }
+    let open_url = body
+        .open_url
+        .map(|u| u.trim().trim_end_matches('/').to_string())
+        .filter(|u| !u.is_empty());
+    if let Some(u) = &open_url
+        && let Err(e) = schedules::check_open_url(u)
+    {
+        return error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+    }
+    let token = match body.token {
+        Some(t) if t.trim().is_empty() => None,
+        Some(t) => Some(t.trim().to_string()),
+        None => store
+            .notify()
+            .filter(|old| old.url == url)
+            .and_then(|old| old.token),
+    };
+    match store.set_notify(Some(Notify {
+        url,
+        token,
+        open_url,
+    })) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+async fn test_notification(State(state): State<AppState>) -> Response {
+    let Some(notify) = state.schedules.notify() else {
+        return error(StatusCode::BAD_REQUEST, "notifications are not set up");
+    };
+    match schedules::send_notification(
+        &notify,
+        "Kjarni",
+        "Notifications from Kjarni reach this device.",
+        None,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, format!("{e:#}")),
     }
 }

@@ -7,6 +7,7 @@
   import Composer from './components/Composer.svelte';
   import Welcome from './components/Welcome.svelte';
   import SignIn from './components/SignIn.svelte';
+  import Schedules from './components/Schedules.svelte';
   import Icon from './components/Icon.svelte';
   import Mark from './components/Mark.svelte';
 
@@ -22,6 +23,8 @@
   let drawer = $state(false);
   let trouble = $state('');
   let atBottom = $state(true);
+  // 'chat', or 'schedules' for the schedules page.
+  let page = $state('chat');
 
   let scroller = $state();
   let composer = $state();
@@ -29,7 +32,11 @@
   // Ignores replies to requests for a conversation the user has left.
   let visit = 0;
 
-  let title = $derived(conversations.find((c) => c.id === current)?.title || (current ? 'Conversation' : 'Kjarni'));
+  let title = $derived(
+    page === 'schedules'
+      ? 'Schedules'
+      : conversations.find((c) => c.id === current)?.title || (current ? 'Conversation' : 'Kjarni'),
+  );
 
   function idFromPath() {
     const m = location.pathname.match(/^\/c\/([A-Za-z0-9_-]{1,64})$/);
@@ -55,7 +62,23 @@
       return;
     }
     await refreshList();
-    await show(idFromPath(), false);
+    await route();
+  }
+
+  /** Shows the page the address names. */
+  async function route() {
+    if (location.pathname === '/schedules') openSchedules(false);
+    else await show(idFromPath(), false);
+  }
+
+  function openSchedules(push = true) {
+    ++visit;
+    stopFollowing();
+    drawer = false;
+    current = null;
+    busy = false;
+    page = 'schedules';
+    if (push && location.pathname !== '/schedules') history.pushState(null, '', '/schedules');
   }
 
   async function refreshList() {
@@ -93,6 +116,7 @@
     const mine = ++visit;
     stopFollowing();
     drawer = false;
+    page = 'chat';
     current = id;
     busy = false;
     summary = null;
@@ -222,7 +246,7 @@
 
   onMount(() => {
     boot();
-    const onPop = () => show(idFromPath(), false);
+    const onPop = () => route();
     addEventListener('popstate', onPop);
     return () => {
       removeEventListener('popstate', onPop);
@@ -232,7 +256,7 @@
 </script>
 
 <svelte:head>
-  <title>{current ? `${title} · Kjarni` : 'Kjarni'}</title>
+  <title>{current || page === 'schedules' ? `${title} · Kjarni` : 'Kjarni'}</title>
 </svelte:head>
 
 {#if signedIn === false}
@@ -245,7 +269,16 @@
 {:else}
   <div class="app" class:drawer>
     <div class="side">
-      <Sidebar {conversations} {current} {status} onselect={(id) => show(id)} onnew={() => show(null)} ondelete={remove} />
+      <Sidebar
+        {conversations}
+        {current}
+        {status}
+        {page}
+        onselect={(id) => show(id)}
+        onnew={() => show(null)}
+        onschedules={() => openSchedules()}
+        ondelete={remove}
+      />
     </div>
     <button class="scrim" onclick={() => (drawer = false)} aria-label="Close menu" tabindex="-1"></button>
 
@@ -256,6 +289,13 @@
         <button class="icon-button" onclick={() => show(null)} aria-label="New conversation"><Icon name="plus" size={20} /></button>
       </header>
 
+      {#if page === 'schedules'}
+        <div class="scroll">
+          <div class="column">
+            <Schedules onopen={(id) => (refreshList(), show(id))} onsignedout={() => (signedIn = false)} />
+          </div>
+        </div>
+      {:else}
       <div class="scroll" bind:this={scroller} onscroll={onScroll}>
         <div class="column">
           {#if !current}
@@ -278,6 +318,7 @@
           <div class="footnote">Runs on your computer. Nothing leaves it.</div>
         </div>
       </div>
+      {/if}
     </main>
   </div>
 {/if}

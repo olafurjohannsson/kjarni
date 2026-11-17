@@ -1,7 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
+The daemon, its web UI and schedules are a preview: they work and are tested,
+but the API and the settings files may still change.
+
+- **Kjarni declares the Rust it needs.** Every crate now says
+  `rust-version = "1.90"`, the oldest Rust the GPU library builds with, so an
+  older compiler gets a plain message naming the version instead of an error
+  from a dependency.
+- **Schedules in the daemon.** A schedule is a message the daemon sends
+  itself at set times: every day at 07:30, on chosen weekdays, or every few
+  minutes or hours. Each run is a new conversation in the web UI's list.
+  Nobody is there to approve its calls, so a schedule says up front which
+  actions it may take (open web pages, change files, run commands, update
+  memory); anything else it tries is declined, and reading files and notes
+  always works. A run missed while the computer was off happens once when
+  the daemon is back. Make and edit them on the new Schedules page, or
+  through `/api/schedules`.
+- **Phone notifications through ntfy.** When a schedule finishes, the
+  daemon can publish its reply to an ntfy topic you choose, on ntfy.sh or
+  your own server, with an access token if it needs one. Tapping the
+  notification opens the run. Set it up on the Schedules page, which can
+  send a test.
 - **The daemon's web UI.** `kjarni daemon open` now opens a chat page served
   by the daemon itself, built into the binary and working with no internet
   connection: conversations listed on the side, replies streamed in, each

@@ -1,6 +1,7 @@
 [package]
 name = "kjarni-rag"
 version.workspace = true
+rust-version.workspace = true
 edition = "2024"
 description = "Retrieval-augmented generation for the Kjarni inference engine"
 license.workspace = true

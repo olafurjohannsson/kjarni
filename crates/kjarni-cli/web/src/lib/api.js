@@ -35,6 +35,13 @@ export const api = {
     request('POST', `/api/conversations/${encodeURIComponent(id)}/approvals/${approval}`, { decision }),
   stop: (id) => request('POST', `/api/conversations/${encodeURIComponent(id)}/stop`),
   signIn: (token) => request('POST', '/login', { token }),
+  schedules: () => request('GET', '/api/schedules'),
+  createSchedule: (spec) => request('POST', '/api/schedules', spec),
+  updateSchedule: (id, spec) => request('PUT', `/api/schedules/${encodeURIComponent(id)}`, spec),
+  deleteSchedule: (id) => request('DELETE', `/api/schedules/${encodeURIComponent(id)}`),
+  runSchedule: (id) => request('POST', `/api/schedules/${encodeURIComponent(id)}/run`).then((r) => r.conversation),
+  setNotifications: (settings) => request('PUT', '/api/notifications', settings),
+  testNotification: () => request('POST', '/api/notifications/test'),
 };
 
 /** Follows a conversation's events after `after`, calling `onEvent` for

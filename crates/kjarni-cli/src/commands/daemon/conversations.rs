@@ -1,7 +1,7 @@
 //! Conversations the daemon holds: an agent for each, the events of its
 //! current turn for clients to follow, and approvals answered from a client.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -80,7 +80,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    fn ends_turn(&self) -> bool {
+    pub fn ends_turn(&self) -> bool {
         matches!(
             self,
             EventKind::Done { .. } | EventKind::Error { .. } | EventKind::Stopped
@@ -152,6 +152,16 @@ impl Hub {
     }
 }
 
+/// Who answers a turn's approvals.
+#[derive(Clone)]
+pub enum Answers {
+    /// The user, from a client.
+    User,
+    /// A list fixed in advance, for a turn nobody is watching: calls to these
+    /// tools run, any other call that needs approval is declined.
+    Allowed(Arc<HashSet<String>>),
+}
+
 /// A user's message could not start a turn.
 #[derive(Debug, PartialEq)]
 pub enum SendError {
@@ -219,6 +229,11 @@ impl Live {
 
     /// Starts a turn answering `text`. Its events follow on [`follow`](Self::follow).
     pub fn send(self: &Arc<Self>, text: &str) -> Result<(), SendError> {
+        self.send_with(text, Answers::User)
+    }
+
+    /// Starts a turn answering `text`, with its approvals answered by `answers`.
+    pub fn send_with(self: &Arc<Self>, text: &str, answers: Answers) -> Result<(), SendError> {
         let text = text.trim().to_string();
         if text.is_empty() {
             return Err(SendError::Empty);
@@ -238,6 +253,7 @@ impl Live {
             let mut events = Relay {
                 live: live.clone(),
                 call: 0,
+                answers,
             };
             let kind = match agent.send(&text, &mut events).await {
                 Ok(reply) => EventKind::Done {
@@ -312,6 +328,7 @@ impl Live {
 struct Relay {
     live: Arc<Live>,
     call: u32,
+    answers: Answers,
 }
 
 #[async_trait]
@@ -333,16 +350,38 @@ impl AgentEvents for Relay {
         });
     }
 
-    async fn approve(&mut self, _call: &ToolCall, summary: &str, access: Access) -> Approval {
+    async fn approve(&mut self, call: &ToolCall, summary: &str, access: Access) -> Approval {
         let id = self.live.hub.next();
-        let (tx, rx) = oneshot::channel();
-        self.live.turn.lock().expect("turn lock").pending = Some((id, tx));
-        self.live.emit(EventKind::Approval {
+        // Announced like any approval, so clients show a call answered in
+        // advance the same way as one the user answered.
+        let asked = EventKind::Approval {
             approval: id,
             call: self.call,
             summary: summary.to_string(),
             access: access.as_str(),
-        });
+        };
+        if let Answers::Allowed(allowed) = &self.answers {
+            self.live.emit(asked);
+            let decision = if allowed.contains(&call.name) {
+                Approval::Once
+            } else {
+                self.live.emit(EventKind::Notice {
+                    message: format!(
+                        "{} is not allowed in this schedule, so the call was declined.",
+                        call.name
+                    ),
+                });
+                Approval::Deny
+            };
+            self.live.emit(EventKind::Approved {
+                approval: id,
+                decision: decision_name(decision),
+            });
+            return decision;
+        }
+        let (tx, rx) = oneshot::channel();
+        self.live.turn.lock().expect("turn lock").pending = Some((id, tx));
+        self.live.emit(asked);
         rx.await.unwrap_or(Approval::Deny)
     }
 
