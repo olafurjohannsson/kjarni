@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Send a message while Kjarni works.** It waits above the message box as
+  "next step", and the agent reads it before its next step, after the results
+  of the calls it made, so "only the first item" or "answer in Icelandic"
+  steers a turn already running. A message that arrives as the answer is
+  written gets an answer of its own in the same turn. Stopping the turn
+  puts the unread messages back in the message box. In the API, a message
+  sent mid-turn returns `{"queued": true}` instead of 409, with a `queued`
+  event, then a `user` event when the agent reads it. In the library,
+  `AgentEvents::interjections`.
+- **Sign another device in with a code.** Settings has an "Other devices"
+  section with the addresses the daemon answers to (such as its Tailscale
+  name) and a button that shows an eight-digit code. Typed on the other
+  device's sign-in page, it signs that browser in once, within two minutes;
+  ten wrong codes cancel the pending ones. The token file still works. Also
+  `POST /api/device-code`, and `POST /login` with `{"code"}`.
+- **A context meter.** A small bar above the message box shows how full the
+  conversation's context is; opened, it says how many tokens of how many,
+  with a button to summarize the earlier messages now instead of waiting.
+  Also `POST /api/conversations/{id}/compact`, a `context` event after each
+  turn, and `context` in `GET /api/conversations/{id}`. In the library,
+  `Agent::context_usage` and `Agent::compact`.
 - **Decline a call and say what to do instead.** Declining in the web UI now
   asks "What should Kjarni do instead?"; the answer goes to the model with the
   decline, so "put it in notes/ instead" steers it rather than only stopping

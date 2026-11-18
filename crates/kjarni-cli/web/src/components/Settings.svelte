@@ -3,12 +3,19 @@
   import Icon from './Icon.svelte';
   import { api, SignedOut } from '../lib/api.js';
   import { describePhase, formatParams, switching } from '../lib/settings.js';
+  import { countdown, deviceAddresses } from '../lib/signin.js';
 
   // The model the daemon runs, with the others it can switch to, and what
   // else it was started with.
   let { status, onchange, onsignedout } = $props();
 
   let models = $state(null);
+  // A code for signing another device in, and the seconds it has left.
+  let device = $state(null);
+  let left = $state(0);
+  let showing = $state(false);
+
+  let addresses = $derived(deviceAddresses(location.origin, status?.allowed_hosts));
   let problem = $state('');
   let asked = $state(null);
 
@@ -40,6 +47,33 @@
       asked = null;
     }
   }
+
+  async function showCode() {
+    showing = true;
+    problem = '';
+    try {
+      const made = await api.deviceCode();
+      device = { code: made.code, until: Date.now() + made.expires_in * 1000 };
+      left = made.expires_in;
+    } catch (e) {
+      if (e instanceof SignedOut) onsignedout?.();
+      else problem = e.message;
+    } finally {
+      showing = false;
+    }
+  }
+
+  $effect(() => {
+    if (!device) return;
+    const tick = setInterval(() => {
+      left = (device.until - Date.now()) / 1000;
+      if (left <= 0) {
+        device = null;
+        clearInterval(tick);
+      }
+    }, 500);
+    return () => clearInterval(tick);
+  });
 
   onMount(() => {
     load();
@@ -111,6 +145,32 @@
       {/if}
     {:else if problem}
       <div class="problem"><Icon name="alert" size={15} /> {problem}</div>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Other devices</h2>
+    {#if addresses.length}
+      <p class="lead">
+        Open Kjarni at
+        {#each addresses as a, i}{#if i > 0}{' or '}{/if}<code>{a}</code>{/each}
+        on your phone or another computer, then enter a code from here.
+      </p>
+    {:else}
+      <p class="lead">
+        Other devices cannot reach this daemon yet. To use it from your phone over Tailscale, start it with
+        <code>--allow-host</code> and your machine's Tailscale name, then run <code>tailscale serve --bg 7710</code>.
+      </p>
+    {/if}
+    {#if device}
+      <div class="device">
+        <div class="code mono" aria-label="Sign-in code">{device.code.slice(0, 4)} {device.code.slice(4)}</div>
+        <div class="left">Works once, for {countdown(left)}</div>
+      </div>
+    {:else}
+      <div>
+        <button class="show" onclick={showCode} disabled={showing}>Show a sign-in code</button>
+      </div>
     {/if}
   </section>
 
@@ -254,6 +314,44 @@
     border: 1.75px solid var(--border-strong);
     border-top-color: var(--core);
     animation: kj-spin 0.7s linear infinite;
+  }
+  .lead {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .show {
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg2);
+    font-weight: 600;
+    font-size: 14px;
+    transition: background 0.12s;
+  }
+  .show:not(:disabled):hover {
+    background: var(--bg3);
+  }
+  .device {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    padding: 20px 16px;
+    border: 1px solid var(--core-line);
+    border-radius: var(--radius);
+    background: linear-gradient(var(--core-soft), var(--core-soft)), var(--bg2);
+  }
+  .device .code {
+    font-family: var(--mono);
+    font-size: clamp(28px, 7vw, 36px);
+    letter-spacing: 0.14em;
+    color: var(--text);
+  }
+  .left {
+    font-size: 13px;
+    color: var(--muted);
   }
   .hint {
     font-size: 13px;

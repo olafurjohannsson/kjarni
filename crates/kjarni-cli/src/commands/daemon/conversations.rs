@@ -85,15 +85,30 @@ pub enum EventKind {
     Error {
         message: String,
     },
-    /// The user stopped the turn.
-    Stopped,
+    /// The user stopped the turn. `dropped` are the messages they sent
+    /// meanwhile that the agent had not read, which are discarded.
+    Stopped {
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dropped: Vec<String>,
+    },
+    /// The user sent `text` while the turn ran; the agent reads it before its
+    /// next step, when a `user` event with the same text follows.
+    Queued {
+        text: String,
+    },
+    /// How full the prompt is: `used` tokens of the `budget` past which
+    /// earlier messages are summarized.
+    Context {
+        used: usize,
+        budget: usize,
+    },
 }
 
 impl EventKind {
     pub fn ends_turn(&self) -> bool {
         matches!(
             self,
-            EventKind::Done { .. } | EventKind::Error { .. } | EventKind::Stopped
+            EventKind::Done { .. } | EventKind::Error { .. } | EventKind::Stopped { .. }
         )
     }
 }
@@ -120,6 +135,8 @@ struct Turn {
     events: Vec<Event>,
     pending: Option<(u64, oneshot::Sender<Approval>)>,
     task: Option<tokio::task::AbortHandle>,
+    /// Messages sent during the turn that the agent has not read yet.
+    queued: Vec<String>,
     /// The saved messages as a client shows them, up to the start of the
     /// current turn. The agent is locked for a whole turn, so this copy is
     /// what a client opening the conversation mid-turn reads.
@@ -186,6 +203,26 @@ pub enum Answers {
     /// A list fixed in advance, for a turn nobody is watching: calls to these
     /// tools run, any other call that needs approval is declined.
     Allowed(Arc<HashSet<String>>),
+}
+
+/// What became of a user's message.
+#[derive(Debug, PartialEq)]
+pub enum Sent {
+    /// It started a turn.
+    Started,
+    /// A turn is running; the agent reads it before its next step.
+    Queued,
+}
+
+/// A conversation could not be summarized.
+#[derive(Debug)]
+pub enum CompactError {
+    /// A turn is running.
+    Busy,
+    /// Turns are held back for now.
+    Held,
+    /// The summary could not be written.
+    Failed(anyhow::Error),
 }
 
 /// A user's message could not start a turn.
@@ -264,9 +301,75 @@ impl Live {
         }
     }
 
-    /// Starts a turn answering `text`. Its events follow on [`follow`](Self::follow).
-    pub fn send(self: &Arc<Self>, text: &str) -> Result<(), SendError> {
-        self.send_with(text, Answers::User)
+    /// Starts a turn answering `text`, or, while one runs, gives `text` to
+    /// it to read before its next step. Events follow on
+    /// [`follow`](Self::follow).
+    pub fn send(self: &Arc<Self>, text: &str) -> Result<Sent, SendError> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(SendError::Empty);
+        }
+        {
+            let mut turn = self.turn.lock().expect("turn lock");
+            if turn.busy {
+                turn.queued.push(text.to_string());
+                drop(turn);
+                self.emit(EventKind::Queued {
+                    text: text.to_string(),
+                });
+                return Ok(Sent::Queued);
+            }
+        }
+        match self.send_with(text, Answers::User) {
+            // Another message started a turn since the check: join it.
+            Err(SendError::Busy) => self.send(text),
+            other => other.map(|()| Sent::Started),
+        }
+    }
+
+    /// Summarizes the conversation's earlier messages now. False when there
+    /// were too few. Counts as a turn while it runs, so no message or change
+    /// of model starts meanwhile.
+    pub async fn compact(self: &Arc<Self>) -> Result<bool, CompactError> {
+        {
+            let held = self.hub.held.read().expect("hold lock");
+            if *held {
+                return Err(CompactError::Held);
+            }
+            let mut turn = self.turn.lock().expect("turn lock");
+            if turn.busy {
+                return Err(CompactError::Busy);
+            }
+            turn.busy = true;
+        }
+        let mut agent = self.agent.lock().await;
+        let mut events = Relay {
+            live: self.clone(),
+            call: 0,
+            answers: Answers::User,
+            workdir: self.workdir.clone(),
+        };
+        let done = agent.compact(&mut events).await;
+        let transcript = transcript_of(&agent);
+        {
+            let mut turn = self.turn.lock().expect("turn lock");
+            turn.transcript = transcript;
+            turn.busy = false;
+        }
+        self.emit_context(&agent);
+        done.map_err(CompactError::Failed)
+    }
+
+    /// How full the prompt is, when the agent is not busy with a turn.
+    pub fn context(&self) -> Option<(usize, usize)> {
+        let agent = self.agent.try_lock().ok()?;
+        agent.context_usage().ok()
+    }
+
+    fn emit_context(&self, agent: &Agent) {
+        if let Ok((used, budget)) = agent.context_usage() {
+            self.emit(EventKind::Context { used, budget });
+        }
     }
 
     /// Starts a turn answering `text`, with its approvals answered by `answers`.
@@ -297,7 +400,9 @@ impl Live {
                 answers,
                 workdir: live.workdir.clone(),
             };
-            let kind = match agent.send(&text, &mut events).await {
+            let result = agent.send(&text, &mut events).await;
+            live.emit_context(&agent);
+            let kind = match result {
                 Ok(reply) => EventKind::Done {
                     text: super::display::split_reasoning(&reply.text).1.to_string(),
                     steps: reply.steps,
@@ -309,7 +414,14 @@ impl Live {
                 },
             };
             let transcript = transcript_of(&agent);
+            drop(agent);
             live.emit_with(kind, Some(transcript));
+            // Messages sent after the agent last asked for them start the
+            // next turn.
+            let left = std::mem::take(&mut live.turn.lock().expect("turn lock").queued);
+            if !left.is_empty() {
+                let _ = live.send(&left.join("\n\n"));
+            }
         });
         let mut turn = self.turn.lock().expect("turn lock");
         // A turn that already finished has cleared `busy`; its handle is moot.
@@ -347,12 +459,13 @@ impl Live {
                 return false;
             }
             turn.pending = None;
-            turn.task.take()
+            (turn.task.take(), std::mem::take(&mut turn.queued))
         };
+        let (task, dropped) = task;
         if let Some(task) = task {
             task.abort();
         }
-        self.emit(EventKind::Stopped);
+        self.emit(EventKind::Stopped { dropped });
         // The stopped turn kept what it had saved; show that once its task
         // has let go of the agent.
         let live = self.clone();
@@ -459,6 +572,14 @@ impl AgentEvents for Relay {
         self.live.emit(EventKind::Notice {
             message: message.to_string(),
         });
+    }
+
+    async fn interjections(&mut self) -> Vec<String> {
+        let texts = std::mem::take(&mut self.live.turn.lock().expect("turn lock").queued);
+        for text in &texts {
+            self.live.emit(EventKind::User { text: text.clone() });
+        }
+        texts
     }
 }
 
@@ -640,6 +761,7 @@ impl Conversations {
                 events: Vec::new(),
                 pending: None,
                 task: None,
+                queued: Vec::new(),
                 transcript,
             }),
             tx,
