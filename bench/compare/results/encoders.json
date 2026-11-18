@@ -7,259 +7,271 @@
     {
       "engine": "kjarni",
       "task": "embed-minilm",
-      "load_ms": 93.62158500152873,
-      "first_call_ms": 9.936128997651394,
+      "device": "cpu",
+      "load_ms": 93.21830099997896,
+      "first_call_ms": 11.57217799936916,
       "single_ms": {
-        "min": 2.3068369991960935,
-        "median": 3.422712499741465
+        "min": 2.047705000222777,
+        "median": 2.2535990001415485
       },
       "batch_ms": {
-        "min": 205.28022700091242,
-        "median": 209.00107299894444
+        "min": 194.25972600038222,
+        "median": 198.77611699939735
       },
       "batch_size": 64,
       "threads": 24,
-      "batch_per_s": 311.7689459672876,
-      "peak_rss_mb": 289.64453125,
-      "rss_mb": 270.9453125,
-      "load_avg_before": 2.74072265625,
+      "batch_per_s": 329.4558337834476,
+      "peak_rss_mb": 291.5,
+      "rss_mb": 272.77734375,
+      "load_avg_before": 2.67626953125,
       "max_abs_diff_vs_torch": 1.6391277313232422e-07,
       "min_cosine_vs_torch": 0.9999998807907104
     },
     {
       "engine": "torch",
       "task": "embed-minilm",
-      "load_ms": 2433.9494650012057,
-      "first_call_ms": 9.422368999366881,
+      "device": "cpu",
+      "load_ms": 2381.5442530003565,
+      "first_call_ms": 8.036076000280445,
       "single_ms": {
-        "min": 3.539212000760017,
-        "median": 3.5809770015475806
+        "min": 3.2841899992490653,
+        "median": 3.334533500037651
       },
       "batch_ms": {
-        "min": 217.12554300029296,
-        "median": 232.67927300184965
+        "min": 213.83896400038793,
+        "median": 214.47932699993544
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 294.7603451700459,
-      "peak_rss_mb": 737.66015625,
-      "rss_mb": 649.015625,
-      "load_avg_before": 5.2509765625,
+      "batch_per_s": 299.2906381639779,
+      "peak_rss_mb": 730.0703125,
+      "rss_mb": 647.6640625,
+      "load_avg_before": 0.77001953125,
       "max_abs_diff_vs_torch": 0.0,
       "min_cosine_vs_torch": 1.0
     },
     {
       "engine": "onnx",
       "task": "embed-minilm",
-      "load_ms": 673.7910480005667,
-      "first_call_ms": 4.6089970019238535,
+      "device": "cpu",
+      "load_ms": 976.2913590002427,
+      "first_call_ms": 7.284422999873641,
       "single_ms": {
-        "min": 1.4837320013612043,
-        "median": 1.508859999376
+        "min": 1.4244399999370216,
+        "median": 1.4572055001735862
       },
       "batch_ms": {
-        "min": 182.10745800024597,
-        "median": 200.42462600031286
+        "min": 194.38282099963544,
+        "median": 194.6598559998165
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 351.4408509283214,
-      "peak_rss_mb": 409.3203125,
-      "rss_mb": 412.3671875,
-      "load_avg_before": 6.11181640625,
+      "batch_per_s": 329.24720235498603,
+      "peak_rss_mb": 415.58203125,
+      "rss_mb": 418.23828125,
+      "load_avg_before": 0.34033203125,
       "max_abs_diff_vs_torch": 1.7881393432617188e-07,
       "min_cosine_vs_torch": 0.9999999403953552
     },
     {
       "engine": "kjarni",
       "task": "embed-mpnet",
-      "load_ms": 228.79811999882804,
-      "first_call_ms": 31.33687999797985,
+      "device": "cpu",
+      "load_ms": 209.88172299985308,
+      "first_call_ms": 27.31311299976369,
       "single_ms": {
-        "min": 24.190770000132034,
-        "median": 25.2799160007271
+        "min": 18.744779000371636,
+        "median": 19.325898500028416
       },
       "batch_ms": {
-        "min": 1273.8915599984466,
-        "median": 1301.2159279969637
+        "min": 1225.7607660003487,
+        "median": 1253.7322459993447
       },
       "batch_size": 64,
       "threads": 24,
-      "batch_per_s": 50.239755101351044,
-      "peak_rss_mb": 748.5390625,
-      "rss_mb": 708.1796875,
-      "load_avg_before": 14.6044921875,
+      "batch_per_s": 52.21247226637192,
+      "peak_rss_mb": 750.40234375,
+      "rss_mb": 710.08203125,
+      "load_avg_before": 7.42138671875,
       "max_abs_diff_vs_torch": 2.384185791015625e-07,
       "min_cosine_vs_torch": 0.9999998807907104
     },
     {
       "engine": "torch",
       "task": "embed-mpnet",
-      "load_ms": 2449.0725770010613,
-      "first_call_ms": 29.766176001430722,
+      "device": "cpu",
+      "load_ms": 2379.360005000308,
+      "first_call_ms": 65.0341219998154,
       "single_ms": {
-        "min": 29.507693001505686,
-        "median": 29.593578999993042
+        "min": 29.969153999445552,
+        "median": 30.033508999622427
       },
       "batch_ms": {
-        "min": 1702.375046999805,
-        "median": 1728.259744002571
+        "min": 1647.2189460000664,
+        "median": 1656.8747620003705
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 37.59453600591183,
-      "peak_rss_mb": 1177.98046875,
-      "rss_mb": 1036.26171875,
-      "load_avg_before": 15.1552734375,
+      "batch_per_s": 38.85336564116803,
+      "peak_rss_mb": 1160.7734375,
+      "rss_mb": 907.7421875,
+      "load_avg_before": 6.50341796875,
       "max_abs_diff_vs_torch": 0.0,
       "min_cosine_vs_torch": 1.0
     },
     {
       "engine": "onnx",
       "task": "embed-mpnet",
-      "load_ms": 1167.8443500022695,
-      "first_call_ms": 19.211669998185243,
+      "device": "cpu",
+      "load_ms": 1113.0364999999074,
+      "first_call_ms": 17.268689000047743,
       "single_ms": {
-        "min": 16.187495999474777,
-        "median": 16.35034349965281
+        "min": 14.16668199999549,
+        "median": 14.26602899982754
       },
       "batch_ms": {
-        "min": 1087.421993001044,
-        "median": 1221.1204589984845
+        "min": 1188.62361399988,
+        "median": 1193.187472000318
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 58.85479640095761,
-      "peak_rss_mb": 943.578125,
-      "rss_mb": 946.25390625,
-      "load_avg_before": 14.4404296875,
+      "batch_per_s": 53.84378978020746,
+      "peak_rss_mb": 911.9765625,
+      "rss_mb": 914.69140625,
+      "load_avg_before": 4.8525390625,
       "max_abs_diff_vs_torch": 2.5704503059387207e-07,
       "min_cosine_vs_torch": 0.9999999403953552
     },
     {
       "engine": "kjarni",
       "task": "rerank",
-      "load_ms": 113.24476600202615,
-      "first_call_ms": 16.276866001135204,
+      "device": "cpu",
+      "load_ms": 133.81708599990816,
+      "first_call_ms": 18.617243000335293,
       "single_ms": {
-        "min": 9.135322001384338,
-        "median": 9.411573000761564
+        "min": 8.441227000730578,
+        "median": 8.864739000273403
       },
       "batch_ms": {
-        "min": 245.66779499946279,
-        "median": 247.87264900078299
+        "min": 226.61575299935066,
+        "median": 230.86949299977277
       },
       "batch_size": 64,
       "threads": 24,
-      "batch_per_s": 260.51440727157564,
-      "peak_rss_mb": 322.6484375,
-      "rss_mb": 308.05859375,
-      "load_avg_before": 15.42041015625,
+      "batch_per_s": 282.41637729475667,
+      "peak_rss_mb": 324.0,
+      "rss_mb": 310.09375,
+      "load_avg_before": 2.185546875,
       "max_abs_diff_vs_torch": 4.291534423828125e-06
     },
     {
       "engine": "torch",
       "task": "rerank",
-      "load_ms": 2427.564978999726,
-      "first_call_ms": 12.917787000333192,
+      "device": "cpu",
+      "load_ms": 2750.1801649996196,
+      "first_call_ms": 11.155330999827129,
       "single_ms": {
-        "min": 7.0613560019410215,
-        "median": 9.35264350118814
+        "min": 9.231669999280712,
+        "median": 9.52303550002398
       },
       "batch_ms": {
-        "min": 273.0882220021158,
-        "median": 287.4018190013885
+        "min": 267.94905299902894,
+        "median": 281.88115999910224
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 234.35650036750448,
-      "peak_rss_mb": 761.71875,
-      "rss_mb": 615.7109375,
-      "load_avg_before": 14.53271484375,
+      "batch_per_s": 238.85137597493932,
+      "peak_rss_mb": 763.55859375,
+      "rss_mb": 617.015625,
+      "load_avg_before": 2.3056640625,
       "max_abs_diff_vs_torch": 0.0
     },
     {
       "engine": "onnx",
       "task": "rerank",
-      "load_ms": 672.0825260017591,
-      "first_call_ms": 6.380637998518068,
+      "device": "cpu",
+      "load_ms": 536.8156549993728,
+      "first_call_ms": 6.081084999095765,
       "single_ms": {
-        "min": 3.776266999921063,
-        "median": 3.9314679997914936
+        "min": 3.690220999487792,
+        "median": 3.764792500078329
       },
       "batch_ms": {
-        "min": 246.97441299940692,
-        "median": 247.9712920030579
+        "min": 242.16365999927802,
+        "median": 242.89796499942895
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 259.1361559391729,
-      "peak_rss_mb": 374.56640625,
-      "rss_mb": 376.87890625,
-      "load_avg_before": 13.36865234375,
+      "batch_per_s": 264.2840796186794,
+      "peak_rss_mb": 373.76171875,
+      "rss_mb": 377.140625,
+      "load_avg_before": 2.12255859375,
       "max_abs_diff_vs_torch": 5.7220458984375e-06
     },
     {
       "engine": "kjarni",
       "task": "classify",
-      "load_ms": 216.87156299958588,
-      "first_call_ms": 19.08699900013744,
+      "device": "cpu",
+      "load_ms": 196.83626299956813,
+      "first_call_ms": 16.900587999771233,
       "single_ms": {
-        "min": 12.344296999799553,
-        "median": 13.206080999225378
+        "min": 9.722800999952597,
+        "median": 10.53306599987991
       },
       "batch_ms": {
-        "min": 156.8776150015765,
-        "median": 168.91577100250288
+        "min": 151.48499799943238,
+        "median": 162.85550099928514
       },
       "batch_size": 64,
       "threads": 24,
-      "batch_per_s": 407.9613270469267,
-      "peak_rss_mb": 501.90625,
-      "rss_mb": 399.30859375,
-      "load_avg_before": 15.18212890625,
+      "batch_per_s": 422.4840799102748,
+      "peak_rss_mb": 503.36328125,
+      "rss_mb": 401.25,
+      "load_avg_before": 2.021484375,
       "max_abs_diff_vs_torch": 1.1920928955078125e-07
     },
     {
       "engine": "torch",
       "task": "classify",
-      "load_ms": 2140.6381230008265,
-      "first_call_ms": 15.785512001457391,
+      "device": "cpu",
+      "load_ms": 2062.705467998967,
+      "first_call_ms": 26.918400000795373,
       "single_ms": {
-        "min": 12.026724001771072,
-        "median": 12.100263997126603
+        "min": 14.910167001289665,
+        "median": 14.957873000639665
       },
       "batch_ms": {
-        "min": 222.78361200005747,
-        "median": 225.34913799972855
+        "min": 208.62127799955488,
+        "median": 209.21079800064035
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 287.27427222063125,
-      "peak_rss_mb": 745.39453125,
-      "rss_mb": 686.23828125,
-      "load_avg_before": 15.248046875,
+      "batch_per_s": 306.7759943457759,
+      "peak_rss_mb": 745.765625,
+      "rss_mb": 686.48046875,
+      "load_avg_before": 1.3955078125,
       "max_abs_diff_vs_torch": 0.0
     },
     {
       "engine": "onnx",
       "task": "classify",
-      "load_ms": 872.4057819999871,
-      "first_call_ms": 12.461136000638362,
+      "device": "cpu",
+      "load_ms": 886.1678479988768,
+      "first_call_ms": 16.143617000125232,
       "single_ms": {
-        "min": 8.875690000422765,
-        "median": 8.942369999203947
+        "min": 12.34818900047685,
+        "median": 12.40620550015592
       },
       "batch_ms": {
-        "min": 153.1744690000778,
-        "median": 154.12882900272962
+        "min": 144.53396599856205,
+        "median": 145.02384699881077
       },
       "batch_size": 64,
       "threads": 16,
-      "batch_per_s": 417.82420019335916,
-      "peak_rss_mb": 438.67578125,
-      "rss_mb": 412.21875,
-      "load_avg_before": 13.05712890625,
+      "batch_per_s": 442.80248976656964,
+      "peak_rss_mb": 438.70703125,
+      "rss_mb": 412.265625,
+      "load_avg_before": 1.53369140625,
       "max_abs_diff_vs_torch": 1.1920928955078125e-07
     }
   ]
