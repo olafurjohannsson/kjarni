@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795022613760,
+  "lastUpdate": 1795031580959,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2244,6 +2244,66 @@ window.BENCHMARK_DATA = {
             "value": 45.29,
             "unit": "tokens/s",
             "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.005"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 434.7,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.000"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 29.54,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.000"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "92553ec7500cb07e05e323dba3f396e782252f26",
+          "message": "Messages sent mid-turn, device sign-in codes, and a context meter (#128)",
+          "timestamp": "2026-11-18T16:59:12Z",
+          "tree_id": "143846f20931df6ebb3962cc23f7118c100da5cc",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/92553ec7500cb07e05e323dba3f396e782252f26"
+        },
+        "date": 1795031579831,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 440.42,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.007"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 45.29,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.005"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 567.91,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.901"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 43.06,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.985"
           },
           {
             "name": "windows-x64 embed",
