@@ -498,9 +498,12 @@ async fn a_write_waits_for_approval_from_the_client() {
     );
     let last = events.last().unwrap()["seq"].as_u64().unwrap();
     let rest = d.follow(&id, last, ends_turn).await;
-    assert_eq!(types(&rest), ["approved", "tool_result", "done"]);
+    assert_eq!(
+        types(&rest),
+        ["approved", "file_changed", "tool_result", "done"]
+    );
     assert_eq!(rest[0]["decision"], "once");
-    assert_eq!(rest[1]["ok"], true);
+    assert_eq!(rest[2]["ok"], true);
     assert_eq!(rest.last().unwrap()["text"], "Saved.");
     assert_eq!(
         std::fs::read_to_string(d.workdir.path().join("note.txt")).unwrap(),
@@ -536,6 +539,113 @@ async fn a_write_waits_for_approval_from_the_client() {
     assert_eq!(messages[1]["tool_calls"][0]["name"], "write_file");
     assert_eq!(messages[1]["text"], "I'll save it.");
     assert_eq!(messages[2]["role"], "tool");
+}
+
+/// A decline can say what to do instead: the model reads it, and followers
+/// see it with the decision.
+#[tokio::test]
+async fn a_decline_with_a_reason_tells_the_model_and_followers() {
+    let d = daemon(Scripted::new(&[Some(WRITE_CALL), Some("Okay.")]), false);
+    let id = d.new_conversation().await;
+    d.api(
+        "POST",
+        &format!("/api/conversations/{id}/messages"),
+        Some(json!({"text": "Save hello"})),
+    )
+    .await;
+    let events = d.follow(&id, 0, |e| e["type"] == "approval").await;
+    let approval = events.last().unwrap()["approval"].as_u64().unwrap();
+    let path = format!("/api/conversations/{id}/approvals/{approval}");
+
+    let too_long = "x".repeat(2001);
+    let (status, _) = d
+        .api(
+            "POST",
+            &path,
+            Some(json!({"decision": "deny", "reason": too_long})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = d
+        .api(
+            "POST",
+            &path,
+            Some(json!({"decision": "deny", "reason": " Put it in notes/ "})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let last = events.last().unwrap()["seq"].as_u64().unwrap();
+    let rest = d.follow(&id, last, ends_turn).await;
+    assert_eq!(rest[0]["type"], "approved");
+    assert_eq!(rest[0]["decision"], "deny");
+    assert_eq!(rest[0]["reason"], "Put it in notes/");
+    let result = rest.iter().find(|e| e["type"] == "tool_result").unwrap();
+    assert_eq!(result["denied"], true);
+    assert!(
+        result["output"]
+            .as_str()
+            .unwrap()
+            .contains("They said: \"Put it in notes/\"")
+    );
+}
+
+/// What a conversation wrote is listed with diffs and saved beside it, and
+/// deleting the conversation deletes the list.
+#[tokio::test]
+async fn the_files_a_conversation_changed_are_listed_with_their_diffs() {
+    let d = daemon(Scripted::new(&[Some(WRITE_CALL), Some("Saved.")]), false);
+    std::fs::write(d.workdir.path().join("note.txt"), "old\n").unwrap();
+    let id = d.new_conversation().await;
+    let changes = format!("/api/conversations/{id}/changes");
+    assert_eq!(d.api("GET", &changes, None).await.1, json!({"changes": []}));
+
+    d.api(
+        "POST",
+        &format!("/api/conversations/{id}/messages"),
+        Some(json!({"text": "Save hello"})),
+    )
+    .await;
+    let events = d.follow(&id, 0, |e| e["type"] == "approval").await;
+    let approval = events.last().unwrap()["approval"].as_u64().unwrap();
+    d.api(
+        "POST",
+        &format!("/api/conversations/{id}/approvals/{approval}"),
+        Some(json!({"decision": "once"})),
+    )
+    .await;
+    let last = events.last().unwrap()["seq"].as_u64().unwrap();
+    let rest = d.follow(&id, last, ends_turn).await;
+    assert_eq!(
+        types(&rest),
+        ["approved", "file_changed", "tool_result", "done"]
+    );
+    assert_eq!(rest[1]["path"], "note.txt");
+
+    let (status, list) = d.api("GET", &changes, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let file = &list["changes"][0];
+    assert_eq!(file["path"], "note.txt");
+    assert_eq!(file["status"], "modified");
+    assert_eq!(
+        file["hunks"][0]["lines"],
+        json!([{"sign": "-", "text": "old"}, {"sign": "+", "text": "hello"}])
+    );
+    let (_, open) = d
+        .api("GET", &format!("/api/conversations/{id}"), None)
+        .await;
+    assert_eq!(open["changed_files"], 1);
+
+    let saved = d
+        .data
+        .path()
+        .join("sessions")
+        .join(format!("{id}.changes.json"));
+    assert!(saved.exists(), "{}", saved.display());
+    d.api("DELETE", &format!("/api/conversations/{id}"), None)
+        .await;
+    assert!(!saved.exists());
+    assert_eq!(d.api("GET", &changes, None).await.0, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -966,6 +1076,7 @@ async fn a_scheduled_run_uses_only_the_tools_it_allows_and_notifies() {
             "tool_call",
             "approval",
             "approved",
+            "file_changed",
             "tool_result",
             "tool_call",
             "approval",

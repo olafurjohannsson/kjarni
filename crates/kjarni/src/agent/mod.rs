@@ -34,7 +34,8 @@ pub use model::{AgentModel, TextStream};
 pub use notes::{ProjectNotes, project_notes};
 pub use session::{Restored, Session, SessionInfo};
 pub use tool::{
-    Access, ParsedReply, Tool, ToolCall, ToolSpec, displayable_prefix_len, parse_tool_calls,
+    Access, FileChange, FileState, ParsedReply, Tool, ToolCall, ToolSpec, displayable_prefix_len,
+    parse_tool_calls,
 };
 
 /// Where the agent keeps its memory and sessions: `$KJARNI_AGENT_DIR`, or

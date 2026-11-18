@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Decline a call and say what to do instead.** Declining in the web UI now
+  asks "What should Kjarni do instead?"; the answer goes to the model with the
+  decline, so "put it in notes/ instead" steers it rather than only stopping
+  it. Leave it empty for a plain decline. `kjarni agent` asks the same after a
+  "no". In the API, `POST .../approvals/{id}` takes an optional `reason` with
+  `deny`, and the `approved` event carries it. In the library, a new
+  `Approval::DenyWith(String)`; `Approval` is no longer `Copy`.
+- **See every file a conversation changed.** A "files changed" button above
+  the message box opens a panel with each file the conversation wrote or
+  edited and its diff from before the conversation first touched it. The list
+  is saved beside the conversation and deleted with it. Files changed by
+  commands the agent ran are not listed. Also at
+  `GET /api/conversations/{id}/changes`, with a `file_changed` event as each
+  write lands. In the library, tools can say which file a call writes
+  (`Tool::writes`), and `AgentEvents::file_changed` reports the content before
+  and after.
+- **The agent can transcribe recordings and find photos.** Two new tools,
+  `transcribe` (Whisper, timestamped) and `search_images` (CLIP: "a receipt",
+  "a dog on a beach"), the same as the MCP server's. Each loads its model on
+  its first call and runs on the CPU.
+
 ## 0.7.0
 
 The daemon, its web UI and schedules are a preview: they work and are tested,

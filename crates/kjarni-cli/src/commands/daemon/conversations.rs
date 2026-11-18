@@ -8,9 +8,11 @@ use std::sync::{Arc, Mutex, RwLock};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni::agent::{
-    Access, Agent, AgentConfig, AgentEvents, AgentModel, Approval, Memory, Session, SessionInfo,
-    ToolCall, ToolOutcome, tools,
+    Access, Agent, AgentConfig, AgentEvents, AgentModel, Approval, FileChange, Memory, Session,
+    SessionInfo, ToolCall, ToolOutcome, tools,
 };
+
+use super::changes::Changes;
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 use tokio::sync::{broadcast, oneshot};
@@ -50,10 +52,18 @@ pub enum EventKind {
         summary: String,
         access: &'static str,
     },
-    /// The user answered.
+    /// The user answered, with what they said when they declined.
     Approved {
         approval: u64,
         decision: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    /// Call `call` changed the file at `path`, relative to the working folder
+    /// when inside it.
+    FileChanged {
+        call: u32,
+        path: String,
     },
     ToolResult {
         call: u32,
@@ -88,11 +98,18 @@ impl EventKind {
     }
 }
 
-fn decision_name(a: Approval) -> &'static str {
+fn decision_name(a: &Approval) -> &'static str {
     match a {
         Approval::Once => "once",
         Approval::Always => "always",
-        Approval::Deny => "deny",
+        Approval::Deny | Approval::DenyWith(_) => "deny",
+    }
+}
+
+fn decision_reason(a: &Approval) -> Option<String> {
+    match a {
+        Approval::DenyWith(words) => Some(words.clone()),
+        _ => None,
     }
 }
 
@@ -136,6 +153,10 @@ pub struct Live {
     turn: Mutex<Turn>,
     tx: broadcast::Sender<Event>,
     hub: Arc<Hub>,
+    /// The files this conversation changed.
+    pub changes: Changes,
+    /// The agent's working folder, which changed paths are shown relative to.
+    pub workdir: PathBuf,
 }
 
 /// What the conversations share: the sequence numbers of events and
@@ -274,6 +295,7 @@ impl Live {
                 live: live.clone(),
                 call: 0,
                 answers,
+                workdir: live.workdir.clone(),
             };
             let kind = match agent.send(&text, &mut events).await {
                 Ok(reply) => EventKind::Done {
@@ -311,7 +333,8 @@ impl Live {
         };
         self.emit(EventKind::Approved {
             approval: id,
-            decision: decision_name(decision),
+            decision: decision_name(&decision),
+            reason: decision_reason(&decision),
         });
         sender.send(decision).is_ok()
     }
@@ -349,6 +372,7 @@ struct Relay {
     live: Arc<Live>,
     call: u32,
     answers: Answers,
+    workdir: PathBuf,
 }
 
 #[async_trait]
@@ -395,7 +419,8 @@ impl AgentEvents for Relay {
             };
             self.live.emit(EventKind::Approved {
                 approval: id,
-                decision: decision_name(decision),
+                decision: decision_name(&decision),
+                reason: None,
             });
             return decision;
         }
@@ -403,6 +428,22 @@ impl AgentEvents for Relay {
         self.live.turn.lock().expect("turn lock").pending = Some((id, tx));
         self.live.emit(asked);
         rx.await.unwrap_or(Approval::Deny)
+    }
+
+    async fn file_changed(&mut self, _call: &ToolCall, change: &FileChange) {
+        if let Err(e) = self.live.changes.record(change) {
+            eprintln!("Could not save the list of changed files: {e:#}");
+        }
+        let workdir = &self.workdir;
+        self.live.emit(EventKind::FileChanged {
+            call: self.call,
+            path: change
+                .path
+                .strip_prefix(workdir)
+                .unwrap_or(&change.path)
+                .display()
+                .to_string(),
+        });
     }
 
     async fn tool_result(&mut self, _call: &ToolCall, outcome: &ToolOutcome) {
@@ -437,6 +478,11 @@ pub struct Conversations {
     sessions_dir: PathBuf,
     live: Mutex<HashMap<String, Arc<Live>>>,
     hub: Arc<Hub>,
+}
+
+/// Where conversation `id`'s list of changed files is saved.
+fn changes_file(sessions_dir: &std::path::Path, id: &str) -> PathBuf {
+    sessions_dir.join(format!("{id}.changes.json"))
 }
 
 /// Whether `id` can name a session file: no separators, no `..`.
@@ -551,6 +597,7 @@ impl Conversations {
             return Ok(false);
         }
         std::fs::remove_file(&path)?;
+        let _ = std::fs::remove_file(changes_file(&self.sessions_dir, id));
         live.remove(id);
         Ok(true)
     }
@@ -584,6 +631,7 @@ impl Conversations {
     fn wrap(&self, id: String, agent: Agent) -> Arc<Live> {
         let (tx, _) = broadcast::channel(1024);
         let transcript = transcript_of(&agent);
+        let changes = Changes::open(changes_file(&self.sessions_dir, &id));
         Arc::new(Live {
             id,
             agent: tokio::sync::Mutex::new(agent),
@@ -596,6 +644,8 @@ impl Conversations {
             }),
             tx,
             hub: self.hub.clone(),
+            changes,
+            workdir: self.setup.workdir.clone(),
         })
     }
 }

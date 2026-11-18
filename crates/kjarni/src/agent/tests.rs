@@ -73,6 +73,7 @@ struct Recorder {
     approvals_asked: Vec<String>,
     answers: VecDeque<Approval>,
     notices: Vec<String>,
+    changes: Vec<FileChange>,
 }
 
 #[async_trait]
@@ -89,6 +90,9 @@ impl AgentEvents for Recorder {
     }
     async fn notice(&mut self, message: &str) {
         self.notices.push(message.to_string());
+    }
+    async fn file_changed(&mut self, _call: &ToolCall, change: &FileChange) {
+        self.changes.push(change.clone());
     }
 }
 
@@ -197,6 +201,106 @@ async fn a_declined_write_does_not_happen_and_the_model_is_told() {
         agent.messages()[2]
             .content
             .starts_with("The user declined this call")
+    );
+}
+
+/// Declining with words tells the model those words, so the user can steer
+/// it instead of only stopping it.
+#[tokio::test]
+async fn a_call_declined_with_words_passes_them_to_the_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = call("write_file", &[("path", "out.txt"), ("content", "hi")]);
+    let model = ScriptedModel::new(&[&write, "Okay, docs/out.txt then."]);
+    let mut agent = agent_in(dir.path(), model.clone());
+    let mut events = Recorder {
+        answers: VecDeque::from([Approval::DenyWith("  put it in docs/ instead ".into())]),
+        ..Default::default()
+    };
+
+    agent
+        .send("Write hi to out.txt", &mut events)
+        .await
+        .unwrap();
+
+    assert!(!dir.path().join("out.txt").exists());
+    assert_eq!(
+        agent.messages()[2].content,
+        "The user declined this call, so it did not run. They said: \"put it in docs/ instead\"\n\
+         Follow what they said; do not make the same call again unless they ask for it."
+    );
+    assert!(model.prompts()[1].contains("They said: \"put it in docs/ instead\""));
+}
+
+/// Blank words are a plain decline.
+#[test]
+fn blank_words_decline_like_a_plain_deny() {
+    assert_eq!(
+        agent::declined_with(" \n"),
+        "The user declined this call, so it did not run. Ask them what to do instead, or continue without it."
+    );
+}
+
+/// Writes and edits report the file's content before and after, so a front
+/// end can list what a conversation changed; a failed edit reports nothing.
+#[tokio::test]
+async fn file_writes_report_the_content_before_and_after() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plan.md"), "- milk\n").unwrap();
+    let model = ScriptedModel::new(&[
+        &call("write_file", &[("path", "new.txt"), ("content", "hello")]),
+        &call(
+            "edit_file",
+            &[
+                ("path", "plan.md"),
+                ("old_text", "- milk"),
+                ("new_text", "- oat milk"),
+            ],
+        ),
+        &call(
+            "edit_file",
+            &[
+                ("path", "plan.md"),
+                ("old_text", "- eggs"),
+                ("new_text", "- bread"),
+            ],
+        ),
+        "Done.",
+    ]);
+    let mut agent = agent_in(dir.path(), model);
+    agent.approve_access(Access::Write);
+    let mut events = Recorder::default();
+
+    agent.send("Shopping", &mut events).await.unwrap();
+
+    assert_eq!(
+        events.changes,
+        [
+            FileChange {
+                path: dir.path().join("new.txt"),
+                before: FileState::Missing,
+                after: FileState::Text("hello".into()),
+            },
+            FileChange {
+                path: dir.path().join("plan.md"),
+                before: FileState::Text("- milk\n".into()),
+                after: FileState::Text("- oat milk\n".into()),
+            },
+        ]
+    );
+}
+
+#[test]
+fn large_and_binary_files_are_not_read_for_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let big = dir.path().join("big.txt");
+    std::fs::write(&big, vec![b'a'; FileState::MAX_BYTES as usize + 1]).unwrap();
+    let binary = dir.path().join("photo.jpg");
+    std::fs::write(&binary, [0xff, 0xd8, 0xff, 0xe0]).unwrap();
+    assert_eq!(FileState::read(&big), FileState::Unreadable);
+    assert_eq!(FileState::read(&binary), FileState::Unreadable);
+    assert_eq!(
+        FileState::read(&dir.path().join("none")),
+        FileState::Missing
     );
 }
 

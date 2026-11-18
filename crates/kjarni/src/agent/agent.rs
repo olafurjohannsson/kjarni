@@ -12,7 +12,7 @@ use kjarni_transformers::{Conversation, Message, Role, ToolCall, ToolSpec, parse
 use super::memory::{Memory, MemoryEntry};
 use super::model::AgentModel;
 use super::session::{Restored, Session, today};
-use super::tool::{Access, Tool};
+use super::tool::{Access, FileChange, FileState, Tool};
 use super::tools::shell::clip;
 
 /// What the agent is told it is, unless the caller gives instructions of its own.
@@ -63,7 +63,7 @@ impl Default for AgentConfig {
 }
 
 /// The user's answer to a call that needs approval.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Approval {
     /// Run this call.
     Once,
@@ -71,6 +71,9 @@ pub enum Approval {
     Always,
     /// Do not run it; the model is told so.
     Deny,
+    /// Do not run it; the model is told so with the user's words, such as
+    /// what to do instead.
+    DenyWith(String),
 }
 
 /// The result of one call, as a front end shows it.
@@ -99,6 +102,10 @@ pub trait AgentEvents: Send {
     async fn approve(&mut self, _call: &ToolCall, _summary: &str, _access: Access) -> Approval {
         Approval::Deny
     }
+
+    /// `call` changed a file. Sent before [`tool_result`](Self::tool_result),
+    /// only when the call succeeded and the content differs.
+    async fn file_changed(&mut self, _call: &ToolCall, _change: &FileChange) {}
 
     /// `call` finished.
     async fn tool_result(&mut self, _call: &ToolCall, _outcome: &ToolOutcome) {}
@@ -391,9 +398,30 @@ impl Agent {
                         output: "The user declined this call, so it did not run. Ask them what to do instead, or continue without it.".into(),
                     };
                 }
+                Approval::DenyWith(words) => {
+                    return ToolOutcome {
+                        ok: false,
+                        denied: true,
+                        output: declined_with(&words),
+                    };
+                }
             }
         }
-        match tool.call(&call.arguments).await {
+        let written = tool.writes(&call.arguments);
+        let before = written.as_deref().map(FileState::read);
+        let result = tool.call(&call.arguments).await;
+        if let (Ok(_), Some(path), Some(before)) = (&result, written, before) {
+            let after = FileState::read(&path);
+            if after != before || after == FileState::Unreadable {
+                let change = FileChange {
+                    path,
+                    before,
+                    after,
+                };
+                events.file_changed(call, &change).await;
+            }
+        }
+        match result {
             Ok(output) => ToolOutcome {
                 ok: true,
                 denied: false,
@@ -465,6 +493,18 @@ impl Agent {
 /// Where to cut `messages` so that at least `keep` recent ones stay and the
 /// kept part starts at a user message, never inside a tool exchange. `None`
 /// when there is nothing to fold.
+/// What the model is told when the user declines a call and says why or
+/// what to do instead.
+pub(super) fn declined_with(words: &str) -> String {
+    let words = words.trim();
+    if words.is_empty() {
+        return "The user declined this call, so it did not run. Ask them what to do instead, or continue without it.".into();
+    }
+    format!(
+        "The user declined this call, so it did not run. They said: \"{words}\"\nFollow what they said; do not make the same call again unless they ask for it."
+    )
+}
+
 fn fold_point(messages: &[Message], keep: usize) -> Option<usize> {
     let latest = messages.len().saturating_sub(keep);
     (1..=latest).rev().find(|&i| messages[i].role == Role::User)

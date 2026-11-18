@@ -9,6 +9,7 @@
 
 mod api;
 mod auth;
+mod changes;
 mod conversations;
 mod display;
 mod logs;

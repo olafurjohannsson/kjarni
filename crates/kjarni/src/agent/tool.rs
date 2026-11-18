@@ -51,6 +51,12 @@ pub trait Tool: Send + Sync {
         }
     }
 
+    /// The file the call writes, for front ends that list a conversation's
+    /// changes. None for tools that write no file.
+    fn writes(&self, _args: &Map<String, Json>) -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// Runs the call. An error is shown to the model as the call's result, so
     /// it says what went wrong in words the model can act on.
     async fn call(&self, args: &Map<String, Json>) -> anyhow::Result<String>;
@@ -179,4 +185,38 @@ mod tests {
         .into();
         assert_eq!(names, ["read", "write", "execute", "network"]);
     }
+}
+
+/// A file's content before or after a call wrote it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileState {
+    /// There was no file.
+    Missing,
+    Text(String),
+    /// Larger than [`FileState::MAX_BYTES`], or not UTF-8 text.
+    Unreadable,
+}
+
+impl FileState {
+    /// Files larger than this are not read for a change list.
+    pub const MAX_BYTES: u64 = 1 << 20;
+
+    pub fn read(path: &std::path::Path) -> Self {
+        match std::fs::metadata(path) {
+            Err(_) => Self::Missing,
+            Ok(m) if !m.is_file() || m.len() > Self::MAX_BYTES => Self::Unreadable,
+            Ok(_) => match std::fs::read(path) {
+                Err(_) => Self::Unreadable,
+                Ok(bytes) => String::from_utf8(bytes).map_or(Self::Unreadable, Self::Text),
+            },
+        }
+    }
+}
+
+/// A file a call changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileChange {
+    pub path: std::path::PathBuf,
+    pub before: FileState,
+    pub after: FileState,
 }

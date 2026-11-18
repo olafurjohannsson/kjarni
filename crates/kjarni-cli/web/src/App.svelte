@@ -10,6 +10,8 @@
   import Schedules from './components/Schedules.svelte';
   import Memory from './components/Memory.svelte';
   import Settings from './components/Settings.svelte';
+  import Changes from './components/Changes.svelte';
+  import { countLabel } from './lib/changes.js';
   import Icon from './components/Icon.svelte';
   import Mark from './components/Mark.svelte';
 
@@ -25,6 +27,11 @@
   let drawer = $state(false);
   let trouble = $state('');
   let atBottom = $state(true);
+  // Files the open conversation changed, and whether that list is shown.
+  // `changesVersion` grows with each write, so an open list reloads.
+  let changedFiles = $state(0);
+  let changesVersion = $state(0);
+  let showChanges = $state(false);
   // 'chat', or one of PAGES.
   let page = $state('chat');
 
@@ -134,6 +141,8 @@
     current = id;
     busy = false;
     summary = null;
+    changedFiles = 0;
+    showChanges = false;
     turn = newTurnState([]);
     if (push && location.pathname !== (id ? `/c/${id}` : '/')) {
       history.pushState(null, '', id ? `/c/${id}` : '/');
@@ -151,6 +160,7 @@
       for (const e of c.events ?? []) applyEvent(state, e);
       turn = state;
       summary = c.summary;
+      changedFiles = c.changed_files ?? 0;
       busy = c.busy;
       if (busy) startFollowing(id, turn.lastSeq);
       await scrollToEnd(true);
@@ -175,6 +185,7 @@
       return;
     }
     applyEvent(turn, event);
+    if (event.type === 'file_changed') countChanges();
     trouble = '';
     if (turn.ended) {
       busy = false;
@@ -182,6 +193,19 @@
       refreshList();
     }
     scrollToEnd();
+  }
+
+  async function countChanges() {
+    const id = current;
+    try {
+      const list = await api.changes(id);
+      if (id === current) {
+        changedFiles = list.length;
+        changesVersion++;
+      }
+    } catch (e) {
+      guard(e);
+    }
   }
 
   async function send(text) {
@@ -194,6 +218,7 @@
         history.pushState(null, '', `/c/${id}`);
         turn = newTurnState([]);
         summary = null;
+        changedFiles = 0;
       }
       turn.blocks.push({ type: 'user', text, pending: true });
       turn.ended = null;
@@ -213,9 +238,9 @@
     }
   }
 
-  async function answer(approval, decision) {
+  async function answer(approval, decision, reason) {
     try {
-      await api.answer(current, approval, decision);
+      await api.answer(current, approval, decision, reason);
     } catch (e) {
       guard(e);
     }
@@ -334,6 +359,12 @@
             <button class="jump" onclick={() => scrollToEnd(true)} aria-label="Jump to the latest"><Icon name="arrowdown" size={17} /></button>
           {/if}
           {#if trouble}<div class="trouble"><Icon name="alert" size={15} /> {trouble}</div>{/if}
+          {#if current && changedFiles > 0}
+            <button class="changed" onclick={() => (showChanges = true)}>
+              <Icon name="diff" size={15} />
+              {countLabel(changedFiles)}
+            </button>
+          {/if}
           <Composer bind:this={composer} bind:value={draft} {busy} onsend={send} onstop={stop} />
           <div class="footnote">Runs on your computer. Nothing leaves it.</div>
         </div>
@@ -341,6 +372,9 @@
       {/if}
     </main>
   </div>
+  {#if showChanges && current}
+    <Changes id={current} version={changesVersion} onclose={() => (showChanges = false)} onsignedout={() => (signedIn = false)} />
+  {/if}
 {/if}
 
 <style>
@@ -405,6 +439,23 @@
   .dock .column {
     position: relative;
     padding-top: 24px;
+  }
+  .changed {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 8px 2px;
+    padding: 5px 11px 5px 9px;
+    border-radius: 99px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg2);
+    color: var(--text2);
+    font-size: 13px;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .changed:hover {
+    background: var(--bg3);
+    border-color: var(--core-line);
   }
   .footnote {
     text-align: center;

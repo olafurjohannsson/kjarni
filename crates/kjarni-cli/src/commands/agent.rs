@@ -409,7 +409,7 @@ impl AgentEvents for Terminal {
             match line.trim().to_lowercase().as_str() {
                 "y" | "yes" => return Approval::Once,
                 "a" | "always" => return Approval::Always,
-                "n" | "no" | "" => return Approval::Deny,
+                "n" | "no" | "" => return ask_why(),
                 _ => continue,
             }
         }
@@ -439,10 +439,41 @@ impl AgentEvents for Terminal {
     }
 }
 
+/// After a "no": what to do instead, passed to the model. Enter skips it.
+fn ask_why() -> Approval {
+    print!(
+        "  {} ",
+        "What should it do instead? (enter to skip) ›".dimmed()
+    );
+    let _ = io::stdout().flush();
+    let mut line = String::new();
+    let _ = io::stdin().lock().read_line(&mut line);
+    denial(&line)
+}
+
+/// A decline with the user's words, or a plain one when there are none.
+fn denial(words: &str) -> Approval {
+    let words = words.trim();
+    if words.is_empty() {
+        Approval::Deny
+    } else {
+        Approval::DenyWith(words.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use kjarni::agent::{AgentModel, TextStream};
+
+    #[test]
+    fn a_no_with_words_passes_them_on_and_without_is_a_plain_no() {
+        assert_eq!(
+            denial(" use docs/ instead\n"),
+            Approval::DenyWith("use docs/ instead".into())
+        );
+        assert_eq!(denial("\n"), Approval::Deny);
+    }
 
     /// A model the slash commands never call.
     struct Idle;

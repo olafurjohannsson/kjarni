@@ -8,6 +8,9 @@
 
   let open = $state(false);
   let answering = $state(false);
+  // Declining asks what to do instead before it is sent.
+  let declining = $state(false);
+  let reason = $state('');
 
   const kinds = {
     read_file: ['file', 'Read'],
@@ -21,6 +24,8 @@
     remember: ['bookmark', 'Remember'],
     recall: ['bookmark', 'Recalled'],
     forget: ['bookmark', 'Forget'],
+    transcribe: ['mic', 'Transcribed'],
+    search_images: ['image', 'Searched photos for'],
   };
 
   const questions = {
@@ -55,13 +60,27 @@
     ];
   });
 
-  async function answer(decision) {
+  async function answer(decision, words) {
     answering = true;
     try {
-      await onanswer(block.approval, decision);
+      await onanswer(block.approval, decision, words?.trim() || undefined);
     } finally {
       answering = false;
     }
+  }
+
+  function decline(event) {
+    event.preventDefault();
+    answer('deny', reason);
+  }
+
+  function onReasonKey(event) {
+    if (event.key === 'Enter' && !event.shiftKey) decline(event);
+    if (event.key === 'Escape') declining = false;
+  }
+
+  function focus(node) {
+    node.focus();
   }
 </script>
 
@@ -100,13 +119,31 @@
       {:else if preview}
         <pre class="preview">{preview}</pre>
       {/if}
-      <div class="answers">
-        <button class="primary" disabled={answering} onclick={() => answer('once')}>Allow once</button>
-        <button class="secondary" disabled={answering} onclick={() => answer('always')} title="Allow {block.name} for the rest of this conversation">
-          Always allow
-        </button>
-        <button class="ghost" disabled={answering} onclick={() => answer('deny')}>Decline</button>
-      </div>
+      {#if declining}
+        <form class="why" onsubmit={decline}>
+          <textarea
+            bind:value={reason}
+            use:focus
+            onkeydown={onReasonKey}
+            rows="2"
+            maxlength="2000"
+            placeholder="What should Kjarni do instead? (optional)"
+            aria-label="What should Kjarni do instead?"
+          ></textarea>
+          <div class="answers">
+            <button class="secondary" type="submit" disabled={answering}>Decline</button>
+            <button class="ghost" type="button" disabled={answering} onclick={() => (declining = false)}>Back</button>
+          </div>
+        </form>
+      {:else}
+        <div class="answers">
+          <button class="primary" disabled={answering} onclick={() => answer('once')}>Allow once</button>
+          <button class="secondary" disabled={answering} onclick={() => answer('always')} title="Allow {block.name} for the rest of this conversation">
+            Always allow
+          </button>
+          <button class="ghost" disabled={answering} onclick={() => (declining = true)}>Decline…</button>
+        </div>
+      {/if}
     </div>
   {:else if open}
     <div class="body">
@@ -120,6 +157,9 @@
         <pre class="output">{block.output}</pre>
       {/if}
     </div>
+  {/if}
+  {#if block.status === 'denied' && block.reason}
+    <div class="said"><span>You said</span> {block.reason}</div>
   {/if}
 </div>
 
@@ -266,6 +306,37 @@
   .ask pre {
     max-height: 240px;
     background: var(--well);
+  }
+  .why {
+    display: grid;
+    gap: 10px;
+  }
+  .why textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 60px;
+    background: var(--well);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text);
+  }
+  .why textarea:focus {
+    outline: none;
+    border-color: var(--core-line);
+  }
+  .said {
+    margin: 4px 0 2px 30px;
+    font-size: 13.5px;
+    color: var(--text2);
+    overflow-wrap: anywhere;
+  }
+  .said span {
+    color: var(--subtle);
+    margin-right: 4px;
   }
   .answers {
     display: flex;

@@ -313,6 +313,12 @@ impl Tool for WriteFile {
         format!("write_file {path} ({lines} lines)")
     }
 
+    fn writes(&self, args: &Map<String, Json>) -> Option<PathBuf> {
+        args.get("path")
+            .and_then(Json::as_str)
+            .map(|p| self.0.resolve(p))
+    }
+
     async fn call(&self, args: &Map<String, Json>) -> anyhow::Result<String> {
         let path = self.0.resolve(string_arg(args, "path")?);
         let content = string_arg(args, "content")?;
@@ -360,6 +366,12 @@ impl Tool for EditFile {
         let path = args.get("path").and_then(Json::as_str).unwrap_or("?");
         let old = args.get("old_text").and_then(Json::as_str).unwrap_or("");
         format!("edit_file {path}: {}", first_line(old))
+    }
+
+    fn writes(&self, args: &Map<String, Json>) -> Option<PathBuf> {
+        args.get("path")
+            .and_then(Json::as_str)
+            .map(|p| self.0.resolve(p))
     }
 
     async fn call(&self, args: &Map<String, Json>) -> anyhow::Result<String> {
