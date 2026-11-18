@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794956674596,
+  "lastUpdate": 1795002547001,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2148,6 +2148,66 @@ window.BENCHMARK_DATA = {
             "value": 27.97,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ac9d447bfee0574533177a1df921f7840a0decdd",
+          "message": "Decline with a reason, a changed-files panel, and transcribe and photo search for the agent (#127)\n\nDeclining a call can say what to do instead, which the model is told\n(Approval::DenyWith, the approval API's reason, a prompt after no in\nkjarni agent). Tools say which file they write and the agent reports the\ncontent before and after; the daemon keeps each conversation's changes\nbeside it and serves their diffs, shown in a panel in the web UI. The\nagent gains transcribe and search_images, sharing their code with the\nMCP server.",
+          "timestamp": "2026-11-18T11:25:52Z",
+          "tree_id": "e85f865dcfd82b4dd191841549c818b4e025374a",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/ac9d447bfee0574533177a1df921f7840a0decdd"
+        },
+        "date": 1795002546139,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 685.68,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 1.001"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 62.79,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 0.972"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 505.04,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.940"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 32.35,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.029"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 575.27,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.000"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 25.73,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.002"
           }
         ]
       }
