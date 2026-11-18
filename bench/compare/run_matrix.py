@@ -22,6 +22,9 @@ CT2_LIBS = ":".join(f"{BENCH}/venv-gpu/lib/python3.13/site-packages/nvidia/{d}/l
 ONLY = os.environ.get("ONLY", "encoders,whisper,decoders")
 PATH = os.path.join(OUT, "matrix.json")
 rows = json.load(open(PATH)) if os.path.exists(PATH) and os.environ.get("ONLY") else []
+# A partial run replaces the rows of the sections it measures again.
+KINDS = {"encoders": "encoder", "whisper": "whisper", "decoders": "decoder"}
+rows = [r for r in rows if r.get("kind") not in {KINDS[s] for s in ONLY.split(",") if s in KINDS}]
 
 
 def save():

@@ -55,6 +55,33 @@ v = versions()
 if v:
     w("- **Versions:** " + ", ".join(f"{k} {val}" for k, val in v.items()) + ", llama.cpp b11901.\n")
 
+fp = load("footprint")
+if fp:
+    w("## Install size and cold start\n")
+    w(picture("install-size", "Installed size"))
+    w(picture("cold-start", "Start to first embedding"))
+    w("Each stack installed with pip into its own new venv; size is its site-packages on disk, pip excluded. "
+      "Reproduce with `bench/compare/run_footprint.py`.\n")
+    label = {"kjarni": "**Kjarni** (CPU and GPU)", "torch-cpu": "PyTorch CPU-only build + sentence-transformers",
+             "torch": "PyTorch default (CUDA) + sentence-transformers", "onnxruntime": "ONNX Runtime + tokenizers"}
+    w("| Stack | Installed | Packages | Install time | Versions |")
+    w("|---|--:|--:|--:|---|")
+    for r in fp["install"]:
+        size = f'{r["installed_mb"] / 1000:.1f} GB' if r["installed_mb"] >= 1000 else f'{r["installed_mb"]:,.0f} MB'
+        took = f'{r["install_s"]:.0f} s' if r.get("install_s") else "–"
+        w(f'| {label[r["stack"]]} | {size} | {r["packages"]} | {took} | '
+          + ", ".join(f"{k} {val}" for k, val in r["versions"].items()) + " |")
+    w("")
+    w("Start to first embedding: a new Python process imports the library, loads all-MiniLM-L6-v2 and embeds one "
+      "sentence on the CPU. *Cold* drops the model and the installed packages from the OS file cache first, "
+      "as after a reboot. Median of 5.\n")
+    w("| Engine | File cache | Whole process | Import | Load model | First vector |")
+    w("|---|---|--:|--:|--:|--:|")
+    for r in fp["coldstart"]:
+        e = "**Kjarni**" if r["engine"] == "kjarni" else "PyTorch + sentence-transformers"
+        w(f'| {e} | {r["mode"]} | {r["process_ms"]:,.0f} ms | {r["import_ms"]:,.0f} ms | {r["load_ms"]:,.0f} ms | {r["first_ms"]:,.0f} ms |')
+    w("")
+
 enc = load("encoders")
 if enc:
     w("## Embeddings, reranking and classification\n")
