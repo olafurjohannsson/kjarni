@@ -15,12 +15,14 @@ struct Info {
     keys: u32,
     mask_stride: u32,
     mask_rows: u32,
-    _pad0: u32,
-    _pad1: u32,
+    /// The first query this dispatch covers, and how many: long prompts are
+    /// attended in pieces so the scores fit in one buffer binding.
+    query_start: u32,
+    queries: u32,
 }
 
 @group(0) @binding(0) var<uniform> info: Info;
-@group(0) @binding(1) var<storage, read> weights: array<f32>; // [B * H * S, keys]
+@group(0) @binding(1) var<storage, read> weights: array<f32>; // [B * H * queries, keys]
 @group(0) @binding(2) var<storage, read> v_store: array<f32>; // [B, KV, capacity, D]
 @group(0) @binding(3) var<storage, read_write> output: array<f32>; // [B, S, H * D]
 
@@ -34,13 +36,13 @@ fn main(
 ) {
     let idx = (wg.y * grid.x + wg.x) * 32u + lid.x;
     let d = info.head_dim;
-    let rows = info.batch * info.heads * info.seq;
+    let rows = info.batch * info.heads * info.queries;
     if (idx >= rows * d) { return; }
 
     let row = idx / d;
     let dim = idx % d;
-    let query = row % info.seq;
-    let batch_head = row / info.seq;
+    let query = info.query_start + row % info.queries;
+    let batch_head = row / info.queries;
     let batch = batch_head / info.heads;
     let head = batch_head % info.heads;
 

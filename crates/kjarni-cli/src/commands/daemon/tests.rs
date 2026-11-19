@@ -13,8 +13,11 @@ use super::*;
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
+/// A scripted reply that panics, as the model does on a GPU validation error.
+const PANICS: &str = "<panics>";
+
 /// Replies from a list, in order, each streamed in a few pieces. A reply of
-/// `None` says "Working" and never finishes.
+/// `None` says "Working" and never finishes; `PANICS` panics.
 struct Scripted(Mutex<VecDeque<Option<String>>>);
 
 impl Scripted {
@@ -38,6 +41,7 @@ impl AgentModel for Scripted {
             .pop_front()
             .expect("a scripted reply");
         Ok(match next {
+            Some(text) if text == PANICS => panic!("wgpu error: Validation Error"),
             Some(text) => {
                 let pieces: Vec<Result<String>> = text
                     .split_inclusive(' ')
@@ -771,6 +775,33 @@ async fn a_conversation_can_be_compacted_by_hand() {
     )
     .await;
     assert_eq!(d.api("POST", &compact, None).await.0, StatusCode::CONFLICT);
+}
+
+/// A model that panics mid-turn ends the turn with an error that says why, and
+/// the conversation takes the next message.
+#[tokio::test]
+async fn a_panic_in_the_model_ends_the_turn_with_an_error() {
+    let d = daemon(Scripted::new(&[Some(PANICS), Some("Back.")]), false);
+    let id = d.new_conversation().await;
+    let messages = format!("/api/conversations/{id}/messages");
+    d.api(
+        "POST",
+        &messages,
+        Some(json!({"text": "check out /srv/media"})),
+    )
+    .await;
+    let all = d.follow(&id, 0, ends_turn).await;
+    let last = all.last().unwrap();
+    assert_eq!(last["type"], "error");
+    assert!(
+        last["message"]
+            .as_str()
+            .unwrap()
+            .contains("Validation Error"),
+        "{last}"
+    );
+
+    assert_eq!(d.ask_in(&id, "again").await, "Back.");
 }
 
 #[tokio::test]

@@ -42,7 +42,19 @@ struct RoPEAttendInfo {
     keys: u32,
     mask_stride: u32,
     mask_rows: u32,
-    _pad: [u32; 2],
+    query_start: u32,
+    queries: u32,
+}
+
+/// The most bytes of attention scores one dispatch writes. A prompt whose scores
+/// would be larger is attended a slice of queries at a time.
+const MAX_SCORE_BYTES: u64 = 512 << 20;
+
+/// Queries per slice for scores `rows_per_query * keys` wide per query, within
+/// `budget` bytes: at least one.
+fn queries_per_slice(rows_per_query: usize, keys: usize, budget: u64) -> usize {
+    let per_query = (rows_per_query * keys * std::mem::size_of::<f32>()) as u64;
+    ((budget / per_query.max(1)) as usize).max(1)
 }
 
 /// The shared helper, with this module's workgroup size.
@@ -97,6 +109,9 @@ pub struct GpuRoPEAttention {
     write_kv: Kernel,
     scores: Kernel,
     output: Kernel,
+    /// Bytes of scores per dispatch: the device's binding limit or
+    /// `MAX_SCORE_BYTES`, whichever is smaller.
+    score_budget: u64,
 }
 
 impl GpuRoPEAttention {
@@ -129,6 +144,8 @@ impl GpuRoPEAttention {
                 wgpu::include_wgsl!("./rope_context.wgsl"),
                 &[true, true, false],
             ),
+            score_budget: (context.device.limits().max_storage_buffer_binding_size as u64)
+                .min(MAX_SCORE_BYTES),
         }
     }
 
@@ -264,7 +281,7 @@ impl GpuRoPEAttention {
         let kv_heads = self.ops.num_kv_heads() as usize;
         let head_dim = self.ops.head_dim() as usize;
         let mask_shape = attention_mask.shape();
-        let info = RoPEAttendInfo {
+        let mut info = RoPEAttendInfo {
             batch: batch as u32,
             seq: seq as u32,
             heads: heads as u32,
@@ -275,30 +292,37 @@ impl GpuRoPEAttention {
             keys: keys as u32,
             mask_stride: mask_shape[mask_shape.len() - 1] as u32,
             mask_rows: mask_shape[0] as u32,
-            _pad: [0; 2],
+            query_start: 0,
+            queries: 0,
         };
-        let uniforms = self.context.uniform_buffer(&info);
 
-        let rows = batch * heads * seq;
-        let scores = pool.get(vec![rows, keys]);
-        self.scores.encode(
-            &self.context,
-            encoder,
-            &uniforms,
-            &[q_rotated, k_store, attention_mask, &scores],
-            rows * keys,
-        );
-        self.softmax
-            .encode(encoder, &scores, self.ops.scale_factor());
-
+        // One scores buffer, reused by each slice of queries in turn.
+        let slice = queries_per_slice(batch * heads, keys, self.score_budget).min(seq);
+        let scores = pool.get(vec![batch * heads * slice, keys]);
         let attended = pool.get(vec![batch, seq, heads * head_dim]);
-        self.output.encode(
-            &self.context,
-            encoder,
-            &uniforms,
-            &[&scores, v_store, &attended],
-            rows * head_dim,
-        );
+        for start in (0..seq).step_by(slice) {
+            let queries = slice.min(seq - start);
+            info.query_start = start as u32;
+            info.queries = queries as u32;
+            let uniforms = self.context.uniform_buffer(&info);
+            let rows = batch * heads * queries;
+            self.scores.encode(
+                &self.context,
+                encoder,
+                &uniforms,
+                &[q_rotated, k_store, attention_mask, &scores],
+                rows * keys,
+            );
+            self.softmax
+                .encode(encoder, &scores, self.ops.scale_factor());
+            self.output.encode(
+                &self.context,
+                encoder,
+                &uniforms,
+                &[&scores, v_store, &attended],
+                rows * head_dim,
+            );
+        }
         attended
     }
 
@@ -635,8 +659,14 @@ mod tests {
         let v_cache = Array4::<f32>::zeros((batch, kv_heads, 16, d));
         let v_cache = GpuTensor::from_ndarray(&ctx, &v_cache).unwrap();
 
-        let run = |input: &Array3<f32>, offset: usize, cached: bool| {
-            let attn = &attn;
+        // Scores for two queries at a time: a prompt is attended in slices, the last
+        // one short, as a prompt too long for one buffer binding is.
+        let mut sliced =
+            GpuRoPEAttention::new(&ctx, hidden_size as u32, heads as u32, kv_heads as u32);
+        sliced.score_budget = (2 * batch * heads * seq * 4) as u64;
+
+        let run = |in_slices: bool, input: &Array3<f32>, offset: usize, cached: bool| {
+            let attn = if in_slices { &sliced } else { &attn };
             let (weights, rope, k_cache, v_cache) = (&weights, &rope, &k_cache, &v_cache);
             let ctx = ctx.clone();
             // As wide as the keys seen so far, like the mask a decoder builds.
@@ -677,13 +707,13 @@ mod tests {
             };
 
         close(
-            &run(&hidden, 0, false).await,
+            &run(false, &hidden, 0, false).await,
             want.view(),
             0,
             "without a cache",
         );
         close(
-            &run(&hidden, 0, true).await,
+            &run(false, &hidden, 0, true).await,
             want.view(),
             0,
             "prefill into a cache",
@@ -692,7 +722,7 @@ mod tests {
         let split = 4;
         let first = hidden.slice(s![.., ..split, ..]).to_owned();
         close(
-            &run(&first, 0, true).await,
+            &run(false, &first, 0, true).await,
             want.slice(s![.., ..split, ..]),
             0,
             "shorter prefill",
@@ -700,12 +730,44 @@ mod tests {
         for t in split..seq {
             let step = hidden.slice(s![.., t..t + 1, ..]).to_owned();
             close(
-                &run(&step, t, true).await,
+                &run(false, &step, t, true).await,
                 want.slice(s![.., t..t + 1, ..]),
                 t,
                 &format!("token {t}"),
             );
         }
+
+        close(
+            &run(true, &hidden, 0, false).await,
+            want.view(),
+            0,
+            "in slices without a cache",
+        );
+        close(
+            &run(true, &first, 0, true).await,
+            want.slice(s![.., ..split, ..]),
+            0,
+            "in slices into a cache",
+        );
+        let rest = hidden.slice(s![.., split.., ..]).to_owned();
+        close(
+            &run(true, &rest, split, true).await,
+            want.slice(s![.., split.., ..]),
+            split,
+            "in slices after a cached prefix",
+        );
+    }
+
+    #[test]
+    fn slices_keep_the_scores_within_the_budget() {
+        // The prompt that failed: 16 heads, 7,093 new tokens over 9,060 keys, whose
+        // scores in one piece are 4.1 GB against a 2 GB binding limit.
+        let slice = queries_per_slice(16, 9060, 2_147_483_647);
+        assert_eq!(slice, 3703);
+        assert!((16 * slice * 9060 * 4) as u64 <= 2_147_483_647);
+        assert_eq!(queries_per_slice(16, 9060, MAX_SCORE_BYTES), 925);
+        // A query too wide for the budget still gets a slice of one.
+        assert_eq!(queries_per_slice(16, 9060, 1024), 1);
     }
 
     #[tokio::test]
