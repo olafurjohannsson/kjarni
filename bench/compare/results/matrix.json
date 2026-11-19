@@ -536,71 +536,6 @@
   },
   {
     "engine": "kjarni",
-    "task": "embed-bge-m3",
-    "device": "cpu",
-    "load_ms": 2675.743570999998,
-    "first_call_ms": 74.74652799999149,
-    "single_ms": {
-      "min": 67.12410800000157,
-      "median": 68.5198389999897
-    },
-    "batch_ms": {
-      "min": 4053.3168400000077,
-      "median": 4064.235574999998
-    },
-    "batch_size": 64,
-    "threads": 24,
-    "batch_per_s": 15.789537933086887,
-    "peak_rss_mb": 3448.28125,
-    "rss_mb": 2836.1171875,
-    "kind": "encoder"
-  },
-  {
-    "engine": "torch",
-    "task": "embed-bge-m3",
-    "device": "cpu",
-    "load_ms": 8073.262433000082,
-    "first_call_ms": 77.51122099989516,
-    "single_ms": {
-      "min": 68.3299499999066,
-      "median": 68.45704950001164
-    },
-    "batch_ms": {
-      "min": 6064.238374999832,
-      "median": 6075.210972999912
-    },
-    "batch_size": 64,
-    "threads": 16,
-    "batch_per_s": 10.55367484626654,
-    "peak_rss_mb": 2436.56640625,
-    "rss_mb": 2078.625,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 0.0
-  },
-  {
-    "engine": "onnx",
-    "task": "embed-bge-m3",
-    "device": "cpu",
-    "load_ms": 1899.6238509998875,
-    "first_call_ms": 92.89982299992516,
-    "single_ms": {
-      "min": 48.606027999994694,
-      "median": 48.74736700003268
-    },
-    "batch_ms": {
-      "min": 4332.121297999947,
-      "median": 4346.309080000083
-    },
-    "batch_size": 64,
-    "threads": 16,
-    "batch_per_s": 14.77336288564854,
-    "peak_rss_mb": 1907.703125,
-    "rss_mb": 1911.625,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 4.2282044887542725e-07
-  },
-  {
-    "engine": "kjarni",
     "device": "cpu",
     "audio": "speech_55s.wav",
     "audio_secs": 57.5,
@@ -650,5 +585,71 @@
     "peak_rss_mb": 829.12109375,
     "rss_mb": 728.03515625,
     "kind": "whisper"
+  },
+  {
+    "engine": "kjarni",
+    "task": "embed-bge-m3",
+    "device": "cpu",
+    "load_ms": 1216.777423000167,
+    "first_call_ms": 76.24117900013516,
+    "single_ms": {
+      "min": 66.76417000016954,
+      "median": 68.41135700005907
+    },
+    "batch_ms": {
+      "min": 4085.3685739994035,
+      "median": 4122.65410100008
+    },
+    "batch_size": 64,
+    "threads": 24,
+    "batch_per_s": 15.66566121042702,
+    "peak_rss_mb": 3448.60546875,
+    "rss_mb": 2836.40625,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 9.872019290924072e-07
+  },
+  {
+    "engine": "torch",
+    "task": "embed-bge-m3",
+    "device": "cpu",
+    "load_ms": 7232.741521000207,
+    "first_call_ms": 69.46810600038589,
+    "single_ms": {
+      "min": 60.980543000368925,
+      "median": 61.10547299977043
+    },
+    "batch_ms": {
+      "min": 6027.344379000169,
+      "median": 6037.833972000044
+    },
+    "batch_size": 64,
+    "threads": 16,
+    "batch_per_s": 10.618274977448108,
+    "peak_rss_mb": 2415.0625,
+    "rss_mb": 2050.11328125,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 0.0
+  },
+  {
+    "engine": "onnx",
+    "task": "embed-bge-m3",
+    "device": "cpu",
+    "load_ms": 1389.9746890001552,
+    "first_call_ms": 52.61286899985862,
+    "single_ms": {
+      "min": 48.452853000526375,
+      "median": 48.67303050014016
+    },
+    "batch_ms": {
+      "min": 4340.501521999613,
+      "median": 4363.0103659997985
+    },
+    "batch_size": 64,
+    "threads": 16,
+    "batch_per_s": 14.744839893643448,
+    "peak_rss_mb": 1907.48046875,
+    "rss_mb": 1911.71875,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 4.2282044887542725e-07
   }
 ]
