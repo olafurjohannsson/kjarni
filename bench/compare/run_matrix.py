@@ -22,9 +22,12 @@ CT2_LIBS = ":".join(f"{BENCH}/venv-gpu/lib/python3.13/site-packages/nvidia/{d}/l
 ONLY = os.environ.get("ONLY", "encoders,whisper,decoders")
 PATH = os.path.join(OUT, "matrix.json")
 rows = json.load(open(PATH)) if os.path.exists(PATH) and os.environ.get("ONLY") else []
-# A partial run replaces the rows of the sections it measures again.
+# DEVICES=cpu measures the CPU only and keeps the GPU rows already recorded.
+DEVICES = os.environ.get("DEVICES", "cpu,gpu").split(",")
+# A partial run replaces the rows of the sections and devices it measures again.
 KINDS = {"encoders": "encoder", "whisper": "whisper", "decoders": "decoder"}
-rows = [r for r in rows if r.get("kind") not in {KINDS[s] for s in ONLY.split(",") if s in KINDS}]
+rerun = {KINDS[s] for s in ONLY.split(",") if s in KINDS}
+rows = [r for r in rows if not (r.get("kind") in rerun and r.get("device") in DEVICES)]
 
 
 def save():
@@ -65,7 +68,7 @@ def llama_bench(model, gguf, backend):
 if "encoders" in ONLY:
     fresh = []
     for task in ["embed-minilm", "embed-bge-m3"]:
-        for device in ["cpu", "gpu"]:
+        for device in [d for d in ["cpu", "gpu"] if d in DEVICES]:
             for engine in ["kjarni", "torch", "onnx"]:
                 npy = os.path.join(OUT, f"matrix.{task}.{engine}.{device}.npy")
                 py = GPU_PY if device == "gpu" and engine != "kjarni" else CPU_PY
@@ -80,7 +83,7 @@ if "encoders" in ONLY:
                 add(row, f"{task} {engine} {device}")
 
 if "whisper" in ONLY:
-    for device in ["cpu", "gpu"]:
+    for device in [d for d in ["cpu", "gpu"] if d in DEVICES]:
         for engine in ["kjarni", "openai-whisper", "faster-whisper", "faster-whisper-int8"]:
             py = GPU_PY if device == "gpu" and engine != "kjarni" else CPU_PY
             env = {"BENCH_DEVICE": device}
