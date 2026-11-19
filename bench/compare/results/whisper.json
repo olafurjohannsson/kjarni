@@ -1,90 +1,98 @@
 [
   {
     "engine": "kjarni",
+    "device": "cpu",
     "audio": "speech.wav",
     "audio_secs": 11.0,
-    "load_ms": 504.71598700096365,
-    "secs": 2.2859917000023415,
-    "realtime_x": 4.811915983767015,
+    "load_ms": 417.3126390001016,
+    "secs": 1.800066121999862,
+    "realtime_x": 6.110886631086124,
     "text": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
-    "peak_rss_mb": 1246.4921875,
-    "rss_mb": 1082.66015625
+    "peak_rss_mb": 1245.53125,
+    "rss_mb": 1081.26171875
   },
   {
     "engine": "faster-whisper",
+    "device": "cpu",
     "audio": "speech.wav",
     "audio_secs": 11.0,
-    "load_ms": 1604.7172990001854,
-    "secs": 2.447614293996594,
-    "realtime_x": 4.494172152442622,
+    "load_ms": 1424.1746289999355,
+    "secs": 1.8903846100001829,
+    "realtime_x": 5.818921684936345,
     "text": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
-    "peak_rss_mb": 2119.86328125,
-    "rss_mb": 1676.375
+    "peak_rss_mb": 2120.76171875,
+    "rss_mb": 1676.57421875
   },
   {
     "engine": "faster-whisper-int8",
+    "device": "cpu",
     "audio": "speech.wav",
     "audio_secs": 11.0,
-    "load_ms": 1330.7764299970586,
-    "secs": 1.3177976709994255,
-    "realtime_x": 8.347260161461309,
+    "load_ms": 1258.9901909996115,
+    "secs": 0.984396894999918,
+    "realtime_x": 11.174354628577852,
     "text": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
-    "peak_rss_mb": 825.234375,
-    "rss_mb": 724.36328125
+    "peak_rss_mb": 825.765625,
+    "rss_mb": 724.609375
   },
   {
     "engine": "openai-whisper",
+    "device": "cpu",
     "audio": "speech.wav",
     "audio_secs": 11.0,
-    "load_ms": 2209.315576001245,
-    "secs": 1.9379033639997942,
-    "realtime_x": 5.676237631011805,
+    "load_ms": 2013.123314999575,
+    "secs": 1.5701047560000916,
+    "realtime_x": 7.005901967982675,
     "text": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
-    "peak_rss_mb": 1665.08984375,
-    "rss_mb": 1353.26953125
+    "peak_rss_mb": 1664.56640625,
+    "rss_mb": 1388.33984375
   },
   {
     "engine": "kjarni",
+    "device": "cpu",
     "audio": "speech_55s.wav",
     "audio_secs": 57.5,
-    "load_ms": 501.86247900273884,
-    "secs": 7.319340602996817,
-    "realtime_x": 7.855898928444088,
+    "load_ms": 441.4263939997909,
+    "secs": 5.387150775000009,
+    "realtime_x": 10.673545701902116,
     "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
-    "peak_rss_mb": 1427.8828125,
-    "rss_mb": 1104.69140625
+    "peak_rss_mb": 1443.88671875,
+    "rss_mb": 1104.6171875
   },
   {
     "engine": "faster-whisper",
+    "device": "cpu",
     "audio": "speech_55s.wav",
     "audio_secs": 57.5,
-    "load_ms": 1668.317527997715,
-    "secs": 10.396496394998394,
-    "realtime_x": 5.530709367404045,
+    "load_ms": 1482.378897000217,
+    "secs": 7.6071815169998445,
+    "realtime_x": 7.558647032610458,
     "text": "And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.",
-    "peak_rss_mb": 2120.4609375,
-    "rss_mb": 1666.703125
+    "peak_rss_mb": 2120.40234375,
+    "rss_mb": 1666.90234375
   },
   {
     "engine": "faster-whisper-int8",
+    "device": "cpu",
     "audio": "speech_55s.wav",
     "audio_secs": 57.5,
-    "load_ms": 1126.7399469943484,
-    "secs": 5.004115575000469,
-    "realtime_x": 11.490541962551417,
+    "load_ms": 1335.4252100002668,
+    "secs": 3.6378634170000623,
+    "realtime_x": 15.805980986338668,
     "text": "And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.",
-    "peak_rss_mb": 828.97265625,
-    "rss_mb": 727.94921875
+    "peak_rss_mb": 829.7421875,
+    "rss_mb": 728.35546875
   },
   {
     "engine": "openai-whisper",
+    "device": "cpu",
     "audio": "speech_55s.wav",
     "audio_secs": 57.5,
-    "load_ms": 2226.5046820029966,
-    "secs": 9.342075332002423,
-    "realtime_x": 6.154949297296577,
+    "load_ms": 1999.0276049998101,
+    "secs": 6.487398465999831,
+    "realtime_x": 8.863337176119975,
     "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
-    "peak_rss_mb": 1664.81640625,
-    "rss_mb": 1347.5546875
+    "peak_rss_mb": 1665.0859375,
+    "rss_mb": 1432.8359375
   }
 ]

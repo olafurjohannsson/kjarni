@@ -145,6 +145,74 @@ mod tests {
         }
     }
 
+    /// The opening of the Gettysburg Address, as openai-whisper's whisper-small
+    /// transcribes the first 40 seconds of `gettysburg_40s.mp3`.
+    const GETTYSBURG_OPENING: &str =
+        "four score and seven years ago our fathers brought forth on this continent";
+
+    fn gettysburg_fixture() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gettysburg_40s.mp3")
+    }
+
+    async fn whisper_small_en() -> Transcriber {
+        Transcriber::builder("whisper-small")
+            .cpu()
+            .language("en")
+            .quiet()
+            .build()
+            .await
+            .expect("Failed to build transcriber")
+    }
+
+    /// whisper-small ends the first window of this recording after the
+    /// LibriVox notice, five seconds before the window does. Those seconds,
+    /// the title and the first sentence, were missing from the transcript.
+    #[tokio::test]
+    #[ignore = "requires model weights"]
+    async fn speech_after_a_window_ends_early_is_transcribed() {
+        let result = whisper_small_en()
+            .await
+            .transcribe_file(gettysburg_fixture())
+            .expect("Transcription failed");
+        assert!(
+            result.text.to_lowercase().contains(GETTYSBURG_OPENING),
+            "expected: {GETTYSBURG_OPENING}\n  got: {}",
+            result.text
+        );
+    }
+
+    /// Streamed with timestamps, the stream carries the same decode as above.
+    /// Without them a window is one segment that spans it, so none ends early.
+    #[tokio::test]
+    #[ignore = "requires model weights"]
+    async fn streaming_transcribes_speech_after_a_window_ends_early() {
+        use futures::StreamExt;
+        let transcriber = Transcriber::builder("whisper-small")
+            .cpu()
+            .language("en")
+            .timestamps(true)
+            .quiet()
+            .build()
+            .await
+            .expect("Failed to build transcriber");
+        let stream = transcriber
+            .stream_file(gettysburg_fixture())
+            .await
+            .expect("Stream failed");
+        futures::pin_mut!(stream);
+        let mut text = String::new();
+        while let Some(token) = stream.next().await {
+            let token = token.expect("Token error");
+            if !token.is_special {
+                text.push_str(&token.text);
+            }
+        }
+        assert!(
+            text.to_lowercase().contains(GETTYSBURG_OPENING),
+            "expected: {GETTYSBURG_OPENING}\n  got: {text}"
+        );
+    }
+
     #[tokio::test]
     #[ignore = "requires model weights"]
     async fn test_stream_file() {

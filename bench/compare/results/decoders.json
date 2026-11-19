@@ -2,22 +2,23 @@
   {
     "engine": "kjarni",
     "model": "qwen2.5-0.5b-instruct",
-    "load_ms": 744.4842780023464,
+    "load_ms": 713.4863189994576,
     "threads": [
       16,
       8
     ],
-    "peak_rss_mb": 1157.0078125,
-    "ttft_ms": 832.6049850002164,
-    "prompt_tok_s": 614.9374664143609,
-    "gen_tok_s": 36.13023545639985,
-    "generated": 128
+    "peak_rss_mb": 1157.9140625,
+    "ttft_ms": 787.0754960003978,
+    "prompt_tok_s": 650.5093889998847,
+    "gen_tok_s": 46.74156291308023,
+    "generated": 128,
+    "gen_short_tok_s": 49.1284283168887
   },
   {
     "engine": "llama.cpp",
     "model": "qwen2.5-0.5b-instruct",
-    "prompt_tok_s": 610.690246,
-    "gen_tok_s": 45.912659,
+    "prompt_tok_s": 689.804342,
+    "gen_tok_s": 65.784069,
     "threads": [
       8,
       8
@@ -27,22 +28,23 @@
   {
     "engine": "kjarni",
     "model": "llama3.2-1b-instruct",
-    "load_ms": 1347.3895300012373,
+    "load_ms": 857.2981990000699,
     "threads": [
       16,
       8
     ],
-    "peak_rss_mb": 2189.703125,
-    "ttft_ms": 1816.0004399978789,
-    "prompt_tok_s": 281.93825768048714,
-    "gen_tok_s": 19.031231083983176,
-    "generated": 128
+    "peak_rss_mb": 1394.17578125,
+    "ttft_ms": 1664.434832000552,
+    "prompt_tok_s": 307.61192337257586,
+    "gen_tok_s": 28.195384940050545,
+    "generated": 128,
+    "gen_short_tok_s": 31.199682535420695
   },
   {
     "engine": "llama.cpp",
     "model": "llama3.2-1b-instruct",
-    "prompt_tok_s": 424.082243,
-    "gen_tok_s": 27.170666,
+    "prompt_tok_s": 513.656989,
+    "gen_tok_s": 33.452781,
     "threads": [
       16,
       8

@@ -1,6 +1,31 @@
 """Waits for the machine to be idle before a timed run, so another program's
 load is not measured as the engine's."""
-import os, subprocess, sys, time
+import glob, os, subprocess, sys, time
+
+# A CPU that is still hot from the previous run clocks lower, so back-to-back runs
+# would measure the heat as much as the engine. Each run starts at or below this
+# package temperature (°C); BENCH_MAX_C overrides it.
+MAX_C = float(os.environ.get("BENCH_MAX_C", "52"))
+
+
+def cpu_temp_c():
+    """The CPU package temperature from Linux's coretemp sensor, or None without one."""
+    for name in glob.glob("/sys/class/hwmon/hwmon*/name"):
+        if open(name).read().strip() != "coretemp":
+            continue
+        d = os.path.dirname(name)
+        for label in glob.glob(os.path.join(d, "temp*_label")):
+            if open(label).read().startswith("Package"):
+                return int(open(label.replace("_label", "_input")).read()) / 1000
+    return None
+
+
+def _wait_cool(max_wait_s=1800):
+    start = time.time()
+    while (t := cpu_temp_c()) is not None and t > MAX_C:
+        if time.time() - start > max_wait_s:
+            sys.exit(f"CPU still at {t:.0f} °C after {max_wait_s} s (limit {MAX_C:.0f}); not measuring")
+        time.sleep(10)
 
 
 def vram_used_mb():
@@ -30,6 +55,7 @@ def wait_quiet(max_wait_s=3600):
         gpu = float(subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
                                    capture_output=True, text=True).stdout.split()[0])
         if busy < 0.05 and gpu < 5:
+            _wait_cool()
             return
         if time.time() - start > max_wait_s:
             sys.exit(f"machine not quiet after {max_wait_s} s (cpu {busy:.0%}, gpu {gpu:.0f}%); not measuring")
@@ -44,6 +70,7 @@ def wait_idle(max_wait_s=900):
     while True:
         one, five, _ = os.getloadavg()
         if one < 1 and five < 1.5:
+            _wait_cool()
             return
         if time.time() - start > max_wait_s:
             sys.exit(f"machine not idle after {max_wait_s} s (load {one:.1f} / {five:.1f}); not measuring")

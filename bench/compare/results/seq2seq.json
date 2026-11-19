@@ -2,37 +2,37 @@
   {
     "engine": "kjarni",
     "task": "summarize",
-    "load_ms": 513.4863120001683,
-    "ms": 2571.3628670000617,
+    "load_ms": 845.0293740002053,
+    "ms": 1798.530516000028,
     "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
-    "peak_rss_mb": 1327.65234375,
-    "rss_mb": 1280.21875
+    "peak_rss_mb": 1328.28515625,
+    "rss_mb": 1280.609375
   },
   {
     "engine": "torch",
     "task": "summarize",
-    "load_ms": 2308.2518689998324,
-    "ms": 2706.5810840003905,
+    "load_ms": 2311.23631499986,
+    "ms": 2027.150318999702,
     "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
-    "peak_rss_mb": 1745.203125,
-    "rss_mb": 1724.0625
+    "peak_rss_mb": 1749.1640625,
+    "rss_mb": 1713.9375
   },
   {
     "engine": "kjarni",
     "task": "translate",
-    "load_ms": 530.943187000048,
-    "ms": 989.0683819994592,
+    "load_ms": 514.352413000779,
+    "ms": 710.5551779995949,
     "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
-    "peak_rss_mb": 1246.3515625,
-    "rss_mb": 1048.5
+    "peak_rss_mb": 1249.33203125,
+    "rss_mb": 1051.74609375
   },
   {
     "engine": "torch",
     "task": "translate",
-    "load_ms": 2321.203974999662,
-    "ms": 946.7316939999364,
+    "load_ms": 2293.7141369993697,
+    "ms": 695.441216999825,
     "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
-    "peak_rss_mb": 1407.37890625,
-    "rss_mb": 1410.296875
+    "peak_rss_mb": 1408.66796875,
+    "rss_mb": 1400.63671875
   }
 ]

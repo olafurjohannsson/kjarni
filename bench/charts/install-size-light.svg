@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="238" viewBox="0 0 760 238" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Installed size (lower is better)">
+<rect width="760" height="238" rx="8" fill="#fcfcfb"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#0b0b0b">Installed size (lower is better)</text>
+<text x="20" y="54" font-size="13" fill="#52514e">A clean venv after pip install, site-packages on disk · PyTorch with sentence-transformers</text>
+<rect x="20" y="66" width="11" height="11" rx="3" fill="#2a78d6"/>
+<text x="36" y="76" font-size="12.5" fill="#52514e">Kjarni</text>
+<rect x="102.4" y="66" width="11" height="11" rx="3" fill="#1baf7a"/>
+<text x="118.4" y="76" font-size="12.5" fill="#52514e">ONNX Runtime</text>
+<rect x="229.20000000000002" y="66" width="11" height="11" rx="3" fill="#eb6834"/>
+<text x="245.20000000000002" y="76" font-size="12.5" fill="#52514e">PyTorch</text>
+<text x="176" y="104.5" text-anchor="end" font-size="13" fill="#0b0b0b">Kjarni</text>
+<line x1="190" y1="89" x2="190" y2="111" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,92 h1.1061321043091341 a1.1061321043091341,1.1061321043091341 0 0 1 1.1061321043091341,1.1061321043091341 v13.787735791381731 a1.1061321043091341,1.1061321043091341 0 0 1 -1.1061321043091341,1.1061321043091341 h-1.1061321043091341 z" fill="#2a78d6"><title>Kjarni: 28 MB</title></path>
+<text x="199.21226420861828" y="104.5" font-size="12" fill="#52514e" font-weight="600">28 MB</text>
+<text x="176" y="138.5" text-anchor="end" font-size="13" fill="#0b0b0b">ONNX Runtime + tokenizers</text>
+<line x1="190" y1="123" x2="190" y2="145" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,126 h11.203563716862538 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-11.203563716862538 z" fill="#1baf7a"><title>ONNX Runtime: 191 MB</title></path>
+<text x="212.20356371686253" y="138.5" font-size="12" fill="#52514e">191 MB</text>
+<text x="176" y="172.5" text-anchor="end" font-size="13" fill="#0b0b0b">PyTorch, CPU-only build</text>
+<line x1="190" y1="157" x2="190" y2="179" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,160 h104.10162189572728 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-104.10162189572728 z" fill="#eb6834"><title>PyTorch: 1.4 GB</title></path>
+<text x="305.10162189572725" y="172.5" font-size="12" fill="#52514e">1.4 GB</text>
+<text x="176" y="206.5" text-anchor="end" font-size="13" fill="#0b0b0b">PyTorch, default (CUDA)</text>
+<line x1="190" y1="191" x2="190" y2="213" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,194 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#eb6834"><title>PyTorch: 6.0 GB</title></path>
+<text x="677.0" y="206.5" font-size="12" fill="#52514e">6.0 GB</text>
+</svg>

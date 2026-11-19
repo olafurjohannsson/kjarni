@@ -92,6 +92,11 @@ def load(name):
 
 ENGINE = {"kjarni": "Kjarni", "torch": "PyTorch", "onnx": "ONNX Runtime"}
 
+
+def value_ms(row):
+    """The whole process's time, interpreter start included, as a user waits for it."""
+    return row["process_ms"] if row else None
+
 enc = load("encoders")
 if enc:
     rows = enc["rows"]
@@ -142,6 +147,28 @@ if dec:
                                    ("prompt_tok_s", "Prompt processing (higher is better)", "512-token prompt, same GGUF file in both, CPU · tokens per second", "decode-prompt")]:
         vals = [[next((r[key] for r in dec if r["model"] == m and eng(r) == e), None) for e in engines] for m in models]
         both(fname, title, sub, [pretty(m) for m in models], engines, vals, lambda v: f"{v:,.0f} tok/s")
+# Install size and cold start from run_footprint.py.
+fp = load("footprint")
+if fp:
+    by = {r["stack"]: r for r in fp["install"]}
+    stacks = [("kjarni", "Kjarni", "Kjarni"),
+              ("onnxruntime", "ONNX Runtime + tokenizers", "ONNX Runtime"),
+              ("torch-cpu", "PyTorch, CPU-only build", "PyTorch"),
+              ("torch", "PyTorch, default (CUDA)", "PyTorch")]
+    engines = ["Kjarni", "ONNX Runtime", "PyTorch"]
+    present = [s for s in stacks if s[0] in by]
+    size = lambda v: f"{v / 1000:.1f} GB" if v >= 1000 else f"{v:,.0f} MB"
+    both("install-size", "Installed size (lower is better)",
+         "A clean venv after pip install, site-packages on disk · PyTorch with sentence-transformers",
+         [label for _, label, _ in present], engines,
+         [[by[key]["installed_mb"] if e == family else None for e in engines] for key, _, family in present], size)
+    cs = {(r["engine"], r["mode"]): r for r in fp["coldstart"]}
+    both("cold-start", "Start to first embedding (lower is better)",
+         "New process, import, load MiniLM-L6, embed one sentence, CPU · median of 5",
+         ["Warm OS cache", "After a reboot"], ["Kjarni", "PyTorch"],
+         [[value_ms(cs.get((engine, mode))) for engine in ["kjarni", "torch"]] for mode in ["warm", "cold"]],
+         lambda v: f"{v / 1000:.2f} s" if v >= 1000 else f"{v:,.0f} ms")
+
 # The CPU and GPU matrix from run_matrix.py.
 matrix = load("matrix")
 if matrix:
@@ -169,7 +196,7 @@ if matrix:
     names = ["Kjarni", "faster-whisper", "faster-whisper int8", "openai-whisper"]
     keys = dict(zip(names, ["kjarni", "faster-whisper", "faster-whisper-int8", "openai-whisper"]))
     both("matrix-whisper", "Speech to text (higher is better)",
-         "whisper-small, 55 s of English, greedy · times faster than real time, each device on its own scale",
+         "whisper-small, 58 s of English, greedy · times faster than real time, each device on its own scale",
          [f"CPU, {machine}", f"GPU, {card}"], names,
          [[value(cell(kind="whisper", engine=keys[n], device=d), "realtime_x") for n in names] for d in ["cpu", "gpu"]],
          lambda v: f"{v:.1f}×", per_group=True)
@@ -201,7 +228,7 @@ if matrix:
     # Package pages (PyPI, NuGet, crates.io) take a plain image and may not render SVG.
     if shutil.which("rsvg-convert"):
         for name in os.listdir(OUT):
-            if name.startswith("matrix-") and name.endswith("-light.svg"):
+            if name.startswith(("matrix-", "install-size", "cold-start")) and name.endswith("-light.svg"):
                 subprocess.run(["rsvg-convert", "--zoom", "2", os.path.join(OUT, name), "-o",
                                 os.path.join(OUT, name[:-len(".svg")] + ".png")], check=True)
 print("charts written to", os.path.abspath(OUT))

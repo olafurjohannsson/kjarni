@@ -219,6 +219,9 @@ impl Transcriber {
             // into the silence, continuing a phrase it expects; a segment that
             // starts there is invented and dropped, and none runs past the end.
             for (mut result, chunk) in results.into_iter().zip(batch) {
+                self.model
+                    .transcribe_rest(samples, &config, chunk, &mut result, None)
+                    .map_err(TranscriberError::TranscriptionFailed)?;
                 let end = chunk.start_secs + chunk.duration_secs;
                 // Whisper writes [BLANK_AUDIO] for a stretch of silence.
                 result
@@ -344,9 +347,18 @@ impl Transcriber {
                     tx_ref.blocking_send(Ok(token)).is_ok()
                 };
 
-                if let Err(e) =
-                    model.decode_chunk(&encoder_out, &config, chunk, Some(&mut on_token))
-                {
+                let decoded = model
+                    .decode_chunk(&encoder_out, &config, chunk, Some(&mut on_token))
+                    .and_then(|mut result| {
+                        model.transcribe_rest(
+                            &samples,
+                            &config,
+                            chunk,
+                            &mut result,
+                            Some(&mut on_token),
+                        )
+                    });
+                if let Err(e) = decoded {
                     let _ = tx.blocking_send(Err(TranscriberError::TranscriptionFailed(e)));
                     return;
                 }
