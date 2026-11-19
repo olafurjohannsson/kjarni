@@ -1,0 +1,293 @@
+{
+  "machine": "Intel Core i7-13700, Linux, Python 3.13.7",
+  "install": [
+    {
+      "stack": "kjarni",
+      "installed_mb": 27.746619,
+      "install_s": 1.3460149210004602,
+      "packages": 1,
+      "versions": {
+        "kjarni": "0.7.0"
+      }
+    },
+    {
+      "stack": "torch-cpu",
+      "installed_mb": 1355.830151,
+      "install_s": 59.158569446,
+      "packages": 45,
+      "versions": {
+        "torch": "2.15.0+cpu",
+        "sentence-transformers": "6.3.0"
+      }
+    },
+    {
+      "stack": "torch",
+      "installed_mb": 6020.24707,
+      "install_s": 153.61734487299964,
+      "packages": 64,
+      "versions": {
+        "torch": "2.15.0",
+        "sentence-transformers": "6.3.0"
+      }
+    },
+    {
+      "stack": "onnxruntime",
+      "installed_mb": 190.685854,
+      "install_s": 7.275127210999926,
+      "packages": 20,
+      "versions": {
+        "onnxruntime": "1.32.0"
+      }
+    }
+  ],
+  "coldstart": [
+    {
+      "stack": "kjarni",
+      "engine": "kjarni",
+      "mode": "warm",
+      "import_ms": 12.712824999653094,
+      "load_ms": 49.583152000195696,
+      "first_ms": 3.7572350001937593,
+      "total_ms": 65.62648499948409,
+      "process_ms": 98.65650699975959,
+      "runs": [
+        {
+          "engine": "kjarni",
+          "mode": "warm",
+          "import_ms": 12.712824999653094,
+          "load_ms": 48.950389999845356,
+          "first_ms": 3.8061810000726837,
+          "total_ms": 65.46939599957113,
+          "dim": 384,
+          "process_ms": 101.65094199965097
+        },
+        {
+          "engine": "kjarni",
+          "mode": "warm",
+          "import_ms": 19.243060000007972,
+          "load_ms": 52.045312000700505,
+          "first_ms": 4.135274999498506,
+          "total_ms": 75.42364700020698,
+          "dim": 384,
+          "process_ms": 103.03924000072584
+        },
+        {
+          "engine": "kjarni",
+          "mode": "warm",
+          "import_ms": 12.633624999580206,
+          "load_ms": 49.583152000195696,
+          "first_ms": 3.409707999708189,
+          "total_ms": 65.62648499948409,
+          "dim": 384,
+          "process_ms": 94.63614699961909
+        },
+        {
+          "engine": "kjarni",
+          "mode": "warm",
+          "import_ms": 12.248560999978508,
+          "load_ms": 48.75057399931393,
+          "first_ms": 3.3114940006271354,
+          "total_ms": 64.31062899991957,
+          "dim": 384,
+          "process_ms": 88.91228399988904
+        },
+        {
+          "engine": "kjarni",
+          "mode": "warm",
+          "import_ms": 14.61148900034459,
+          "load_ms": 54.25896999986435,
+          "first_ms": 3.7572350001937593,
+          "total_ms": 72.6276940004027,
+          "dim": 384,
+          "process_ms": 98.65650699975959
+        }
+      ]
+    },
+    {
+      "stack": "kjarni",
+      "engine": "kjarni",
+      "mode": "cold",
+      "import_ms": 25.462510999204824,
+      "load_ms": 88.32657000039035,
+      "first_ms": 6.215645000338554,
+      "total_ms": 119.88475100042706,
+      "process_ms": 155.83432399944286,
+      "runs": [
+        {
+          "engine": "kjarni",
+          "mode": "cold",
+          "import_ms": 29.087171000355738,
+          "load_ms": 89.82074300001841,
+          "first_ms": 6.215645000338554,
+          "total_ms": 125.1235590007127,
+          "dim": 384,
+          "process_ms": 162.62439300044207
+        },
+        {
+          "engine": "kjarni",
+          "mode": "cold",
+          "import_ms": 24.991520999719796,
+          "load_ms": 85.03652499985037,
+          "first_ms": 6.12919899958797,
+          "total_ms": 116.15724499915814,
+          "dim": 384,
+          "process_ms": 155.83432399944286
+        },
+        {
+          "engine": "kjarni",
+          "mode": "cold",
+          "import_ms": 25.00692200010235,
+          "load_ms": 88.32657000039035,
+          "first_ms": 6.551258999934362,
+          "total_ms": 119.88475100042706,
+          "dim": 384,
+          "process_ms": 155.02188600021327
+        },
+        {
+          "engine": "kjarni",
+          "mode": "cold",
+          "import_ms": 25.462510999204824,
+          "load_ms": 85.07141400059481,
+          "first_ms": 6.63398300002882,
+          "total_ms": 117.16790799982846,
+          "dim": 384,
+          "process_ms": 148.0781099999149
+        },
+        {
+          "engine": "kjarni",
+          "mode": "cold",
+          "import_ms": 27.79750799982139,
+          "load_ms": 90.30716400047822,
+          "first_ms": 6.176378999953158,
+          "total_ms": 124.28105100025277,
+          "dim": 384,
+          "process_ms": 160.95033199962927
+        }
+      ]
+    },
+    {
+      "stack": "torch-cpu",
+      "engine": "torch",
+      "mode": "warm",
+      "import_ms": 2034.9226400003317,
+      "load_ms": 82.99893999992491,
+      "first_ms": 7.176609999987704,
+      "total_ms": 2133.3816619999197,
+      "process_ms": 2732.96240199943,
+      "runs": [
+        {
+          "engine": "torch",
+          "mode": "warm",
+          "import_ms": 2034.9226400003317,
+          "load_ms": 82.99893999992491,
+          "first_ms": 24.16702600021381,
+          "total_ms": 2142.0886060004705,
+          "dim": 384,
+          "process_ms": 2738.1900359996507
+        },
+        {
+          "engine": "torch",
+          "mode": "warm",
+          "import_ms": 2019.4277030004741,
+          "load_ms": 82.88035499936086,
+          "first_ms": 7.160481000028085,
+          "total_ms": 2109.468538999863,
+          "dim": 384,
+          "process_ms": 2706.4041339999676
+        },
+        {
+          "engine": "torch",
+          "mode": "warm",
+          "import_ms": 2032.6214670003537,
+          "load_ms": 83.84633799960284,
+          "first_ms": 6.787410000470118,
+          "total_ms": 2123.2552150004267,
+          "dim": 384,
+          "process_ms": 2718.320854999547
+        },
+        {
+          "engine": "torch",
+          "mode": "warm",
+          "import_ms": 2041.6025280001122,
+          "load_ms": 83.10243399955652,
+          "first_ms": 8.676700000251003,
+          "total_ms": 2133.3816619999197,
+          "dim": 384,
+          "process_ms": 2732.96240199943
+        },
+        {
+          "engine": "torch",
+          "mode": "warm",
+          "import_ms": 2101.353574999848,
+          "load_ms": 82.13936799984367,
+          "first_ms": 7.176609999987704,
+          "total_ms": 2190.6695529996796,
+          "dim": 384,
+          "process_ms": 2790.996011000061
+        }
+      ]
+    },
+    {
+      "stack": "torch-cpu",
+      "engine": "torch",
+      "mode": "cold",
+      "import_ms": 2719.520638999711,
+      "load_ms": 111.8901800000458,
+      "first_ms": 45.50602600011189,
+      "total_ms": 2876.844245999564,
+      "process_ms": 3720.11940900029,
+      "runs": [
+        {
+          "engine": "torch",
+          "mode": "cold",
+          "import_ms": 2710.7539750004435,
+          "load_ms": 112.47481499958667,
+          "first_ms": 45.50602600011189,
+          "total_ms": 2868.734816000142,
+          "dim": 384,
+          "process_ms": 3724.3225799993525
+        },
+        {
+          "engine": "torch",
+          "mode": "cold",
+          "import_ms": 2719.520638999711,
+          "load_ms": 111.39084400019783,
+          "first_ms": 46.15560399997776,
+          "total_ms": 2877.0670869998867,
+          "dim": 384,
+          "process_ms": 3702.3573759997817
+        },
+        {
+          "engine": "torch",
+          "mode": "cold",
+          "import_ms": 2721.878437999294,
+          "load_ms": 111.8901800000458,
+          "first_ms": 44.588759999896865,
+          "total_ms": 2878.3573779992366,
+          "dim": 384,
+          "process_ms": 3711.0100119998606
+        },
+        {
+          "engine": "torch",
+          "mode": "cold",
+          "import_ms": 2712.6168849999885,
+          "load_ms": 112.30331800015847,
+          "first_ms": 46.96970699933445,
+          "total_ms": 2871.8899099994815,
+          "dim": 384,
+          "process_ms": 3740.4011489998084
+        },
+        {
+          "engine": "torch",
+          "mode": "cold",
+          "import_ms": 2721.173983999506,
+          "load_ms": 111.60123799982102,
+          "first_ms": 44.06902400023682,
+          "total_ms": 2876.844245999564,
+          "dim": 384,
+          "process_ms": 3720.11940900029
+        }
+      ]
+    }
+  ]
+}
