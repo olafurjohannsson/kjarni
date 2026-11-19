@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
+- **Whisper no longer drops speech after a window that ends early.** When
+  Whisper finished a 30-second window before its end, the speech after the
+  last segment was skipped. That part is now transcribed again on its own,
+  in files and in streaming, unless it is silence.
 - **Send a message while Kjarni works.** It waits above the message box as
   "next step", and the agent reads it before its next step, after the results
   of the calls it made, so "only the first item" or "answer in Icelandic"
