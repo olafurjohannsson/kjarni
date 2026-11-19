@@ -2,72 +2,6 @@
   {
     "engine": "kjarni",
     "task": "embed-minilm",
-    "device": "cpu",
-    "load_ms": 90.7758780012955,
-    "first_call_ms": 9.640703996410593,
-    "single_ms": {
-      "min": 2.252070000395179,
-      "median": 3.005031499924371
-    },
-    "batch_ms": {
-      "min": 221.00118700109306,
-      "median": 226.0882459995628
-    },
-    "batch_size": 64,
-    "threads": 24,
-    "batch_per_s": 289.591204773409,
-    "peak_rss_mb": 290.83984375,
-    "rss_mb": 271.94921875,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 1.6391277313232422e-07
-  },
-  {
-    "engine": "torch",
-    "task": "embed-minilm",
-    "device": "cpu",
-    "load_ms": 2503.9961460024642,
-    "first_call_ms": 20.545554001728306,
-    "single_ms": {
-      "min": 5.541132999496767,
-      "median": 5.611907499769586
-    },
-    "batch_ms": {
-      "min": 226.36652499932097,
-      "median": 232.93768600342446
-    },
-    "batch_size": 64,
-    "threads": 16,
-    "batch_per_s": 282.7273157998603,
-    "peak_rss_mb": 758.734375,
-    "rss_mb": 613.234375,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 0.0
-  },
-  {
-    "engine": "onnx",
-    "task": "embed-minilm",
-    "device": "cpu",
-    "load_ms": 495.0291329987522,
-    "first_call_ms": 4.344910998042906,
-    "single_ms": {
-      "min": 1.351929000520613,
-      "median": 1.3825550013280008
-    },
-    "batch_ms": {
-      "min": 198.8811999981408,
-      "median": 200.22460199834313
-    },
-    "batch_size": 64,
-    "threads": 16,
-    "batch_per_s": 321.80015004232826,
-    "peak_rss_mb": 416.1796875,
-    "rss_mb": 418.7265625,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 1.7881393432617188e-07
-  },
-  {
-    "engine": "kjarni",
-    "task": "embed-minilm",
     "device": "gpu",
     "load_ms": 451.70435900217853,
     "first_call_ms": 32.876249999389984,
@@ -137,72 +71,6 @@
   {
     "engine": "kjarni",
     "task": "embed-bge-m3",
-    "device": "cpu",
-    "load_ms": 1294.9053270021977,
-    "first_call_ms": 91.6485659981845,
-    "single_ms": {
-      "min": 83.59937999921385,
-      "median": 85.41186650109012
-    },
-    "batch_ms": {
-      "min": 4193.262695000158,
-      "median": 4219.436985000357
-    },
-    "batch_size": 64,
-    "threads": 24,
-    "batch_per_s": 15.262578248748996,
-    "peak_rss_mb": 3448.33203125,
-    "rss_mb": 2835.67578125,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 9.872019290924072e-07
-  },
-  {
-    "engine": "torch",
-    "task": "embed-bge-m3",
-    "device": "cpu",
-    "load_ms": 6733.638866997353,
-    "first_call_ms": 109.0038780021132,
-    "single_ms": {
-      "min": 107.08779099877574,
-      "median": 107.53305199978058
-    },
-    "batch_ms": {
-      "min": 6472.133835999557,
-      "median": 6475.211515997216
-    },
-    "batch_size": 64,
-    "threads": 16,
-    "batch_per_s": 9.888547057543324,
-    "peak_rss_mb": 2439.06640625,
-    "rss_mb": 2080.671875,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 0.0
-  },
-  {
-    "engine": "onnx",
-    "task": "embed-bge-m3",
-    "device": "cpu",
-    "load_ms": 1451.126721000037,
-    "first_call_ms": 65.55196800036356,
-    "single_ms": {
-      "min": 61.22130199946696,
-      "median": 61.412536500938586
-    },
-    "batch_ms": {
-      "min": 4599.1011379992415,
-      "median": 4706.819752998854
-    },
-    "batch_size": 64,
-    "threads": 16,
-    "batch_per_s": 13.915762684845431,
-    "peak_rss_mb": 1909.3203125,
-    "rss_mb": 1912.203125,
-    "kind": "encoder",
-    "max_abs_diff_vs_torch_cpu": 4.2282044887542725e-07
-  },
-  {
-    "engine": "kjarni",
-    "task": "embed-bge-m3",
     "device": "gpu",
     "load_ms": 2466.7781839998497,
     "first_call_ms": 416.97739400115097,
@@ -268,58 +136,6 @@
     "vram_mb": 2687.0,
     "kind": "encoder",
     "max_abs_diff_vs_torch_cpu": 0.00037523265928030014
-  },
-  {
-    "engine": "kjarni",
-    "device": "cpu",
-    "audio": "speech_55s.wav",
-    "audio_secs": 57.5,
-    "load_ms": 464.01581299869576,
-    "secs": 6.705593655002303,
-    "realtime_x": 8.574930566677805,
-    "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
-    "peak_rss_mb": 1444.9765625,
-    "rss_mb": 1105.9921875,
-    "kind": "whisper"
-  },
-  {
-    "engine": "openai-whisper",
-    "device": "cpu",
-    "audio": "speech_55s.wav",
-    "audio_secs": 57.5,
-    "load_ms": 2151.7550720018335,
-    "secs": 7.835109768999246,
-    "realtime_x": 7.33876125482085,
-    "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
-    "peak_rss_mb": 1664.984375,
-    "rss_mb": 1374.41015625,
-    "kind": "whisper"
-  },
-  {
-    "engine": "faster-whisper",
-    "device": "cpu",
-    "audio": "speech_55s.wav",
-    "audio_secs": 57.5,
-    "load_ms": 1423.6981200010632,
-    "secs": 9.33775765899918,
-    "realtime_x": 6.157795275890983,
-    "text": "And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.",
-    "peak_rss_mb": 2120.609375,
-    "rss_mb": 1666.79296875,
-    "kind": "whisper"
-  },
-  {
-    "engine": "faster-whisper-int8",
-    "device": "cpu",
-    "audio": "speech_55s.wav",
-    "audio_secs": 57.5,
-    "load_ms": 1049.453846000688,
-    "secs": 4.490613224999834,
-    "realtime_x": 12.804487298057635,
-    "text": "And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.",
-    "peak_rss_mb": 829.16015625,
-    "rss_mb": 728.13671875,
-    "kind": "whisper"
   },
   {
     "engine": "kjarni",
@@ -652,5 +468,187 @@
       8,
       8
     ]
+  },
+  {
+    "engine": "kjarni",
+    "task": "embed-minilm",
+    "device": "cpu",
+    "load_ms": 100.64792100000375,
+    "first_call_ms": 9.650557000000504,
+    "single_ms": {
+      "min": 2.0927550000067185,
+      "median": 2.864581499991914
+    },
+    "batch_ms": {
+      "min": 192.45057300000212,
+      "median": 195.71722399999203
+    },
+    "batch_size": 64,
+    "threads": 24,
+    "batch_per_s": 332.55291996454224,
+    "peak_rss_mb": 291.1875,
+    "rss_mb": 271.98828125,
+    "kind": "encoder"
+  },
+  {
+    "engine": "torch",
+    "task": "embed-minilm",
+    "device": "cpu",
+    "load_ms": 3520.4110800000026,
+    "first_call_ms": 32.53910200001542,
+    "single_ms": {
+      "min": 5.284751000004917,
+      "median": 5.318037999998637
+    },
+    "batch_ms": {
+      "min": 212.0091529999968,
+      "median": 219.64539499998637
+    },
+    "batch_size": 64,
+    "threads": 16,
+    "batch_per_s": 301.8737591956748,
+    "peak_rss_mb": 717.46484375,
+    "rss_mb": 656.99609375,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 0.0
+  },
+  {
+    "engine": "onnx",
+    "task": "embed-minilm",
+    "device": "cpu",
+    "load_ms": 676.6092830000048,
+    "first_call_ms": 7.291347000005999,
+    "single_ms": {
+      "min": 1.4082909999899584,
+      "median": 1.4391349999982594
+    },
+    "batch_ms": {
+      "min": 176.24888399998895,
+      "median": 194.53098699997895
+    },
+    "batch_size": 64,
+    "threads": 16,
+    "batch_per_s": 363.12286663899675,
+    "peak_rss_mb": 409.0859375,
+    "rss_mb": 411.8046875,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 1.7881393432617188e-07
+  },
+  {
+    "engine": "kjarni",
+    "task": "embed-bge-m3",
+    "device": "cpu",
+    "load_ms": 2675.743570999998,
+    "first_call_ms": 74.74652799999149,
+    "single_ms": {
+      "min": 67.12410800000157,
+      "median": 68.5198389999897
+    },
+    "batch_ms": {
+      "min": 4053.3168400000077,
+      "median": 4064.235574999998
+    },
+    "batch_size": 64,
+    "threads": 24,
+    "batch_per_s": 15.789537933086887,
+    "peak_rss_mb": 3448.28125,
+    "rss_mb": 2836.1171875,
+    "kind": "encoder"
+  },
+  {
+    "engine": "torch",
+    "task": "embed-bge-m3",
+    "device": "cpu",
+    "load_ms": 8073.262433000082,
+    "first_call_ms": 77.51122099989516,
+    "single_ms": {
+      "min": 68.3299499999066,
+      "median": 68.45704950001164
+    },
+    "batch_ms": {
+      "min": 6064.238374999832,
+      "median": 6075.210972999912
+    },
+    "batch_size": 64,
+    "threads": 16,
+    "batch_per_s": 10.55367484626654,
+    "peak_rss_mb": 2436.56640625,
+    "rss_mb": 2078.625,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 0.0
+  },
+  {
+    "engine": "onnx",
+    "task": "embed-bge-m3",
+    "device": "cpu",
+    "load_ms": 1899.6238509998875,
+    "first_call_ms": 92.89982299992516,
+    "single_ms": {
+      "min": 48.606027999994694,
+      "median": 48.74736700003268
+    },
+    "batch_ms": {
+      "min": 4332.121297999947,
+      "median": 4346.309080000083
+    },
+    "batch_size": 64,
+    "threads": 16,
+    "batch_per_s": 14.77336288564854,
+    "peak_rss_mb": 1907.703125,
+    "rss_mb": 1911.625,
+    "kind": "encoder",
+    "max_abs_diff_vs_torch_cpu": 4.2282044887542725e-07
+  },
+  {
+    "engine": "kjarni",
+    "device": "cpu",
+    "audio": "speech_55s.wav",
+    "audio_secs": 57.5,
+    "load_ms": 900.1493250002568,
+    "secs": 5.393145259999983,
+    "realtime_x": 10.661682047852015,
+    "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+    "peak_rss_mb": 1443.79296875,
+    "rss_mb": 1104.6875,
+    "kind": "whisper"
+  },
+  {
+    "engine": "openai-whisper",
+    "device": "cpu",
+    "audio": "speech_55s.wav",
+    "audio_secs": 57.5,
+    "load_ms": 2485.106032999738,
+    "secs": 6.491861518000405,
+    "realtime_x": 8.857243772154723,
+    "text": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country. And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
+    "peak_rss_mb": 1662.1171875,
+    "rss_mb": 1371.19140625,
+    "kind": "whisper"
+  },
+  {
+    "engine": "faster-whisper",
+    "device": "cpu",
+    "audio": "speech_55s.wav",
+    "audio_secs": 57.5,
+    "load_ms": 1600.2499780001926,
+    "secs": 7.616103165999903,
+    "realtime_x": 7.549792688824606,
+    "text": "And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.",
+    "peak_rss_mb": 2119.9296875,
+    "rss_mb": 1666.453125,
+    "kind": "whisper"
+  },
+  {
+    "engine": "faster-whisper-int8",
+    "device": "cpu",
+    "audio": "speech_55s.wav",
+    "audio_secs": 57.5,
+    "load_ms": 1183.5815670001466,
+    "secs": 3.651749629999813,
+    "realtime_x": 15.745876860677042,
+    "text": "And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.  And so, my fellow Americans, ask not what your country can do for you.  Ask what you can do for your country.",
+    "peak_rss_mb": 829.12109375,
+    "rss_mb": 728.03515625,
+    "kind": "whisper"
   }
 ]
