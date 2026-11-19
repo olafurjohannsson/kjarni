@@ -17,15 +17,17 @@ struct Info {
     mask_stride: u32,
     /// Rows of the padding mask: 1 is shared by every batch row.
     mask_rows: u32,
-    _pad0: u32,
-    _pad1: u32,
+    /// The first query this dispatch covers, and how many: long prompts are
+    /// attended in pieces so the scores fit in one buffer binding.
+    query_start: u32,
+    queries: u32,
 }
 
 @group(0) @binding(0) var<uniform> info: Info;
 @group(0) @binding(1) var<storage, read> q: array<f32>;       // [B, H, S, D]
 @group(0) @binding(2) var<storage, read> k_store: array<f32>; // [B, KV, capacity, D]
 @group(0) @binding(3) var<storage, read> mask: array<f32>;    // [mask_rows, mask_stride]
-@group(0) @binding(4) var<storage, read_write> scores: array<f32>; // [B * H * S, keys]
+@group(0) @binding(4) var<storage, read_write> scores: array<f32>; // [B * H * queries, keys]
 
 /// What the softmax takes for a key that is not there.
 const MASKED: f32 = -1e9;
@@ -39,13 +41,13 @@ fn main(
     @builtin(num_workgroups) grid: vec3<u32>,
 ) {
     let idx = (wg.y * grid.x + wg.x) * 32u + lid.x;
-    let rows = info.batch * info.heads * info.seq;
+    let rows = info.batch * info.heads * info.queries;
     if (idx >= rows * info.keys) { return; }
 
     let row = idx / info.keys;
     let key = idx % info.keys;
-    let query = row % info.seq;
-    let batch_head = row / info.seq;
+    let query = info.query_start + row % info.queries;
+    let batch_head = row / info.queries;
     let batch = batch_head / info.heads;
     let head = batch_head % info.heads;
 
@@ -57,7 +59,7 @@ fn main(
 
     let d = info.head_dim;
     let kv = head / (info.heads / info.kv_heads);
-    let q_base = row * d;
+    let q_base = (batch_head * info.seq + query) * d;
     let k_base = ((batch * info.kv_heads + kv) * info.key_stride + key) * d;
 
     var total = 0.0;

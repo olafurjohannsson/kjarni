@@ -5,8 +5,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
+use std::panic::AssertUnwindSafe;
+
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use futures::FutureExt;
 use kjarni::agent::{
     Access, Agent, AgentConfig, AgentEvents, AgentModel, Approval, FileChange, Memory, Session,
     SessionInfo, ToolCall, ToolOutcome, tools,
@@ -400,7 +403,14 @@ impl Live {
                 answers,
                 workdir: live.workdir.clone(),
             };
-            let result = agent.send(&text, &mut events).await;
+            // A panic in the model, such as a GPU validation error, ends the turn
+            // with an error rather than leaving the conversation busy for good.
+            let result = AssertUnwindSafe(agent.send(&text, &mut events))
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|panic| {
+                    Err(anyhow!("the model failed: {}", panic_message(&*panic)))
+                });
             live.emit_context(&agent);
             let kind = match result {
                 Ok(reply) => EventKind::Done {
@@ -477,6 +487,15 @@ impl Live {
         });
         true
     }
+}
+
+/// The text a panic was raised with.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_else(|| "it panicked".to_string())
 }
 
 /// Reports a turn's events to a conversation's followers, and waits for

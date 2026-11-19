@@ -756,4 +756,42 @@ mod gpu {
             four_b::SHORT_GREEDY[..3]
         );
     }
+
+    /// The daemon's failing turn: about 2,000 tokens in the cache, then 7,000 of
+    /// tool output at once, whose attention scores in one piece (4.1 GB) are over
+    /// the 2 GB a buffer binding may hold. It runs, and gives the logits of the
+    /// same tokens prefilled 256 at a time.
+    #[tokio::test]
+    #[ignore = "needs a GPU and `kjarni model download qwen3.5-4b --gguf`"]
+    async fn the_4b_prefills_7000_tokens_after_2000_on_the_gpu() {
+        let Some((m, backend)) = load_real(gguf("Qwen_Qwen3.5-4B")).await else {
+            return;
+        };
+        let ids: Vec<u32> = long_ids(&m).into_iter().cycle().take(9060).collect();
+        let prompt =
+            |tokens: &[u32]| Array2::from_shape_vec((1, tokens.len()), tokens.to_vec()).unwrap();
+
+        let mut cache = m.new_cache(1, ids.len(), 1).unwrap();
+        backend
+            .prefill(&m, &prompt(&ids[..1967]), cache.as_mut())
+            .await
+            .unwrap();
+        let at_once = backend
+            .prefill(&m, &prompt(&ids[1967..]), cache.as_mut())
+            .await
+            .unwrap();
+
+        let mut cache = m.new_cache(1, ids.len(), 1).unwrap();
+        let mut in_pieces = None;
+        for piece in ids.chunks(256) {
+            in_pieces = Some(
+                backend
+                    .prefill(&m, &prompt(piece), cache.as_mut())
+                    .await
+                    .unwrap(),
+            );
+        }
+        let want: Vec<f32> = in_pieces.unwrap().to_vec();
+        assert_close(at_once.view(), &want, 1e-2);
+    }
 }
