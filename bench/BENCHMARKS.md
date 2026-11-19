@@ -14,6 +14,36 @@ Reproduce with `bench/compare/run_encoders.py` and `bench/compare/run_rest.py`; 
 - **Agreement:** encoder outputs are compared with PyTorch's; the largest difference is listed with each row. Generated text is recorded so the engines can be checked to have done the same work.
 - **Versions:** torch 2.13.0+cpu, transformers 5.16.1, sentence-transformers 6.0.1, onnxruntime 1.31.0, faster-whisper 1.2.1, ctranslate2 4.8.4, open_clip 3.3.0, llama.cpp b11901.
 
+## Install size and cold start
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/install-size-dark.svg">
+  <img alt="Installed size" src="charts/install-size-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="charts/cold-start-dark.svg">
+  <img alt="Start to first embedding" src="charts/cold-start-light.svg">
+</picture>
+
+Each stack installed with pip into its own new venv; size is its site-packages on disk, pip excluded. Reproduce with `bench/compare/run_footprint.py`.
+
+| Stack | Installed | Packages | Install time | Versions |
+|---|--:|--:|--:|---|
+| **Kjarni** (CPU and GPU) | 28 MB | 1 | 1 s | kjarni 0.7.0 |
+| PyTorch CPU-only build + sentence-transformers | 1.4 GB | 45 | 59 s | torch 2.15.0+cpu, sentence-transformers 6.3.0 |
+| PyTorch default (CUDA) + sentence-transformers | 6.0 GB | 64 | 154 s | torch 2.15.0, sentence-transformers 6.3.0 |
+| ONNX Runtime + tokenizers | 191 MB | 20 | 7 s | onnxruntime 1.32.0 |
+
+Start to first embedding: a new Python process imports the library, loads all-MiniLM-L6-v2 and embeds one sentence on the CPU. *Cold* drops the model and the installed packages from the OS file cache first, as after a reboot. Median of 5.
+
+| Engine | File cache | Whole process | Import | Load model | First vector |
+|---|---|--:|--:|--:|--:|
+| **Kjarni** | warm | 99 ms | 13 ms | 50 ms | 4 ms |
+| **Kjarni** | cold | 156 ms | 25 ms | 88 ms | 6 ms |
+| PyTorch + sentence-transformers | warm | 2,733 ms | 2,035 ms | 83 ms | 7 ms |
+| PyTorch + sentence-transformers | cold | 3,720 ms | 2,720 ms | 112 ms | 46 ms |
+
 ## Embeddings, reranking and classification
 
 <picture>
@@ -33,18 +63,18 @@ Reproduce with `bench/compare/run_encoders.py` and `bench/compare/run_rest.py`; 
 
 | Task | Engine | Batch of 64 | One text | Load | Memory after | Peak memory | Max diff vs PyTorch |
 |---|---|--:|--:|--:|--:|--:|--:|
-| Embed · all-MiniLM-L6-v2 | **Kjarni** | 205 ms (312/s) | 2.3 ms | 94 ms | 271 MB | 290 MB | 2e-07 |
-| Embed · all-MiniLM-L6-v2 | PyTorch | 217 ms (295/s) | 3.5 ms | 2,434 ms | 649 MB | 738 MB | reference |
-| Embed · all-MiniLM-L6-v2 | ONNX Runtime | 182 ms (351/s) | 1.5 ms | 674 ms | 412 MB | 409 MB | 2e-07 |
-| Embed · all-mpnet-base-v2 | **Kjarni** | 1274 ms (50/s) | 24.2 ms | 229 ms | 708 MB | 749 MB | 2e-07 |
-| Embed · all-mpnet-base-v2 | PyTorch | 1702 ms (38/s) | 29.5 ms | 2,449 ms | 1,036 MB | 1,178 MB | reference |
-| Embed · all-mpnet-base-v2 | ONNX Runtime | 1087 ms (59/s) | 16.2 ms | 1,168 ms | 946 MB | 944 MB | 3e-07 |
-| Rerank · ms-marco-MiniLM-L6 | **Kjarni** | 246 ms (261/s) | 9.1 ms | 113 ms | 308 MB | 323 MB | 4e-06 |
-| Rerank · ms-marco-MiniLM-L6 | PyTorch | 273 ms (234/s) | 7.1 ms | 2,428 ms | 616 MB | 762 MB | reference |
-| Rerank · ms-marco-MiniLM-L6 | ONNX Runtime | 247 ms (259/s) | 3.8 ms | 672 ms | 377 MB | 375 MB | 6e-06 |
-| Classify · DistilBERT SST-2 | **Kjarni** | 157 ms (408/s) | 12.3 ms | 217 ms | 399 MB | 502 MB | 1e-07 |
-| Classify · DistilBERT SST-2 | PyTorch | 223 ms (287/s) | 12.0 ms | 2,141 ms | 686 MB | 745 MB | reference |
-| Classify · DistilBERT SST-2 | ONNX Runtime | 153 ms (418/s) | 8.9 ms | 872 ms | 412 MB | 439 MB | 1e-07 |
+| Embed · all-MiniLM-L6-v2 | **Kjarni** | 194 ms (329/s) | 2.0 ms | 93 ms | 273 MB | 292 MB | 2e-07 |
+| Embed · all-MiniLM-L6-v2 | PyTorch | 214 ms (299/s) | 3.3 ms | 2,382 ms | 648 MB | 730 MB | reference |
+| Embed · all-MiniLM-L6-v2 | ONNX Runtime | 194 ms (329/s) | 1.4 ms | 976 ms | 418 MB | 416 MB | 2e-07 |
+| Embed · all-mpnet-base-v2 | **Kjarni** | 1226 ms (52/s) | 18.7 ms | 210 ms | 710 MB | 750 MB | 2e-07 |
+| Embed · all-mpnet-base-v2 | PyTorch | 1647 ms (39/s) | 30.0 ms | 2,379 ms | 908 MB | 1,161 MB | reference |
+| Embed · all-mpnet-base-v2 | ONNX Runtime | 1189 ms (54/s) | 14.2 ms | 1,113 ms | 915 MB | 912 MB | 3e-07 |
+| Rerank · ms-marco-MiniLM-L6 | **Kjarni** | 227 ms (282/s) | 8.4 ms | 134 ms | 310 MB | 324 MB | 4e-06 |
+| Rerank · ms-marco-MiniLM-L6 | PyTorch | 268 ms (239/s) | 9.2 ms | 2,750 ms | 617 MB | 764 MB | reference |
+| Rerank · ms-marco-MiniLM-L6 | ONNX Runtime | 242 ms (264/s) | 3.7 ms | 537 ms | 377 MB | 374 MB | 6e-06 |
+| Classify · DistilBERT SST-2 | **Kjarni** | 151 ms (422/s) | 9.7 ms | 197 ms | 401 MB | 503 MB | 1e-07 |
+| Classify · DistilBERT SST-2 | PyTorch | 209 ms (307/s) | 14.9 ms | 2,063 ms | 686 MB | 746 MB | reference |
+| Classify · DistilBERT SST-2 | ONNX Runtime | 145 ms (443/s) | 12.3 ms | 886 ms | 412 MB | 439 MB | 1e-07 |
 
 ## Speech to text
 
@@ -57,14 +87,14 @@ whisper-small, English, greedy decoding, CPU.
 
 | Audio | Engine | Time | Faster than real time | Load | Memory after | Peak memory |
 |---|---|--:|--:|--:|--:|--:|
-| 11 s | **Kjarni** | 2.29 s | 4.8× | 505 ms | 1,083 MB | 1,246 MB |
-| 11 s | faster-whisper | 2.45 s | 4.5× | 1,605 ms | 1,676 MB | 2,120 MB |
-| 11 s | faster-whisper-int8 | 1.32 s | 8.3× | 1,331 ms | 724 MB | 825 MB |
-| 11 s | openai-whisper | 1.94 s | 5.7× | 2,209 ms | 1,353 MB | 1,665 MB |
-| 58 s | **Kjarni** | 7.32 s | 7.9× | 502 ms | 1,105 MB | 1,428 MB |
-| 58 s | faster-whisper | 10.40 s | 5.5× | 1,668 ms | 1,667 MB | 2,120 MB |
-| 58 s | faster-whisper-int8 | 5.00 s | 11.5× | 1,127 ms | 728 MB | 829 MB |
-| 58 s | openai-whisper | 9.34 s | 6.2× | 2,227 ms | 1,348 MB | 1,665 MB |
+| 11 s | **Kjarni** | 1.80 s | 6.1× | 417 ms | 1,081 MB | 1,246 MB |
+| 11 s | faster-whisper | 1.89 s | 5.8× | 1,424 ms | 1,677 MB | 2,121 MB |
+| 11 s | faster-whisper-int8 | 0.98 s | 11.2× | 1,259 ms | 725 MB | 826 MB |
+| 11 s | openai-whisper | 1.57 s | 7.0× | 2,013 ms | 1,388 MB | 1,665 MB |
+| 58 s | **Kjarni** | 5.39 s | 10.7× | 441 ms | 1,105 MB | 1,444 MB |
+| 58 s | faster-whisper | 7.61 s | 7.6× | 1,482 ms | 1,667 MB | 2,120 MB |
+| 58 s | faster-whisper-int8 | 3.64 s | 15.8× | 1,335 ms | 728 MB | 830 MB |
+| 58 s | openai-whisper | 6.49 s | 8.9× | 1,999 ms | 1,433 MB | 1,665 MB |
 
 ## Summarization and translation
 
@@ -72,10 +102,10 @@ distilbart-cnn-12-6 and flan-t5-base, each with its checkpoint's own generation 
 
 | Task | Engine | Time | Load | Memory after | Peak memory | Output |
 |---|---|--:|--:|--:|--:|---|
-| summarize | **Kjarni** | 2,571 ms | 513 ms | 1,280 MB | 1,328 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
-| summarize | PyTorch | 2,707 ms | 2,308 ms | 1,724 MB | 1,745 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
-| translate | **Kjarni** | 989 ms | 531 ms | 1,048 MB | 1,246 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
-| translate | PyTorch | 947 ms | 2,321 ms | 1,410 MB | 1,407 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
+| summarize | **Kjarni** | 1,799 ms | 845 ms | 1,281 MB | 1,328 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
+| summarize | PyTorch | 2,027 ms | 2,311 ms | 1,714 MB | 1,749 MB | The library will include a children's wing, a maker space with 3D printers, and a cafe … |
+| translate | **Kjarni** | 711 ms | 514 ms | 1,052 MB | 1,249 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
+| translate | PyTorch | 695 ms | 2,294 ms | 1,401 MB | 1,409 MB | Das Haus ist klein, aber das Garten hinter es ist groß und voll von alten Bäumen. |
 
 ## Image search (CLIP)
 
@@ -83,8 +113,8 @@ ViT-B/32 with the LAION-2B weights, indexing 64 photos and running one text quer
 
 | Engine | Images per second | Query | Load | Memory after | Peak memory |
 |---|--:|--:|--:|--:|--:|
-| **Kjarni** | 57.2 | 37.8 ms | 304 ms | 775 MB | 865 MB |
-| open_clip | 52.2 | 16.9 ms | 3,460 ms | 1,176 MB | 1,679 MB |
+| **Kjarni** | 65.8 | 15.2 ms | 585 ms | 780 MB | 874 MB |
+| open_clip | 57.7 | 15.8 ms | 3,448 ms | 1,177 MB | 1,679 MB |
 
 ## Text generation
 
@@ -102,10 +132,10 @@ The same Q4_K_M GGUF file in both engines. llama.cpp is timed with its own `llam
 
 | Model | Engine | Prompt processing | Generation |
 |---|---|--:|--:|
-| qwen2.5-0.5b-instruct | **Kjarni** | 615 tok/s | 36.1 tok/s |
-| qwen2.5-0.5b-instruct | llama.cpp | 611 tok/s | 45.9 tok/s |
-| llama3.2-1b-instruct | **Kjarni** | 282 tok/s | 19.0 tok/s |
-| llama3.2-1b-instruct | llama.cpp | 424 tok/s | 27.2 tok/s |
+| qwen2.5-0.5b-instruct | **Kjarni** | 651 tok/s | 46.7 tok/s |
+| qwen2.5-0.5b-instruct | llama.cpp | 690 tok/s | 65.8 tok/s |
+| llama3.2-1b-instruct | **Kjarni** | 308 tok/s | 28.2 tok/s |
+| llama3.2-1b-instruct | llama.cpp | 514 tok/s | 33.5 tok/s |
 
 ## CPU and GPU
 
@@ -143,52 +173,52 @@ Reproduce with `bench/compare/run_matrix.py`. CPU as above; GPU an NVIDIA RTX A2
 
 | Model | Device | Engine | Batch of 64 | One text | Load | Max diff vs PyTorch on CPU |
 |---|---|---|--:|--:|--:|--:|
-| minilm | CPU | **Kjarni** | 289.6/s | 2.3 ms | 91 ms | 2e-07 |
-| minilm | CPU | PyTorch | 282.7/s | 5.5 ms | 2,504 ms | reference |
-| minilm | CPU | ONNX Runtime | 321.8/s | 1.4 ms | 495 ms | 2e-07 |
 | minilm | GPU | **Kjarni** | 554.9/s | 6.2 ms | 452 ms | 2e-07 |
 | minilm | GPU | PyTorch | 1,767.1/s | 1.8 ms | 2,397 ms | 2e-07 |
 | minilm | GPU | ONNX Runtime | 2,720.4/s | 1.2 ms | 625 ms | 1e-04 |
-| bge-m3 | CPU | **Kjarni** | 15.3/s | 83.6 ms | 1,295 ms | 1e-06 |
-| bge-m3 | CPU | PyTorch | 9.9/s | 107.1 ms | 6,734 ms | reference |
-| bge-m3 | CPU | ONNX Runtime | 13.9/s | 61.2 ms | 1,451 ms | 4e-07 |
 | bge-m3 | GPU | **Kjarni** | 31.1/s | 57.7 ms | 2,467 ms | 2e-06 |
 | bge-m3 | GPU | PyTorch | 73.5/s | 10.5 ms | 8,153 ms | 1e-06 |
 | bge-m3 | GPU | ONNX Runtime | 172.1/s | 7.5 ms | 1,302 ms | 4e-04 |
+| minilm | CPU | **Kjarni** | 332.6/s | 2.1 ms | 101 ms |  |
+| minilm | CPU | PyTorch | 301.9/s | 5.3 ms | 3,520 ms | reference |
+| minilm | CPU | ONNX Runtime | 363.1/s | 1.4 ms | 677 ms | 2e-07 |
+| bge-m3 | CPU | **Kjarni** | 15.7/s | 66.8 ms | 1,217 ms | 1e-06 |
+| bge-m3 | CPU | PyTorch | 10.6/s | 61.0 ms | 7,233 ms | reference |
+| bge-m3 | CPU | ONNX Runtime | 14.7/s | 48.5 ms | 1,390 ms | 4e-07 |
 
-| Device | Engine | 55 s of speech | Faster than real time |
+| Device | Engine | 58 s of speech | Faster than real time |
 |---|---|--:|--:|
-| CPU | **Kjarni** | 6.71 s | 8.6× |
-| CPU | openai-whisper | 7.84 s | 7.3× |
-| CPU | faster-whisper | 9.34 s | 6.2× |
-| CPU | faster-whisper-int8 | 4.49 s | 12.8× |
 | GPU | **Kjarni** | 3.61 s | 15.9× |
 | GPU | openai-whisper | 1.09 s | 52.6× |
 | GPU | faster-whisper | 0.64 s | 89.3× |
 | GPU | faster-whisper-int8 | 0.62 s | 92.7× |
+| CPU | **Kjarni** | 5.39 s | 10.7× |
+| CPU | openai-whisper | 6.49 s | 8.9× |
+| CPU | faster-whisper | 7.62 s | 7.5× |
+| CPU | faster-whisper-int8 | 3.65 s | 15.7× |
 
 Generation is from the same Q4_K_M GGUF, except PyTorch and the rows marked safetensors. *After a prompt* follows 512 tokens; *short* starts from a nearly empty context, as llama-bench's tg128 does, so llama.cpp's one figure is in that column.
 
 | Model | Device | Engine | Prompt | After a prompt | Short |
 |---|---|---|--:|--:|--:|
-| qwen2.5-0.5b-instruct | CPU | **Kjarni** | 653 | 45.2 | 47.2 |
-| qwen2.5-0.5b-instruct | GPU | **Kjarni** | 1,565 | 62.5 | 82.4 |
-| qwen2.5-0.5b-instruct | CPU | **Kjarni** safetensors | 643 | 26.1 | 27.1 |
-| qwen2.5-0.5b-instruct | GPU | **Kjarni** safetensors | 1,438 | 59.6 | 75.3 |
-| qwen2.5-0.5b-instruct | CPU | PyTorch | 661 | 11.2 | 11.5 |
-| qwen2.5-0.5b-instruct | GPU | PyTorch | 21,890 | 130.8 | 132.7 |
-| qwen2.5-0.5b-instruct | CPU | llama.cpp | 693 |  | 67.0 |
-| qwen2.5-0.5b-instruct | GPU | llama.cpp CUDA | 14,529 |  | 331.1 |
-| qwen2.5-0.5b-instruct | GPU | llama.cpp Vulkan | 9,838 |  | 234.8 |
-| llama3.2-1b-instruct | CPU | **Kjarni** | 301 | 22.7 | 24.2 |
-| llama3.2-1b-instruct | GPU | **Kjarni** | 719 | 81.7 | 105.1 |
-| llama3.2-1b-instruct | CPU | **Kjarni** safetensors | 274 | 6.7 | 6.9 |
-| llama3.2-1b-instruct | GPU | **Kjarni** safetensors | 645 | 51.9 | 61.3 |
-| llama3.2-1b-instruct | CPU | PyTorch | 229 | 3.0 | 3.0 |
-| llama3.2-1b-instruct | GPU | PyTorch | 9,274 | 78.7 | 80.0 |
-| llama3.2-1b-instruct | CPU | llama.cpp | 481 |  | 28.8 |
-| llama3.2-1b-instruct | GPU | llama.cpp CUDA | 9,034 |  | 216.3 |
-| llama3.2-1b-instruct | GPU | llama.cpp Vulkan | 7,238 |  | 194.2 |
+| qwen2.5-0.5b-instruct | CPU | **Kjarni** | 661 | 47.6 | 51.0 |
+| qwen2.5-0.5b-instruct | GPU | **Kjarni** | 1,564 | 58.5 | 74.9 |
+| qwen2.5-0.5b-instruct | CPU | **Kjarni** safetensors | 644 | 26.2 | 26.2 |
+| qwen2.5-0.5b-instruct | GPU | **Kjarni** safetensors | 1,431 | 57.9 | 74.2 |
+| qwen2.5-0.5b-instruct | CPU | PyTorch | 707 | 12.2 | 11.5 |
+| qwen2.5-0.5b-instruct | GPU | PyTorch | 21,948 | 131.6 | 133.6 |
+| qwen2.5-0.5b-instruct | CPU | llama.cpp | 692 |  | 66.0 |
+| qwen2.5-0.5b-instruct | GPU | llama.cpp CUDA | 14,532 |  | 333.4 |
+| qwen2.5-0.5b-instruct | GPU | llama.cpp Vulkan | 10,159 |  | 238.6 |
+| llama3.2-1b-instruct | CPU | **Kjarni** | 307 | 28.2 | 31.2 |
+| llama3.2-1b-instruct | GPU | **Kjarni** | 725 | 78.7 | 103.6 |
+| llama3.2-1b-instruct | CPU | **Kjarni** safetensors | 239 | 9.2 | 9.4 |
+| llama3.2-1b-instruct | GPU | **Kjarni** safetensors | 653 | 52.0 | 60.0 |
+| llama3.2-1b-instruct | CPU | PyTorch | 221 | 3.4 | 3.4 |
+| llama3.2-1b-instruct | GPU | PyTorch | 9,328 | 78.9 | 80.0 |
+| llama3.2-1b-instruct | CPU | llama.cpp | 483 |  | 33.5 |
+| llama3.2-1b-instruct | GPU | llama.cpp CUDA | 8,612 |  | 219.3 |
+| llama3.2-1b-instruct | GPU | llama.cpp Vulkan | 7,499 |  | 198.2 |
 
 ## Binding overhead
 

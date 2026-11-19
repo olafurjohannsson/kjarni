@@ -165,7 +165,7 @@ if fp:
     cs = {(r["engine"], r["mode"]): r for r in fp["coldstart"]}
     both("cold-start", "Start to first embedding (lower is better)",
          "New process, import, load MiniLM-L6, embed one sentence, CPU · median of 5",
-         ["Files in the OS cache", "Cache dropped, as after a reboot"], ["Kjarni", "PyTorch"],
+         ["Warm OS cache", "After a reboot"], ["Kjarni", "PyTorch"],
          [[value_ms(cs.get((engine, mode))) for engine in ["kjarni", "torch"]] for mode in ["warm", "cold"]],
          lambda v: f"{v / 1000:.2f} s" if v >= 1000 else f"{v:,.0f} ms")
 
@@ -196,7 +196,7 @@ if matrix:
     names = ["Kjarni", "faster-whisper", "faster-whisper int8", "openai-whisper"]
     keys = dict(zip(names, ["kjarni", "faster-whisper", "faster-whisper-int8", "openai-whisper"]))
     both("matrix-whisper", "Speech to text (higher is better)",
-         "whisper-small, 55 s of English, greedy · times faster than real time, each device on its own scale",
+         "whisper-small, 58 s of English, greedy · times faster than real time, each device on its own scale",
          [f"CPU, {machine}", f"GPU, {card}"], names,
          [[value(cell(kind="whisper", engine=keys[n], device=d), "realtime_x") for n in names] for d in ["cpu", "gpu"]],
          lambda v: f"{v:.1f}×", per_group=True)

@@ -169,7 +169,7 @@ if matrix:
         w(f'| {r["task"].replace("embed-", "")} | {r["device"].upper()} | {engine[r["engine"]]} | {r["batch_per_s"]:,.1f}/s | '
           f'{r["single_ms"]["min"]:.1f} ms | {r["load_ms"]:,.0f} ms | {shown} |')
     w("")
-    w("| Device | Engine | 55 s of speech | Faster than real time |")
+    w("| Device | Engine | 58 s of speech | Faster than real time |")
     w("|---|---|--:|--:|")
     for r in rows(kind="whisper"):
         w(f'| {r["device"].upper()} | {"**Kjarni**" if r["engine"] == "kjarni" else r["engine"]} | {r["secs"]:.2f} s | {r["realtime_x"]:.1f}× |')
