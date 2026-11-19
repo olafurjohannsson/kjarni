@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795115253184,
+  "lastUpdate": 1795128240147,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2436,6 +2436,66 @@ window.BENCHMARK_DATA = {
             "value": 24.24,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 106 Stepping 6, GenuineIntel; vs previous commit: 0.995"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "54c3e66f09920d4608e7aa5cad29eb1feabc43d5",
+          "message": "Attend to long GPU prompts in slices; end a turn whose model panics with an error (#131)",
+          "timestamp": "2026-11-19T22:19:15Z",
+          "tree_id": "d4edea072e81806f58d8da58640d141cd942510d",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/54c3e66f09920d4608e7aa5cad29eb1feabc43d5"
+        },
+        "date": 1795128239481,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 655.36,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel(R) Xeon(R) 6975P-C; vs previous commit: 1.001"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 30.43,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel(R) Xeon(R) 6975P-C; vs previous commit: 0.993"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 1058.33,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M2 Pro (Virtual); vs previous commit: 1.016"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 58.38,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M2 Pro (Virtual); vs previous commit: 0.951"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 456.96,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.993"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 27.48,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
           }
         ]
       }
