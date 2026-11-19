@@ -8,6 +8,7 @@ use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::base::ModelInput;
 use kjarni_transformers::{
     Cache, LanguageModel, WgpuContext,
+    audio::compute_mel_spectrogram,
     cache::CpuBeamKVCache,
     cpu::encoder::{CpuEncoderOps, GpuEncoderOps, prelude::EncoderLanguageModel},
     encoder_decoder::traits::{
@@ -122,6 +123,46 @@ pub struct AudioChunk {
     pub start_secs: f32,
     /// How much of the window is audio rather than padding.
     pub duration_secs: f32,
+}
+
+/// The least untranscribed audio at the end of a window that is decoded again.
+const MIN_TAIL_SECS: f32 = 1.0;
+/// A tail whose mean energy is below this fraction of its window's is silence.
+const TAIL_SPEECH_ENERGY: f32 = 0.1;
+/// The most times one window's remainder is decoded again.
+const MAX_RESUMES: usize = 4;
+
+/// The audio between `reached` and `window_end` as a window of its own, when
+/// there is enough of it and it is not silence.
+///
+/// `samples` is the whole recording at 16 kHz. Nothing is returned when the
+/// transcript reached nothing past `window_start`: decoding the same audio again
+/// would give the same result.
+fn untranscribed_tail(
+    samples: &[f32],
+    window_start: f32,
+    window_end: f32,
+    reached: f32,
+) -> Option<AudioChunk> {
+    if reached <= window_start || window_end - reached < MIN_TAIL_SECS {
+        return None;
+    }
+    let sr = WHISPER_SAMPLE_RATE as f32;
+    let at = |secs: f32| ((secs * sr).round() as usize).min(samples.len());
+    let (start, from, end) = (at(window_start), at(reached), at(window_end));
+    let energy = |s: &[f32]| s.iter().map(|x| x * x).sum::<f32>() / s.len().max(1) as f32;
+    if from >= end
+        || energy(&samples[from..end]) < TAIL_SPEECH_ENERGY * energy(&samples[start..end])
+    {
+        return None;
+    }
+    let mut window = samples[from..end].to_vec();
+    window.resize(WHISPER_CHUNK_SAMPLES, 0.0);
+    Some(AudioChunk {
+        samples: window,
+        start_secs: from as f32 / sr,
+        duration_secs: (end - from) as f32 / sr,
+    })
 }
 
 /// How far back from a window's 30-second limit to look for a pause to cut at.
@@ -468,6 +509,56 @@ impl WhisperModel {
         }
 
         self.finalize_chunk(generated_ids, config, chunk_time_offset)
+    }
+
+    /// Decodes the speech at the end of `chunk` that `result` stops short of,
+    /// and adds its segments to `result`.
+    ///
+    /// Whisper can end a window early. After reading a music intro as a single
+    /// segment, whisper-small closed the first window of a LibriVox recording
+    /// at 23.8 seconds, and the five seconds of speech after it, "Four score
+    /// and seven years ago", were in no transcript. OpenAI's transcribe moves on
+    /// from the last timestamp a window reached rather than from the window's
+    /// end, which decodes such audio again; this does the same for a window
+    /// already decoded. `samples` is the whole recording at 16 kHz.
+    pub fn transcribe_rest(
+        &self,
+        samples: &[f32],
+        config: &WhisperTranscriberConfig,
+        chunk: &AudioChunk,
+        result: &mut WhisperChunkResult,
+        mut on_token: Option<&mut dyn FnMut(u32, &str) -> bool>,
+    ) -> Result<()> {
+        let end = chunk.start_secs + chunk.duration_secs;
+        let reached = |segments: &[WhisperSegment]| {
+            segments
+                .iter()
+                .filter(|s| s.start < end)
+                .map(|s| s.end.min(end))
+                .fold(chunk.start_secs, f32::max)
+        };
+        let mel_config = self.expected_mel_config();
+        for _ in 0..MAX_RESUMES {
+            let before = reached(&result.segments);
+            let Some(tail) = untranscribed_tail(samples, chunk.start_secs, end, before) else {
+                break;
+            };
+            let mel = compute_mel_spectrogram(&tail.samples, &mel_config)?;
+            let encoded = self.encode_mel(&mel)?;
+            let callback: Option<&mut dyn FnMut(u32, &str) -> bool> = match &mut on_token {
+                Some(f) => Some(&mut **f),
+                None => None,
+            };
+            let more = self.decode_chunk(&encoded, config, &tail, callback)?;
+            result
+                .segments
+                .extend(more.segments.into_iter().filter(|s| s.start < end));
+            if reached(&result.segments) <= before {
+                break;
+            }
+        }
+        result.text = result.segments.iter().map(|s| s.text.as_str()).collect();
+        Ok(())
     }
 
     /// Decodes several chunks at once, greedily, each exactly as
@@ -893,6 +984,59 @@ mod tests {
 
     /// <|endoftext|> in the multilingual vocabulary.
     const EOT_TOKEN: u32 = 50257;
+
+    /// Ten seconds at 16 kHz: speech (a tone) up to `quiet_from`, silence after.
+    fn speech_then_silence(quiet_from: f32) -> Vec<f32> {
+        (0..160_000)
+            .map(|i| {
+                if (i as f32) / 16_000.0 < quiet_from {
+                    (i as f32 * 0.05).sin() * 0.3
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_untranscribed_end_of_a_window_is_decoded_again() {
+        let samples = speech_then_silence(10.0);
+        let tail =
+            untranscribed_tail(&samples, 0.0, 10.0, 6.0).expect("four seconds of speech left");
+        assert_eq!(tail.start_secs, 6.0);
+        assert_eq!(tail.duration_secs, 4.0);
+        assert_eq!(tail.samples.len(), WHISPER_CHUNK_SAMPLES);
+        assert_eq!(&tail.samples[..64_000], &samples[96_000..]);
+        assert!(
+            tail.samples[64_000..].iter().all(|&x| x == 0.0),
+            "padded with silence"
+        );
+    }
+
+    #[test]
+    fn a_window_transcribed_to_its_end_is_left_alone() {
+        let samples = speech_then_silence(10.0);
+        assert!(
+            untranscribed_tail(&samples, 0.0, 10.0, 9.5).is_none(),
+            "under a second left"
+        );
+        assert!(untranscribed_tail(&samples, 0.0, 10.0, 10.0).is_none());
+    }
+
+    #[test]
+    fn a_silent_remainder_is_not_decoded_again() {
+        // Decoding silence is where Whisper invents text.
+        let samples = speech_then_silence(5.0);
+        assert!(untranscribed_tail(&samples, 0.0, 10.0, 5.0).is_none());
+    }
+
+    #[test]
+    fn a_window_with_no_transcript_is_not_decoded_again() {
+        // The same audio decoded again gives the same nothing.
+        let samples = speech_then_silence(10.0);
+        assert!(untranscribed_tail(&samples, 0.0, 10.0, 0.0).is_none());
+        assert!(untranscribed_tail(&samples, 2.0, 10.0, 2.0).is_none());
+    }
 
     #[test]
     fn test_chunk_audio_short() {
