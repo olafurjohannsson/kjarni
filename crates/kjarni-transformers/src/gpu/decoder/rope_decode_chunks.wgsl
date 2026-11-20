@@ -4,10 +4,9 @@
 //! score, its sum of exponentials and its exponential-weighted sum of values;
 //! rope_decode_combine.wgsl merges the chunks.
 //!
-//! One thread per output walks every key in rope_context.wgsl, which at a few
-//! thousand keys of context is a long serial loop on few threads. Here the
-//! keys are spread over workgroups, and each key and value row is read once
-//! for its group of query heads.
+//! A thread owns a key: it reads the key's row once, four values at a time,
+//! and scores it against every query head of the group, held in workgroup
+//! memory. The values are then summed four dimensions per thread.
 
 struct Info {
     batch: u32,
@@ -29,25 +28,27 @@ struct Info {
 }
 
 const CHUNK: u32 = 128u;
-const THREADS: u32 = 256u;
 const MAX_GROUP: u32 = 8u;
-const MAX_HEAD_DIM: u32 = 256u;
+/// Threads per query head when reducing over the chunk.
+const LANES: u32 = 16u; // CHUNK / MAX_GROUP
 const MASKED: f32 = -1e30;
 
 @group(0) @binding(0) var<uniform> info: Info;
-@group(0) @binding(1) var<storage, read> q: array<f32>;        // [B, H, 1, D]
-@group(0) @binding(2) var<storage, read> k_store: array<f32>;  // [B, KV, capacity, D]
-@group(0) @binding(3) var<storage, read> v_store: array<f32>;  // [B, KV, capacity, D]
-@group(0) @binding(4) var<storage, read> mask: array<f32>;     // [mask_rows, mask_stride]
-@group(0) @binding(5) var<storage, read_write> stats: array<f32>;  // [B, H, chunks, 2]: max, sum
-@group(0) @binding(6) var<storage, read_write> partial: array<f32>; // [B, H, chunks, D]
+@group(0) @binding(1) var<storage, read> q: array<vec4<f32>>;       // [B, H, 1, D]
+@group(0) @binding(2) var<storage, read> k_store: array<vec4<f32>>; // [B, KV, capacity, D]
+@group(0) @binding(3) var<storage, read> v_store: array<vec4<f32>>; // [B, KV, capacity, D]
+@group(0) @binding(4) var<storage, read> mask: array<f32>;          // [mask_rows, mask_stride]
+@group(0) @binding(5) var<storage, read_write> stats: array<f32>;        // [B, H, chunks, 2]: max, sum
+@group(0) @binding(6) var<storage, read_write> partial: array<vec4<f32>>; // [B, H, chunks, D]
 
-var<workgroup> scores: array<f32, 1024>;    // [MAX_GROUP][CHUNK]
-var<workgroup> reduce: array<f32, THREADS>;
+/// The group's queries, at most MAX_GROUP heads of 256 dimensions.
+var<workgroup> q_s: array<vec4<f32>, 512>;
+var<workgroup> scores: array<f32, 1024>; // [MAX_GROUP][CHUNK]
+var<workgroup> reduce: array<f32, CHUNK>;
 var<workgroup> maxes: array<f32, MAX_GROUP>;
 
-/// Workgroup (chunk, KV head, batch).
-@compute @workgroup_size(256)
+/// Workgroup (chunk, KV head, batch); thread t owns key t of the chunk.
+@compute @workgroup_size(128)
 fn main(
     @builtin(workgroup_id) wg: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
@@ -56,62 +57,65 @@ fn main(
     let kv = wg.y;
     let batch = wg.z;
     let t = lid.x;
-    let d = info.head_dim;
+    let d4 = info.head_dim / 4u;
     let group = info.heads / info.kv_heads;
     let first_key = chunk * CHUNK;
-    let kv_base = (batch * info.kv_heads + kv) * info.key_stride * d;
-    let mask_row = select(batch, 0u, info.mask_rows == 1u);
+    let kv_row0 = (batch * info.kv_heads + kv) * info.key_stride;
+    let q_row0 = batch * info.heads + kv * group;
 
-    // Scores, one per (query head of the group, key of the chunk).
-    for (var idx = t; idx < group * CHUNK; idx += THREADS) {
-        let g = idx / CHUNK;
-        let key = first_key + idx % CHUNK;
-        var s = MASKED;
-        if (key < info.keys && key <= info.position_offset
-                && mask[mask_row * info.mask_stride + key] != 0.0) {
-            let q_base = (batch * info.heads + kv * group + g) * d;
-            let k_base = kv_base + key * d;
-            var dot = 0.0;
-            for (var i = 0u; i < d; i += 4u) {
-                dot += q[q_base + i] * k_store[k_base + i]
-                    + q[q_base + i + 1u] * k_store[k_base + i + 1u]
-                    + q[q_base + i + 2u] * k_store[k_base + i + 2u]
-                    + q[q_base + i + 3u] * k_store[k_base + i + 3u];
-            }
-            s = dot * info.scale;
-        }
-        scores[g * CHUNK + idx % CHUNK] = s;
+    for (var i = t; i < group * d4; i += CHUNK) {
+        q_s[i] = q[q_row0 * d4 + i];
     }
     workgroupBarrier();
 
-    // The largest score of each query head: 32 threads per head.
-    let lane = t % 32u;
-    let mine = t / 32u;
+    let key = first_key + t;
+    let mask_row = select(batch, 0u, info.mask_rows == 1u);
+    let visible = key < info.keys && key <= info.position_offset
+        && mask[mask_row * info.mask_stride + min(key, info.mask_stride - 1u)] != 0.0;
+    var dots: array<f32, MAX_GROUP>;
+    if (visible) {
+        let k_base = (kv_row0 + key) * d4;
+        for (var i = 0u; i < d4; i++) {
+            let k4 = k_store[k_base + i];
+            for (var g = 0u; g < MAX_GROUP; g++) {
+                if (g < group) {
+                    dots[g] += dot(q_s[g * d4 + i], k4);
+                }
+            }
+        }
+    }
+    for (var g = 0u; g < group; g++) {
+        scores[g * CHUNK + t] = select(MASKED, dots[g] * info.scale, visible);
+    }
+    workgroupBarrier();
+
+    // The largest score and the sum of exponentials of each query head:
+    // LANES threads per head.
+    let mine = t / LANES;
+    let lane = t % LANES;
     var largest = MASKED;
     if (mine < group) {
-        for (var key = lane; key < CHUNK; key += 32u) {
-            largest = max(largest, scores[mine * CHUNK + key]);
+        for (var k = lane; k < CHUNK; k += LANES) {
+            largest = max(largest, scores[mine * CHUNK + k]);
         }
     }
     reduce[t] = largest;
     workgroupBarrier();
     if (lane == 0u && mine < group) {
         var m = MASKED;
-        for (var i = 0u; i < 32u; i++) {
+        for (var i = 0u; i < LANES; i++) {
             m = max(m, reduce[t + i]);
         }
         maxes[mine] = m;
     }
     workgroupBarrier();
-
-    // Exponentials in place, and their sum per head.
     var total = 0.0;
     if (mine < group) {
         let m = maxes[mine];
-        for (var key = lane; key < CHUNK; key += 32u) {
-            let s = scores[mine * CHUNK + key];
+        for (var k = lane; k < CHUNK; k += LANES) {
+            let s = scores[mine * CHUNK + k];
             let e = select(exp(s - m), 0.0, s <= MASKED);
-            scores[mine * CHUNK + key] = e;
+            scores[mine * CHUNK + k] = e;
             total += e;
         }
     }
@@ -119,23 +123,23 @@ fn main(
     workgroupBarrier();
     if (lane == 0u && mine < group) {
         var sum = 0.0;
-        for (var i = 0u; i < 32u; i++) {
+        for (var i = 0u; i < LANES; i++) {
             sum += reduce[t + i];
         }
-        let at = ((batch * info.heads + kv * group + mine) * info.chunks + chunk) * 2u;
+        let at = ((q_row0 + mine) * info.chunks + chunk) * 2u;
         stats[at] = maxes[mine];
         stats[at + 1u] = sum;
     }
 
-    // Weighted values, one output per (query head, dimension).
+    // Weighted values, four dimensions of one query head per output.
     let keys_here = min(CHUNK, select(0u, info.keys - first_key, info.keys > first_key));
-    for (var idx = t; idx < group * d; idx += THREADS) {
-        let g = idx / d;
-        let dim = idx % d;
-        var acc = 0.0;
-        for (var key = 0u; key < keys_here; key++) {
-            acc += scores[g * CHUNK + key] * v_store[kv_base + (first_key + key) * d + dim];
+    for (var idx = t; idx < group * d4; idx += CHUNK) {
+        let g = idx / d4;
+        let i = idx % d4;
+        var acc = vec4<f32>(0.0);
+        for (var k = 0u; k < keys_here; k++) {
+            acc += scores[g * CHUNK + k] * v_store[(kv_row0 + first_key + k) * d4 + i];
         }
-        partial[((batch * info.heads + kv * group + g) * info.chunks + chunk) * d + dim] = acc;
+        partial[((q_row0 + g) * info.chunks + chunk) * d4 + i] = acc;
     }
 }
