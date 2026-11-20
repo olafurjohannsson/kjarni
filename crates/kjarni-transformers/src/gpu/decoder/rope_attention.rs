@@ -319,7 +319,7 @@ impl GpuRoPEAttention {
         let head_dim = self.ops.head_dim() as usize;
         let mask_shape = attention_mask.shape();
         if seq == 1
-            && head_dim % 4 == 0
+            && head_dim.is_multiple_of(4)
             && head_dim <= DECODE_MAX_HEAD_DIM
             && heads / kv_heads <= DECODE_MAX_GROUP
         {
