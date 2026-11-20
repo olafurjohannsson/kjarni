@@ -768,7 +768,13 @@ mod gpu {
         let m = Qwen3_5Model::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)
             .unwrap();
         let backend = GpuDecoderBackend::new(ctx.clone()).unwrap();
-        let ids: Vec<u32> = long_ids(&m).into_iter().cycle().take(600).collect();
+        // PROFILE_CONTEXT sets the prompt length: decoding at long context is
+        // where attention costs most.
+        let context: usize = std::env::var("PROFILE_CONTEXT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(512);
+        let ids: Vec<u32> = long_ids(&m).into_iter().cycle().take(context).collect();
         let prompt = |t: &[u32]| Array2::from_shape_vec((1, t.len()), t.to_vec()).unwrap();
         let report = |name: &str, totals: Vec<(String, f64, usize)>, wall: f64| {
             let sum: f64 = totals.iter().map(|t| t.1).sum();
@@ -783,22 +789,26 @@ mod gpu {
             c.queue.submit(Some(enc.finish()));
         };
         // A warm-up, whose timings are dropped.
-        let mut cache = m.new_cache(1, 700, 1).unwrap();
+        let mut cache = m.new_cache(1, context + 8, 1).unwrap();
         backend
-            .prefill(&m, &prompt(&ids[..512]), cache.as_mut())
+            .prefill(&m, &prompt(&ids[..512.min(context)]), cache.as_mut())
             .await
             .unwrap();
         flush(&ctx);
         ctx.profiler.totals(&ctx).await;
-        let mut cache = m.new_cache(1, 700, 1).unwrap();
+        let mut cache = m.new_cache(1, context + 8, 1).unwrap();
         let t = std::time::Instant::now();
         let l = backend
-            .prefill(&m, &prompt(&ids[..512]), cache.as_mut())
+            .prefill(&m, &prompt(&ids), cache.as_mut())
             .await
             .unwrap();
         let wall = t.elapsed().as_secs_f64() * 1e3;
         flush(&ctx);
-        report("prefill 512", ctx.profiler.totals(&ctx).await, wall);
+        report(
+            &format!("prefill {context}"),
+            ctx.profiler.totals(&ctx).await,
+            wall,
+        );
         let mut next = argmax(l.view());
         let mut tok = backend.new_decode_token().unwrap();
         let t = std::time::Instant::now();
