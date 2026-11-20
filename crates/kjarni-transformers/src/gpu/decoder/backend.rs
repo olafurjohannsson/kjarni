@@ -17,6 +17,11 @@ use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError};
 pub use crate::models::base::AutoregressiveLoop;
 use crate::models::base::ModelInput;
 
+/// Tokens a prefill sends to the GPU at a time, each piece finished before the
+/// next is sent. On an RTX A2000, 512 tokens of Qwen3.5-4B take about 3 s;
+/// 7,000 at once take 110 s, past the readback timeout, and no less in total.
+const PREFILL_PIECE: usize = 512;
+
 pub struct GpuDecoderBackend {
     context: Arc<WgpuContext>,
     last_token_slicer: GpuLastTokenSlice,
@@ -362,8 +367,17 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
 
         match model.autoregressive_loop() {
             AutoregressiveLoop::Pipelined => {
-                let input = ModelInput::TokensCpu(tokens.view());
-                self.forward_and_project(model, input, cache).await
+                // In pieces, each waited for: one submission for a long prompt can
+                // outlast the readback timeout, and costs no less in total.
+                let mut logits = None;
+                let mut start = 0;
+                while start < prompt_len {
+                    let end = (start + PREFILL_PIECE).min(prompt_len);
+                    let piece = ModelInput::TokensCpu(tokens.slice(s![.., start..end]));
+                    logits = Some(self.forward_and_project(model, piece, cache).await?);
+                    start = end;
+                }
+                Ok(logits.expect("a non-empty prompt"))
             }
             AutoregressiveLoop::Legacy => {
                 let last_idx = prompt_len - 1;

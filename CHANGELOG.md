@@ -6,7 +6,9 @@
   such as a large tool result in the agent, could stop the daemon with "Buffer
   binding exceeds max_storage_buffer_binding_size": the attention scores for
   the whole prompt did not fit in one buffer. They are now computed a slice of
-  the prompt at a time, with the same result.
+  the prompt at a time, with the same result. A long prompt also goes to the
+  GPU 512 tokens at a time, so it no longer stops with "timed out after
+  30 s": 7,000 tokens on Qwen3.5-4B take about two minutes on an RTX A2000.
 - **A failing model no longer leaves a conversation stuck.** If the model
   panics during a turn, the turn ends with an error saying why, and the
   conversation takes the next message.
