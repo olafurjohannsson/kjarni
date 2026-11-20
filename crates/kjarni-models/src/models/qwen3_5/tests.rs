@@ -758,9 +758,10 @@ mod gpu {
     }
 
     /// The daemon's failing turn: about 2,000 tokens in the cache, then 7,000 of
-    /// tool output at once, whose attention scores in one piece (4.1 GB) are over
-    /// the 2 GB a buffer binding may hold. It runs, and gives the logits of the
-    /// same tokens prefilled 256 at a time.
+    /// tool output at once. In one submission their attention scores (4.1 GB) are
+    /// over the 2 GB a buffer binding may hold, and the work outlasts the 30 s
+    /// readback timeout. It runs, and gives the logits of the same tokens
+    /// prefilled 256 at a time.
     #[tokio::test]
     #[ignore = "needs a GPU and `kjarni model download qwen3.5-4b --gguf`"]
     async fn the_4b_prefills_7000_tokens_after_2000_on_the_gpu() {
