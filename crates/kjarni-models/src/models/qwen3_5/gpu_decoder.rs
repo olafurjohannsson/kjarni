@@ -106,6 +106,8 @@ struct GatedNormInfo {
 /// The largest key head and convolution the kernels hold in private memory.
 const MAX_KEY_DIM: usize = 128;
 const MAX_CONV_KERNEL: usize = 8;
+/// Threads sharing one head of the gated norm.
+const GATED_NORM_THREADS: usize = 64;
 /// Value columns per workgroup of the delta rule.
 const DELTA_COLS: usize = 32;
 
@@ -115,6 +117,8 @@ struct Kernels {
     gate: ComputeKernel,
     conv: ComputeKernel,
     delta: ComputeKernel,
+    /// The delta rule for one token per sequence, as in decoding.
+    delta_step: ComputeKernel,
     gated_norm: ComputeKernel,
 }
 
@@ -149,6 +153,12 @@ impl Kernels {
                 device,
                 "Qwen 3.5 delta rule",
                 wgpu::include_wgsl!("gpu/delta.wgsl"),
+                &[true, true, true, true, false, false, false],
+            ),
+            delta_step: ComputeKernel::new(
+                device,
+                "Qwen 3.5 delta step",
+                wgpu::include_wgsl!("gpu/delta_step.wgsl"),
                 &[true, true, true, true, false, false, false],
             ),
             gated_norm: ComputeKernel::new(
@@ -568,7 +578,12 @@ impl Qwen3_5GpuDecoder {
             scale: (dk as f32).powf(-0.5),
             _pad: [0; 2],
         };
-        self.kernels.delta.encode_workgroups(
+        let delta = if seq == 1 {
+            &self.kernels.delta_step
+        } else {
+            &self.kernels.delta
+        };
+        delta.encode_workgroups(
             &self.context,
             encoder,
             &self.context.uniform_buffer(&info),
@@ -595,8 +610,8 @@ impl Qwen3_5GpuDecoder {
             encoder,
             &self.context.uniform_buffer(&info),
             &[&z, &layer.norm, &core],
-            rows * nv,
-            32,
+            rows * nv * GATED_NORM_THREADS,
+            GATED_NORM_THREADS,
         );
         self.linear(encoder, pool, &core, &layer.out)
     }
@@ -770,5 +785,100 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
             self.layers.len(),
         )?;
         GpuDecoder::final_norm(self, encoder, pool, &hidden)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+
+    fn random(n: usize, seed: u64) -> Array1<f32> {
+        let mut state = seed | 1;
+        Array1::from_shape_fn(n, |_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / 8_388_608.0 - 1.0
+        })
+    }
+
+    /// The one-token delta rule gives what the general one gives for a sequence
+    /// of one: output, state and the captured state, in both head layouts, with
+    /// value columns that do not fill the last workgroup.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn the_delta_step_matches_the_delta_rule_for_one_token() {
+        let ctx = WgpuContext::new().await.unwrap();
+        let kernels = Kernels::new(&ctx.device);
+        let (batch, nk, nv, dk, dv) = (2usize, 2usize, 4usize, 128usize, 48usize);
+        let channels = 2 * nk * dk + nv * dv;
+        let tensor = |a: Array1<f32>| GpuTensor::from_ndarray(&ctx, &a).unwrap();
+        let qkv = random(batch * channels, 1);
+        let a = random(batch * nv, 2);
+        let b = random(batch * nv, 3);
+        let mut params = random(2 * nv, 4);
+        params
+            .slice_mut(ndarray::s![..nv])
+            .mapv_inplace(|x| -x.abs() - 0.1);
+        let state = random(batch * nv * dk * dv, 5);
+
+        for tiled in [0u32, 1] {
+            let run = |kernel: &ComputeKernel| {
+                let (qkv, a, b, params) = (
+                    tensor(qkv.clone()),
+                    tensor(a.clone()),
+                    tensor(b.clone()),
+                    tensor(params.clone()),
+                );
+                let state = tensor(state.clone());
+                let captured = tensor(Array1::zeros(batch * nv * dk * dv));
+                let out = tensor(Array1::zeros(batch * nv * dv));
+                let info = DeltaInfo {
+                    batch: batch as u32,
+                    seq: 1,
+                    k_heads: nk as u32,
+                    v_heads: nv as u32,
+                    key_dim: dk as u32,
+                    value_dim: dv as u32,
+                    tiled,
+                    capture: 1,
+                    channels: channels as u32,
+                    scale: (dk as f32).powf(-0.5),
+                    _pad: [0; 2],
+                };
+                let mut encoder = ctx.device.create_command_encoder(&Default::default());
+                kernel.encode_workgroups(
+                    &ctx,
+                    &mut encoder,
+                    &ctx.uniform_buffer(&info),
+                    &[&qkv, &a, &b, &params, &state, &captured, &out],
+                    [dv.div_ceil(DELTA_COLS) as u32, nv as u32, batch as u32],
+                );
+                ctx.queue.submit(Some(encoder.finish()));
+                async move {
+                    (
+                        out.to_ndarray_1d::<f32>().await.unwrap(),
+                        state.to_ndarray_1d::<f32>().await.unwrap(),
+                        captured.to_ndarray_1d::<f32>().await.unwrap(),
+                    )
+                }
+            };
+            let want = run(&kernels.delta).await;
+            let got = run(&kernels.delta_step).await;
+            for (what, g, w) in [
+                ("output", &got.0, &want.0),
+                ("state", &got.1, &want.1),
+                ("captured", &got.2, &want.2),
+            ] {
+                let worst = g
+                    .iter()
+                    .zip(w.iter())
+                    .map(|(g, w)| (g - w).abs())
+                    .fold(0.0f32, f32::max);
+                assert!(worst < 1e-5, "{what}, tiled {tiled}: differs by {worst:e}");
+            }
+            assert!(want.0.iter().any(|x| x.abs() > 1e-3));
+        }
     }
 }
