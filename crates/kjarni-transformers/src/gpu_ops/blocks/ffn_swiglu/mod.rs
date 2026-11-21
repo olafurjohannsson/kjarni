@@ -1,5 +1,6 @@
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
+use crate::gpu_ops::primitives::linear::q8::Q8Gemv;
 use crate::tensor::DType;
 use crate::{WgpuContext, gpu_profile};
 use anyhow::Result;
@@ -52,6 +53,9 @@ pub struct GpuSwiGLUFFN {
     elementwise_bind_group_layout: wgpu::BindGroupLayout,
     elementwise_pipeline: wgpu::ComputePipeline,
     linear_layer: GpuLinearLayer,
+    /// Decode's gate and up projections on int8 activations, when the context
+    /// allows it.
+    q8: Q8Gemv,
     context: Arc<WgpuContext>,
 }
 
@@ -346,6 +350,7 @@ impl GpuSwiGLUFFN {
             elementwise_bind_group_layout,
             elementwise_pipeline,
             linear_layer: GpuLinearLayer::new(context),
+            q8: Q8Gemv::new(context),
             context: context.clone(),
         })
     }
@@ -469,6 +474,17 @@ impl GpuSwiGLUFFN {
         let is_q4k = weights.gate_proj.dtype() == DType::Q4_K;
 
         let q4k_gemv = is_q4k && m <= FUSED_Q4K_GEMV_MAX_ROWS;
+        if q4k_gemv && self.context.int8_activations {
+            self.q8.encode_swiglu_q4k(
+                encoder,
+                input,
+                &weights.gate_proj,
+                &weights.up_proj,
+                output,
+                (m, k, n),
+            );
+            return;
+        }
         let (pipeline, bind_group) = if is_q4k {
             let pipeline = if q4k_gemv {
                 &self.fused_gemv_q4k

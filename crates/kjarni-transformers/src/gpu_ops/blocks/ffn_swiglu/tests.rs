@@ -90,7 +90,12 @@ async fn q4k_fused_gate_up_matches_cpu() -> Result<()> {
         }
     }
 
-    let context = WgpuContext::new().await?;
+    // Exact mode: these compare against the CPU's f32-activation kernel.
+    let context = WgpuContext::with_config(crate::gpu_ops::context::GpuConfig {
+        exact_quantized: true,
+        ..Default::default()
+    })
+    .await?;
     let ffn = GpuSwiGLUFFN::new(&context)?;
 
     let gate_g =
@@ -190,7 +195,12 @@ async fn q4k_fused_rows_short_of_a_workgroup() -> Result<()> {
     let (gate_blocks, up_blocks) = (read(gate)?, read(up)?);
     let k = 3072;
 
-    let context = WgpuContext::new().await?;
+    // Exact mode: these compare against the CPU's f32-activation kernel.
+    let context = WgpuContext::with_config(crate::gpu_ops::context::GpuConfig {
+        exact_quantized: true,
+        ..Default::default()
+    })
+    .await?;
     let ffn = GpuSwiGLUFFN::new(&context)?;
     for (rows, n) in [(1usize, 1usize), (1, 3), (1, 7), (3, 5), (10, 6)] {
         let blocks = n * k / 256;

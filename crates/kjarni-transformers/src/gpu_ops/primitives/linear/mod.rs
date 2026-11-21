@@ -3,7 +3,7 @@ use crate::tensor::DType;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
 
-mod q8;
+pub(crate) mod q8;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -280,11 +280,24 @@ impl GpuLinearLayer {
         let split = n <= SPLIT_MAX_OUTPUTS && k >= SPLIT_MIN_INPUTS;
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
 
-        if use_q4k_kernel && self.context.int8_activations {
-            let info = LinearInfo { m, k, n };
-            self.q8
-                .encode_q4k(encoder, input, weights, output, info, split);
-            return;
+        if self.context.int8_activations {
+            let kernel = if use_q4k_kernel && split {
+                Some(q8::Q8Kernel::Q4KSplit)
+            } else if use_q4k_kernel {
+                Some(q8::Q8Kernel::Q4K)
+            } else if use_q5k_kernel && split {
+                Some(q8::Q8Kernel::Q5KSplit)
+            } else if use_q5k_kernel {
+                Some(q8::Q8Kernel::Q5K)
+            } else {
+                None
+            };
+            if let Some(kernel) = kernel {
+                let info = LinearInfo { m, k, n };
+                self.q8
+                    .encode(encoder, input, weights, output, info, kernel);
+                return;
+            }
         }
 
         // Below this many rows the 128x128 GEMM tile is mostly empty and the
