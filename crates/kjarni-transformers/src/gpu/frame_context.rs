@@ -34,7 +34,7 @@ pub fn submit_between_layers(
 }
 
 fn submits_after(layer: usize, end_layer: usize) -> bool {
-    (layer + 1) % LAYERS_PER_SUBMIT == 0 && layer + 1 < end_layer
+    (layer + 1).is_multiple_of(LAYERS_PER_SUBMIT) && layer + 1 < end_layer
 }
 
 /// A guard that manages the resources for a single frame of GPU work.
