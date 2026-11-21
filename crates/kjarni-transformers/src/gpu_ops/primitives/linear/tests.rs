@@ -156,7 +156,7 @@ async fn q4k_batched_matches_cpu() -> Result<()> {
 
 /// `gemv_q4k` when the output rows do not fill its last workgroup, for one row and for a
 /// few. Every tensor in the file has a row count divisible by 8, so these use the first
-/// rows of one.
+/// rows of one. Rows of 4096 and more take `gemv_q4k_split`.
 #[cfg(target_arch = "x86_64")]
 #[tokio::test]
 #[ignore = "GPU required"]
@@ -175,12 +175,18 @@ async fn q4k_gemv_rows_short_of_a_workgroup() -> Result<()> {
     let blocks: Vec<BlockQ4_K> = weights.with_raw_tensor(name, |v| {
         Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
     })?;
-    let k = 3072;
-    let blocks_per_row = k / 256;
-
     let context = WgpuContext::new().await?;
     let linear = GpuLinearLayer::new(&context);
-    for (m, n) in [(1, 1), (1, 7), (1, 13), (3, 13), (10, 15)] {
+    for (m, n, k) in [
+        (1, 1, 3072),
+        (1, 7, 3072),
+        (1, 13, 3072),
+        (3, 13, 3072),
+        (10, 15, 3072),
+        (1, 13, 4096),
+        (3, 7, 8192),
+    ] {
+        let blocks_per_row = k / 256;
         let row_blocks = &blocks[..n * blocks_per_row];
         let view = crate::tensor::raw_tensor::TensorView {
             name: name.to_string(),
@@ -609,9 +615,20 @@ async fn run_q8(m: usize, n: usize, k: usize) -> Result<(Array2<f32>, Array2<f32
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q8_gemv_matches_cpu() -> Result<()> {
-    // `n` deliberately includes values that are not multiples of the four rows a
-    // GEMV workgroup owns, so the tail path is covered.
-    for (n, k) in [(64, 64), (128, 256), (255, 128), (33, 512), (1, 32)] {
+    // Under Q8_NARROW_MAX_OUTPUTS rows a workgroup takes one row; from it on, four,
+    // and `n` includes values that are not multiples of four so the tail is covered.
+    // (32, 2560) is Qwen 3.5's gate projections.
+    for (n, k) in [
+        (64, 64),
+        (128, 256),
+        (255, 128),
+        (33, 512),
+        (1, 32),
+        (32, 2560),
+        (256, 64),
+        (259, 96),
+        (517, 160),
+    ] {
         let (gpu, cpu) = run_q8(1, n, k).await?;
         report(&format!("q8 gemv [{n}x{k}]"), &gpu, &cpu, &[n, k]);
     }
@@ -627,6 +644,7 @@ async fn q8_batched_matches_cpu() -> Result<()> {
         (4, 64, 128),
         (8, 129, 256),
         (2, 32, 64),
+        (3, 32, 2560),
         (67, 200, 96),
         (127, 65, 160),
         (128, 128, 64),
@@ -820,7 +838,14 @@ async fn q5k_matches_its_dequantisation() -> Result<()> {
     let context = WgpuContext::new().await?;
     let linear = GpuLinearLayer::new(&context);
 
-    for (n, k) in [(13usize, 256usize), (64, 512), (257, 768)] {
+    // Rows of 4096 and more take gemv_q5k_split for a GEMV.
+    for (n, k) in [
+        (13usize, 256usize),
+        (64, 512),
+        (257, 768),
+        (13, 4096),
+        (40, 8192),
+    ] {
         let blocks: Vec<BlockQ5_K> = (0..n * k / 256)
             .map(|_| {
                 let mut bytes = [0u8; 176];

@@ -27,6 +27,16 @@ const GEMM_FEW_ROWS: u32 = 3;
 /// rises with each row and a tile's does not, and the two meet about here.
 const GEMM_WIDE_MAX_ROWS: u32 = 10;
 
+/// Below this many outputs a Q8_0 GEMV takes a workgroup per output row, as four
+/// rows a workgroup leaves most of the GPU idle.
+const Q8_NARROW_MAX_OUTPUTS: u32 = 256;
+
+/// Up to this many outputs, with rows of at least SPLIT_MIN_INPUTS, a Q4_K or
+/// Q5_K GEMV workgroup has four warps share its rows, as one warp each leaves
+/// too few warps to keep the GPU's memory busy.
+const SPLIT_MAX_OUTPUTS: u32 = 4096;
+const SPLIT_MIN_INPUTS: u32 = 4096;
+
 /// The fewest outputs for a wide GEMM. Below this a workgroup per output is wasted.
 const GEMM_WIDE_MIN_OUTPUTS: u32 = 128;
 
@@ -39,6 +49,8 @@ pub struct GpuLinearLayer {
     gemv_bf16: wgpu::ComputePipeline,
     gemv_bf16_wide: wgpu::ComputePipeline,
     gemv_q4k: wgpu::ComputePipeline,
+    gemv_q4k_split: wgpu::ComputePipeline,
+    gemv_q5k_split: wgpu::ComputePipeline,
     gemm_q4k: wgpu::ComputePipeline,
     gemv_q5k: wgpu::ComputePipeline,
     gemm_q5k: wgpu::ComputePipeline,
@@ -46,6 +58,7 @@ pub struct GpuLinearLayer {
     gemv_q6k: wgpu::ComputePipeline,
     gemm_q6k: wgpu::ComputePipeline,
     gemv_q8: wgpu::ComputePipeline,
+    gemv_q8_narrow: wgpu::ComputePipeline,
     gemm_q8: wgpu::ComputePipeline,
     gemm_f32: wgpu::ComputePipeline,
     gemm64_f32: wgpu::ComputePipeline,
@@ -203,6 +216,8 @@ impl GpuLinearLayer {
             gemv_bf16: make_pipeline("gemv_bf16"),
             gemv_bf16_wide: make_pipeline("gemv_bf16_wide"),
             gemv_q4k: make_pipeline("gemv_q4k"),
+            gemv_q4k_split: make_pipeline("gemv_q4k_split"),
+            gemv_q5k_split: make_pipeline("gemv_q5k_split"),
             gemm_q4k: make_pipeline("gemm_q4k"),
             gemv_q5k: make_pipeline("gemv_q5k"),
             gemm_q5k: make_pipeline("gemm_q5k"),
@@ -210,6 +225,7 @@ impl GpuLinearLayer {
             gemv_q6k: make_pipeline("gemv_q6k"),
             gemm_q6k: make_pipeline("gemm_q6k"),
             gemv_q8: make_pipeline("gemv_q8"),
+            gemv_q8_narrow: make_pipeline("gemv_q8_narrow"),
             gemm_q8: make_pipeline("gemm_q8"),
             gemm_f32: make_pipeline("gemm_f32"),
             gemm64_f32: make_pipeline("gemm64_f32"),
@@ -252,6 +268,8 @@ impl GpuLinearLayer {
         let use_q5k_kernel = few_quantized_rows && is_q5k;
         let use_q6k_kernel = few_quantized_rows && is_q6k;
         let use_q8_kernel = few_quantized_rows && is_q8;
+        let use_q8_narrow = use_q8_kernel && n < Q8_NARROW_MAX_OUTPUTS;
+        let split = n <= SPLIT_MAX_OUTPUTS && k >= SPLIT_MIN_INPUTS;
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
 
         // Below this many rows the 128x128 GEMM tile is mostly empty and the
@@ -262,7 +280,9 @@ impl GpuLinearLayer {
             is_float && !is_gemv && m <= GEMM_WIDE_MAX_ROWS && n >= GEMM_WIDE_MIN_OUTPUTS;
         let few_rows = is_float && !is_gemv && !wide_gemm && m < GEMM_FEW_ROWS;
 
-        let pipeline = if use_q4k_kernel {
+        let pipeline = if use_q4k_kernel && split {
+            &self.gemv_q4k_split
+        } else if use_q4k_kernel {
             &self.gemv_q4k
         } else if is_q4k {
             if small_tile {
@@ -270,6 +290,8 @@ impl GpuLinearLayer {
             } else {
                 &self.gemm_q4k
             }
+        } else if use_q5k_kernel && split {
+            &self.gemv_q5k_split
         } else if use_q5k_kernel {
             &self.gemv_q5k
         } else if is_q5k {
@@ -286,6 +308,8 @@ impl GpuLinearLayer {
             } else {
                 &self.gemm_q6k
             }
+        } else if use_q8_narrow {
+            &self.gemv_q8_narrow
         } else if use_q8_kernel {
             &self.gemv_q8
         } else if is_q8 {
@@ -383,7 +407,9 @@ impl GpuLinearLayer {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                if use_q4k_kernel || use_q5k_kernel || use_q6k_kernel || use_q8_kernel {
+                if use_q8_narrow {
+                    pass.dispatch_workgroups(n, 1, m);
+                } else if use_q4k_kernel || use_q5k_kernel || use_q6k_kernel || use_q8_kernel {
                     // Each workgroup produces 8 output rows for Q4_K and Q5_K, and 4 otherwise.
                     let rows = n.div_ceil(if use_q4k_kernel || use_q5k_kernel {
                         8
