@@ -108,6 +108,8 @@ const MAX_KEY_DIM: usize = 128;
 const MAX_CONV_KERNEL: usize = 8;
 /// Threads sharing one head of the gated norm.
 const GATED_NORM_THREADS: usize = 64;
+/// Threads per (row, head) in prepare_q.wgsl and prepare_kv.wgsl.
+const PREPARE_THREADS: usize = 64;
 /// Value columns per workgroup of the delta rule.
 const DELTA_COLS: usize = 32;
 
@@ -457,8 +459,8 @@ impl Qwen3_5GpuDecoder {
             encoder,
             &self.context.uniform_buffer(&info),
             &[&qg, &layer.q_norm, cos, sin, &q],
-            rows * heads,
-            32,
+            rows * heads * PREPARE_THREADS,
+            PREPARE_THREADS,
         );
         let info = PrepareKvInfo {
             rows: rows as u32,
@@ -478,8 +480,8 @@ impl Qwen3_5GpuDecoder {
             encoder,
             &self.context.uniform_buffer(&info),
             &[&k, &v, &layer.k_norm, cos, sin, &k_store, &v_store],
-            rows * kv_heads,
-            32,
+            rows * kv_heads * PREPARE_THREADS,
+            PREPARE_THREADS,
         );
 
         let attended = self.attention.attend(
