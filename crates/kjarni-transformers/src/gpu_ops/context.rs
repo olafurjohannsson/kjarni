@@ -51,6 +51,10 @@ pub struct WgpuContext {
     pub profiler: GpuProfiler,
     pub uniform_arena: GpuUniformBuffer,
     uniform_buffers: std::sync::Mutex<HashMap<Vec<u8>, wgpu::Buffer>>,
+    /// Quantised GEMVs round their activations to int8 and multiply with
+    /// dot4I8Packed. Off when [`GpuConfig::exact_quantized`] is set or the WGSL
+    /// implementation lacks packed integer dot products.
+    pub int8_activations: bool,
 }
 
 /// The largest workgroup any shader in the crate declares, `(32, 32, 1)`.
@@ -111,6 +115,11 @@ impl WgpuContext {
         // outright rather than merely losing the profiler.
         const WANTED: Features =
             Features::TIMESTAMP_QUERY.union(Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+
+        let int8_activations = !config.exact_quantized
+            && instance
+                .wgsl_language_features()
+                .contains(wgpu::WgslLanguageFeatures::Packed4x8IntegerDotProduct);
 
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
@@ -205,6 +214,7 @@ impl WgpuContext {
             profiler,
             uniform_arena,
             uniform_buffers: std::sync::Mutex::new(HashMap::new()),
+            int8_activations,
         }))
     }
 
@@ -381,6 +391,10 @@ pub struct GpuConfig {
     pub kv_cache_memory_mb: u64,
     pub prefer_texture_embeddings: bool,
     pub min_batch_size_for_gpu: usize,
+    /// Quantised weights on the GPU give the same results as on the CPU, to
+    /// float rounding, instead of rounding activations to int8 for speed.
+    /// Defaults to on when the environment sets `KJARNI_GPU_EXACT=1`.
+    pub exact_quantized: bool,
 }
 
 impl Default for GpuConfig {
@@ -389,6 +403,7 @@ impl Default for GpuConfig {
             kv_cache_memory_mb: 1024,
             prefer_texture_embeddings: true,
             min_batch_size_for_gpu: 128,
+            exact_quantized: std::env::var("KJARNI_GPU_EXACT").is_ok_and(|v| v == "1"),
         }
     }
 }

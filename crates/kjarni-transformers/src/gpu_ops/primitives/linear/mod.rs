@@ -3,6 +3,8 @@ use crate::tensor::DType;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
 
+mod q8;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct LinearInfo {
@@ -73,6 +75,7 @@ pub struct GpuLinearLayer {
     gemm_few_rows_bf16: wgpu::ComputePipeline,
 
     buffer: wgpu::Buffer,
+    q8: q8::Q8Gemv,
 }
 
 impl GpuLinearLayer {
@@ -243,6 +246,7 @@ impl GpuLinearLayer {
             gemm_few_rows_f32: make_pipeline("gemm_few_rows_f32"),
             gemm_few_rows_bf16: make_pipeline("gemm_few_rows_bf16"),
             buffer,
+            q8: q8::Q8Gemv::new(context),
         }
     }
 
@@ -275,6 +279,13 @@ impl GpuLinearLayer {
         let use_q8_narrow = use_q8_kernel && n < Q8_NARROW_MAX_OUTPUTS;
         let split = n <= SPLIT_MAX_OUTPUTS && k >= SPLIT_MIN_INPUTS;
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
+
+        if use_q4k_kernel && self.context.int8_activations {
+            let info = LinearInfo { m, k, n };
+            self.q8
+                .encode_q4k(encoder, input, weights, output, info, split);
+            return;
+        }
 
         // Below this many rows the 128x128 GEMM tile is mostly empty and the
         // 64x64 one is faster; above it the larger tile reuses more.
