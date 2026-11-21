@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2};
-use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, ComputePipeline};
 
 use crate::WgpuContext;
 use crate::activations::Activation;
@@ -159,7 +159,7 @@ impl GpuFeedForwardStd {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         weights: &GpuFeedForwardWeights,
         pool: &mut GpuTensorPool,
@@ -178,7 +178,7 @@ impl GpuFeedForwardStd {
 
     pub fn encode_2(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         weights: &GpuFeedForwardWeights,
         pool: &mut GpuTensorPool,
@@ -194,7 +194,7 @@ impl GpuFeedForwardStd {
 
     pub fn forward(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuFeedForwardWeights,
         input: &GpuTensor,
         intermediate: &GpuTensor,
@@ -206,7 +206,7 @@ impl GpuFeedForwardStd {
 
     pub fn run_fc1(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuFeedForwardWeights,
         input: &GpuTensor,
         output: &GpuTensor,
@@ -277,7 +277,7 @@ impl GpuFeedForwardStd {
 
     pub fn run_fc2(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuFeedForwardWeights,
         input: &GpuTensor,
         output: &GpuTensor,

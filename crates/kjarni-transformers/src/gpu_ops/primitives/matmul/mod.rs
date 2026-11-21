@@ -4,7 +4,7 @@ use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
 use crate::tensor::DType;
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline};
 
 /// Uniform parameters passed to matmul shaders.
 #[repr(C)]
@@ -86,7 +86,12 @@ impl GpuMatMul {
 
 impl Kernel for GpuMatMul {
     /// Encodes matrix multiplication operation to command encoder
-    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
+    fn encode(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        inputs: &[&GpuTensor],
+        output: &GpuTensor,
+    ) {
         let a = inputs[0];
         let b = inputs[1];
 
@@ -220,7 +225,7 @@ fn create_pipeline(
 
 fn run_internal_matmul(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut crate::gpu::GpuEncoder,
     pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,
     _uniform_buffer: &Buffer,

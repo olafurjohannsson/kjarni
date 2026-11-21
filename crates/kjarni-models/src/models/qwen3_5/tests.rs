@@ -784,7 +784,9 @@ mod gpu {
             }
         };
         let flush = |c: &std::sync::Arc<WgpuContext>| {
-            let mut enc = c.device.create_command_encoder(&Default::default());
+            let mut enc = kjarni_transformers::gpu::GpuEncoder::from_encoder(
+                c.device.create_command_encoder(&Default::default()),
+            );
             c.profiler.process_results(&mut enc);
             c.queue.submit(Some(enc.finish()));
         };

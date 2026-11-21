@@ -27,7 +27,9 @@ async fn test_gpu_slice_parity() -> Result<()> {
             offset[3]..offset[3] + shape[3]
         ])
         .to_owned();
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let actual_slice_gpu = source_gpu.slice(&mut encoder, &slice_kernel, &offset, &shape)?;
     context.queue.submit(Some(encoder.finish()));
     let actual_slice_cpu: Array4<f32> = read_gpu_tensor(&actual_slice_gpu).await?;

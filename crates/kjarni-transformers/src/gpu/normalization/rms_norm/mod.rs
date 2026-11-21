@@ -119,7 +119,7 @@ impl GpuRMSNorm {
     /// Encodes the RMSNorm operation.
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuRMSNormWeights,
         input: &GpuTensor,
         output: &GpuTensor,

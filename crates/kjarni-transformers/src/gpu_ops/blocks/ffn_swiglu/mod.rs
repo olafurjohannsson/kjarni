@@ -352,7 +352,7 @@ impl GpuSwiGLUFFN {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuSwiGLUFFNWeights,
         input: &GpuTensor,
         output: &GpuTensor,
@@ -398,7 +398,7 @@ impl GpuSwiGLUFFN {
     /// `silu(gate) * up`, elementwise. The unfused half of `encode`.
     fn encode_swiglu_elementwise(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         gate: &GpuTensor,
         up: &GpuTensor,
         output: &GpuTensor,
@@ -440,7 +440,7 @@ impl GpuSwiGLUFFN {
 
     fn encode_fused_gate_up(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         weights: &GpuSwiGLUFFNWeights,
         output: &GpuTensor,

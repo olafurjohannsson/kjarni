@@ -160,7 +160,9 @@ where
         mapped_at_creation: false,
     });
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
     context.queue.submit(std::iter::once(encoder.finish()));
 

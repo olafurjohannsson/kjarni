@@ -27,7 +27,7 @@ impl GpuCrossAttention {
     /// Precomputes K and V from encoder hidden states
     pub fn precompute_kv(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         encoder_hidden_states: &GpuTensor,
         weights: &GpuAttentionWeights,
         pool: &mut GpuTensorPool,
@@ -61,7 +61,7 @@ impl GpuCrossAttention {
     /// Performs cross-attention using precomputed K/V
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         decoder_hidden_states: &GpuTensor,
         precomputed_kv: &(GpuTensor, GpuTensor),
         weights: &GpuAttentionWeights,

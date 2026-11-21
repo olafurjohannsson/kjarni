@@ -16,7 +16,6 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
 #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
-use wgpu::CommandEncoder;
 
 /// Defines the generation loop.
 #[async_trait]
@@ -88,7 +87,7 @@ pub trait GpuDecoder: Send + Sync {
 
     fn embed_norm(
         &self,
-        _cmd_encoder: &mut CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -96,7 +95,7 @@ pub trait GpuDecoder: Send + Sync {
     }
     fn final_norm(
         &self,
-        _cmd_encoder: &mut CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -105,7 +104,7 @@ pub trait GpuDecoder: Send + Sync {
 
     fn embed(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -113,7 +112,7 @@ pub trait GpuDecoder: Send + Sync {
 
     fn embed_and_normalize(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -121,7 +120,7 @@ pub trait GpuDecoder: Send + Sync {
 
     fn forward_layers(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -134,7 +133,7 @@ pub trait GpuDecoder: Send + Sync {
     #[cfg(not(target_arch = "wasm32"))]
     fn forward_layers2(
         &self,
-        _cmd_encoder: &mut CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _hidden_states: &GpuTensor,
         _encoder_hidden_states: &GpuTensor,
@@ -151,7 +150,7 @@ pub trait GpuDecoder: Send + Sync {
     #[cfg(not(target_arch = "wasm32"))]
     fn precompute_cross_attention_kv(
         &self,
-        _cmd_encoder: &mut CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache> {
@@ -165,7 +164,7 @@ pub trait GpuDecoder: Send + Sync {
     /// Default full forward pass.
     fn forward(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         attention_mask: &GpuTensor,

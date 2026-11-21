@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -37,7 +37,12 @@ impl Kernel for GpuAddBias {
     ///   - `input` can be any rank.
     ///   - `bias` must be a 1D tensor.
     /// * `output` - The tensor where the result is written. Must have the same shape as `input`.
-    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
+    fn encode(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        inputs: &[&GpuTensor],
+        output: &GpuTensor,
+    ) {
         let input = inputs[0];
         let bias = inputs[1];
 
@@ -74,7 +79,7 @@ impl Kernel for GpuAddBias {
 /// The internal, private implementation that sets up and dispatches the shader.
 fn run_internal_add_bias(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut crate::gpu::GpuEncoder,
     pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,
     input: &Buffer,

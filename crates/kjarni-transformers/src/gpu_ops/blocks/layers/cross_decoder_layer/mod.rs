@@ -63,7 +63,7 @@ impl GpuCrossDecoderLayer {
 
     pub fn precompute_cross_kv(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         encoder_hidden_states: &GpuTensor,
         pool: &mut GpuTensorPool,
     ) -> (GpuTensor, GpuTensor) {
@@ -78,7 +78,7 @@ impl GpuCrossDecoderLayer {
     /// Forward pass
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         cross_kv: &(GpuTensor, GpuTensor),
         decoder_mask: &GpuTensor,
@@ -156,7 +156,7 @@ impl GpuCrossDecoderLayer {
     /// as Whisper does.
     pub fn forward_prenorm(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         cross_kv: &(GpuTensor, GpuTensor),
         decoder_mask: &GpuTensor,

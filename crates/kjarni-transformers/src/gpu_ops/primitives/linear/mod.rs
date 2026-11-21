@@ -202,9 +202,13 @@ impl GpuLinearLayer {
             })
         };
 
+        // Bound in the weight slots a dtype does not read. Large enough for any
+        // kernel's view of a slot: wgpu 27 keeps the previous pipeline's minimum
+        // binding sizes when the next pipeline in a pass has the same layout, so a
+        // kernel that never reads a slot can be held to another kernel's minimum.
         let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Linear Dummy"),
-            size: 4,
+            size: 256,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
@@ -244,7 +248,7 @@ impl GpuLinearLayer {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         weights: &GpuTensor,
         output: &GpuTensor,

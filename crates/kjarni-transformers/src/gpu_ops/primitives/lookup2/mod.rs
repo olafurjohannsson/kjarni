@@ -49,7 +49,7 @@ impl GpuLookup2 {
     /// output[i, j, k] = embedding_table[input_ids[i, j], k]
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         embedding_table: &GpuTensor, // [vocab_size, hidden_size], F32 or BF16
         input_ids: &GpuTensor,       // [batch_size, seq_len], U32
         output: &GpuTensor,          // [batch_size, seq_len, hidden_size], F32

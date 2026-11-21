@@ -100,7 +100,7 @@ impl GpuSlice {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         src: &GpuTensor,
         dst: &GpuTensor,
         offset: &[usize], // [B, H, S, D] offsets

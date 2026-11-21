@@ -31,7 +31,9 @@ mod tests {
         let gpu_src = GpuTensor::from_ndarray(&context, &src)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![4, 8, 64], DType::F32, "")?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&mut encoder, &gpu_src, &gpu_dst, 0);
         context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -62,7 +64,9 @@ mod tests {
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![num_beams, seq, hidden], DType::F32, "")?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&mut encoder, &gpu_src, &gpu_dst, 0);
         context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -97,7 +101,9 @@ mod tests {
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![1, 2, 4], DType::F32, "")?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&mut encoder, &gpu_src, &gpu_dst, 0);
         context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -124,7 +130,9 @@ mod tests {
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![num_beams, seq, hidden], DType::F32, "")?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&mut encoder, &gpu_src, &gpu_dst, 0);
         context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -156,7 +164,9 @@ mod tests {
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![num_beams, seq, hidden], DType::F32, "")?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&mut encoder, &gpu_src, &gpu_dst, 0);
         context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -185,7 +195,9 @@ mod tests {
             let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
             let gpu_dst = GpuTensor::zeros(&context, vec![num_beams, 4, 8], DType::F32, "")?;
 
-            let mut encoder = context.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             kernel.encode(&mut encoder, &gpu_src, &gpu_dst, 0);
             context.queue.submit(std::iter::once(encoder.finish()));
 

@@ -6,7 +6,6 @@ use crate::gpu_ops::blocks::cache::GpuUpdateCache;
 use anyhow::{Result, anyhow};
 use std::any::Any;
 use std::sync::Arc;
-use wgpu::CommandEncoder;
 
 pub struct GpuKVCache {
     // A vector of K-cache tensors, one for each decoder layer
@@ -87,7 +86,7 @@ impl GpuKVCache {
     /// Encodes a GPU command to append new key and value tensors to the cache
     pub fn update(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         layer_idx: usize,
         new_k: &GpuTensor,
         new_v: &GpuTensor,

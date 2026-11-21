@@ -97,7 +97,7 @@ impl Kernel {
     fn encode(
         &self,
         context: &WgpuContext,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         uniforms: &wgpu::Buffer,
         tensors: &[&GpuTensor],
         threads: usize,
@@ -209,7 +209,7 @@ impl GpuRoPEAttention {
     /// must have room for them.
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         weights: &GpuAttentionWeights,
         rope: &GpuRoPE,
@@ -301,7 +301,7 @@ impl GpuRoPEAttention {
     /// `position_offset + s` sees the keys up to it that the mask allows.
     pub fn attend(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         q_rotated: &GpuTensor,
         k_store: &GpuTensor,
         v_store: &GpuTensor,
@@ -384,7 +384,7 @@ impl GpuRoPEAttention {
     #[allow(clippy::too_many_arguments)]
     fn attend_one(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         q_rotated: &GpuTensor,
         k_store: &GpuTensor,
         v_store: &GpuTensor,
@@ -442,7 +442,7 @@ impl GpuRoPEAttention {
 
     fn encode_write_kv(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         q_proj: &GpuTensor,
         k_proj: &GpuTensor,
         v_proj: &GpuTensor,
@@ -569,7 +569,9 @@ mod tests {
         let mask = Array2::<f32>::ones((1, seq_len));
         let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask).unwrap();
 
-        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(ctx.clone());
 
         let result = attn.forward(
@@ -623,7 +625,9 @@ mod tests {
         let cached_k_gpu = GpuTensor::from_ndarray(&ctx, &cached_k).unwrap();
         let cached_v_gpu = GpuTensor::from_ndarray(&ctx, &cached_v).unwrap();
 
-        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(ctx.clone());
 
         let result = attn.forward(
@@ -789,7 +793,9 @@ mod tests {
                 GpuTensor::from_ndarray(&ctx, &mask.slice(s![.., ..keys]).to_owned()).unwrap();
             let input = GpuTensor::from_ndarray(&ctx, input).unwrap();
             async move {
-                let mut enc = ctx.device.create_command_encoder(&Default::default());
+                let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                    ctx.device.create_command_encoder(&Default::default()),
+                );
                 let mut pool = GpuTensorPool::new(ctx.clone());
                 let out = attn
                     .forward(
@@ -895,7 +901,9 @@ mod tests {
         let k_gpu = gpu(&k, [batch, kv_heads, capacity, d]);
         let v_gpu = gpu(&v, [batch, kv_heads, capacity, d]);
         let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask).unwrap();
-        let mut enc = ctx.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(ctx.clone());
         let out = attn.attend(
             &mut enc, &q_gpu, &k_gpu, &v_gpu, &mask_gpu, position, keys, &mut pool,
@@ -955,7 +963,9 @@ mod tests {
         let cache = Array4::<f32>::zeros((1, 8, 4, 8));
         let k = GpuTensor::from_ndarray(&ctx, &cache).unwrap();
         let v = GpuTensor::from_ndarray(&ctx, &cache).unwrap();
-        let mut enc = ctx.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(ctx.clone());
         let result = attn.forward(
             &mut enc,

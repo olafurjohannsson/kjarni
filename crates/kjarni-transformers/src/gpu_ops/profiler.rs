@@ -9,10 +9,11 @@ use std::sync::Mutex;
 #[macro_export]
 macro_rules! gpu_profile {
     ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
-        $ctx.profiler
-            .profile($encoder, $label, |pass: &mut wgpu::ComputePass<'_>| {
-                $body(pass)
-            })
+        $ctx.profiler.profile(
+            $encoder.raw(),
+            $label,
+            |pass: &mut wgpu::ComputePass<'_>| $body(pass),
+        )
     }};
 }
 
@@ -20,12 +21,9 @@ macro_rules! gpu_profile {
 #[macro_export]
 macro_rules! gpu_profile {
     ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
-        let mut pass: wgpu::ComputePass<'_> =
-            $encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some($label),
-                timestamp_writes: None,
-            });
-        $body(&mut pass)
+        let _ = $label;
+        let pass: &mut wgpu::ComputePass<'static> = $encoder.pass();
+        $body(pass)
     }};
 }
 
@@ -256,7 +254,9 @@ mod tests {
         let out = GpuTensor::from_ndarray(&ctx, &Array1::<f32>::zeros(1024)).unwrap();
         let uniforms = ctx.uniform_buffer(&[1024u32, 0, 0, 0]);
         ctx.profiler.totals(&ctx).await;
-        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&ctx, &mut encoder, &uniforms, &[&out], 1024, 64);
         kernel.encode(&ctx, &mut encoder, &uniforms, &[&out], 1024, 64);
         ctx.profiler.process_results(&mut encoder);

@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -29,7 +29,7 @@ impl GpuSoftmax {
     }
 
     /// A more specialized encode method for softmax which is in-place and needs extra params.
-    pub fn encode(&self, encoder: &mut CommandEncoder, tensor: &GpuTensor, scale: f32) {
+    pub fn encode(&self, encoder: &mut crate::gpu::GpuEncoder, tensor: &GpuTensor, scale: f32) {
         // Softmax operates on the last dimension.
         // The "rows" are all preceding dimensions combined.
         let last_dim = tensor.shape().last().unwrap();
@@ -51,7 +51,7 @@ impl GpuSoftmax {
     /// The powerful version for padded/cached data.
     pub fn encode_padded(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         tensor: &GpuTensor,
         valid_cols: u32,
         scale: f32,
@@ -75,7 +75,7 @@ impl GpuSoftmax {
 
 fn run_internal_softmax(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut crate::gpu::GpuEncoder,
     pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,
     data: &Buffer,

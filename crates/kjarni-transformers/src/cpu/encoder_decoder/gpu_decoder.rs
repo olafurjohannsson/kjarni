@@ -2,7 +2,6 @@
 
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
-use wgpu::CommandEncoder;
 
 use crate::{
     WgpuContext,
@@ -396,7 +395,7 @@ impl Seq2SeqGPUDecoder {
 
     pub fn forward_layers2(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         encoder_hidden_states: &GpuTensor,
@@ -466,7 +465,7 @@ impl Seq2SeqGPUDecoder {
     /// Precompute cross-attention K/V from encoder hidden states.
     pub fn precompute_cross_attention_kv2(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache> {
@@ -481,7 +480,7 @@ impl Seq2SeqGPUDecoder {
 impl GpuCrossDecoder for Seq2SeqGPUDecoder {
     fn embed_norm(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -500,7 +499,7 @@ impl GpuCrossDecoder for Seq2SeqGPUDecoder {
     }
     fn final_norm(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -520,7 +519,7 @@ impl GpuCrossDecoder for Seq2SeqGPUDecoder {
 
     fn forward_layers(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         encoder_hidden_states: &GpuTensor,
@@ -570,7 +569,7 @@ impl GpuCrossDecoder for Seq2SeqGPUDecoder {
 
     fn precompute_cross_attention_kv(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache> {

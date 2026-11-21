@@ -45,7 +45,7 @@ pub enum GpuFeedForward {
 impl GpuFeedForward {
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuFeedForwardWeights,
         input: &GpuTensor,
         output: &GpuTensor,

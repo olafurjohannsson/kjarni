@@ -401,7 +401,7 @@ impl Qwen3_5GpuDecoder {
 
     fn linear(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: &GpuTensor,
         weight: &GpuTensor,
@@ -415,7 +415,7 @@ impl Qwen3_5GpuDecoder {
     #[allow(clippy::too_many_arguments)]
     fn attention(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         layer: &Attention,
         x: &GpuTensor,
@@ -517,7 +517,7 @@ impl Qwen3_5GpuDecoder {
     #[allow(clippy::too_many_arguments)]
     fn delta_net(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         layer: &DeltaNet,
         x: &GpuTensor,
@@ -626,7 +626,7 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
 
     fn embed(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -637,7 +637,7 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
 
     fn embed_and_normalize(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -647,7 +647,7 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
 
     fn final_norm(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -663,7 +663,7 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
     /// recurrent state at its end and just before, as the CPU decoder does.
     fn forward_layers(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -774,7 +774,7 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
 
     fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         attention_mask: &GpuTensor,
@@ -856,7 +856,9 @@ mod tests {
                     scale: (dk as f32).powf(-0.5),
                     _pad: [0; 2],
                 };
-                let mut encoder = ctx.device.create_command_encoder(&Default::default());
+                let mut encoder = kjarni_transformers::gpu::GpuEncoder::from_encoder(
+                    ctx.device.create_command_encoder(&Default::default()),
+                );
                 kernel.encode_workgroups(
                     &ctx,
                     &mut encoder,

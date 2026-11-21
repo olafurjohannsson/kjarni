@@ -234,7 +234,7 @@ mod decoder_pipeline_test {
         }
         fn embed(
             &self,
-            _encoder: &mut wgpu::CommandEncoder,
+            _encoder: &mut crate::gpu::GpuEncoder,
             _pool: &mut GpuTensorPool,
             _input: ModelInput<'_>,
             _position_offset: usize,
@@ -247,7 +247,7 @@ mod decoder_pipeline_test {
         }
         fn embed_and_normalize(
             &self,
-            _encoder: &mut wgpu::CommandEncoder,
+            _encoder: &mut crate::gpu::GpuEncoder,
             _pool: &mut GpuTensorPool,
             _input: ModelInput<'_>,
             _position_offset: usize,
@@ -257,7 +257,7 @@ mod decoder_pipeline_test {
 
         fn forward_layers(
             &self,
-            _: &mut wgpu::CommandEncoder,
+            _: &mut crate::gpu::GpuEncoder,
             _: &mut GpuTensorPool,
             _: &GpuTensor,
             _: &GpuTensor,

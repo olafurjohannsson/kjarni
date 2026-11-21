@@ -99,7 +99,9 @@ async fn test_attention_encoder_parity() -> Result<()> {
     let (cpu_output, _cpu_new_k, _cpu_new_v) =
         cpu_attn.forward_with_cache(&input_cpu, None, Some(&mask_cpu), false, None, None)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(context.clone());
 
     let gpu_output = gpu_attn.forward(
@@ -166,7 +168,9 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     )?;
     let cpu_output_projected = crate::utils::linear_algebra::matmul_3d_2d(&cpu_output, &o_w) + &o_b;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(context.clone());
     let mut gpu_cache = GpuKVCache::new(&context, 1, b, n, head_dim, max_len)?;
     let gpu_slicer = GpuSlice::new(&context);

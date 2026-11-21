@@ -224,10 +224,11 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             .ok_or_else(|| anyhow!("GpuBackend requires a GpuBeamKVCache"))?;
         let indices_ndarray = Array1::from_vec(indices.iter().map(|&i| i as u32).collect());
         let indices_gpu = GpuTensor::from_ndarray(&self.context, &indices_ndarray)?;
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            self.context
+                .device
+                .create_command_encoder(&Default::default()),
+        );
         gpu_cache.reorder(&mut encoder, &indices_gpu);
         self.context.queue.submit(Some(encoder.finish()));
         Ok(())
@@ -470,7 +471,9 @@ mod tests {
         let k_tensor = GpuTensor::from_ndarray(ctx, &k_data).unwrap();
         let v_tensor = GpuTensor::from_ndarray(ctx, &v_data).unwrap();
 
-        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
 
         for layer in 0..num_layers {
             cache
@@ -572,7 +575,9 @@ mod tests {
             let k_tensor = GpuTensor::from_ndarray(&ctx, &k_data).unwrap();
             let v_tensor = GpuTensor::from_ndarray(&ctx, &v_data).unwrap();
 
-            let mut encoder = ctx.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                ctx.device.create_command_encoder(&Default::default()),
+            );
             for layer in 0..num_layers {
                 cache
                     .update(&mut encoder, layer, &k_tensor, &v_tensor)

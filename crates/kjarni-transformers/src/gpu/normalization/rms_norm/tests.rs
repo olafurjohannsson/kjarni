@@ -23,7 +23,9 @@ async fn test_gpu_rmsnorm_parity_with_cpu_impl() -> Result<()> {
         GpuTensor::uninitialized(&context, vec![b, s, h], input_gpu.dtype(), "RMSNorm Output");
     let cpu_rmsnorm = RMSNorm::new(gamma_cpu.clone(), eps);
     let expected_cpu = cpu_rmsnorm.forward_3d(&input_cpu);
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_rmsnorm.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
     assert_tensors_are_close(&expected_cpu, &output_gpu, "RMSNorm Output", 1e-4).await;
@@ -51,7 +53,9 @@ async fn test_gpu_rmsnorm_parity() -> Result<()> {
     let inv_rms = 1.0 / (variance + eps).mapv(f32::sqrt);
     let normalized_cpu = &input_cpu * &inv_rms;
     let expected_cpu = &normalized_cpu * &gamma_cpu;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_rmsnorm.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
     assert_tensors_are_close(&expected_cpu, &output_gpu, "RMSNorm Output", 1e-4).await;

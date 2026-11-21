@@ -60,7 +60,7 @@ impl GpuPreNormDecoderLayer {
 
     pub fn forward_llama(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         layer_idx: usize,
@@ -171,7 +171,7 @@ impl GpuPreNormDecoderLayer {
 
     pub fn forward_gpt2(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         layer_idx: usize,

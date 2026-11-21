@@ -270,7 +270,9 @@ async fn profile_the_1b_on_the_gpu() -> Result<()> {
         }
     };
     let flush = |c: &Arc<WgpuContext>| {
-        let mut enc = c.device.create_command_encoder(&Default::default());
+        let mut enc = kjarni_transformers::gpu::GpuEncoder::from_encoder(
+            c.device.create_command_encoder(&Default::default()),
+        );
         c.profiler.process_results(&mut enc);
         c.queue.submit(Some(enc.finish()));
     };

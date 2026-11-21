@@ -271,7 +271,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     }
     fn embed(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -287,7 +287,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
 
     fn embed_and_normalize(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -299,7 +299,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
 
     fn forward_layers(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -352,7 +352,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     // Override default forward to include Final Layer Norm
     fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         attention_mask: &GpuTensor,

@@ -1,9 +1,13 @@
 use crate::gpu::tensor::GpuTensor;
-use wgpu::CommandEncoder;
 
 pub trait Kernel: Send + Sync {
     /// Encodes the kernel's compute pass into the given command encoder
-    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor);
+    fn encode(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        inputs: &[&GpuTensor],
+        output: &GpuTensor,
+    );
 }
 
 /// A compute pipeline and its bind group layout: a uniform at binding 0, then
@@ -78,7 +82,7 @@ impl ComputeKernel {
     pub fn encode(
         &self,
         context: &crate::WgpuContext,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         uniforms: &wgpu::Buffer,
         tensors: &[&GpuTensor],
         threads: usize,
@@ -93,7 +97,7 @@ impl ComputeKernel {
     pub fn encode_workgroups(
         &self,
         context: &crate::WgpuContext,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         uniforms: &wgpu::Buffer,
         tensors: &[&GpuTensor],
         workgroups: [u32; 3],

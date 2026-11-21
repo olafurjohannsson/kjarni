@@ -236,7 +236,9 @@ async fn test_loaded_lm_head_forward_gpu_shape() {
     let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden_cpu).unwrap();
 
     // Create encoder and pool
-    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        ctx.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(ctx.clone());
 
     let logits = head
@@ -281,7 +283,9 @@ async fn test_loaded_lm_head_forward_gpu_values() {
     let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden_cpu).unwrap();
 
     // Forward
-    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        ctx.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(ctx.clone());
 
     let logits_gpu = head
@@ -316,7 +320,9 @@ async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
     let hidden_cpu = Array3::<f32>::zeros((1, 1, 256));
     let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden_cpu).unwrap();
 
-    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        ctx.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(ctx);
 
     let result = head.forward_gpu(&mut encoder, &mut pool, &hidden_gpu);
@@ -371,7 +377,9 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
     let logits_cpu = head.forward_cpu(&hidden_cpu).unwrap();
 
     // GPU forward
-    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        ctx.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(ctx.clone());
     let logits_gpu_tensor = head
         .forward_gpu(&mut encoder, &mut pool, &hidden_gpu)

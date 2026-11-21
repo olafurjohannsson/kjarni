@@ -1,5 +1,5 @@
 use crate::WgpuContext;
-use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline, include_wgsl};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline, include_wgsl};
 
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl GpuApplyMask {
     /// Encodes the masking operation. This is an in-place operation.
     pub fn encode(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         scores: &GpuTensor, // The [B, H, S_q, S_k_padded] score tensor
         mask: &GpuTensor,   // The [B, S_k_padded] mask tensor
         is_causal: bool,
@@ -87,7 +87,7 @@ impl GpuApplyMask {
 
 fn run_internal_apply_mask(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut crate::gpu::GpuEncoder,
     pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,
     scores: &Buffer,

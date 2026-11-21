@@ -590,7 +590,7 @@ impl GpuEncoderOps for SequenceClassifier {
     }
     fn embed_tokens(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input_ids: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,

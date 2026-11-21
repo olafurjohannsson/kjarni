@@ -4,18 +4,86 @@ use std::sync::Arc;
 use tokio::sync::MutexGuard;
 use wgpu::CommandEncoder;
 
+/// A command encoder that keeps one compute pass open across dispatches.
+///
+/// wgpu records every compute pass as a command buffer of its own, with its
+/// resource transitions worked out when it ends. On an RTX A2000 that costs
+/// about 10 us of GPU time and several of CPU per pass, more than most decode
+/// kernels take. Dispatches recorded through [`pass`](Self::pass) share one
+/// pass; wgpu still places a barrier between two dispatches that depend on
+/// each other, so they run in order.
+///
+/// It dereferences to the `wgpu::CommandEncoder`, for copies and passes of
+/// their own. Doing so first ends the shared pass, so commands keep the order
+/// they were recorded in.
+pub struct GpuEncoder {
+    encoder: CommandEncoder,
+    pass: Option<wgpu::ComputePass<'static>>,
+}
+
+impl GpuEncoder {
+    pub fn new(device: &wgpu::Device, label: &str) -> Self {
+        Self::from_encoder(
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) }),
+        )
+    }
+
+    pub fn from_encoder(encoder: CommandEncoder) -> Self {
+        Self {
+            encoder,
+            pass: None,
+        }
+    }
+
+    /// The shared compute pass, begun if none is open.
+    pub fn pass(&mut self) -> &mut wgpu::ComputePass<'static> {
+        if self.pass.is_none() {
+            let pass = self
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("shared compute pass"),
+                    timestamp_writes: None,
+                })
+                .forget_lifetime();
+            self.pass = Some(pass);
+        }
+        self.pass.as_mut().expect("just opened")
+    }
+
+    /// The wgpu encoder, after ending the shared pass.
+    pub fn raw(&mut self) -> &mut CommandEncoder {
+        self.pass = None;
+        &mut self.encoder
+    }
+
+    pub fn finish(mut self) -> wgpu::CommandBuffer {
+        self.pass = None;
+        self.encoder.finish()
+    }
+}
+
+impl std::ops::Deref for GpuEncoder {
+    type Target = CommandEncoder;
+
+    fn deref(&self) -> &CommandEncoder {
+        &self.encoder
+    }
+}
+
+impl std::ops::DerefMut for GpuEncoder {
+    fn deref_mut(&mut self) -> &mut CommandEncoder {
+        self.raw()
+    }
+}
+
 /// Layers recorded between submissions in a decoder's forward pass.
 pub const LAYERS_PER_SUBMIT: usize = 4;
 
 /// Submits what `encoder` has recorded and leaves it a fresh encoder, so the
 /// GPU starts on those commands while the CPU records the rest. The queue runs
 /// submissions in order, so this changes nothing but when the work starts.
-pub fn submit_recorded(context: &WgpuContext, encoder: &mut CommandEncoder) {
-    let fresh = context
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("GpuFrameContext Encoder"),
-        });
+pub fn submit_recorded(context: &WgpuContext, encoder: &mut GpuEncoder) {
+    let fresh = GpuEncoder::new(&context.device, "GpuFrameContext Encoder");
     let recorded = std::mem::replace(encoder, fresh);
     context.queue.submit(Some(recorded.finish()));
 }
@@ -24,7 +92,7 @@ pub fn submit_recorded(context: &WgpuContext, encoder: &mut CommandEncoder) {
 /// LAYERS_PER_SUBMIT layers, except after the last, which the frame submits.
 pub fn submit_between_layers(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut GpuEncoder,
     layer: usize,
     end_layer: usize,
 ) {
@@ -39,7 +107,7 @@ fn submits_after(layer: usize, end_layer: usize) -> bool {
 
 /// A guard that manages the resources for a single frame of GPU work.
 pub struct GpuFrameContext<'a> {
-    pub encoder: Option<CommandEncoder>,
+    pub encoder: Option<GpuEncoder>,
     pub pool_guard: MutexGuard<'a, GpuTensorPool>,
     pub context: &'a Arc<WgpuContext>,
     submitted: bool,
@@ -47,11 +115,7 @@ pub struct GpuFrameContext<'a> {
 
 impl<'a> GpuFrameContext<'a> {
     pub fn new(context: &'a Arc<WgpuContext>, pool_guard: MutexGuard<'a, GpuTensorPool>) -> Self {
-        let encoder = context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GpuFrameContext Encoder"),
-            });
+        let encoder = GpuEncoder::new(&context.device, "GpuFrameContext Encoder");
         Self {
             encoder: Some(encoder),
             pool_guard,
@@ -60,7 +124,7 @@ impl<'a> GpuFrameContext<'a> {
         }
     }
 
-    pub fn resources(&mut self) -> (&mut CommandEncoder, &mut GpuTensorPool) {
+    pub fn resources(&mut self) -> (&mut GpuEncoder, &mut GpuTensorPool) {
         (self.encoder.as_mut().unwrap(), &mut *self.pool_guard)
     }
 

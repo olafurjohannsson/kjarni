@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -34,7 +34,7 @@ impl GpuReshape {
 
     pub fn encode(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         output: &GpuTensor,
         transpose_k: bool,

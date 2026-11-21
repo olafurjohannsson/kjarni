@@ -85,7 +85,7 @@ impl GpuEncoderLayer {
     /// Performs the forward pass through this encoder layer
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         position_bias: Option<&GpuTensor>,
@@ -117,7 +117,7 @@ impl GpuEncoderLayer {
     /// Forward pass for pre-normalization
     pub fn forward_prenorm(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         position_bias: Option<&GpuTensor>,
@@ -161,7 +161,7 @@ impl GpuEncoderLayer {
     /// Forward pass for post-normalization
     pub fn forward_postnorm(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         position_bias: Option<&GpuTensor>,

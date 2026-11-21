@@ -3,7 +3,6 @@
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
-use wgpu::CommandEncoder;
 
 use crate::{
     WgpuContext,
@@ -423,7 +422,7 @@ impl Seq2SeqGPUEncoder {
 impl GpuEncoder for Seq2SeqGPUEncoder {
     fn embed(
         &self,
-        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _input: crate::models::base::ModelInput<'_>,
         _token_type_ids: Option<crate::models::base::ModelInput<'_>>,
@@ -432,7 +431,7 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
     }
     fn embed_and_normalize(
         &self,
-        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _input: crate::models::base::ModelInput<'_>,
         _token_type_ids: Option<crate::models::base::ModelInput<'_>>,
@@ -441,7 +440,7 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
     }
     fn embed_norm(
         &self,
-        cmd_encoder: &mut CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -457,7 +456,7 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
 
     fn forward_layers(
         &self,
-        cmd_encoder: &mut CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -508,7 +507,7 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
 
     fn final_norm(
         &self,
-        cmd_encoder: &mut CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {

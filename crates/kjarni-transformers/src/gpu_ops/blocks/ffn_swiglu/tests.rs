@@ -44,7 +44,9 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
 
     let expected_cpu = cpu_swiglu.forward_2d(&input_cpu)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(context.clone());
 
     gpu_swiglu.encode(
@@ -111,7 +113,9 @@ async fn q4k_fused_gate_up_matches_cpu() -> Result<()> {
 
         // `down` is unused by the fused stage but the weights struct needs one.
         let w = GpuSwiGLUFFNWeights::new(gate_g.clone(), up_g.clone(), gate_g.clone())?;
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         ffn.encode_fused_gate_up(&mut enc, &gpu_in, &w, &gpu_out);
         context.queue.submit(std::iter::once(enc.finish()));
 
@@ -208,7 +212,9 @@ async fn q4k_fused_rows_short_of_a_workgroup() -> Result<()> {
         });
         let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
         let out = GpuTensor::uninitialized(&context, vec![rows, n], DType::F32, "o");
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         ffn.encode_fused_gate_up(&mut enc, &gpu_in, &w, &out);
         context.queue.submit(std::iter::once(enc.finish()));
         let (got, _) = crate::tests::common::read_gpu_tensor_to_vec::<f32>(&out).await?;
@@ -275,7 +281,9 @@ async fn q4k_fused_bandwidth() -> Result<()> {
     let mut best = f64::MAX;
     for _ in 0..5 {
         let t = std::time::Instant::now();
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         for _ in 0..reps {
             ffn.encode_fused_gate_up(&mut enc, &gpu_in, &w, &out);
         }

@@ -89,7 +89,7 @@ impl GpuBroadcast {
     }
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         src: &GpuTensor,
         dst: &GpuTensor,
         repeat_axis: usize,

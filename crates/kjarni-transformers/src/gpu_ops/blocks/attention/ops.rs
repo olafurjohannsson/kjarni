@@ -90,7 +90,7 @@ impl AttentionOps {
     /// Projects input through a linear layer with bias.
     pub fn project(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         weight: &GpuTensor,
         bias: Option<&GpuTensor>,
@@ -121,7 +121,7 @@ impl AttentionOps {
     /// Splits heads from `[B, S, H*D]` into `[B, H, S, D]`.
     pub fn split_heads(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
@@ -145,7 +145,7 @@ impl AttentionOps {
     /// Merges heads from `[B, H, S, D]` back to `[B, S, H*D]`.
     pub fn merge_heads(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
@@ -158,7 +158,7 @@ impl AttentionOps {
     /// Performs 4D batched matrix multiplication.
     pub fn bmm_4d(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor,
         b: &GpuTensor,
         pool: &mut GpuTensorPool,
@@ -185,7 +185,7 @@ impl AttentionOps {
     /// Applies attention mask and softmax to attention scores.
     pub fn apply_mask_and_softmax(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         scores: &GpuTensor,
         mask: Option<&GpuTensor>,
         is_causal: bool,
@@ -217,7 +217,7 @@ impl AttentionOps {
     /// which is where MPNet adds its relative position bias.
     pub fn attention(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         q: &GpuTensor,
         k: &GpuTensor,
         v: &GpuTensor,

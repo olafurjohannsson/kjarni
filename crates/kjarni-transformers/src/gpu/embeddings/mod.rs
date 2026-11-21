@@ -158,7 +158,7 @@ impl GpuEmbeddings {
     /// Encodes the complete embedding generation pass into the command encoder
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuEmbeddingWeights,
         input_ids: &GpuTensor,              // Shape: [batch, seq]
         token_type_ids: Option<&GpuTensor>, // Shape: [batch, seq]

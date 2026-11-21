@@ -32,7 +32,9 @@ async fn test_permute_2d_transpose() -> Result<()> {
     let output_shape = vec![cpu_input.shape()[1], cpu_input.shape()[0]];
 
     let gpu_output = GpuTensor::uninitialized(&context, output_shape, DType::F32, "Permute Output");
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     permute_kernel.encode(&mut encoder, &gpu_input, &gpu_output, perm);
     context.queue.submit(std::iter::once(encoder.finish()));
     let cpu_result = cpu_input.permuted_axes(*perm);
@@ -59,7 +61,9 @@ async fn test_permute_4d_attention_reshape() -> Result<()> {
     let perm = &[0, 2, 1, 3];
     let output_shape = vec![batch, heads, seq, dims];
     let gpu_output = GpuTensor::uninitialized(&context, output_shape, DType::F32, "Permute Output");
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     permute_kernel.encode(&mut encoder, &gpu_input, &gpu_output, perm);
     context.queue.submit(std::iter::once(encoder.finish()));
     let cpu_result = cpu_input.permuted_axes(*perm);
@@ -89,7 +93,9 @@ async fn test_permute_4d_attention_k_transpose() -> Result<()> {
     let perm = &[0, 1, 3, 2];
     let output_shape = vec![batch, heads, dims, seq];
     let gpu_output = GpuTensor::uninitialized(&context, output_shape, DType::F32, "Permute Output");
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     permute_kernel.encode(&mut encoder, &gpu_input, &gpu_output, perm);
     context.queue.submit(std::iter::once(encoder.finish()));
     let cpu_result = cpu_input.permuted_axes(*perm);

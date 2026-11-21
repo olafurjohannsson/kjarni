@@ -68,7 +68,9 @@ async fn run_q4k(m: usize, tensor: &str) -> Result<Option<(Array2<f32>, Array2<f
     let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
     let gpu_out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "q4k_out");
 
-    let mut enc = context.device.create_command_encoder(&Default::default());
+    let mut enc = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     linear.encode(&mut enc, &gpu_in, &gpu_w, &gpu_out);
     context.queue.submit(std::iter::once(enc.finish()));
 
@@ -200,7 +202,9 @@ async fn q4k_gemv_rows_short_of_a_workgroup() -> Result<()> {
             Array2::from_shape_fn((m, k), |(r, c)| ((r * 31 + c * 7) % 97) as f32 / 48.0 - 1.0);
         let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
         let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         linear.encode(&mut enc, &gpu_in, &w, &out);
         context.queue.submit(std::iter::once(enc.finish()));
         let (got, _) = read_gpu_tensor_to_vec::<f32>(&out).await?;
@@ -273,7 +277,9 @@ async fn q4k_packed_matches_expanded() -> Result<()> {
 
         let run = |w: &GpuTensor| -> Result<Vec<f32>> {
             let out = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "out");
-            let mut enc = context.device.create_command_encoder(&Default::default());
+            let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut enc, &gpu_in, w, &out);
             context.queue.submit(std::iter::once(enc.finish()));
             Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
@@ -348,7 +354,9 @@ async fn packed_gemv_bandwidth() -> Result<()> {
             let mut best = f64::MAX;
             for _ in 0..5 {
                 let t = std::time::Instant::now();
-                let mut enc = context.device.create_command_encoder(&Default::default());
+                let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                    context.device.create_command_encoder(&Default::default()),
+                );
                 for _ in 0..reps {
                     linear.encode(&mut enc, &gpu_in, w, &out);
                 }
@@ -421,7 +429,9 @@ async fn q6k_packed_matches_cpu_and_expanded() -> Result<()> {
 
         let run = |w: &GpuTensor| -> Result<Vec<f32>> {
             let out = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "o");
-            let mut enc = context.device.create_command_encoder(&Default::default());
+            let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut enc, &gpu_in, w, &out);
             context.queue.submit(std::iter::once(enc.finish()));
             Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
@@ -603,7 +613,9 @@ async fn run_q8(m: usize, n: usize, k: usize) -> Result<(Array2<f32>, Array2<f32
     let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
     let gpu_out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "q8_out");
 
-    let mut enc = context.device.create_command_encoder(&Default::default());
+    let mut enc = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     linear.encode(&mut enc, &gpu_in, &gpu_w, &gpu_out);
     context.queue.submit(std::iter::once(enc.finish()));
 
@@ -739,7 +751,9 @@ async fn gemm_matches_cpu() -> Result<()> {
 
             let a_gpu = GpuTensor::from_ndarray(&context, &a)?;
             let out = GpuTensor::from_ndarray(&context, &Array2::<f32>::zeros((m, n)))?;
-            let mut encoder = context.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut encoder, &a_gpu, &w_gpu, &out);
             context.queue.submit(Some(encoder.finish()));
 
@@ -791,7 +805,9 @@ async fn q6k_batched_matches_expanded() -> Result<()> {
             let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
             let run = |w: &GpuTensor| -> Result<Vec<f32>> {
                 let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
-                let mut enc = context.device.create_command_encoder(&Default::default());
+                let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                    context.device.create_command_encoder(&Default::default()),
+                );
                 linear.encode(&mut enc, &gpu_in, w, &out);
                 context.queue.submit(std::iter::once(enc.finish()));
                 Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
@@ -878,7 +894,9 @@ async fn q5k_matches_its_dequantisation() -> Result<()> {
             let want = input.dot(&dequantized.t());
             let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
             let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
-            let mut enc = context.device.create_command_encoder(&Default::default());
+            let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut enc, &gpu_in, &packed, &out);
             context.queue.submit(std::iter::once(enc.finish()));
             let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
@@ -894,6 +912,79 @@ async fn q5k_matches_its_dequantisation() -> Result<()> {
                 worst < 1e-5 * scale.max(1.0) * (k as f32).sqrt(),
                 "[{m}x{k} @ {n}]: {worst:.3e}"
             );
+        }
+    }
+    Ok(())
+}
+
+/// A Q5_K GEMV and then an F32 one, recorded into one shared compute pass. The
+/// F32 kernel never reads the Q5_K slot, which holds the placeholder buffer, but
+/// wgpu 27 still checks it against the Q5_K kernel's minimum binding size when
+/// both pipelines share a layout. Both results must come out right.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn kernels_of_different_dtypes_share_a_pass() -> Result<()> {
+    use crate::cpu::kernels::q_common::BlockQ5_K;
+    use crate::tensor::QuantizedMatrix;
+    use crate::tensor::raw_tensor::TensorView;
+    use half::f16;
+    use std::borrow::Cow;
+
+    let context = WgpuContext::new().await?;
+    let linear = GpuLinearLayer::new(&context);
+    let (n, k) = (32usize, 256usize);
+    let mut state = 0x2545F4914F6CDD1Du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let blocks: Vec<BlockQ5_K> = (0..n * k / 256)
+        .map(|_| {
+            let mut bytes = [0u8; 176];
+            for b in bytes.iter_mut() {
+                *b = next() as u8;
+            }
+            let mut block: BlockQ5_K = bytemuck::cast(bytes);
+            block.d = f16::from_f32(0.002);
+            block.dmin = f16::from_f32(0.001);
+            block
+        })
+        .collect();
+    let matrix = QuantizedMatrix {
+        blocks,
+        shape: [n, k],
+    };
+    let q5k_dense = matrix.dequantize()?;
+    let q5k = GpuTensor::from_raw(
+        &context,
+        &TensorView {
+            name: "q5k".into(),
+            bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+            shape: vec![n, k],
+            dtype: DType::Q5_K,
+        },
+        "q5k",
+    )?;
+    let f32_dense =
+        Array2::from_shape_fn((n, k), |(i, j)| ((i * 7 + j * 3) % 13) as f32 / 13.0 - 0.5);
+    let f32_w = GpuTensor::from_ndarray(&context, &f32_dense)?;
+
+    let input = Array2::from_shape_fn((1, k), |(_, j)| ((j * 11) % 17) as f32 / 17.0 - 0.5);
+    let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+    let out_q5k = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "a");
+    let out_f32 = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "b");
+    let mut enc = crate::gpu::GpuEncoder::new(&context.device, "shared");
+    linear.encode(&mut enc, &gpu_in, &q5k, &out_q5k);
+    linear.encode(&mut enc, &gpu_in, &f32_w, &out_f32);
+    context.queue.submit(Some(enc.finish()));
+
+    for (out, dense) in [(&out_q5k, &q5k_dense), (&out_f32, &f32_dense)] {
+        let got = read_gpu_tensor_to_vec::<f32>(out).await?.0;
+        let want = input.dot(&dense.t());
+        for (g, w) in got.iter().zip(want.iter()) {
+            assert!((g - w).abs() < 1e-3 * w.abs().max(1.0), "{g} against {w}");
         }
     }
     Ok(())

@@ -45,7 +45,7 @@ impl GpuDecoderSelfAttention {
     /// Performs the forward pass of decoder self-attention
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         weights: &GpuAttentionWeights,
         attention_mask: &GpuTensor,
@@ -138,7 +138,7 @@ impl GpuDecoderSelfAttention {
     /// Concatenates new K/V with cached K/V
     fn concat_with_cache(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         k_new: &GpuTensor,
         v_new: &GpuTensor,
         cached_k: &GpuTensor,
@@ -172,7 +172,7 @@ impl GpuDecoderSelfAttention {
     /// Projects only K and V
     pub fn project_kv(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         weights: &GpuAttentionWeights,
         pool: &mut GpuTensorPool,

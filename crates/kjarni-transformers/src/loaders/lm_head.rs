@@ -226,7 +226,7 @@ impl LoadedLMHead {
     #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
     pub fn forward_gpu(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {

@@ -103,7 +103,7 @@ impl GpuRecurrentState {
     }
 
     /// Encodes a copy of the live states as the snapshot after `len` tokens.
-    pub fn snapshot(&mut self, encoder: &mut wgpu::CommandEncoder, len: usize) -> Result<()> {
+    pub fn snapshot(&mut self, encoder: &mut crate::gpu::GpuEncoder, len: usize) -> Result<()> {
         let slot = self.take_slot()?;
         for (from, to) in self.states.iter().zip(&slot) {
             encoder.copy_buffer_to_buffer(from.buffer(), 0, to.buffer(), 0, from.buffer().size());
@@ -140,11 +140,11 @@ impl GpuRecurrentState {
             && let Some(i) = self.snapshots.iter().position(|s| s.len == len)
         {
             let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                crate::gpu::GpuEncoder::from_encoder(self.context.device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
                         label: Some("restore recurrent snapshot"),
-                    });
+                    },
+                ));
             for (from, to) in self.snapshots[i].states.iter().zip(&self.states) {
                 encoder.copy_buffer_to_buffer(
                     from.buffer(),
@@ -169,11 +169,11 @@ impl GpuRecurrentState {
     /// Zeroes the states and forgets every snapshot.
     pub fn clear(&mut self) {
         let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            crate::gpu::GpuEncoder::from_encoder(self.context.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
                     label: Some("clear recurrent state"),
-                });
+                },
+            ));
         for state in &self.states {
             encoder.clear_buffer(state.buffer(), 0, None);
         }
@@ -248,7 +248,9 @@ mod tests {
     fn snapshot(c: &mut GpuKVCache) {
         let len = c.get_seq_length();
         let r = c.recurrent_mut().unwrap();
-        let mut encoder = r.context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            r.context.device.create_command_encoder(&Default::default()),
+        );
         r.snapshot(&mut encoder, len).unwrap();
         r.context.queue.submit(Some(encoder.finish()));
     }

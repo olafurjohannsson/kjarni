@@ -1,7 +1,7 @@
 use crate::gpu::GpuTensor;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, ComputePipeline};
 
 pub mod reorder;
 
@@ -37,7 +37,7 @@ impl GpuUpdateCache {
 
     pub fn encode(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         new_k: &GpuTensor,      // The new K tensor [B, S_new, H*D]
         new_v: &GpuTensor,      // The new V tensor [B, S_new, H*D]
         cache_k: &GpuTensor,    // The full K cache [B, H, S_total, D]

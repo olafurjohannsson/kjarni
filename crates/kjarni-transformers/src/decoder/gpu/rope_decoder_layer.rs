@@ -65,7 +65,7 @@ impl GpuRoPEDecoderLayer {
     }
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         layer_idx: usize,
@@ -286,7 +286,9 @@ mod rope_decoder_gpu_test {
         )?;
 
         //  GPU Forward
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let gpu_out_t = gpu_layer.forward(
@@ -341,7 +343,9 @@ mod rope_decoder_gpu_test {
         let input_g = GpuTensor::from_ndarray(&context, &input)?;
         let mask_g = GpuTensor::from_ndarray(&context, &mask)?;
 
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let cpu_norm1 = cpu.attention_norm.forward(&input);

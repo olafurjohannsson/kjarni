@@ -19,7 +19,7 @@ pub enum GpuNormalization {
 impl GpuNormalization {
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuNormalizationWeights,
         input: &GpuTensor,
         output: &GpuTensor,

@@ -20,7 +20,9 @@ async fn test_gpu_scale_out_of_place() -> Result<()> {
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
     let output_shape: Vec<usize> = cpu_input.shape().to_vec();
     let gpu_output = GpuTensor::zeros(&context, output_shape, crate::gpu::DType::F32, "f32")?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     scale_kernel.encode_out_of_place(&mut encoder, &gpu_input, &gpu_output, scale_factor);
     context.queue.submit(std::iter::once(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
@@ -40,7 +42,9 @@ async fn test_scale_parity() -> Result<()> {
     let scale_factor = 1.0 / (64.0f32).sqrt(); // A realistic attention scaling factor
     let cpu_input = Array::random((12, 128, 128), Uniform::new(-10.0, 10.0));
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     scale_kernel.encode_in_place(&mut encoder, &gpu_input, scale_factor);
     context.queue.submit(std::iter::once(encoder.finish()));
     let cpu_result = &cpu_input * scale_factor;
