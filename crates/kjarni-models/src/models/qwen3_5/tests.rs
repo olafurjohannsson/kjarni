@@ -757,6 +757,75 @@ mod gpu {
         );
     }
 
+    /// Times every GPU kernel of a 512-token prefill and of four decode steps,
+    /// totalled per kernel. A tool rather than a check: run it with
+    /// `--features kjarni-transformers/profiling --release -- --nocapture`.
+    #[tokio::test]
+    #[ignore = "a profile: needs a GPU, the 4B GGUF and the profiling feature"]
+    async fn profile_the_4b_on_the_gpu() {
+        let path = gguf("Qwen_Qwen3.5-4B").unwrap();
+        let ctx = WgpuContext::new().await.unwrap();
+        let m = Qwen3_5Model::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)
+            .unwrap();
+        let backend = GpuDecoderBackend::new(ctx.clone()).unwrap();
+        // PROFILE_CONTEXT sets the prompt length: decoding at long context is
+        // where attention costs most.
+        let context: usize = std::env::var("PROFILE_CONTEXT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(512);
+        let ids: Vec<u32> = long_ids(&m).into_iter().cycle().take(context).collect();
+        let prompt = |t: &[u32]| Array2::from_shape_vec((1, t.len()), t.to_vec()).unwrap();
+        let report = |name: &str, totals: Vec<(String, f64, usize)>, wall: f64| {
+            let sum: f64 = totals.iter().map(|t| t.1).sum();
+            println!("== {name}: wall {wall:.1} ms, timed GPU {sum:.1} ms");
+            for (l, ms, n) in totals.iter().take(18) {
+                println!("{:>8.1} ms {:>5.1}% {:>5}x  {l}", ms, 100.0 * ms / sum, n);
+            }
+        };
+        let flush = |c: &std::sync::Arc<WgpuContext>| {
+            let mut enc = c.device.create_command_encoder(&Default::default());
+            c.profiler.process_results(&mut enc);
+            c.queue.submit(Some(enc.finish()));
+        };
+        // A warm-up, whose timings are dropped.
+        let mut cache = m.new_cache(1, context + 8, 1).unwrap();
+        backend
+            .prefill(&m, &prompt(&ids[..512.min(context)]), cache.as_mut())
+            .await
+            .unwrap();
+        flush(&ctx);
+        ctx.profiler.totals(&ctx).await;
+        let mut cache = m.new_cache(1, context + 8, 1).unwrap();
+        let t = std::time::Instant::now();
+        let l = backend
+            .prefill(&m, &prompt(&ids), cache.as_mut())
+            .await
+            .unwrap();
+        let wall = t.elapsed().as_secs_f64() * 1e3;
+        flush(&ctx);
+        report(
+            &format!("prefill {context}"),
+            ctx.profiler.totals(&ctx).await,
+            wall,
+        );
+        let mut next = argmax(l.view());
+        let mut tok = backend.new_decode_token().unwrap();
+        let t = std::time::Instant::now();
+        // Four steps: the profiler holds 2,048 timed dispatches.
+        for i in 0..4 {
+            backend.update_decode_token(&mut tok, next).unwrap();
+            let l = backend
+                .decode_one(&m, &tok, 513 + i, cache.as_mut())
+                .await
+                .unwrap();
+            next = argmax(l.view());
+        }
+        let wall = t.elapsed().as_secs_f64() * 1e3;
+        flush(&ctx);
+        report("decode 4 tokens", ctx.profiler.totals(&ctx).await, wall);
+    }
+
     /// The daemon's failing turn: about 2,000 tokens in the cache, then 7,000 of
     /// tool output at once. In one submission their attention scores (4.1 GB) are
     /// over the 2 GB a buffer binding may hold, and the work outlasts the 30 s

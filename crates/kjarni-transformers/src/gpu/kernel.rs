@@ -12,6 +12,8 @@ pub trait Kernel: Send + Sync {
 pub struct ComputeKernel {
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    /// Names the dispatches in the GPU profiler.
+    label: String,
 }
 
 impl ComputeKernel {
@@ -63,7 +65,11 @@ impl ComputeKernel {
             compilation_options: Default::default(),
             cache: None,
         });
-        Self { pipeline, layout }
+        Self {
+            pipeline,
+            layout,
+            label: label.to_string(),
+        }
     }
 
     /// One dispatch of `threads` threads in workgroups of `workgroup_size`,
@@ -109,10 +115,16 @@ impl ComputeKernel {
                 layout: &self.layout,
                 entries: &entries,
             });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
         let [x, y, z] = workgroups;
-        pass.dispatch_workgroups(x, y, z);
+        crate::gpu_profile!(
+            context,
+            encoder,
+            &self.label,
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(x, y, z);
+            }
+        );
     }
 }

@@ -9,7 +9,7 @@ pub mod kernel;
 pub mod normalization;
 pub mod tensor;
 pub mod tensor_pool;
-pub use frame_context::GpuFrameContext;
+pub use frame_context::{GpuFrameContext, submit_between_layers, submit_recorded};
 pub use kernel::{ComputeKernel, Kernel};
 pub use tensor::{DType, GpuTensor};
 pub use tensor_pool::GpuTensorPool;

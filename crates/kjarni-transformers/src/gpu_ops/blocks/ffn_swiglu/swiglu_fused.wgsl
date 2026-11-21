@@ -28,6 +28,11 @@ struct Info {
 // undo most of the point of a packed GPU path.
 @group(0) @binding(7) var<storage, read> gate_w_q4k: array<u32>;
 @group(0) @binding(8) var<storage, read> up_w_q4k: array<u32>;
+// The same buffers read sixteen bytes at a time, for the GEMV kernel. An entry
+// point reads one view of a binding or the other, never both.
+@group(0) @binding(1) var<storage, read> input4: array<vec4<f32>>;
+@group(0) @binding(7) var<storage, read> gate_w_q4k4: array<vec4<u32>>;
+@group(0) @binding(8) var<storage, read> up_w_q4k4: array<vec4<u32>>;
 
 // Shared Memory Cache for GEMV (M=1)
 // Size 8192 floats = 32KB. Supports hidden_size up to 8192 (Llama-70B).
@@ -282,24 +287,33 @@ const Q4K_THREADS: u32 = 32u;
 var<workgroup> wg_q4k_gate: array<vec4<f32>, Q4K_THREADS>;
 var<workgroup> wg_q4k_up: array<vec4<f32>, Q4K_THREADS>;
 
-// d * scale and d * min for sub-blocks `2j` and `2j + 1`, as (scale_lo, min_lo, scale_hi,
-// min_hi).
-fn q4k_scales(d: u32, s0: u32, s1: u32, s2: u32, j: u32) -> vec4<f32> {
-    let dd = unpack2x16float(d);
-    let lo = q4k_sm(s0, s1, s2, j * 2u);
-    let hi = q4k_sm(s0, s1, s2, j * 2u + 1u);
-    return vec4<f32>(lo.x * dd.x, lo.y * dd.y, hi.x * dd.x, hi.y * dd.y);
-}
-
-fn q4k_gate_scales(base: u32, j: u32) -> vec4<f32> {
-    return q4k_scales(
-        gate_w_q4k[base], gate_w_q4k[base + 1u], gate_w_q4k[base + 2u], gate_w_q4k[base + 3u], j,
+// d * scale and d * min for sub-blocks `2j` and `2j + 1`, from a block's first
+// sixteen bytes: d and dmin, then twelve bytes of 6-bit scales and mins. Sub-blocks
+// 0..3 keep theirs in the low six bits of bytes 0..3 (scales) and 4..7 (mins);
+// sub-blocks 4..7 take their low four bits from bytes 8..11 and their top two from
+// the spare bits of bytes 0..7. Both halves are rebuilt a word at a time, four
+// sub-blocks per word, so no thread branches on which half it reads.
+fn q4k_header_scales(h: vec4<u32>, j: u32) -> vec4<f32> {
+    let dd = unpack2x16float(h.x);
+    let first = j < 2u;
+    let scales = select(
+        (h.w & 0x0F0F0F0Fu) | ((h.y >> 2u) & 0x30303030u),
+        h.y & 0x3F3F3F3Fu,
+        first,
     );
-}
-
-fn q4k_up_scales(base: u32, j: u32) -> vec4<f32> {
-    return q4k_scales(
-        up_w_q4k[base], up_w_q4k[base + 1u], up_w_q4k[base + 2u], up_w_q4k[base + 3u], j,
+    let mins = select(
+        ((h.w >> 4u) & 0x0F0F0F0Fu) | ((h.z >> 2u) & 0x30303030u),
+        h.z & 0x3F3F3F3Fu,
+        first,
+    );
+    let shift = (j & 1u) * 16u;
+    let sc = scales >> shift;
+    let mn = mins >> shift;
+    return vec4<f32>(
+        f32(sc & 0xFFu) * dd.x,
+        f32(mn & 0xFFu) * dd.y,
+        f32((sc >> 8u) & 0xFFu) * dd.x,
+        f32((mn >> 8u) & 0xFFu) * dd.y,
     );
 }
 
@@ -340,31 +354,41 @@ fn fused_gemv_q4k(
 
     // Rows past the end repeat the last row, and are not written out.
     let last = info.N - 1u;
+    // In sixteen-byte units: a block is nine of them, the header and then eight
+    // chunks of qs.
     let row_base = vec4<u32>(
         row0,
         min(row0 + 1u, last),
         min(row0 + 2u, last),
         min(row0 + 3u, last),
-    ) * words_per_row;
+    ) * (words_per_row / 4u);
 
     var acc_gate = vec4<f32>(0.0);
     var acc_up = vec4<f32>(0.0);
     for (var chunk = tid; chunk < total_chunks; chunk += Q4K_THREADS) {
         let blk = chunk / 8u;
         let j = (chunk % 8u) / 2u;
-        let bases = row_base + vec4<u32>(blk * Q4K_WORDS);
+        let bases = row_base + vec4<u32>(blk * (Q4K_WORDS / 4u));
 
-        let g0 = q4k_gate_scales(bases.x, j);
-        let g1 = q4k_gate_scales(bases.y, j);
-        let g2 = q4k_gate_scales(bases.z, j);
-        let g3 = q4k_gate_scales(bases.w, j);
-        let u0 = q4k_up_scales(bases.x, j);
-        let u1 = q4k_up_scales(bases.y, j);
-        let u2 = q4k_up_scales(bases.z, j);
-        let u3 = q4k_up_scales(bases.w, j);
+        let g0 = q4k_header_scales(gate_w_q4k4[bases.x], j);
+        let g1 = q4k_header_scales(gate_w_q4k4[bases.y], j);
+        let g2 = q4k_header_scales(gate_w_q4k4[bases.z], j);
+        let g3 = q4k_header_scales(gate_w_q4k4[bases.w], j);
+        let u0 = q4k_header_scales(up_w_q4k4[bases.x], j);
+        let u1 = q4k_header_scales(up_w_q4k4[bases.y], j);
+        let u2 = q4k_header_scales(up_w_q4k4[bases.z], j);
+        let u3 = q4k_header_scales(up_w_q4k4[bases.w], j);
 
-        let words = bases + vec4<u32>(4u + (chunk % 8u) * 4u);
-        let l0 = input_row + blk * 256u + j * 64u + (chunk % 2u) * 16u;
+        let at = 1u + chunk % 8u;
+        let wg0 = gate_w_q4k4[bases.x + at];
+        let wg1 = gate_w_q4k4[bases.y + at];
+        let wg2 = gate_w_q4k4[bases.z + at];
+        let wg3 = gate_w_q4k4[bases.w + at];
+        let wu0 = up_w_q4k4[bases.x + at];
+        let wu1 = up_w_q4k4[bases.y + at];
+        let wu2 = up_w_q4k4[bases.z + at];
+        let wu3 = up_w_q4k4[bases.w + at];
+        let l4 = (input_row + blk * 256u + j * 64u + (chunk % 2u) * 16u) / 4u;
 
         var gate_lo = vec4<f32>(0.0);
         var gate_hi = vec4<f32>(0.0);
@@ -373,20 +397,19 @@ fn fused_gemv_q4k(
         var sum_lo = 0.0;
         var sum_hi = 0.0;
         for (var i = 0u; i < 4u; i++) {
-            let l = l0 + i * 4u;
-            let a_lo = vec4<f32>(input[l], input[l + 1u], input[l + 2u], input[l + 3u]);
-            let a_hi = vec4<f32>(input[l + 32u], input[l + 33u], input[l + 34u], input[l + 35u]);
+            let a_lo = input4[l4 + i];
+            let a_hi = input4[l4 + 8u + i];
             sum_lo += a_lo.x + a_lo.y + a_lo.z + a_lo.w;
             sum_hi += a_hi.x + a_hi.y + a_hi.z + a_hi.w;
 
-            let qg0 = gate_w_q4k[words.x + i];
-            let qg1 = gate_w_q4k[words.y + i];
-            let qg2 = gate_w_q4k[words.z + i];
-            let qg3 = gate_w_q4k[words.w + i];
-            let qu0 = up_w_q4k[words.x + i];
-            let qu1 = up_w_q4k[words.y + i];
-            let qu2 = up_w_q4k[words.z + i];
-            let qu3 = up_w_q4k[words.w + i];
+            let qg0 = wg0[i];
+            let qg1 = wg1[i];
+            let qg2 = wg2[i];
+            let qg3 = wg3[i];
+            let qu0 = wu0[i];
+            let qu1 = wu1[i];
+            let qu2 = wu2[i];
+            let qu3 = wu3[i];
             gate_lo += vec4<f32>(
                 dot(a_lo, q4k_lo_nibbles(qg0)),
                 dot(a_lo, q4k_lo_nibbles(qg1)),

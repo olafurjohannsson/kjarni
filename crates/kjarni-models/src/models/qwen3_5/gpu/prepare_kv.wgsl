@@ -27,15 +27,19 @@ struct Info {
 @group(0) @binding(6) var<storage, read_write> k_store: array<f32>; // [B, KV, capacity, D]
 @group(0) @binding(7) var<storage, read_write> v_store: array<f32>;
 
-/// One thread per (row, kv head).
-@compute @workgroup_size(32)
+const THREADS: u32 = 64u;
+var<workgroup> partial: array<f32, THREADS>;
+
+/// A workgroup per (row, head); its threads split the head's dimensions.
+@compute @workgroup_size(64)
 fn main(
     @builtin(workgroup_id) wg: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(num_workgroups) grid: vec3<u32>,
 ) {
-    let idx = (wg.y * grid.x + wg.x) * 32u + lid.x;
+    let idx = wg.y * grid.x + wg.x;
     if (idx >= info.rows * info.kv_heads) { return; }
+    let t = lid.x;
     let row = idx / info.kv_heads;
     let head = idx % info.kv_heads;
     let token = row % info.seq;
@@ -44,16 +48,24 @@ fn main(
 
     let src = row * info.kv_heads * d + head * d;
     var sum = 0.0;
-    for (var i = 0u; i < d; i++) {
+    for (var i = t; i < d; i += THREADS) {
         let x = k_in[src + i];
         sum += x * x;
     }
-    let inv = 1.0 / sqrt(sum / f32(d) + info.eps);
+    partial[t] = sum;
+    workgroupBarrier();
+    for (var s = THREADS / 2u; s > 0u; s >>= 1u) {
+        if (t < s) {
+            partial[t] += partial[t + s];
+        }
+        workgroupBarrier();
+    }
+    let inv = 1.0 / sqrt(partial[0] / f32(d) + info.eps);
 
     let dst = ((batch * info.kv_heads + head) * info.key_stride + info.write_offset + token) * d;
     let table = (info.position_offset + token) * info.rope_stride;
     let half = info.rotary_half;
-    for (var i = 0u; i < half; i++) {
+    for (var i = t; i < half; i += THREADS) {
         let x0 = k_in[src + i] * inv * norm[i];
         let x1 = k_in[src + i + half] * inv * norm[i + half];
         let c = cos_table[table + i];
@@ -61,10 +73,10 @@ fn main(
         k_store[dst + i] = x0 * c - x1 * s;
         k_store[dst + i + half] = x0 * s + x1 * c;
     }
-    for (var i = 2u * half; i < d; i++) {
+    for (var i = 2u * half + t; i < d; i += THREADS) {
         k_store[dst + i] = k_in[src + i] * inv * norm[i];
     }
-    for (var i = 0u; i < d; i++) {
+    for (var i = t; i < d; i += THREADS) {
         v_store[dst + i] = v_in[src + i];
     }
 }

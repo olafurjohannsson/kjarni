@@ -46,6 +46,29 @@ struct RoPEAttendInfo {
     queries: u32,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct RoPEDecodeInfo {
+    batch: u32,
+    heads: u32,
+    kv_heads: u32,
+    head_dim: u32,
+    position_offset: u32,
+    key_stride: u32,
+    keys: u32,
+    mask_stride: u32,
+    mask_rows: u32,
+    chunks: u32,
+    scale: f32,
+    _pad: u32,
+}
+
+/// Keys per workgroup of the one-query attention, as in rope_decode_chunks.wgsl.
+const DECODE_CHUNK: usize = 32;
+/// The largest head and query-head group the one-query attention takes.
+const DECODE_MAX_HEAD_DIM: usize = 256;
+const DECODE_MAX_GROUP: usize = 8;
+
 /// The most bytes of attention scores one dispatch writes. A prompt whose scores
 /// would be larger is attended a slice of queries at a time.
 const MAX_SCORE_BYTES: u64 = 512 << 20;
@@ -109,6 +132,8 @@ pub struct GpuRoPEAttention {
     write_kv: Kernel,
     scores: Kernel,
     output: Kernel,
+    decode_chunks: Kernel,
+    decode_combine: Kernel,
     /// Bytes of scores per dispatch: the device's binding limit or
     /// `MAX_SCORE_BYTES`, whichever is smaller.
     score_budget: u64,
@@ -142,6 +167,18 @@ impl GpuRoPEAttention {
                 device,
                 "RoPE context",
                 wgpu::include_wgsl!("./rope_context.wgsl"),
+                &[true, true, false],
+            ),
+            decode_chunks: Kernel::new(
+                device,
+                "RoPE decode chunks",
+                wgpu::include_wgsl!("./rope_decode_chunks.wgsl"),
+                &[true, true, true, true, false, false],
+            ),
+            decode_combine: Kernel::new(
+                device,
+                "RoPE decode combine",
+                wgpu::include_wgsl!("./rope_decode_combine.wgsl"),
                 &[true, true, false],
             ),
             score_budget: (context.device.limits().max_storage_buffer_binding_size as u64)
@@ -281,6 +318,22 @@ impl GpuRoPEAttention {
         let kv_heads = self.ops.num_kv_heads() as usize;
         let head_dim = self.ops.head_dim() as usize;
         let mask_shape = attention_mask.shape();
+        if seq == 1
+            && head_dim.is_multiple_of(4)
+            && head_dim <= DECODE_MAX_HEAD_DIM
+            && heads / kv_heads <= DECODE_MAX_GROUP
+        {
+            return self.attend_one(
+                encoder,
+                q_rotated,
+                k_store,
+                v_store,
+                attention_mask,
+                position_offset,
+                keys,
+                pool,
+            );
+        }
         let mut info = RoPEAttendInfo {
             batch: batch as u32,
             seq: seq as u32,
@@ -326,6 +379,67 @@ impl GpuRoPEAttention {
         attended
     }
 
+    /// `attend` for one query per sequence: the keys in chunks across
+    /// workgroups, then the chunks merged.
+    #[allow(clippy::too_many_arguments)]
+    fn attend_one(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        q_rotated: &GpuTensor,
+        k_store: &GpuTensor,
+        v_store: &GpuTensor,
+        attention_mask: &GpuTensor,
+        position_offset: usize,
+        keys: usize,
+        pool: &mut GpuTensorPool,
+    ) -> GpuTensor {
+        let (batch, heads) = (q_rotated.shape()[0], q_rotated.shape()[1]);
+        let kv_heads = self.ops.num_kv_heads() as usize;
+        let head_dim = self.ops.head_dim() as usize;
+        let mask_shape = attention_mask.shape();
+        let chunks = keys.div_ceil(DECODE_CHUNK);
+        let info = RoPEDecodeInfo {
+            batch: batch as u32,
+            heads: heads as u32,
+            kv_heads: kv_heads as u32,
+            head_dim: head_dim as u32,
+            position_offset: position_offset as u32,
+            key_stride: k_store.shape()[2] as u32,
+            keys: keys as u32,
+            mask_stride: mask_shape[mask_shape.len() - 1] as u32,
+            mask_rows: mask_shape[0] as u32,
+            chunks: chunks as u32,
+            scale: self.ops.scale_factor(),
+            _pad: 0,
+        };
+        let uniforms = self.context.uniform_buffer(&info);
+        let stats = pool.get(vec![batch, heads, chunks, 2]);
+        let partial = pool.get(vec![batch, heads, chunks, head_dim]);
+        self.decode_chunks.0.encode_workgroups(
+            &self.context,
+            encoder,
+            &uniforms,
+            &[
+                q_rotated,
+                k_store,
+                v_store,
+                attention_mask,
+                &stats,
+                &partial,
+            ],
+            [chunks as u32, kv_heads as u32, batch as u32],
+        );
+        let attended = pool.get(vec![batch, 1, heads * head_dim]);
+        self.decode_combine.0.encode_workgroups(
+            &self.context,
+            encoder,
+            &uniforms,
+            &[&stats, &partial, &attended],
+            [heads as u32, batch as u32, 1],
+        );
+        attended
+    }
+
     fn encode_write_kv(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -362,7 +476,7 @@ impl GpuRoPEAttention {
             &[
                 q_proj, k_proj, v_proj, cos_table, sin_table, q_rotated, k_store, v_store,
             ],
-            batch * seq * heads as usize,
+            batch * seq * heads as usize * (self.ops.head_dim() as usize / 2),
         );
     }
 }
@@ -756,6 +870,65 @@ mod tests {
             split,
             "in slices after a cached prefix",
         );
+    }
+
+    /// One query over keys in several chunks: the chunks merged give the
+    /// softmax over every key it may see, with a padded first chunk in one
+    /// batch row, keys past the query's position and grouped KV heads.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn one_query_attends_across_chunks_like_the_reference() {
+        let ctx = setup().await;
+        let (batch, heads, kv_heads, d) = (2usize, 8usize, 2usize, 64usize);
+        let (capacity, keys, position) = (320usize, 300usize, 290usize);
+        let attn = GpuRoPEAttention::new(&ctx, (heads * d) as u32, heads as u32, kv_heads as u32);
+        let q = random(batch * heads, d, 1);
+        let k = random(batch * kv_heads * capacity, d, 2);
+        let v = random(batch * kv_heads * capacity, d, 3);
+        let mut mask = Array2::<f32>::ones((batch, keys));
+        mask.slice_mut(s![1, ..130]).fill(0.0);
+
+        let gpu = |a: &Array2<f32>, shape: [usize; 4]| {
+            GpuTensor::from_ndarray(&ctx, &a.clone().into_shape_with_order(shape).unwrap()).unwrap()
+        };
+        let q_gpu = gpu(&q, [batch, heads, 1, d]);
+        let k_gpu = gpu(&k, [batch, kv_heads, capacity, d]);
+        let v_gpu = gpu(&v, [batch, kv_heads, capacity, d]);
+        let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask).unwrap();
+        let mut enc = ctx.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(ctx.clone());
+        let out = attn.attend(
+            &mut enc, &q_gpu, &k_gpu, &v_gpu, &mask_gpu, position, keys, &mut pool,
+        );
+        ctx.queue.submit(Some(enc.finish()));
+        let got = out.to_ndarray_3d::<f32>().await.unwrap();
+
+        let mut worst = 0.0f32;
+        for b in 0..batch {
+            for h in 0..heads {
+                let kv = h / (heads / kv_heads);
+                let qr = q.row(b * heads + h);
+                let row = |key: usize| (b * kv_heads + kv) * capacity + key;
+                let seen: Vec<usize> = (0..=position)
+                    .filter(|&key| mask[[b, key]] != 0.0)
+                    .collect();
+                let scores: Vec<f32> = seen
+                    .iter()
+                    .map(|&key| qr.dot(&k.row(row(key))) / (d as f32).sqrt())
+                    .collect();
+                let largest = scores.iter().cloned().fold(f32::MIN, f32::max);
+                let total: f32 = scores.iter().map(|s| (s - largest).exp()).sum();
+                for i in 0..d {
+                    let want: f32 = seen
+                        .iter()
+                        .zip(&scores)
+                        .map(|(&key, s)| (s - largest).exp() / total * v[[row(key), i]])
+                        .sum();
+                    worst = worst.max((got[[b, 0, h * d + i]] - want).abs());
+                }
+            }
+        }
+        assert!(worst < 1e-5, "differs by {worst:e}");
     }
 
     #[test]
