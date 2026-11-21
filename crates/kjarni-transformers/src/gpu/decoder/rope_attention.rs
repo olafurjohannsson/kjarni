@@ -64,7 +64,7 @@ struct RoPEDecodeInfo {
 }
 
 /// Keys per workgroup of the one-query attention, as in rope_decode_chunks.wgsl.
-const DECODE_CHUNK: usize = 128;
+const DECODE_CHUNK: usize = 32;
 /// The largest head and query-head group the one-query attention takes.
 const DECODE_MAX_HEAD_DIM: usize = 256;
 const DECODE_MAX_GROUP: usize = 8;
@@ -476,7 +476,7 @@ impl GpuRoPEAttention {
             &[
                 q_proj, k_proj, v_proj, cos_table, sin_table, q_rotated, k_store, v_store,
             ],
-            batch * seq * heads as usize,
+            batch * seq * heads as usize * (self.ops.head_dim() as usize / 2),
         );
     }
 }
