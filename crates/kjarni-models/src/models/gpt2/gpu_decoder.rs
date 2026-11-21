@@ -335,6 +335,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
             // Only the hidden state carries into the next layer (the KV cache owns
             // its own buffers); see GpuTensorPool::release_since.
             pool.release_since(&checkpoint, &[&current_state]);
+            kjarni_transformers::gpu::submit_between_layers(&self.context, encoder, i, end_layer);
         }
 
         Ok(current_state)

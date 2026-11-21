@@ -695,7 +695,13 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
         let rows = batch * seq;
         let mut current = hidden_states.view(vec![rows, hidden]);
         let checkpoint = pool.checkpoint();
-        for layer in &self.layers[start_layer..end_layer] {
+        for (i, layer) in self
+            .layers
+            .iter()
+            .enumerate()
+            .take(end_layer)
+            .skip(start_layer)
+        {
             let normed = pool.get(vec![rows, hidden]);
             self.norm
                 .encode(encoder, &layer.input_norm, &current, &normed);
@@ -738,6 +744,7 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
             self.add.encode(encoder, &[&mixed_in, &mlp], &next);
             current = next;
             pool.release_since(&checkpoint, &[&current]);
+            kjarni_transformers::gpu::submit_between_layers(&self.context, encoder, i, end_layer);
         }
 
         if end_layer == self.layers.len() {
