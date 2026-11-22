@@ -15,7 +15,6 @@ use crate::models::base::{AutoregressiveLoop, LanguageModel};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
-#[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
 
 /// Defines the generation loop.
 #[async_trait]
