@@ -6,6 +6,7 @@
 
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
+use crate::tensor::DType;
 use std::sync::{Arc, Mutex};
 
 use super::LinearInfo;
@@ -31,8 +32,12 @@ pub(super) enum Q8Kernel {
     Q5K,
     /// Q5_K, as Q4KSplit.
     Q5KSplit,
+    /// Q8_0, eight rows a warp.
+    Q8_0,
     /// SwiGLU's gate and up projections, both Q4_K, four outputs a warp.
     SwiGluQ4K,
+    /// SwiGLU over Q8_0 gate and up projections.
+    SwiGluQ8_0,
 }
 
 pub(crate) struct Q8Gemv {
@@ -43,7 +48,9 @@ pub(crate) struct Q8Gemv {
     gemv_q4k_split: wgpu::ComputePipeline,
     gemv_q5k: wgpu::ComputePipeline,
     gemv_q5k_split: wgpu::ComputePipeline,
+    gemv_q8_0: wgpu::ComputePipeline,
     swiglu_q4k: wgpu::ComputePipeline,
+    swiglu_q8_0: wgpu::ComputePipeline,
     /// The int8 activations and their scales. Calls recorded one after another
     /// reuse them: the GPU runs a call's quantize and GEMV before the next's.
     scratch: Mutex<Option<Scratch>>,
@@ -109,7 +116,9 @@ impl Q8Gemv {
             gemv_q4k_split: make("gemv_q4k_q8_split"),
             gemv_q5k: make("gemv_q5k_q8"),
             gemv_q5k_split: make("gemv_q5k_q8_split"),
+            gemv_q8_0: make("gemv_q8_0_q8"),
             swiglu_q4k: make("swiglu_q4k_q8"),
+            swiglu_q8_0: make("swiglu_q8_0_q8"),
             layout,
             scratch: Mutex::new(None),
         }
@@ -152,9 +161,11 @@ impl Q8Gemv {
         self.record(encoder, input, weights, weights, output, info, kernel);
     }
 
-    /// Records SwiGLU's `silu(input @ gate^T) * (input @ up^T)` for Q4_K gate and
-    /// up projections, `m` rows of `k` into `n` outputs.
-    pub(crate) fn encode_swiglu_q4k(
+    /// Records SwiGLU's `silu(input @ gate^T) * (input @ up^T)` for Q4_K or Q8_0
+    /// gate and up projections, `m` rows of `k` into `n` outputs. `None` for any
+    /// other weight format, which records nothing.
+    #[must_use]
+    pub(crate) fn encode_swiglu(
         &self,
         encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
@@ -162,9 +173,15 @@ impl Q8Gemv {
         up: &GpuTensor,
         output: &GpuTensor,
         (m, k, n): (u32, u32, u32),
-    ) {
+    ) -> Option<()> {
+        let kernel = match (gate.dtype(), up.dtype()) {
+            (DType::Q4_K, DType::Q4_K) => Q8Kernel::SwiGluQ4K,
+            (DType::Q8_0, DType::Q8_0) => Q8Kernel::SwiGluQ8_0,
+            _ => return None,
+        };
         let info = LinearInfo { m, k, n };
-        self.record(encoder, input, gate, up, output, info, Q8Kernel::SwiGluQ4K);
+        self.record(encoder, input, gate, up, output, info, kernel);
+        Some(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -203,11 +220,15 @@ impl Q8Gemv {
             Q8Kernel::Q4KSplit => (&self.gemv_q4k_split, 8),
             Q8Kernel::Q5K => (&self.gemv_q5k, 8),
             Q8Kernel::Q5KSplit => (&self.gemv_q5k_split, 8),
+            Q8Kernel::Q8_0 => (&self.gemv_q8_0, 8),
             Q8Kernel::SwiGluQ4K => (&self.swiglu_q4k, 4),
+            Q8Kernel::SwiGluQ8_0 => (&self.swiglu_q8_0, 4),
         };
         let rows = n.div_ceil(rows_per_group);
         let label = match kernel {
-            Q8Kernel::SwiGluQ4K => format!("Fused SwiGLU Q8 [{m}x{k} -> {n}]"),
+            Q8Kernel::SwiGluQ4K | Q8Kernel::SwiGluQ8_0 => {
+                format!("Fused SwiGLU Q8 [{m}x{k} -> {n}]")
+            }
             _ => format!("Linear Q8 [{m}x{k} @ {n}]"),
         };
         crate::gpu_profile!(

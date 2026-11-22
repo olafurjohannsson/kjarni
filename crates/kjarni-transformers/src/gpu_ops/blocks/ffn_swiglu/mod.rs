@@ -385,7 +385,23 @@ impl GpuSwiGLUFFN {
         let dt = weights.gate_proj.dtype();
         let fused_reads = matches!(dt, DType::BF16 | DType::F32 | DType::Q4_K);
         let fused = fused_reads && rows == 1;
-        if fused {
+        // Decode on Q4_K or Q8_0 weights: both projections and the activation in
+        // one int8 kernel, when the context allows int8 activations.
+        let int8_fused = rows == 1
+            && self.context.int8_activations
+            && self
+                .q8
+                .encode_swiglu(
+                    encoder,
+                    input,
+                    &weights.gate_proj,
+                    &weights.up_proj,
+                    &intermediate,
+                    (1, input.shape()[1] as u32, intermediate_size as u32),
+                )
+                .is_some();
+        if int8_fused {
+        } else if fused {
             self.encode_fused_gate_up(encoder, input, weights, &intermediate);
         } else {
             let gate = pool.get(vec![rows, intermediate_size]);
@@ -474,17 +490,6 @@ impl GpuSwiGLUFFN {
         let is_q4k = weights.gate_proj.dtype() == DType::Q4_K;
 
         let q4k_gemv = is_q4k && m <= FUSED_Q4K_GEMV_MAX_ROWS;
-        if q4k_gemv && self.context.int8_activations {
-            self.q8.encode_swiglu_q4k(
-                encoder,
-                input,
-                &weights.gate_proj,
-                &weights.up_proj,
-                output,
-                (m, k, n),
-            );
-            return;
-        }
         let (pipeline, bind_group) = if is_q4k {
             let pipeline = if q4k_gemv {
                 &self.fused_gemv_q4k

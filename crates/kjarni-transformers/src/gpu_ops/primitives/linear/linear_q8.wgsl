@@ -19,6 +19,10 @@ struct LinearInfo {
 @group(0) @binding(4) var<storage, read_write> Aux: array<vec4<f32>>;  // [M, K/32] scale, sum of first 16, sum of last 16
 @group(0) @binding(5) var<storage, read_write> Output: array<f32>;     // [M, N]
 @group(0) @binding(6) var<storage, read> W_UP4: array<vec4<u32>>;      // SwiGLU's up projection, Q4_K
+// Bindings 2 and 6 read a word at a time: Q8_0 blocks repacked to 9 words, d
+// in the low half of the first and 32 signed bytes after it.
+@group(0) @binding(2) var<storage, read> W_Q8: array<u32>;
+@group(0) @binding(6) var<storage, read> W_UP_Q8: array<u32>;
 
 const QUANTIZE_THREADS: u32 = 256u;
 
@@ -27,7 +31,7 @@ var<workgroup> qa_sum: array<f32, QUANTIZE_THREADS>;
 var<workgroup> qa_val: array<f32, QUANTIZE_THREADS>;
 
 // A thread per activation, eight blocks of 32 a workgroup. K is a multiple of
-// 256, so no block spans two rows.
+// 32, so no block spans two rows.
 @compute @workgroup_size(QUANTIZE_THREADS)
 fn quantize_q8(
     @builtin(workgroup_id) wg: vec3<u32>,
@@ -290,6 +294,149 @@ fn swiglu_q4k_q8(
         let r = rows + vec4<u32>((chunk / 8u) * Q4K_VEC4S);
         gate += vec4<f32>(q4k_row(r.x, c), q4k_row(r.y, c), q4k_row(r.z, c), q4k_row(r.w, c));
         up += vec4<f32>(up_row(r.x, c), up_row(r.y, c), up_row(r.z, c), up_row(r.w, c));
+    }
+
+    red_a[tid] = gate;
+    red_b[tid] = up;
+    workgroupBarrier();
+    for (var s = 16u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            red_a[tid] += red_a[tid + s];
+            red_b[tid] += red_b[tid + s];
+        }
+        workgroupBarrier();
+    }
+    if (tid == 0u) {
+        let g = red_a[0];
+        let u = red_b[0];
+        let out0 = wg.z * info.N + row0;
+        for (var r = 0u; r < 4u; r++) {
+            if (row0 + r < info.N) { Output[out0 + r] = silu(g[r]) * u[r]; }
+        }
+    }
+}
+
+const Q8_WORDS: u32 = 9u;
+
+// One row's share of half a Q8_0 block: 16 weights against 16 activations.
+fn q8_0_half(base: u32, half: u32, a: vec4<u32>, s: f32) -> f32 {
+    let d = unpack2x16float(W_Q8[base]).x;
+    let w = base + 1u + half * 4u;
+    let dot = dot4I8Packed(W_Q8[w], a.x) + dot4I8Packed(W_Q8[w + 1u], a.y)
+        + dot4I8Packed(W_Q8[w + 2u], a.z) + dot4I8Packed(W_Q8[w + 3u], a.w);
+    return d * s * f32(dot);
+}
+
+// Eight rows a workgroup, a thread taking half a block at a time, so a warp
+// reads consecutive blocks of each row.
+@compute @workgroup_size(32)
+fn gemv_q8_0_q8(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>
+) {
+    let row0 = (wg.y * grid.x + wg.x) * ROWS_PER_WG;
+    let tid = lid.x;
+    if (row0 >= info.N) { return; }
+    let blocks = info.K / 32u;
+    let per_row = blocks * Q8_WORDS;
+    let last = info.N - 1u;
+    let ra = vec4<u32>(row0, min(row0 + 1u, last), min(row0 + 2u, last), min(row0 + 3u, last)) * per_row;
+    let rb = vec4<u32>(min(row0 + 4u, last), min(row0 + 5u, last), min(row0 + 6u, last), min(row0 + 7u, last)) * per_row;
+    let act0 = wg.z * (info.K / 4u);
+    let aux0 = wg.z * blocks;
+
+    var acc_a = vec4<f32>(0.0);
+    var acc_b = vec4<f32>(0.0);
+    for (var u = tid; u < blocks * 2u; u += 32u) {
+        let blk = u / 2u;
+        let half = u % 2u;
+        let w = act0 + blk * 8u + half * 4u;
+        let a = vec4<u32>(Act[w], Act[w + 1u], Act[w + 2u], Act[w + 3u]);
+        let s = Aux[aux0 + blk].x;
+        let off = blk * Q8_WORDS;
+        acc_a += vec4<f32>(
+            q8_0_half(ra.x + off, half, a, s),
+            q8_0_half(ra.y + off, half, a, s),
+            q8_0_half(ra.z + off, half, a, s),
+            q8_0_half(ra.w + off, half, a, s),
+        );
+        acc_b += vec4<f32>(
+            q8_0_half(rb.x + off, half, a, s),
+            q8_0_half(rb.y + off, half, a, s),
+            q8_0_half(rb.z + off, half, a, s),
+            q8_0_half(rb.w + off, half, a, s),
+        );
+    }
+
+    red_a[tid] = acc_a;
+    red_b[tid] = acc_b;
+    workgroupBarrier();
+    for (var s = 16u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            red_a[tid] += red_a[tid + s];
+            red_b[tid] += red_b[tid + s];
+        }
+        workgroupBarrier();
+    }
+    if (tid == 0u) {
+        let a = red_a[0];
+        let b = red_b[0];
+        let out0 = wg.z * info.N + row0;
+        for (var r = 0u; r < 4u; r++) {
+            if (row0 + r < info.N) { Output[out0 + r] = a[r]; }
+            if (row0 + 4u + r < info.N) { Output[out0 + 4u + r] = b[r]; }
+        }
+    }
+}
+
+fn q8_0_up_half(base: u32, half: u32, a: vec4<u32>, s: f32) -> f32 {
+    let d = unpack2x16float(W_UP_Q8[base]).x;
+    let w = base + 1u + half * 4u;
+    let dot = dot4I8Packed(W_UP_Q8[w], a.x) + dot4I8Packed(W_UP_Q8[w + 1u], a.y)
+        + dot4I8Packed(W_UP_Q8[w + 2u], a.z) + dot4I8Packed(W_UP_Q8[w + 3u], a.w);
+    return d * s * f32(dot);
+}
+
+// SwiGLU over Q8_0 gate and up projections, as swiglu_q4k_q8: four outputs a
+// workgroup, each half block of activations serving four gate and four up rows.
+@compute @workgroup_size(32)
+fn swiglu_q8_0_q8(
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>
+) {
+    let row0 = (wg.y * grid.x + wg.x) * 4u;
+    let tid = lid.x;
+    if (row0 >= info.N) { return; }
+    let blocks = info.K / 32u;
+    let per_row = blocks * Q8_WORDS;
+    let last = info.N - 1u;
+    let rows = vec4<u32>(row0, min(row0 + 1u, last), min(row0 + 2u, last), min(row0 + 3u, last)) * per_row;
+    let act0 = wg.z * (info.K / 4u);
+    let aux0 = wg.z * blocks;
+
+    var gate = vec4<f32>(0.0);
+    var up = vec4<f32>(0.0);
+    for (var u = tid; u < blocks * 2u; u += 32u) {
+        let blk = u / 2u;
+        let half = u % 2u;
+        let w = act0 + blk * 8u + half * 4u;
+        let a = vec4<u32>(Act[w], Act[w + 1u], Act[w + 2u], Act[w + 3u]);
+        let s = Aux[aux0 + blk].x;
+        let r = rows + vec4<u32>(blk * Q8_WORDS);
+        gate += vec4<f32>(
+            q8_0_half(r.x, half, a, s),
+            q8_0_half(r.y, half, a, s),
+            q8_0_half(r.z, half, a, s),
+            q8_0_half(r.w, half, a, s),
+        );
+        up += vec4<f32>(
+            q8_0_up_half(r.x, half, a, s),
+            q8_0_up_half(r.y, half, a, s),
+            q8_0_up_half(r.z, half, a, s),
+            q8_0_up_half(r.w, half, a, s),
+        );
     }
 
     red_a[tid] = gate;

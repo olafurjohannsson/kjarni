@@ -289,6 +289,10 @@ impl GpuLinearLayer {
                 Some(q8::Q8Kernel::Q5KSplit)
             } else if use_q5k_kernel {
                 Some(q8::Q8Kernel::Q5K)
+            } else if use_q8_kernel && !use_q8_narrow {
+                // Narrow Q8_0 outputs stay exact: at a few hundred rows the
+                // extra quantise dispatch costs more than int8 saves.
+                Some(q8::Q8Kernel::Q8_0)
             } else {
                 None
             };

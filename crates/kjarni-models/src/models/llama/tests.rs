@@ -244,12 +244,29 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
 #[tokio::test]
 #[ignore = "a profile: needs a GPU, the 1B Instruct GGUF and the profiling feature"]
 async fn profile_the_1b_on_the_gpu() -> Result<()> {
-    use kjarni_transformers::cache::Cache;
-    use ndarray::Array2;
-
     let path = model_cache_dir("meta-llama_Llama-3.2-1B-Instruct").join("model.gguf");
     let ctx = WgpuContext::new().await?;
     let m = LlamaModel::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)?;
+    profile_on_the_gpu(&m, ctx).await
+}
+
+/// As `profile_the_1b_on_the_gpu`, for Qwen2.5-0.5B, which runs on the Llama
+/// decoder.
+#[tokio::test]
+#[ignore = "a profile: needs a GPU, the Qwen2.5-0.5B GGUF and the profiling feature"]
+async fn profile_qwen2_5_0_5b_on_the_gpu() -> Result<()> {
+    use crate::models::qwen::model::QwenModel;
+    let path = model_cache_dir("Qwen_Qwen2.5-0.5B-Instruct").join("model.gguf");
+    let ctx = WgpuContext::new().await?;
+    let m = QwenModel::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)?;
+    profile_on_the_gpu(&m, ctx).await
+}
+
+/// A 512-token prefill and four decode steps, each kernel's GPU time totalled.
+async fn profile_on_the_gpu(m: &dyn DecoderLanguageModel, ctx: Arc<WgpuContext>) -> Result<()> {
+    use kjarni_transformers::cache::Cache;
+    use ndarray::Array2;
+
     let backend = GpuDecoderBackend::new(ctx.clone())?;
     let context: usize = 512;
     let ids: Vec<u32> = (0..context as u32)
@@ -278,13 +295,13 @@ async fn profile_the_1b_on_the_gpu() -> Result<()> {
     };
     // A warm-up, whose timings are dropped.
     let mut cache: Box<dyn Cache> = m.new_cache(1, context + 8, 1)?;
-    backend.prefill(&m, &prompt, cache.as_mut()).await?;
+    backend.prefill(m, &prompt, cache.as_mut()).await?;
     flush(&ctx);
     ctx.profiler.totals(&ctx).await;
 
     let mut cache = m.new_cache(1, context + 8, 1)?;
     let t = std::time::Instant::now();
-    let l = backend.prefill(&m, &prompt, cache.as_mut()).await?;
+    let l = backend.prefill(m, &prompt, cache.as_mut()).await?;
     let wall = t.elapsed().as_secs_f64() * 1e3;
     flush(&ctx);
     report("prefill 512", ctx.profiler.totals(&ctx).await, wall);
@@ -295,7 +312,7 @@ async fn profile_the_1b_on_the_gpu() -> Result<()> {
     for i in 0..4 {
         backend.update_decode_token(&mut tok, next)?;
         let l = backend
-            .decode_one(&m, &tok, context + 1 + i, cache.as_mut())
+            .decode_one(m, &tok, context + 1 + i, cache.as_mut())
             .await?;
         next = argmax(&l);
     }
