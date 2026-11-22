@@ -19,6 +19,16 @@ use crate::gpu::GpuTensor;
 use crate::tests::common::read_gpu_tensor_to_vec;
 use crate::weights::ModelWeights;
 
+/// A context whose quantised GEMVs keep their activations in f32, so they match
+/// the CPU to float rounding.
+async fn exact_context() -> Result<Arc<WgpuContext>> {
+    WgpuContext::with_config(crate::gpu_ops::context::GpuConfig {
+        exact_quantized: true,
+        ..Default::default()
+    })
+    .await
+}
+
 fn gguf_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap())
         .join(".cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf")
@@ -37,7 +47,7 @@ async fn run_q4k(m: usize, tensor: &str) -> Result<Option<(Array2<f32>, Array2<f
         return Ok(None);
     }
 
-    let context = WgpuContext::new().await?;
+    let context = exact_context().await?;
     let linear = GpuLinearLayer::new(&context);
 
     // The real loader path, not a hand-built view: the shape and dtype it derives
@@ -68,7 +78,9 @@ async fn run_q4k(m: usize, tensor: &str) -> Result<Option<(Array2<f32>, Array2<f
     let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
     let gpu_out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "q4k_out");
 
-    let mut enc = context.device.create_command_encoder(&Default::default());
+    let mut enc = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     linear.encode(&mut enc, &gpu_in, &gpu_w, &gpu_out);
     context.queue.submit(std::iter::once(enc.finish()));
 
@@ -156,7 +168,7 @@ async fn q4k_batched_matches_cpu() -> Result<()> {
 
 /// `gemv_q4k` when the output rows do not fill its last workgroup, for one row and for a
 /// few. Every tensor in the file has a row count divisible by 8, so these use the first
-/// rows of one.
+/// rows of one. Rows of 4096 and more take `gemv_q4k_split`.
 #[cfg(target_arch = "x86_64")]
 #[tokio::test]
 #[ignore = "GPU required"]
@@ -175,12 +187,18 @@ async fn q4k_gemv_rows_short_of_a_workgroup() -> Result<()> {
     let blocks: Vec<BlockQ4_K> = weights.with_raw_tensor(name, |v| {
         Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
     })?;
-    let k = 3072;
-    let blocks_per_row = k / 256;
-
-    let context = WgpuContext::new().await?;
+    let context = exact_context().await?;
     let linear = GpuLinearLayer::new(&context);
-    for (m, n) in [(1, 1), (1, 7), (1, 13), (3, 13), (10, 15)] {
+    for (m, n, k) in [
+        (1, 1, 3072),
+        (1, 7, 3072),
+        (1, 13, 3072),
+        (3, 13, 3072),
+        (10, 15, 3072),
+        (1, 13, 4096),
+        (3, 7, 8192),
+    ] {
+        let blocks_per_row = k / 256;
         let row_blocks = &blocks[..n * blocks_per_row];
         let view = crate::tensor::raw_tensor::TensorView {
             name: name.to_string(),
@@ -194,7 +212,9 @@ async fn q4k_gemv_rows_short_of_a_workgroup() -> Result<()> {
             Array2::from_shape_fn((m, k), |(r, c)| ((r * 31 + c * 7) % 97) as f32 / 48.0 - 1.0);
         let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
         let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         linear.encode(&mut enc, &gpu_in, &w, &out);
         context.queue.submit(std::iter::once(enc.finish()));
         let (got, _) = read_gpu_tensor_to_vec::<f32>(&out).await?;
@@ -267,7 +287,9 @@ async fn q4k_packed_matches_expanded() -> Result<()> {
 
         let run = |w: &GpuTensor| -> Result<Vec<f32>> {
             let out = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "out");
-            let mut enc = context.device.create_command_encoder(&Default::default());
+            let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut enc, &gpu_in, w, &out);
             context.queue.submit(std::iter::once(enc.finish()));
             Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
@@ -342,7 +364,9 @@ async fn packed_gemv_bandwidth() -> Result<()> {
             let mut best = f64::MAX;
             for _ in 0..5 {
                 let t = std::time::Instant::now();
-                let mut enc = context.device.create_command_encoder(&Default::default());
+                let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                    context.device.create_command_encoder(&Default::default()),
+                );
                 for _ in 0..reps {
                     linear.encode(&mut enc, &gpu_in, w, &out);
                 }
@@ -415,7 +439,9 @@ async fn q6k_packed_matches_cpu_and_expanded() -> Result<()> {
 
         let run = |w: &GpuTensor| -> Result<Vec<f32>> {
             let out = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "o");
-            let mut enc = context.device.create_command_encoder(&Default::default());
+            let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut enc, &gpu_in, w, &out);
             context.queue.submit(std::iter::once(enc.finish()));
             Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
@@ -554,7 +580,14 @@ async fn fused_row_range_uploads_the_same_rows_the_cpu_slices() -> Result<()> {
 
 /// Quantise a deterministic pseudo-random `[n, k]` matrix, multiply an `[m, k]`
 /// input by it on both devices, and return `(gpu, cpu)`.
-async fn run_q8(m: usize, n: usize, k: usize) -> Result<(Array2<f32>, Array2<f32>)> {
+/// `exact`: an exact context. Returns the GPU's result, the f32 product, and the
+/// product with the activations rounded as the int8 kernels round them.
+async fn run_q8(
+    m: usize,
+    n: usize,
+    k: usize,
+    exact: bool,
+) -> Result<(Array2<f32>, Array2<f32>, Array2<f32>)> {
     use crate::linear_layer::LinearData;
     use crate::tensor::QuantizedMatrix;
     use std::sync::Arc;
@@ -581,8 +614,18 @@ async fn run_q8(m: usize, n: usize, k: usize) -> Result<(Array2<f32>, Array2<f32
     // comparison and hide a layout bug behind it.
     let dequantized = matrix.dequantize()?;
     let cpu = input.dot(&dequantized.t());
+    let rounded: Vec<f32> = input
+        .rows()
+        .into_iter()
+        .flat_map(|r| int8_rounded(&r.to_vec()))
+        .collect();
+    let rounded = Array2::from_shape_vec((m, k), rounded)?.dot(&dequantized.t());
 
-    let context = WgpuContext::new().await?;
+    let context = if exact {
+        exact_context().await?
+    } else {
+        WgpuContext::new().await?
+    };
     let linear = GpuLinearLayer::new(&context);
 
     // Through `LinearLayer::to_gpu_tensor`, because that is the path a loaded
@@ -597,22 +640,35 @@ async fn run_q8(m: usize, n: usize, k: usize) -> Result<(Array2<f32>, Array2<f32
     let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
     let gpu_out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "q8_out");
 
-    let mut enc = context.device.create_command_encoder(&Default::default());
+    let mut enc = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     linear.encode(&mut enc, &gpu_in, &gpu_w, &gpu_out);
     context.queue.submit(std::iter::once(enc.finish()));
 
     let (v, out_shape) = read_gpu_tensor_to_vec::<f32>(&gpu_out).await?;
     let gpu = Array2::from_shape_vec((out_shape[0], out_shape[1]), v)?;
-    Ok((gpu, cpu))
+    Ok((gpu, cpu, rounded))
 }
 
 #[tokio::test]
 #[ignore = "GPU required"]
 async fn q8_gemv_matches_cpu() -> Result<()> {
-    // `n` deliberately includes values that are not multiples of the four rows a
-    // GEMV workgroup owns, so the tail path is covered.
-    for (n, k) in [(64, 64), (128, 256), (255, 128), (33, 512), (1, 32)] {
-        let (gpu, cpu) = run_q8(1, n, k).await?;
+    // Under Q8_NARROW_MAX_OUTPUTS rows a workgroup takes one row; from it on, four,
+    // and `n` includes values that are not multiples of four so the tail is covered.
+    // (32, 2560) is Qwen 3.5's gate projections.
+    for (n, k) in [
+        (64, 64),
+        (128, 256),
+        (255, 128),
+        (33, 512),
+        (1, 32),
+        (32, 2560),
+        (256, 64),
+        (259, 96),
+        (517, 160),
+    ] {
+        let (gpu, cpu, _) = run_q8(1, n, k, true).await?;
         report(&format!("q8 gemv [{n}x{k}]"), &gpu, &cpu, &[n, k]);
     }
     Ok(())
@@ -627,12 +683,13 @@ async fn q8_batched_matches_cpu() -> Result<()> {
         (4, 64, 128),
         (8, 129, 256),
         (2, 32, 64),
+        (3, 32, 2560),
         (67, 200, 96),
         (127, 65, 160),
         (128, 128, 64),
         (300, 257, 128),
     ] {
-        let (gpu, cpu) = run_q8(m, n, k).await?;
+        let (gpu, cpu, _) = run_q8(m, n, k, true).await?;
         report(&format!("q8 gemm [{m}x{k} @ {n}]"), &gpu, &cpu, &[n, k]);
     }
     Ok(())
@@ -721,7 +778,9 @@ async fn gemm_matches_cpu() -> Result<()> {
 
             let a_gpu = GpuTensor::from_ndarray(&context, &a)?;
             let out = GpuTensor::from_ndarray(&context, &Array2::<f32>::zeros((m, n)))?;
-            let mut encoder = context.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut encoder, &a_gpu, &w_gpu, &out);
             context.queue.submit(Some(encoder.finish()));
 
@@ -773,7 +832,9 @@ async fn q6k_batched_matches_expanded() -> Result<()> {
             let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
             let run = |w: &GpuTensor| -> Result<Vec<f32>> {
                 let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
-                let mut enc = context.device.create_command_encoder(&Default::default());
+                let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                    context.device.create_command_encoder(&Default::default()),
+                );
                 linear.encode(&mut enc, &gpu_in, w, &out);
                 context.queue.submit(std::iter::once(enc.finish()));
                 Ok(pollster::block_on(read_gpu_tensor_to_vec::<f32>(&out))?.0)
@@ -817,10 +878,17 @@ async fn q5k_matches_its_dequantisation() -> Result<()> {
         state ^= state << 17;
         state
     };
-    let context = WgpuContext::new().await?;
+    let context = exact_context().await?;
     let linear = GpuLinearLayer::new(&context);
 
-    for (n, k) in [(13usize, 256usize), (64, 512), (257, 768)] {
+    // Rows of 4096 and more take gemv_q5k_split for a GEMV.
+    for (n, k) in [
+        (13usize, 256usize),
+        (64, 512),
+        (257, 768),
+        (13, 4096),
+        (40, 8192),
+    ] {
         let blocks: Vec<BlockQ5_K> = (0..n * k / 256)
             .map(|_| {
                 let mut bytes = [0u8; 176];
@@ -853,7 +921,9 @@ async fn q5k_matches_its_dequantisation() -> Result<()> {
             let want = input.dot(&dequantized.t());
             let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
             let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
-            let mut enc = context.device.create_command_encoder(&Default::default());
+            let mut enc = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             linear.encode(&mut enc, &gpu_in, &packed, &out);
             context.queue.submit(std::iter::once(enc.finish()));
             let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
@@ -869,6 +939,577 @@ async fn q5k_matches_its_dequantisation() -> Result<()> {
                 worst < 1e-5 * scale.max(1.0) * (k as f32).sqrt(),
                 "[{m}x{k} @ {n}]: {worst:.3e}"
             );
+        }
+    }
+    Ok(())
+}
+
+/// A Q5_K GEMV and then an F32 one, recorded into one shared compute pass. The
+/// F32 kernel never reads the Q5_K slot, which holds the placeholder buffer, but
+/// wgpu 27 still checks it against the Q5_K kernel's minimum binding size when
+/// both pipelines share a layout. Both results must come out right.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn kernels_of_different_dtypes_share_a_pass() -> Result<()> {
+    use crate::cpu::kernels::q_common::BlockQ5_K;
+    use crate::tensor::QuantizedMatrix;
+    use crate::tensor::raw_tensor::TensorView;
+    use half::f16;
+    use std::borrow::Cow;
+
+    let context = exact_context().await?;
+    let linear = GpuLinearLayer::new(&context);
+    let (n, k) = (32usize, 256usize);
+    let mut state = 0x2545F4914F6CDD1Du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let blocks: Vec<BlockQ5_K> = (0..n * k / 256)
+        .map(|_| {
+            let mut bytes = [0u8; 176];
+            for b in bytes.iter_mut() {
+                *b = next() as u8;
+            }
+            let mut block: BlockQ5_K = bytemuck::cast(bytes);
+            block.d = f16::from_f32(0.002);
+            block.dmin = f16::from_f32(0.001);
+            block
+        })
+        .collect();
+    let matrix = QuantizedMatrix {
+        blocks,
+        shape: [n, k],
+    };
+    let q5k_dense = matrix.dequantize()?;
+    let q5k = GpuTensor::from_raw(
+        &context,
+        &TensorView {
+            name: "q5k".into(),
+            bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+            shape: vec![n, k],
+            dtype: DType::Q5_K,
+        },
+        "q5k",
+    )?;
+    let f32_dense =
+        Array2::from_shape_fn((n, k), |(i, j)| ((i * 7 + j * 3) % 13) as f32 / 13.0 - 0.5);
+    let f32_w = GpuTensor::from_ndarray(&context, &f32_dense)?;
+
+    let input = Array2::from_shape_fn((1, k), |(_, j)| ((j * 11) % 17) as f32 / 17.0 - 0.5);
+    let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+    let out_q5k = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "a");
+    let out_f32 = GpuTensor::uninitialized(&context, vec![1, n], DType::F32, "b");
+    let mut enc = crate::gpu::GpuEncoder::new(&context.device, "shared");
+    linear.encode(&mut enc, &gpu_in, &q5k, &out_q5k);
+    linear.encode(&mut enc, &gpu_in, &f32_w, &out_f32);
+    context.queue.submit(Some(enc.finish()));
+
+    for (out, dense) in [(&out_q5k, &q5k_dense), (&out_f32, &f32_dense)] {
+        let got = read_gpu_tensor_to_vec::<f32>(out).await?.0;
+        let want = input.dot(&dense.t());
+        for (g, w) in got.iter().zip(want.iter()) {
+            assert!((g - w).abs() < 1e-3 * w.abs().max(1.0), "{g} against {w}");
+        }
+    }
+    Ok(())
+}
+
+/// What the int8 Q4_K GEMV computes, on the CPU: each block of 32 activations
+/// rounded to int8 against its largest magnitude, the weights' scales applied to
+/// those, and their minimums to the unrounded activations' sums.
+fn q4k_int8_reference(blocks: &[BlockQ4_K], input: &[f32], n: usize, k: usize) -> Vec<f32> {
+    use crate::cpu::kernels::dequantize::get_scale_min_k4;
+    let rounded = int8_rounded(input);
+    let per_row = k / 256;
+    (0..n)
+        .map(|r| {
+            let mut acc = 0.0f64;
+            for (bi, b) in blocks[r * per_row..(r + 1) * per_row].iter().enumerate() {
+                let (d, dmin) = (b.d.to_f32(), b.dmin.to_f32());
+                for j in 0..4 {
+                    for (half, shift) in [(0usize, 0u8), (1, 4)] {
+                        let (sc, m) = get_scale_min_k4(2 * j + half, &b.scales);
+                        let base = bi * 256 + j * 64 + half * 32;
+                        for l in 0..32 {
+                            let q = ((b.qs[j * 32 + l] >> shift) & 0xF) as f64;
+                            acc += (d * sc as f32) as f64 * q * rounded[base + l] as f64
+                                - (dmin * m as f32) as f64 * input[base + l] as f64;
+                        }
+                    }
+                }
+            }
+            acc as f32
+        })
+        .collect()
+}
+
+/// Activations as the int8 GEMVs see them: each block of 32 rounded to int8
+/// steps of its largest magnitude over 127.
+fn int8_rounded(input: &[f32]) -> Vec<f32> {
+    input
+        .chunks(32)
+        .flat_map(|block| {
+            let amax = block.iter().fold(0.0f32, |a, x| a.max(x.abs()));
+            let scale = amax / 127.0;
+            let inv = if scale > 0.0 { 1.0 / scale } else { 0.0 };
+            block
+                .iter()
+                .map(move |x| (x * inv).round_ties_even() * scale)
+        })
+        .collect()
+}
+
+fn relative_error(got: &[f32], want: &[f32]) -> f32 {
+    let num: f64 = got
+        .iter()
+        .zip(want)
+        .map(|(g, w)| ((g - w) as f64).powi(2))
+        .sum();
+    let den: f64 = want.iter().map(|w| (*w as f64).powi(2)).sum();
+    (num / den).sqrt() as f32
+}
+
+/// The int8 Q4_K GEMV on real weights, one and several rows, with and without
+/// the split kernel, against the CPU's version of the same rounding and against
+/// the exact result.
+#[cfg(target_arch = "x86_64")]
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q4k_int8_gemv_matches_its_rounding() -> Result<()> {
+    let path = gguf_path();
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let context = WgpuContext::new().await?;
+    if !context.int8_activations {
+        println!("Skipping: no int8 activations on this device");
+        return Ok(());
+    }
+    let linear = GpuLinearLayer::new(&context);
+    for (tensor, rows) in [
+        ("blk.0.attn_k.weight", 1usize), // 1024 outputs
+        ("blk.0.ffn_gate.weight", 1),    // 8192 outputs
+        ("blk.0.ffn_gate.weight", 3),
+        ("blk.3.ffn_down.weight", 1), // K = 8192, the split kernel
+        ("blk.3.ffn_down.weight", 10),
+    ] {
+        if weights.tensor_dtype(tensor)? != DType::Q4_K {
+            println!("  skipping {tensor}: not Q4_K");
+            continue;
+        }
+        let gpu_w = GpuTensor::from_model_weights(&context, &weights, tensor, None, "w")?;
+        let (n, k) = (gpu_w.shape()[0], gpu_w.shape()[1]);
+        let blocks: Vec<BlockQ4_K> = match weights.get_typed_tensor(tensor)? {
+            crate::tensor::CpuTensor::Q4_K(m) => m.blocks.clone(),
+            _ => anyhow::bail!("{tensor} is not Q4_K"),
+        };
+        let mut state = 0x9E3779B97F4A7C15u64;
+        let input = Array2::from_shape_simple_fn((rows, k), || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            ((state >> 40) as f32 / 8_388_608.0) - 1.0
+        });
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![rows, n], DType::F32, "o");
+        let mut enc = crate::gpu::GpuEncoder::new(&context.device, "q4k int8");
+        linear.encode(&mut enc, &gpu_in, &gpu_w, &out);
+        context.queue.submit(Some(enc.finish()));
+        let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+
+        for r in 0..rows {
+            let row = input.row(r).to_vec();
+            let got_row = &got[r * n..(r + 1) * n];
+            let rounded = q4k_int8_reference(&blocks, &row, n, k);
+            let mut exact = vec![0.0f32; n];
+            unsafe {
+                crate::cpu::kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                    &mut exact,
+                    row.as_ptr(),
+                    &blocks,
+                    k,
+                )
+            };
+            let against_rounding = relative_error(got_row, &rounded);
+            let against_exact = relative_error(got_row, &exact);
+            println!(
+                "  {tensor} [{rows}x{k} @ {n}] row {r}: {against_rounding:.2e} from its rounding, {against_exact:.2e} from exact"
+            );
+            // Summation order, and the odd activation whose rounding lands the
+            // other way on the GPU's division.
+            assert!(against_rounding < 1e-4, "{tensor}: {against_rounding:.2e}");
+            // The int8 rounding itself: about half a percent.
+            assert!(against_exact < 2e-2, "{tensor}: {against_exact:.2e}");
+        }
+    }
+    Ok(())
+}
+
+/// The int8 Q4_K GEMV when the outputs do not fill the last workgroup, and an
+/// all-zero block of activations, whose scale is zero.
+#[cfg(target_arch = "x86_64")]
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q4k_int8_gemv_partial_workgroups_and_zero_blocks() -> Result<()> {
+    let path = gguf_path();
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let name = "blk.0.ffn_gate.weight";
+    if weights.tensor_dtype(name)? != DType::Q4_K {
+        println!("Skipping: {name} is not Q4_K");
+        return Ok(());
+    }
+    let blocks: Vec<BlockQ4_K> = weights.with_raw_tensor(name, |v| {
+        Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
+    })?;
+    let context = WgpuContext::new().await?;
+    if !context.int8_activations {
+        println!("Skipping: no int8 activations on this device");
+        return Ok(());
+    }
+    let linear = GpuLinearLayer::new(&context);
+    for (m, n, k) in [
+        (1, 1, 3072),
+        (1, 13, 3072),
+        (3, 13, 3072),
+        (1, 13, 4096),
+        (3, 7, 8192),
+    ] {
+        let row_blocks = &blocks[..n * k / 256];
+        let view = crate::tensor::raw_tensor::TensorView {
+            name: name.to_string(),
+            bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(row_blocks)),
+            shape: vec![n, k],
+            dtype: DType::Q4_K,
+        };
+        let w = GpuTensor::from_raw(&context, &view, "w")?;
+        // Every row's second block of 32 is zero. The rest are pseudo-random:
+        // values on a coarse grid put activations exactly halfway between two
+        // int8 steps, where the GPU's division can round them either way.
+        let mut state = 0x2545F4914F6CDD1Du64;
+        let input = Array2::from_shape_fn((m, k), |(_, c)| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            if (32..64).contains(&c) {
+                0.0
+            } else {
+                ((state >> 40) as f32 / 8_388_608.0) - 1.0
+            }
+        });
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
+        let mut enc = crate::gpu::GpuEncoder::new(&context.device, "q4k int8");
+        linear.encode(&mut enc, &gpu_in, &w, &out);
+        context.queue.submit(Some(enc.finish()));
+        let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+        for r in 0..m {
+            let want = q4k_int8_reference(row_blocks, &input.row(r).to_vec(), n, k);
+            let err = relative_error(&got[r * n..(r + 1) * n], &want);
+            assert!(err < 1e-4, "m={m} n={n} k={k} row {r}: {err:.2e}");
+        }
+    }
+    Ok(())
+}
+
+/// The int8 fused SwiGLU on real Q4_K gate and up projections, one and several
+/// rows, with the outputs short of a workgroup, against `silu(gate) * up` from the
+/// CPU version of the same rounding.
+#[cfg(target_arch = "x86_64")]
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn swiglu_q4k_int8_matches_its_rounding() -> Result<()> {
+    let path = gguf_path();
+    if !path.exists() {
+        println!("Skipping: model not present");
+        return Ok(());
+    }
+    let weights = ModelWeights::new(&path)?;
+    let (gate, up) = ("blk.0.ffn_gate.weight", "blk.0.ffn_up.weight");
+    if weights.tensor_dtype(gate)? != DType::Q4_K || weights.tensor_dtype(up)? != DType::Q4_K {
+        println!("Skipping: gate or up is not Q4_K");
+        return Ok(());
+    }
+    let context = WgpuContext::new().await?;
+    if !context.int8_activations {
+        println!("Skipping: no int8 activations on this device");
+        return Ok(());
+    }
+    let q8 = q8::Q8Gemv::new(&context);
+    let read = |name: &str| -> Result<Vec<BlockQ4_K>> {
+        weights.with_raw_tensor(name, |v| {
+            Ok(bytemuck::cast_slice::<u8, BlockQ4_K>(&v.bytes).to_vec())
+        })
+    };
+    let (gate_all, up_all) = (read(gate)?, read(up)?);
+    let k = 3072;
+    for (rows, n) in [(1usize, 8192usize), (3, 8192), (1, 13), (10, 7)] {
+        let upload = |blocks: &[BlockQ4_K]| {
+            let view = crate::tensor::raw_tensor::TensorView {
+                name: "w".into(),
+                bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(blocks)),
+                shape: vec![n, k],
+                dtype: DType::Q4_K,
+            };
+            GpuTensor::from_raw(&context, &view, "w")
+        };
+        let (g, u) = (&gate_all[..n * k / 256], &up_all[..n * k / 256]);
+        let (gpu_g, gpu_u) = (upload(g)?, upload(u)?);
+        let mut state = 0x9E3779B97F4A7C15u64;
+        let input = Array2::from_shape_simple_fn((rows, k), || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            ((state >> 40) as f32 / 8_388_608.0) - 1.0
+        });
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![rows, n], DType::F32, "o");
+        let mut enc = crate::gpu::GpuEncoder::new(&context.device, "swiglu int8");
+        q8.encode_swiglu(
+            &mut enc,
+            &gpu_in,
+            &gpu_g,
+            &gpu_u,
+            &out,
+            (rows as u32, k as u32, n as u32),
+        )
+        .expect("Q4_K gate and up have an int8 SwiGLU kernel");
+        context.queue.submit(Some(enc.finish()));
+        let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+        for r in 0..rows {
+            let row = input.row(r).to_vec();
+            let (gr, ur) = (
+                q4k_int8_reference(g, &row, n, k),
+                q4k_int8_reference(u, &row, n, k),
+            );
+            let want: Vec<f32> = gr
+                .iter()
+                .zip(&ur)
+                .map(|(g, u)| g / (1.0 + (-g).exp()) * u)
+                .collect();
+            let err = relative_error(&got[r * n..(r + 1) * n], &want);
+            println!("  swiglu [{rows}x{k} -> {n}] row {r}: {err:.2e} from its rounding");
+            assert!(err < 1e-4, "rows={rows} n={n} row {r}: {err:.2e}");
+        }
+    }
+    Ok(())
+}
+
+/// The int8 Q5_K GEMV on random blocks, decode-sized and split, with partial
+/// workgroups, against the CPU version of its rounding: the weights' scales on
+/// the int8-rounded activations and their minimums on the unrounded sums.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q5k_int8_gemv_matches_its_rounding() -> Result<()> {
+    use crate::cpu::kernels::dequantize::{dequantize_q5_k_block, get_scale_min_k4};
+    use crate::cpu::kernels::q_common::BlockQ5_K;
+    use half::f16;
+
+    let context = WgpuContext::new().await?;
+    if !context.int8_activations {
+        println!("Skipping: no int8 activations on this device");
+        return Ok(());
+    }
+    let linear = GpuLinearLayer::new(&context);
+    let mut state = 0x9E3779B97F4A7C15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for (m, n, k) in [
+        (1usize, 13usize, 256usize),
+        (3, 64, 2560),
+        (1, 2560, 4096),
+        (10, 40, 8192),
+    ] {
+        let blocks: Vec<BlockQ5_K> = (0..n * k / 256)
+            .map(|_| {
+                let mut bytes = [0u8; 176];
+                for b in bytes.iter_mut() {
+                    *b = next() as u8;
+                }
+                let mut block: BlockQ5_K = bytemuck::cast(bytes);
+                block.d = f16::from_f32(0.002 + (next() % 1000) as f32 * 1e-5);
+                block.dmin = f16::from_f32((next() % 1000) as f32 * 1e-5);
+                block
+            })
+            .collect();
+        let mut dense = vec![0.0f32; n * k];
+        let mut mins = Vec::with_capacity(n * k / 32);
+        for (b, out) in blocks.iter().zip(dense.chunks_mut(256)) {
+            dequantize_q5_k_block(b, out);
+            for sb in 0..8 {
+                mins.push(b.dmin.to_f32() * get_scale_min_k4(sb, &b.scales).1 as f32);
+            }
+        }
+        let view = crate::tensor::raw_tensor::TensorView {
+            name: "q5k".into(),
+            bytes: std::borrow::Cow::Borrowed(bytemuck::cast_slice(&blocks)),
+            shape: vec![n, k],
+            dtype: DType::Q5_K,
+        };
+        let w = GpuTensor::from_raw(&context, &view, "q5k")?;
+        let input =
+            Array2::from_shape_simple_fn((m, k), || ((next() >> 40) as f32 / 8_388_608.0) - 1.0);
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
+        let mut enc = crate::gpu::GpuEncoder::new(&context.device, "q5k int8");
+        linear.encode(&mut enc, &gpu_in, &w, &out);
+        context.queue.submit(Some(enc.finish()));
+        let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+
+        for r in 0..m {
+            let x = input.row(r).to_vec();
+            let rounded = int8_rounded(&x);
+            let want: Vec<f32> = (0..n)
+                .map(|row| {
+                    let w = &dense[row * k..(row + 1) * k];
+                    let mn = &mins[row * k / 32..(row + 1) * k / 32];
+                    let mut acc = 0.0f64;
+                    for i in 0..k {
+                        let min = mn[i / 32] as f64;
+                        acc += (w[i] as f64 + min) * rounded[i] as f64 - min * x[i] as f64;
+                    }
+                    acc as f32
+                })
+                .collect();
+            let exact: Vec<f32> = (0..n)
+                .map(|row| {
+                    dense[row * k..(row + 1) * k]
+                        .iter()
+                        .zip(&x)
+                        .map(|(a, b)| *a as f64 * *b as f64)
+                        .sum::<f64>() as f32
+                })
+                .collect();
+            let got_row = &got[r * n..(r + 1) * n];
+            let against_rounding = relative_error(got_row, &want);
+            let against_exact = relative_error(got_row, &exact);
+            println!(
+                "  q5k [{m}x{k} @ {n}] row {r}: {against_rounding:.2e} from its rounding, {against_exact:.2e} from exact"
+            );
+            assert!(
+                against_rounding < 1e-4,
+                "[{m}x{k} @ {n}] row {r}: {against_rounding:.2e}"
+            );
+            assert!(
+                against_exact < 2e-2,
+                "[{m}x{k} @ {n}] row {r}: {against_exact:.2e}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The int8 Q8_0 GEMVs, eight rows a workgroup and a workgroup a row, with rows
+/// short of a workgroup, one and several rows of activations, and Qwen2.5-0.5B's
+/// shapes, against the CPU version of their rounding. Under Q8_NARROW_MAX_OUTPUTS
+/// outputs the exact kernel runs instead, and matches the f32 product.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn q8_int8_gemv_matches_its_rounding() -> Result<()> {
+    if !WgpuContext::new().await?.int8_activations {
+        println!("Skipping: no int8 activations on this device");
+        return Ok(());
+    }
+    for (m, n, k) in [
+        (1usize, 1usize, 32usize),
+        (1, 33, 512),
+        (1, 255, 128),
+        (1, 259, 96),
+        (3, 32, 2560),
+        (10, 517, 160),
+        (1, 4864, 896),
+        (1, 896, 4864),
+        (2, 128, 896),
+    ] {
+        let (gpu, exact, rounded) = run_q8(m, n, k, false).await?;
+        let int8 = n as u32 >= Q8_NARROW_MAX_OUTPUTS;
+        let reference = if int8 { &rounded } else { &exact };
+        let err = relative_error(gpu.as_slice().unwrap(), reference.as_slice().unwrap());
+        let against = if int8 { "its rounding" } else { "exact" };
+        println!("  q8 [{m}x{k} @ {n}]: {err:.2e} from {against}");
+        assert!(err < 1e-4, "[{m}x{k} @ {n}]: {err:.2e} from {against}");
+    }
+    Ok(())
+}
+
+/// The int8 fused SwiGLU over Q8_0 gate and up projections, uploaded through the
+/// decoder's repack, against `silu(gate) * up` from the dequantised weights and
+/// the activations rounded as the kernel rounds them. Qwen2.5-0.5B's shape, and
+/// outputs short of a workgroup.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn swiglu_q8_0_int8_matches_its_rounding() -> Result<()> {
+    use crate::linear_layer::{LinearData, LinearLayer};
+    use crate::tensor::QuantizedMatrix;
+
+    let context = WgpuContext::new().await?;
+    if !context.int8_activations {
+        println!("Skipping: no int8 activations on this device");
+        return Ok(());
+    }
+    let q8 = q8::Q8Gemv::new(&context);
+    let mut state = 0x243F6A8885A308D3u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        ((state >> 40) as f32 / 8_388_608.0) - 1.0
+    };
+    for (rows, n, k) in [(1usize, 4864usize, 896usize), (1, 13, 160), (3, 7, 2560)] {
+        let mut make = || -> Result<(Array2<f32>, GpuTensor)> {
+            let w = Array2::from_shape_fn((n, k), |_| next());
+            let matrix = QuantizedMatrix {
+                blocks: crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w)?,
+                shape: [n, k],
+            };
+            let dense = matrix.dequantize()?;
+            let layer = LinearLayer {
+                data: LinearData::Q8_0(Arc::new(matrix)),
+                bias: None,
+                f32_strategy: crate::linear_layer::F32MatmulStrategy::Faer,
+            };
+            Ok((dense, layer.to_gpu_tensor(&context, "w")?))
+        };
+        let (gate, gpu_g) = make()?;
+        let (up, gpu_u) = make()?;
+        let input = Array2::from_shape_fn((rows, k), |_| next());
+        let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+        let out = GpuTensor::uninitialized(&context, vec![rows, n], DType::F32, "o");
+        let mut enc = crate::gpu::GpuEncoder::new(&context.device, "swiglu q8_0");
+        q8.encode_swiglu(
+            &mut enc,
+            &gpu_in,
+            &gpu_g,
+            &gpu_u,
+            &out,
+            (rows as u32, k as u32, n as u32),
+        )
+        .expect("Q8_0 gate and up have an int8 SwiGLU kernel");
+        context.queue.submit(Some(enc.finish()));
+        let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+        for r in 0..rows {
+            let x = ndarray::Array1::from(int8_rounded(&input.row(r).to_vec()));
+            let (g, u) = (gate.dot(&x), up.dot(&x));
+            let want: Vec<f32> = g
+                .iter()
+                .zip(u.iter())
+                .map(|(g, u)| g / (1.0 + (-g).exp()) * u)
+                .collect();
+            let err = relative_error(&got[r * n..(r + 1) * n], &want);
+            println!("  swiglu q8_0 [{rows}x{k} -> {n}] row {r}: {err:.2e} from its rounding");
+            assert!(err < 1e-4, "rows={rows} n={n} row {r}: {err:.2e}");
         }
     }
     Ok(())

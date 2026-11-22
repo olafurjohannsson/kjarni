@@ -1,9 +1,13 @@
 use crate::gpu::tensor::GpuTensor;
-use wgpu::CommandEncoder;
 
 pub trait Kernel: Send + Sync {
     /// Encodes the kernel's compute pass into the given command encoder
-    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor);
+    fn encode(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        inputs: &[&GpuTensor],
+        output: &GpuTensor,
+    );
 }
 
 /// A compute pipeline and its bind group layout: a uniform at binding 0, then
@@ -12,6 +16,8 @@ pub trait Kernel: Send + Sync {
 pub struct ComputeKernel {
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    /// Names the dispatches in the GPU profiler.
+    label: String,
 }
 
 impl ComputeKernel {
@@ -63,7 +69,11 @@ impl ComputeKernel {
             compilation_options: Default::default(),
             cache: None,
         });
-        Self { pipeline, layout }
+        Self {
+            pipeline,
+            layout,
+            label: label.to_string(),
+        }
     }
 
     /// One dispatch of `threads` threads in workgroups of `workgroup_size`,
@@ -72,7 +82,7 @@ impl ComputeKernel {
     pub fn encode(
         &self,
         context: &crate::WgpuContext,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         uniforms: &wgpu::Buffer,
         tensors: &[&GpuTensor],
         threads: usize,
@@ -87,7 +97,7 @@ impl ComputeKernel {
     pub fn encode_workgroups(
         &self,
         context: &crate::WgpuContext,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         uniforms: &wgpu::Buffer,
         tensors: &[&GpuTensor],
         workgroups: [u32; 3],
@@ -109,10 +119,16 @@ impl ComputeKernel {
                 layout: &self.layout,
                 entries: &entries,
             });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
         let [x, y, z] = workgroups;
-        pass.dispatch_workgroups(x, y, z);
+        crate::gpu_profile!(
+            context,
+            encoder,
+            &self.label,
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(x, y, z);
+            }
+        );
     }
 }

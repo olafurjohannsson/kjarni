@@ -55,7 +55,7 @@ impl GpuTanh {
     /// # Arguments
     /// * `encoder`: The command encoder to record the compute pass.
     /// * `tensor`: The tensor to apply the Tanh function to. Its contents will be modified.
-    pub fn encode_inplace(&self, encoder: &mut wgpu::CommandEncoder, tensor: &GpuTensor) {
+    pub fn encode_inplace(&self, encoder: &mut crate::gpu::GpuEncoder, tensor: &GpuTensor) {
         let bind_group = self
             .context
             .device

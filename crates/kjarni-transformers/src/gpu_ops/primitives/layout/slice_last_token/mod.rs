@@ -98,7 +98,7 @@ impl GpuLastTokenSlice {
     /// Extract last token logits from [batch, seq_len, vocab] -> [batch, vocab]
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         src: &GpuTensor, // [batch, seq_len, vocab_size]
         dst: &GpuTensor, // [batch, vocab_size] or [batch, 1, vocab_size]
     ) {

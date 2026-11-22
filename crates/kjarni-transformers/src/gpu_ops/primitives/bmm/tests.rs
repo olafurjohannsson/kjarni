@@ -33,7 +33,9 @@ async fn run_bmm_test(batch: usize, heads: usize, m: usize, k: usize, n: usize) 
         DType::F32,
         "BMM Output",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     bmm_kernel.encode(&mut encoder, &[&gpu_a, &gpu_b], &gpu_c);
     context.queue.submit(std::iter::once(encoder.finish()));
     let (gpu_result_vec, result_shape) = read_gpu_tensor_to_vec::<f32>(&gpu_c).await?;
@@ -161,7 +163,9 @@ async fn test_bmm_broadcast_3d_2d() -> Result<()> {
         DType::F32,
         "BMM Broadcast Output",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     bmm_kernel.encode(&mut encoder, &[&gpu_a, &gpu_b], &gpu_c);
     context.queue.submit(std::iter::once(encoder.finish()));
     let (gpu_result_vec, result_shape) = read_gpu_tensor_to_vec::<f32>(&gpu_c).await?;

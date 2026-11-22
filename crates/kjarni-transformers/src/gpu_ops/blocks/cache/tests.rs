@@ -41,7 +41,9 @@ async fn test_update_cache_kernel() -> Result<()> {
     let cache_k_gpu = GpuTensor::uninitialized(&context, cache_shape, DType::F32, "test_k_cache");
     let dummy_cache_v_gpu = cache_k_gpu.clone();
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(
         &mut encoder,
         &new_k_gpu,

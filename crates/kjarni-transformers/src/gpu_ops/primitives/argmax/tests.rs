@@ -18,7 +18,9 @@ async fn read_output_index(context: &WgpuContext, buffer: &wgpu::Buffer) -> u32 
         mapped_at_creation: false,
     });
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, 4);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -59,7 +61,9 @@ async fn test_argmax_simple() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -80,7 +84,9 @@ async fn test_argmax_first_element() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -101,7 +107,9 @@ async fn test_argmax_last_element() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -122,7 +130,9 @@ async fn test_argmax_with_negative_values() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -143,7 +153,9 @@ async fn test_argmax_mixed_positive_negative() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -163,7 +175,9 @@ async fn test_argmax_single_element() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -184,7 +198,9 @@ async fn test_argmax_two_elements() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -205,7 +221,9 @@ async fn test_argmax_equal_values_returns_first() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -226,7 +244,9 @@ async fn test_argmax_zeros() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -253,7 +273,9 @@ async fn test_argmax_large_vocab() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -280,7 +302,9 @@ async fn test_argmax_gpt2_vocab_size() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -307,7 +331,9 @@ async fn test_argmax_llama_vocab_size() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -331,7 +357,9 @@ async fn test_argmax_very_close_values() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -352,7 +380,9 @@ async fn test_argmax_large_magnitude() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -373,7 +403,9 @@ async fn test_argmax_small_magnitude() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -409,7 +441,9 @@ async fn test_argmax_matches_cpu_random_small() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -438,7 +472,9 @@ async fn test_argmax_matches_cpu_random_large() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -464,7 +500,9 @@ async fn test_argmax_softmax_like_distribution() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -486,7 +524,9 @@ async fn test_argmax_ascending_values() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -509,7 +549,9 @@ async fn test_argmax_descending_values() -> Result<()> {
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -537,7 +579,9 @@ async fn test_argmax_kernel_reuse() -> Result<()> {
         let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
         let output_buffer = create_output_buffer(&context);
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
         context.queue.submit(std::iter::once(encoder.finish()));
 

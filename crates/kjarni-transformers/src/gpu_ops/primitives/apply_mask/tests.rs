@@ -42,7 +42,9 @@ async fn test_mask_encoder_case() -> Result<()> {
     let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let logical_key_len = gpu_scores.shape()[2] as u32;
     kernel.encode(
         &mut encoder,
@@ -76,7 +78,9 @@ async fn test_mask_decoder_prompt_case() -> Result<()> {
     let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let logical_key_len = gpu_scores.shape()[2] as u32;
     kernel.encode(
         &mut encoder,
@@ -117,7 +121,9 @@ async fn test_mask_decoder_generation_case() -> Result<()> {
     let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let logical_key_len = gpu_scores.shape()[2] as u32;
     let e = logical_key_len + position_offset as u32;
     kernel.encode(
@@ -160,7 +166,9 @@ async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
     let logical_key_len = gpu_scores.shape()[2] as u32;
     let e = logical_key_len + position_offset as u32;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(
         &mut encoder,
         &gpu_scores,
@@ -201,7 +209,9 @@ async fn test_mask_decoder_generation_batched() -> Result<()> {
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
     let logical_key_len = gpu_scores.shape()[2] as u32;
     let e = logical_key_len + position_offset as u32;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     kernel.encode(
         &mut encoder,
         &gpu_scores,
@@ -238,9 +248,11 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
 
     let scores_gpu = GpuTensor::from_ndarray(&context, &scores_cpu)?;
     let mask_gpu = GpuTensor::from_ndarray(&context, &mask_cpu)?;
-    let mut encoder = context
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+    );
 
     let logical_key_len = position_offset + query_len + scores_gpu.shape()[2]; // 6
     apply_mask_kernel.encode(

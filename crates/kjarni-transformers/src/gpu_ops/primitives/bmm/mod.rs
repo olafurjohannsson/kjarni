@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, Kernel};
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -29,7 +29,12 @@ pub struct GpuBatchedMatMul {
 }
 
 impl Kernel for GpuBatchedMatMul {
-    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
+    fn encode(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        inputs: &[&GpuTensor],
+        output: &GpuTensor,
+    ) {
         let a = inputs[0];
         let b = inputs[1];
 
@@ -101,7 +106,7 @@ impl GpuBatchedMatMul {
     // Internal implementation that works with normalized 3D shapes
     fn encode_internal(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor,
         b: &GpuTensor,
         output: &GpuTensor,
@@ -147,7 +152,7 @@ impl GpuBatchedMatMul {
     /// Matmul with custom strides for B matrix (for KV cache optimization)
     pub fn encode_with_b_strides(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor,
         b: &GpuTensor,
         output: &GpuTensor,
@@ -209,7 +214,7 @@ const FEW_ROWS: u32 = 64;
 
 fn run_internal_bmm(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut crate::gpu::GpuEncoder,
     pipeline: &ComputePipeline,
     few_rows_pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,

@@ -56,7 +56,9 @@ async fn test_fc1_kernel_parity() -> Result<()> {
         DType::F32,
         "FC1 Output",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_ffn_partial.run_fc1(&mut encoder, &weights, &gpu_input, &gpu_intermediate);
     context.queue.submit(std::iter::once(encoder.finish()));
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_intermediate).await?;
@@ -114,7 +116,9 @@ async fn test_fc2_kernel_parity() -> Result<()> {
         DType::F32,
         "FC2 Output",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_ffn_partial.run_fc2(&mut encoder, &weights, &gpu_input, &gpu_output);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -187,7 +191,9 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
         DType::F32,
         "FFN Output",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_ffn.forward(
         &mut encoder,
         &weights,
@@ -256,7 +262,9 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
 
     let expected_cpu = cpu_ffn.forward(&input_cpu)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let mut pool = GpuTensorPool::new(context.clone());
 
     let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, &mut pool);
@@ -318,7 +326,9 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
     cpu_ffn.apply_activation(&mut expected_cpu_output);
 
     // Run GPU
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let intermediate_shape = expected_cpu_output.shape().to_vec();
     let output_gpu = GpuTensor::uninitialized(
         &context,
@@ -385,7 +395,9 @@ async fn test_gpu_ffn_fc1_isolated_relu() -> Result<()> {
     cpu_ffn.apply_activation(&mut expected_cpu_output);
 
     // GPU Run
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let intermediate_shape = expected_cpu_output.shape().to_vec();
     let output_gpu =
         GpuTensor::uninitialized(&context, intermediate_shape, DType::F32, "Relu Output");
@@ -447,7 +459,9 @@ async fn test_gpu_ffn_fc1_isolated_silu() -> Result<()> {
     let mut expected_cpu_output = cpu_ffn.fc1(&input_cpu)?;
     cpu_ffn.apply_activation(&mut expected_cpu_output);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let intermediate_shape = expected_cpu_output.shape().to_vec();
     let output_gpu =
         GpuTensor::uninitialized(&context, intermediate_shape, DType::F32, "SiLU Output");
@@ -509,7 +523,9 @@ async fn test_gpu_ffn_fc1_isolated_tanh() -> Result<()> {
     let mut expected_cpu_output = cpu_ffn.fc1(&input_cpu)?;
     cpu_ffn.apply_activation(&mut expected_cpu_output);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let intermediate_shape = expected_cpu_output.shape().to_vec();
     let output_gpu =
         GpuTensor::uninitialized(&context, intermediate_shape, DType::F32, "Tanh Output");
@@ -574,7 +590,9 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
 
     let expected_cpu_output = cpu_ffn.fc2(&intermediate_input_cpu)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     let final_output_shape = expected_cpu_output.shape().to_vec();
     let output_gpu = GpuTensor::uninitialized(
         &context,
@@ -706,7 +724,9 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
         activation,
     );
     let expected_cpu = cpu_ffn_partial.fc2(&input_cpu)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_ffn.run_fc2(&mut encoder, &gpu_weights, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
     assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN FC2 Output", 1e-1).await; // TODO FIND OUT WHY 1e-2 doesnt work
@@ -754,7 +774,9 @@ async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
     let mut matmul_plus_bias = cpu_ffn_partial.fc1(&input_cpu)?;
     cpu_ffn_partial.apply_activation(&mut matmul_plus_bias);
     let expected_cpu = matmul_plus_bias;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_ffn.run_fc1(&mut encoder, &gpu_weights, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
     assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN FC1 Output", 1e-2).await;

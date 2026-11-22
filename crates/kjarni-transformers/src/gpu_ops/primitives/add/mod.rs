@@ -57,7 +57,7 @@ impl GpuAdd {
     }
     pub fn encode_broadcast_row(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor, // The larger tensor [M, N]
         b: &GpuTensor, // The row to broadcast [1, N]
         output: &GpuTensor,
@@ -115,7 +115,7 @@ impl GpuAdd {
     /// Panics if `a`, `b`, and `output` do not have the exact same shape.
     pub fn encode_elementwise(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor,
         b: &GpuTensor,
         output: &GpuTensor,
@@ -164,14 +164,17 @@ impl GpuAdd {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Add Element-wise Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.elementwise_pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
         let workgroups = size.div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Add",
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.elementwise_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                crate::gpu_ops::utils::dispatch_1d(pass, workgroups);
+            }
+        );
     }
     /// Encodes broadcast addition with an offset: `output[i,j,k] = a[i,j,k] + b[j + offset, k]`.
     ///
@@ -181,7 +184,7 @@ impl GpuAdd {
     /// Panics if the hidden dimensions of `a` and `b` do not match.
     pub fn encode_broadcast_offset(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor,       // The 3D hidden_states tensor
         b: &GpuTensor,       // The 2D positional embedding table
         b_row_offset: usize, // The starting row in `b` (e.g., 2 for BART)
@@ -257,7 +260,7 @@ impl Kernel for GpuAdd {
     /// * `output`: The `GpuTensor` where the result will be written.
     fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         inputs: &[&GpuTensor],
         output: &GpuTensor,
     ) {

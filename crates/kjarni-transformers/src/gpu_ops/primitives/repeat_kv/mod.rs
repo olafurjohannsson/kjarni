@@ -89,7 +89,7 @@ impl GpuRepeatKV {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input_kv: &GpuTensor,  // Shape: [B, num_kv_heads, S, D]
         output_kv: &GpuTensor, // Shape: [B, num_q_heads, S, D]
     ) {

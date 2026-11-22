@@ -37,7 +37,9 @@ async fn run_matmul_test(m: usize, k: usize, n: usize) -> Result<()> {
     let gpu_b = GpuTensor::from_ndarray(&context, &cpu_b)?;
     let gpu_c = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "matmul_output");
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     matmul_kernel.encode(&mut encoder, &[&gpu_a, &gpu_b], &gpu_c);
     context.queue.submit(std::iter::once(encoder.finish()));
 

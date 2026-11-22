@@ -48,7 +48,7 @@ impl GpuLookup {
     /// Panics if tensor dimensions are incorrect.
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         embedding_table: &GpuTensor, // The [vocab_size, hidden_size] f32 table
         input_ids: &GpuTensor,       // The [batch_size, seq_len] u32 IDs
         output: &GpuTensor,          // The [batch_size, seq_len, hidden_size] f32 output

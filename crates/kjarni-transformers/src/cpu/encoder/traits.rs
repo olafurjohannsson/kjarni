@@ -471,7 +471,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings only
     fn embed(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
@@ -480,7 +480,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings + initial normalization
     fn embed_and_normalize(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
@@ -489,7 +489,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Run layers `[start_layer, end_layer)` on hidden states
     fn forward_layers(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -500,7 +500,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Apply embedding layer normalization (BART-specific, after embed lookup)
     fn embed_norm(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor>;
@@ -508,7 +508,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Apply final layer normalization (T5/Whisper have this, BART doesn't)
     fn final_norm(
         &self,
-        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -526,7 +526,7 @@ pub trait GpuEncoder: Send + Sync {
     #[deprecated]
     fn forward(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         attention_mask: &GpuTensor,
@@ -548,7 +548,7 @@ pub trait GpuEncoder: Send + Sync {
     fn forward2(
         // todo do something
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -576,7 +576,7 @@ pub trait GpuEncoderOps: Send + Sync {
     /// Embed tokens to hidden states (no normalization)
     fn embed_tokens(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input_ids: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
@@ -586,7 +586,7 @@ pub trait GpuEncoderOps: Send + Sync {
     /// Embed audio -> hidden states (Whisper)
     fn embed_audio(
         &self,
-        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _cmd_encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _mel: &GpuTensor,
     ) -> Result<GpuTensor> {
@@ -601,7 +601,7 @@ pub trait GpuEncoderOps: Send + Sync {
     /// Full forward from tokens: embed -> embed_norm -> layers -> final_norm
     fn forward_tokens(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         ctx: &Arc<WgpuContext>,
         input_ids: ModelInput<'_>,
@@ -629,7 +629,7 @@ pub trait GpuEncoderOps: Send + Sync {
     /// Forward from mel spectrogram (Whisper)
     fn forward_audio(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         ctx: &Arc<WgpuContext>,
         mel: &GpuTensor,

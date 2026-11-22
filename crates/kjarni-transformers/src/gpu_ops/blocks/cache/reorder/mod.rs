@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::{BindGroupEntry, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupEntry, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -107,7 +107,7 @@ impl GpuReorderCache {
 
     pub fn encode(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         src_cache: &GpuTensor,
         dst_cache: &GpuTensor,
         indices: &GpuTensor,

@@ -354,7 +354,9 @@ mod tests {
 
         let expected_output_cpu = cpu_ffn.forward(&input_cpu)?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut temp = GpuTensorPool::new(context.clone());
 
         let (b, s, h) = input_gpu.dims3();
@@ -472,7 +474,9 @@ mod tests {
         let cpu_ffn_out = cpu_layer.feedforward.forward(&cpu_ln2_out)?;
         let cpu_final_output = &cpu_residual_2 + &cpu_ffn_out;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let residual_gpu = hidden_states_gpu;
         let ln1_out_gpu = temp.get(hidden_states_gpu.shape().to_vec());
         gpu_layer.self_attn_norm.encode(
@@ -487,7 +491,7 @@ mod tests {
             Err(e) => panic!("gpu poll failed: {:?}", e),
         }
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         assert_tensors_are_close(&cpu_ln1_out, &ln1_out_gpu, "ln1_out", tolerance).await;
 
         let q_proj = gpu_layer.self_attn.project(
@@ -536,7 +540,7 @@ mod tests {
             Err(e) => panic!("gpu poll failed: {:?}", e),
         }
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         assert_tensors_are_close(&cpu_attn_out, &attn_out_gpu, "attn_out", tolerance).await;
 
         let attn_block_output_gpu = temp.get(hidden_states_gpu.shape().to_vec());
@@ -551,7 +555,7 @@ mod tests {
             Err(e) => panic!("gpu poll failed: {:?}", e),
         }
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         assert_tensors_are_close(
             &cpu_attn_block_output,
             &attn_block_output_gpu,
@@ -574,7 +578,7 @@ mod tests {
             Err(e) => panic!("gpu poll failed: {:?}", e),
         }
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         assert_tensors_are_close(&cpu_ln2_out, &ln2_out_gpu, "ln2_out", tolerance).await;
 
         let (b, s, h) = ln2_out_gpu.dims3();
@@ -594,7 +598,7 @@ mod tests {
             Err(e) => panic!("gpu poll failed: {:?}", e),
         }
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         assert_tensors_are_close(&cpu_ffn_out, &ffn_out_gpu, "ffn_out", tolerance).await;
 
         let final_output_gpu = temp.get(residual_2_gpu.shape().to_vec());
@@ -731,7 +735,9 @@ mod tests {
             num_heads as u32,
             num_kv_heads as u32,
         );
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
 
         let kv_heads_gpu = GpuTensor::from_ndarray::<f32, _>(&context, &kv_heads_cpu)?;
 
@@ -894,7 +900,9 @@ mod tests {
 
         let expected_rotated_cpu = cpu_rope.rotate_4d(&input_cpu, position_offset);
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let output_gpu = GpuTensor::uninitialized(
             &context,
             input_gpu.shape().to_vec(),
@@ -948,7 +956,9 @@ mod tests {
 
         let (expected_q_rot, expected_k_rot) = cpu_rope.apply_4d(&q_cpu, &k_cpu, position_offset);
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let q_rot_gpu = GpuTensor::uninitialized(
             &context,
             q_gpu.shape().to_vec(),

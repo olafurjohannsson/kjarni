@@ -24,7 +24,7 @@ pub trait GpuPooler: Send + Sync {
     /// Pool hidden states to a single vector per batch item.
     fn pool(
         &self,
-        cmd: &mut wgpu::CommandEncoder,
+        cmd: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,

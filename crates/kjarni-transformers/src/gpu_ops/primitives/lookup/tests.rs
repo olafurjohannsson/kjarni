@@ -20,7 +20,9 @@ async fn test_gpu_lookup() -> Result<()> {
     let ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
     let output_gpu = GpuTensor::zeros(&context, vec![2, 2, 3], crate::gpu::DType::F32, "f32")?;
     let lookup_kernel = GpuLookup::new(&context);
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     lookup_kernel.encode(&mut encoder, &table_gpu, &ids_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 

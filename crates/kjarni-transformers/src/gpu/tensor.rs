@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
 use wgpu::util::DeviceExt;
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder};
+use wgpu::{Buffer, BufferDescriptor, BufferUsages};
 
 use crate::WgpuContext;
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
@@ -448,11 +448,11 @@ impl GpuTensor {
         });
 
         let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            crate::gpu::GpuEncoder::from_encoder(self.context.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
                     label: Some("GpuTensor::deep_clone encoder"),
-                });
+                },
+            ));
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buffer, 0, self.buffer.size());
         self.context.queue.submit(Some(encoder.finish()));
 
@@ -614,7 +614,7 @@ impl GpuTensor {
     /// Permutes with actual data copy (creates new buffer).
     pub fn permute(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         permute_kernel: &GpuPermute,
         axes: &[usize],
     ) -> Self {
@@ -654,7 +654,7 @@ impl GpuTensor {
     /// Creates a sliced tensor using a GPU kernel.
     pub fn slice(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         slice_kernel: &GpuSlice,
         offset: &[usize],
         shape: &[usize],
@@ -745,9 +745,11 @@ impl GpuTensor {
             mapped_at_creation: false,
         });
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback encoder"),
-        });
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("readback encoder"),
+            },
+        ));
         encoder.copy_buffer_to_buffer(self.buffer(), 0, &staging_buffer, 0, buffer_size);
 
         queue.submit(Some(encoder.finish()));

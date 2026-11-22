@@ -1,7 +1,7 @@
 use crate::gpu::GpuTensor;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -31,7 +31,7 @@ impl GpuPermute {
     /// A specific `encode` for this kernel, as the generic `Kernel` trait is too simple.
     pub fn encode(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         output: &GpuTensor,
         perm: &[usize],

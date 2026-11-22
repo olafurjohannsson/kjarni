@@ -116,7 +116,9 @@ mod embeddings_tests {
         // CPU Input
         let input_cpu = arr2(&[[0u32]]);
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let result = loaded.embed(
@@ -234,7 +236,9 @@ mod embeddings_tests {
         let input_cpu = arr2(&[[0u32, 1]]);
         let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let result = loaded.embed(
@@ -263,7 +267,9 @@ mod embeddings_tests {
 
         let input_cpu = arr2(&[[0u32, 1]]); // Array2
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let result = loaded.embed(
@@ -299,7 +305,9 @@ mod embeddings_tests {
 
         let input_cpu = arr2(&[[0u32]]);
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let result = loaded.embed(
@@ -329,7 +337,9 @@ mod embeddings_tests {
         let hidden_cpu = Array3::<f32>::from_elem((1, 1, 1), 99.0);
         let hidden_gpu = GpuTensor::from_ndarray(&context, &hidden_cpu)?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let result = loaded.embed(
@@ -362,7 +372,9 @@ mod embeddings_tests {
         let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
         let types_gpu = GpuTensor::from_ndarray(&context, &types_cpu)?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let result = loaded.embed(
@@ -420,7 +432,9 @@ mod embeddings_tests {
 
         let cpu_out = loaded.embed_cpu(&input_ids, Some(&type_ids), 0)?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let gpu_tensor = loaded.embed(

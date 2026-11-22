@@ -128,7 +128,7 @@ impl GpuConcatenate {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         inputs: &[&GpuTensor],
         output: &GpuTensor,
         axis: usize,

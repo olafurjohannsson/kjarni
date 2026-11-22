@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu::GpuTensor;
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -36,7 +36,12 @@ impl GpuScale {
     }
 
     /// Encodes the scaling operation. This is an in-place operation.
-    pub fn encode_in_place(&self, encoder: &mut CommandEncoder, tensor: &GpuTensor, scale: f32) {
+    pub fn encode_in_place(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        tensor: &GpuTensor,
+        scale: f32,
+    ) {
         run_internal_scale(
             &self.context,
             encoder,
@@ -49,7 +54,7 @@ impl GpuScale {
     }
     pub fn encode_out_of_place(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         output: &GpuTensor, // New parameter
         scale: f32,
@@ -98,7 +103,7 @@ impl GpuScale {
 
 fn run_internal_scale(
     context: &WgpuContext,
-    encoder: &mut CommandEncoder,
+    encoder: &mut crate::gpu::GpuEncoder,
     pipeline: &ComputePipeline,
     bind_group_layout: &BindGroupLayout,
     data: &Buffer,

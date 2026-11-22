@@ -19,11 +19,11 @@ pub async fn read_buffer_2d(
         mapped_at_creation: false,
     });
 
-    let mut encoder = context
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(context.device.create_command_encoder(
+        &wgpu::CommandEncoderDescriptor {
             label: Some("readback encoder 2d"),
-        });
+        },
+    ));
     encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, buffer_size);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -62,11 +62,11 @@ pub async fn read_buffer_3d(
         mapped_at_creation: false,
     });
 
-    let mut encoder = context
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(context.device.create_command_encoder(
+        &wgpu::CommandEncoderDescriptor {
             label: Some("readback encoder 3d"),
-        });
+        },
+    ));
     encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, buffer_size);
     context.queue.submit(std::iter::once(encoder.finish()));
 

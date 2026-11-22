@@ -166,7 +166,9 @@ mod cache_tests {
         let k_gpu = GpuTensor::from_ndarray(&context, &k_data)?;
         let v_gpu = GpuTensor::from_ndarray(&context, &v_data)?;
 
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         cache.update(&mut enc, 0, &k_gpu, &v_gpu)?;
 
         cache.increment_len(1);
@@ -206,7 +208,9 @@ mod cache_tests {
         let k1_g = GpuTensor::from_ndarray(&context, &k1)?;
         let v1_g = GpuTensor::from_ndarray(&context, &v1)?;
 
-        let mut enc = context.device.create_command_encoder(&Default::default());
+        let mut enc = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         gpu.update(&mut enc, 0, &k1_g, &v1_g, 0)?;
         context.queue.submit(Some(enc.finish()));
         gpu.increment_len(2);
@@ -251,7 +255,9 @@ mod cache_tests {
 
         let new_k_gpu_1 = GpuTensor::from_ndarray(&context, &new_k_cpu_1)?;
         let new_v_gpu_1 = GpuTensor::from_ndarray(&context, &new_v_cpu_1)?;
-        let mut encoder1 = context.device.create_command_encoder(&Default::default());
+        let mut encoder1 = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         gpu_cache.update(
             &mut encoder1,
             layer_idx,
@@ -277,7 +283,9 @@ mod cache_tests {
 
         let new_k_gpu_2 = GpuTensor::from_ndarray(&context, &new_k_cpu_2)?;
         let new_v_gpu_2 = GpuTensor::from_ndarray(&context, &new_v_cpu_2)?;
-        let mut encoder2 = context.device.create_command_encoder(&Default::default());
+        let mut encoder2 = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
 
         gpu_cache.update(
             &mut encoder2,
@@ -425,9 +433,11 @@ mod cache_tests {
 
         let new_k_gpu = GpuTensor::from_ndarray(&context, &new_k_cpu)?;
         let new_v_gpu = GpuTensor::from_ndarray(&context, &new_v_cpu)?;
-        let mut encoder = context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+        );
 
         cache.update(
             &mut encoder,
@@ -480,7 +490,9 @@ mod cache_tests {
             let position_offset = gpu_cache.get_seq_length();
             assert_eq!(position_offset, 0);
 
-            let mut encoder = context.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             gpu_cache.update(
                 &mut encoder,
                 layer_idx,
@@ -503,7 +515,9 @@ mod cache_tests {
             let position_offset = gpu_cache.get_seq_length();
             assert_eq!(position_offset, 3);
 
-            let mut encoder = context.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             gpu_cache.update(
                 &mut encoder,
                 layer_idx,
@@ -560,7 +574,9 @@ mod cache_tests {
 
             let new_k_gpu = GpuTensor::from_ndarray(&context, &new_k_cpu)?;
             let new_v_gpu = GpuTensor::from_ndarray(&context, &new_v_cpu)?;
-            let mut encoder = context.device.create_command_encoder(&Default::default());
+            let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+                context.device.create_command_encoder(&Default::default()),
+            );
             for layer in 0..NUM_LAYERS {
                 gpu_cache.update(&mut encoder, layer, &new_k_gpu, &new_v_gpu)?;
             }
@@ -579,7 +595,9 @@ mod cache_tests {
             &context,
             &Array1::from_vec(reorder_indices.iter().map(|&i| i as u32).collect()),
         )?;
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         gpu_cache.reorder(&mut encoder, &indices_gpu);
         context.queue.submit(Some(encoder.finish()));
 

@@ -145,7 +145,7 @@ impl GpuRoPE {
     /// Encodes the RoPE operation for a single tensor
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         tensor_in: &GpuTensor,
         tensor_out: &GpuTensor,
         position_offset: usize,

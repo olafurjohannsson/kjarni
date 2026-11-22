@@ -5,7 +5,6 @@ use crate::gpu_ops::{blocks::cache::GpuUpdateCache, blocks::cache::reorder::GpuR
 use anyhow::{Result, anyhow};
 use std::any::Any;
 use std::sync::Arc;
-use wgpu::CommandEncoder;
 
 /// A specialized, high-performance, GPU-resident KV cache for beam search decoding
 pub struct GpuBeamKVCache {
@@ -87,7 +86,7 @@ impl GpuBeamKVCache {
     /// Updates all beams with their new KV value
     pub fn update(
         &mut self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         layer_idx: usize,
         new_k: &GpuTensor, // Expected shape: [NumBeams, 1, HiddenSize]
         new_v: &GpuTensor, // Expected shape: [NumBeams, 1, HiddenSize]
@@ -130,7 +129,7 @@ impl GpuBeamKVCache {
         Ok(())
     }
 
-    pub fn reorder(&mut self, encoder: &mut CommandEncoder, parent_indices: &GpuTensor) {
+    pub fn reorder(&mut self, encoder: &mut crate::gpu::GpuEncoder, parent_indices: &GpuTensor) {
         assert_eq!(parent_indices.shape().len(), 1, "parent_indices must be 1D");
 
         let num_beams = self.k_tensors[0].shape()[0];

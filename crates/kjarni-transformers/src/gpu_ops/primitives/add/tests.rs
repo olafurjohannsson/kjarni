@@ -61,7 +61,9 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
     let output_gpu = GpuTensor::zeros(&context, vec, DType::F32, "output")?;
 
     let add_kernel = GpuAdd::new(&context);
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     add_kernel.encode_broadcast_offset(&mut encoder, &a_gpu, &b_gpu, b_row_offset, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 
@@ -110,7 +112,9 @@ async fn test_gpu_add_parity() -> Result<()> {
 
     let expected_cpu = &a_cpu + &b_cpu;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_add.encode(&mut encoder, &[&a_gpu, &b_gpu], &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 
@@ -137,7 +141,9 @@ async fn test_gpu_add_beyond_dispatch_limit() -> Result<()> {
     let output_gpu =
         GpuTensor::uninitialized(&context, vec![1, 1, len], a_gpu.dtype(), "add_output");
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_add.encode(&mut encoder, &[&a_gpu, &b_gpu], &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 

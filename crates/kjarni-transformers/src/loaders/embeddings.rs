@@ -339,7 +339,7 @@ impl LoadedEmbeddings {
     #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
     pub fn embed(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
@@ -435,7 +435,7 @@ impl LoadedEmbeddings {
     #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: EmbeddingInput,
         token_type_ids: Option<EmbeddingInput>,
@@ -522,7 +522,7 @@ impl LoadedEmbeddings {
     #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         token_ids: &Array2<u32>,
         token_type_ids: Option<&Array2<u32>>,
@@ -563,7 +563,7 @@ impl LoadedEmbeddings {
     #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
     pub async fn forward_gpu(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         token_ids: &GpuTensor,
         token_type_ids: Option<&GpuTensor>,

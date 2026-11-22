@@ -10,7 +10,6 @@ use crate::pipeline::EncoderDecoderPipeline;
 use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
-use wgpu::CommandEncoder;
 
 /// A container for the pre-computed cross-attention Key/Value cache on the CPU.
 #[derive(Debug, Default)]
@@ -90,7 +89,7 @@ pub trait GpuCrossDecoder: Send + Sync {
     #[deprecated]
     fn embed(
         &self,
-        _encoder: &mut CommandEncoder,
+        _encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _input: ModelInput<'_>,
         _position_offset: usize,
@@ -101,7 +100,7 @@ pub trait GpuCrossDecoder: Send + Sync {
     #[deprecated]
     fn embed_and_normalize(
         &self,
-        _encoder: &mut CommandEncoder,
+        _encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _input: ModelInput<'_>,
         _position_offset: usize,
@@ -112,7 +111,7 @@ pub trait GpuCrossDecoder: Send + Sync {
     #[deprecated]
     fn forward(
         &self,
-        _encoder: &mut CommandEncoder,
+        _encoder: &mut crate::gpu::GpuEncoder,
         _pool: &mut GpuTensorPool,
         _decoder_input: ModelInput<'_>,
         _encoder_hidden_states: &GpuTensor,
@@ -125,21 +124,21 @@ pub trait GpuCrossDecoder: Send + Sync {
 
     fn embed_norm(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor>;
 
     fn final_norm(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor>;
 
     fn precompute_cross_attention_kv(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache>;
@@ -148,7 +147,7 @@ pub trait GpuCrossDecoder: Send + Sync {
 
     fn forward_layers(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         encoder_hidden_states: &GpuTensor,
@@ -185,7 +184,7 @@ pub trait GpuEncoderDecoderOps: Send + Sync {
     fn decoder(&self) -> &dyn GpuCrossDecoder;
     fn embed_decoder_tokens(
         &self,
-        encoder: &mut CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,

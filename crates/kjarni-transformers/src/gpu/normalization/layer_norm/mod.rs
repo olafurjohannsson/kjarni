@@ -140,7 +140,7 @@ impl GpuLayerNorm {
     /// Encodes the LayerNorm operation.
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         weights: &GpuLayerNormWeights,
         input: &GpuTensor,
         output: &GpuTensor,

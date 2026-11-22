@@ -41,7 +41,9 @@ async fn layernorm_matches_cpu(b: usize, s: usize, h: usize) -> Result<()> {
     let inv_std_cpu = 1.0 / (var_cpu + eps).mapv(f32::sqrt);
     let normalized_cpu = (&input_cpu - &mean_cpu) * &inv_std_cpu;
     let expected_cpu = &normalized_cpu * &gamma_cpu + &beta_cpu;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_layernorm.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
     assert_tensors_are_close(&expected_cpu, &output_gpu, "LayerNorm Output", 1e-4).await;

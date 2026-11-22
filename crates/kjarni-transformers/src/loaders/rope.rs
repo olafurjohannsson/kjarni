@@ -165,7 +165,9 @@ mod loaded_rope {
 
         let cpu_rotated = loaded.cpu.rotate_4d(&input_cpu, 0);
 
-        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
 
         gpu_rope.encode(
             &mut encoder,
@@ -206,7 +208,9 @@ mod loaded_rope {
 
         let offset = 10;
         let cpu_rotated = loaded.cpu.rotate_4d(&input_cpu, offset);
-        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
         loaded
             .gpu
             .as_ref()

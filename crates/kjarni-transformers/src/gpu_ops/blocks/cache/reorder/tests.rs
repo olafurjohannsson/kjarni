@@ -47,7 +47,9 @@ async fn test_gpu_reorder_cache_parity() -> Result<()> {
         "reorder_dst",
     );
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     reorder_kernel.encode(
         &mut encoder,
         &source_gpu,
@@ -105,7 +107,9 @@ async fn test_reorder_at_step_2() -> Result<()> {
         source_gpu.dtype(),
         "reorder_dst",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     reorder_kernel.encode(
         &mut encoder,
         &source_gpu,

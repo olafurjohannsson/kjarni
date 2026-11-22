@@ -9,10 +9,11 @@ use std::sync::Mutex;
 #[macro_export]
 macro_rules! gpu_profile {
     ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
-        $ctx.profiler
-            .profile($encoder, $label, |pass: &mut wgpu::ComputePass<'a>| {
-                $body(pass)
-            })
+        $ctx.profiler.profile(
+            $encoder.raw(),
+            $label,
+            |pass: &mut wgpu::ComputePass<'_>| $body(pass),
+        )
     }};
 }
 
@@ -20,12 +21,9 @@ macro_rules! gpu_profile {
 #[macro_export]
 macro_rules! gpu_profile {
     ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
-        let mut pass: wgpu::ComputePass<'_> =
-            $encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some($label),
-                timestamp_writes: None,
-            });
-        $body(&mut pass)
+        let _ = $label;
+        let pass: &mut wgpu::ComputePass<'static> = $encoder.pass();
+        $body(pass)
     }};
 }
 
@@ -136,6 +134,45 @@ impl GpuProfiler {
         );
     }
 
+    /// Reads the timings back, totalled per label, longest first, as
+    /// (label, milliseconds, dispatches), and starts counting afresh. Call after
+    /// `process_results` has been submitted.
+    pub async fn totals(&self, context: &WgpuContext) -> Vec<(String, f64, usize)> {
+        let labels = std::mem::take(&mut *self.labels.lock().unwrap());
+        if labels.is_empty() || self.query_set.is_none() {
+            return Vec::new();
+        }
+        let slice = self
+            .destination_buffer
+            .slice(0..((labels.len() as u64) * 16));
+        let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        crate::gpu_ops::context::drain(&context.device);
+        if !matches!(rx.receive().await, Some(Ok(()))) {
+            return Vec::new();
+        }
+        let period = context.queue.get_timestamp_period() as f64;
+        let mut totals: Vec<(String, f64, usize)> = Vec::new();
+        {
+            let data = slice.get_mapped_range();
+            let timestamps: &[u64] = bytemuck::cast_slice(&data);
+            for (i, label) in labels.iter().enumerate() {
+                let (start, end) = (timestamps[i * 2], timestamps[i * 2 + 1]);
+                let ms = end.saturating_sub(start) as f64 * period / 1e6;
+                match totals.iter_mut().find(|t| &t.0 == label) {
+                    Some(t) => {
+                        t.1 += ms;
+                        t.2 += 1;
+                    }
+                    None => totals.push((label.clone(), ms, 1)),
+                }
+            }
+        }
+        self.destination_buffer.unmap();
+        totals.sort_by(|a, b| b.1.total_cmp(&a.1));
+        totals
+    }
+
     /// Reads data back from GPU (Async/Blocking)
     pub async fn print_stats(&self, context: &WgpuContext) {
         let labels = { self.labels.lock().unwrap().clone() };
@@ -182,5 +219,56 @@ impl GpuProfiler {
 
         // Reset for next frame
         self.labels.lock().unwrap().clear();
+    }
+}
+
+#[cfg(all(test, feature = "profiling"))]
+mod tests {
+    use crate::WgpuContext;
+    use crate::gpu::{ComputeKernel, GpuTensor};
+    use ndarray::Array1;
+
+    /// Dispatches through `ComputeKernel` are timed under their kernel's label and
+    /// totalled per label.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn kernels_are_totalled_per_label() {
+        let ctx = WgpuContext::new().await.unwrap();
+        let kernel = ComputeKernel::new(
+            &ctx.device,
+            "Profiled fill",
+            wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(
+                    "@group(0) @binding(0) var<uniform> n: vec4<u32>;
+                     @group(0) @binding(1) var<storage, read_write> out: array<f32>;
+                     @compute @workgroup_size(64)
+                     fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                         if (id.x < n.x) { out[id.x] = f32(id.x); }
+                     }"
+                    .into(),
+                ),
+            },
+            &[false],
+        );
+        let out = GpuTensor::from_ndarray(&ctx, &Array1::<f32>::zeros(1024)).unwrap();
+        let uniforms = ctx.uniform_buffer(&[1024u32, 0, 0, 0]);
+        ctx.profiler.totals(&ctx).await;
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            ctx.device.create_command_encoder(&Default::default()),
+        );
+        kernel.encode(&ctx, &mut encoder, &uniforms, &[&out], 1024, 64);
+        kernel.encode(&ctx, &mut encoder, &uniforms, &[&out], 1024, 64);
+        ctx.profiler.process_results(&mut encoder);
+        ctx.queue.submit(Some(encoder.finish()));
+
+        let totals = ctx.profiler.totals(&ctx).await;
+        if ctx.profiler.query_set.is_none() {
+            assert!(totals.is_empty());
+            return;
+        }
+        assert_eq!(totals.len(), 1, "{totals:?}");
+        assert_eq!((totals[0].0.as_str(), totals[0].2), ("Profiled fill", 2));
+        assert!(totals[0].1 >= 0.0);
     }
 }

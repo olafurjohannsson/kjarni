@@ -258,7 +258,9 @@ mod gpu_cross_decoder_test {
             None,
         )?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let gpu_decoder_hs = GpuTensor::from_ndarray(&context, &cpu_decoder_hs)?;
@@ -316,7 +318,9 @@ mod gpu_cross_decoder_test {
         let gpu_dec_mask = GpuTensor::from_ndarray(&context, &cpu_dec_mask)?;
         let gpu_enc_mask = GpuTensor::from_ndarray(&context, &cpu_enc_mask)?;
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+            context.device.create_command_encoder(&Default::default()),
+        );
         let mut pool = GpuTensorPool::new(context.clone());
 
         let (attn_out, new_k, new_v) =
@@ -369,7 +373,7 @@ mod gpu_cross_decoder_test {
         let input_for_step_2 = cpu_sa_out.clone();
         let gpu_input_for_step_2 = GpuTensor::from_ndarray(&context, &input_for_step_2)?;
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         pool.next_frame();
 
         let (k, v) = cpu_layer
@@ -424,7 +428,7 @@ mod gpu_cross_decoder_test {
         let input_for_step_3 = cpu_ca_out.clone();
         let gpu_input_for_step_3 = GpuTensor::from_ndarray(&context, &input_for_step_3)?;
 
-        encoder = context.device.create_command_encoder(&Default::default());
+        encoder = crate::gpu::GpuEncoder::new(&context.device, "test");
         pool.next_frame();
 
         let cpu_ffn_out = cpu_layer.feed_forward(&input_for_step_3)?;

@@ -1,7 +1,7 @@
 use crate::gpu::GpuTensor;
 use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -28,7 +28,12 @@ impl GpuUnreshape {
         }
     }
 
-    pub fn encode(&self, encoder: &mut CommandEncoder, input: &GpuTensor, output: &GpuTensor) {
+    pub fn encode(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        input: &GpuTensor,
+        output: &GpuTensor,
+    ) {
         assert_eq!(
             input.rank(),
             4,

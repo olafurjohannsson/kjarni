@@ -26,7 +26,9 @@ async fn test_add_bias_parity() -> Result<()> {
     let gpu_output =
         GpuTensor::uninitialized(&context, vec![rows, cols], DType::F32, "add_bias_output");
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     add_bias_kernel.encode(&mut encoder, &[&gpu_input, &gpu_bias], &gpu_output);
     context.queue.submit(std::iter::once(encoder.finish()));
 

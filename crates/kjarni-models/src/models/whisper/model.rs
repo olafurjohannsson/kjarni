@@ -395,7 +395,7 @@ impl GpuEncoderOps for WhisperModel {
     }
     fn embed_tokens(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
+        cmd_encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input_ids: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
@@ -436,7 +436,7 @@ impl GpuEncoderDecoderOps for WhisperModel {
 
     fn embed_decoder_tokens(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,

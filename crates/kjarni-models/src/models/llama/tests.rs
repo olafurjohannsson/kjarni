@@ -237,3 +237,87 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     kjarni_transformers::weights::clear_mmap_cache();
     Ok(())
 }
+
+/// Times every GPU kernel of a 512-token prefill and of four decode steps of
+/// Llama 3.2 1B from its GGUF, totalled per kernel. A tool rather than a check:
+/// run it with `--features kjarni-transformers/profiling --release -- --nocapture`.
+#[tokio::test]
+#[ignore = "a profile: needs a GPU, the 1B Instruct GGUF and the profiling feature"]
+async fn profile_the_1b_on_the_gpu() -> Result<()> {
+    let path = model_cache_dir("meta-llama_Llama-3.2-1B-Instruct").join("model.gguf");
+    let ctx = WgpuContext::new().await?;
+    let m = LlamaModel::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)?;
+    profile_on_the_gpu(&m, ctx).await
+}
+
+/// As `profile_the_1b_on_the_gpu`, for Qwen2.5-0.5B, which runs on the Llama
+/// decoder.
+#[tokio::test]
+#[ignore = "a profile: needs a GPU, the Qwen2.5-0.5B GGUF and the profiling feature"]
+async fn profile_qwen2_5_0_5b_on_the_gpu() -> Result<()> {
+    use crate::models::qwen::model::QwenModel;
+    let path = model_cache_dir("Qwen_Qwen2.5-0.5B-Instruct").join("model.gguf");
+    let ctx = WgpuContext::new().await?;
+    let m = QwenModel::from_pretrained(&path, Device::Wgpu, Some(ctx.clone()), None, None)?;
+    profile_on_the_gpu(&m, ctx).await
+}
+
+/// A 512-token prefill and four decode steps, each kernel's GPU time totalled.
+async fn profile_on_the_gpu(m: &dyn DecoderLanguageModel, ctx: Arc<WgpuContext>) -> Result<()> {
+    use kjarni_transformers::cache::Cache;
+    use ndarray::Array2;
+
+    let backend = GpuDecoderBackend::new(ctx.clone())?;
+    let context: usize = 512;
+    let ids: Vec<u32> = (0..context as u32)
+        .map(|i| 1000 + (i * 37) % 20000)
+        .collect();
+    let prompt = Array2::from_shape_vec((1, context), ids)?;
+    let argmax = |l: &ndarray::Array1<f32>| {
+        l.iter()
+            .enumerate()
+            .fold((0, f32::MIN), |b, (i, &v)| if v > b.1 { (i, v) } else { b })
+            .0 as u32
+    };
+    let report = |name: &str, totals: Vec<(String, f64, usize)>, wall: f64| {
+        let sum: f64 = totals.iter().map(|t| t.1).sum();
+        println!("== {name}: wall {wall:.1} ms, timed GPU {sum:.1} ms");
+        for (l, ms, n) in totals.iter().take(18) {
+            println!("{:>8.1} ms {:>5.1}% {:>5}x  {l}", ms, 100.0 * ms / sum, n);
+        }
+    };
+    let flush = |c: &Arc<WgpuContext>| {
+        let mut enc = kjarni_transformers::gpu::GpuEncoder::from_encoder(
+            c.device.create_command_encoder(&Default::default()),
+        );
+        c.profiler.process_results(&mut enc);
+        c.queue.submit(Some(enc.finish()));
+    };
+    // A warm-up, whose timings are dropped.
+    let mut cache: Box<dyn Cache> = m.new_cache(1, context + 8, 1)?;
+    backend.prefill(m, &prompt, cache.as_mut()).await?;
+    flush(&ctx);
+    ctx.profiler.totals(&ctx).await;
+
+    let mut cache = m.new_cache(1, context + 8, 1)?;
+    let t = std::time::Instant::now();
+    let l = backend.prefill(m, &prompt, cache.as_mut()).await?;
+    let wall = t.elapsed().as_secs_f64() * 1e3;
+    flush(&ctx);
+    report("prefill 512", ctx.profiler.totals(&ctx).await, wall);
+
+    let mut next = argmax(&l);
+    let mut tok = backend.new_decode_token()?;
+    let t = std::time::Instant::now();
+    for i in 0..4 {
+        backend.update_decode_token(&mut tok, next)?;
+        let l = backend
+            .decode_one(m, &tok, context + 1 + i, cache.as_mut())
+            .await?;
+        next = argmax(&l);
+    }
+    let wall = t.elapsed().as_secs_f64() * 1e3;
+    flush(&ctx);
+    report("decode 4 tokens", ctx.profiler.totals(&ctx).await, wall);
+    Ok(())
+}

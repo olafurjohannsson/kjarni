@@ -29,7 +29,7 @@ impl GpuEncoderSelfAttention {
     /// Performs the forward pass of encoder self-attention
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         hidden_states: &GpuTensor,
         weights: &GpuAttentionWeights,
         padding_mask: Option<&GpuTensor>,

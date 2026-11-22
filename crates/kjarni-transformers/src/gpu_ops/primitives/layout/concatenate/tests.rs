@@ -30,7 +30,9 @@ async fn test_gpu_concatenate_parity() -> Result<()> {
     let output_shape = expected_cpu.shape().to_vec();
     let output_gpu =
         GpuTensor::uninitialized(&context, output_shape, a_gpu.dtype(), "Concat Output");
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     concat_kernel.encode(&mut encoder, &[&a_gpu, &b_gpu], &output_gpu, concat_axis);
     context.queue.submit(Some(encoder.finish()));
     let actual_gpu_result: Array4<f32> = read_gpu_tensor(&output_gpu).await?;

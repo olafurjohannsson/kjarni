@@ -29,7 +29,9 @@ async fn test_gpu_rope_parity() -> Result<()> {
 
     let (expected_q, expected_k) = cpu_rope.apply_4d(&q_cpu, &k_cpu, position_offset);
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
 
     let q_rot_gpu = GpuTensor::uninitialized(
         &context,

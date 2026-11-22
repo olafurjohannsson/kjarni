@@ -51,6 +51,10 @@ pub struct WgpuContext {
     pub profiler: GpuProfiler,
     pub uniform_arena: GpuUniformBuffer,
     uniform_buffers: std::sync::Mutex<HashMap<Vec<u8>, wgpu::Buffer>>,
+    /// Quantised GEMVs round their activations to int8 and multiply with
+    /// dot4I8Packed. Off when [`GpuConfig::exact_quantized`] is set or the WGSL
+    /// implementation lacks packed integer dot products.
+    pub int8_activations: bool,
 }
 
 /// The largest workgroup any shader in the crate declares, `(32, 32, 1)`.
@@ -63,6 +67,31 @@ const REQUIRED_INVOCATIONS: u32 = 1024;
 /// Distinct uniform values kept by [`WgpuContext::uniform_buffer`]. Far more than one
 /// token uses, so a decode step finds last step's buffers even with a few new ones.
 const MAX_UNIFORM_BUFFERS: usize = 4096;
+
+fn new_instance() -> Instance {
+    Instance::new(&InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY,
+        flags: wgpu::InstanceFlags::empty(),
+        ..Default::default()
+    })
+}
+
+/// The process's one wgpu instance. NVIDIA's Vulkan driver gives a process about
+/// sixteen instances and does not take them back when they are dropped, after
+/// which only other adapters remain: the integrated GPU or llvmpipe, a software
+/// renderer. Every context shares this one, so any number of contexts, one after
+/// another, find the same GPU.
+#[cfg(not(target_arch = "wasm32"))]
+fn shared_instance() -> Instance {
+    static INSTANCE: OnceLock<Instance> = OnceLock::new();
+    INSTANCE.get_or_init(new_instance).clone()
+}
+
+/// In the browser an instance cannot be kept in a static; each context makes its own.
+#[cfg(target_arch = "wasm32")]
+fn shared_instance() -> Instance {
+    new_instance()
+}
 
 impl WgpuContext {
     pub async fn new() -> Result<Arc<Self>> {
@@ -100,17 +129,18 @@ impl WgpuContext {
     }
 
     pub async fn with_config(config: GpuConfig) -> Result<Arc<Self>> {
-        let instance = Instance::new(&InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            flags: wgpu::InstanceFlags::empty(),
-            ..Default::default()
-        });
+        let instance = shared_instance();
 
         // Requested, never required. A browser exposes timestamp queries only
         // behind a developer flag, and demanding them makes `request_device` fail
         // outright rather than merely losing the profiler.
         const WANTED: Features =
             Features::TIMESTAMP_QUERY.union(Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+
+        let int8_activations = !config.exact_quantized
+            && instance
+                .wgsl_language_features()
+                .contains(wgpu::WgslLanguageFeatures::Packed4x8IntegerDotProduct);
 
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
@@ -205,6 +235,7 @@ impl WgpuContext {
             profiler,
             uniform_arena,
             uniform_buffers: std::sync::Mutex::new(HashMap::new()),
+            int8_activations,
         }))
     }
 
@@ -381,6 +412,10 @@ pub struct GpuConfig {
     pub kv_cache_memory_mb: u64,
     pub prefer_texture_embeddings: bool,
     pub min_batch_size_for_gpu: usize,
+    /// Quantised weights on the GPU give the same results as on the CPU, to
+    /// float rounding, instead of rounding activations to int8 for speed.
+    /// Defaults to on when the environment sets `KJARNI_GPU_EXACT=1`.
+    pub exact_quantized: bool,
 }
 
 impl Default for GpuConfig {
@@ -389,6 +424,7 @@ impl Default for GpuConfig {
             kv_cache_memory_mb: 1024,
             prefer_texture_embeddings: true,
             min_batch_size_for_gpu: 128,
+            exact_quantized: std::env::var("KJARNI_GPU_EXACT").is_ok_and(|v| v == "1"),
         }
     }
 }
@@ -431,5 +467,29 @@ mod uniform_buffer_tests {
             context.uniform_buffer(&[i, 0, 0, 0]);
         }
         assert!(context.uniform_buffers.lock().unwrap().len() <= MAX_UNIFORM_BUFFERS);
+    }
+}
+
+#[cfg(test)]
+mod instance_tests {
+    use super::WgpuContext;
+
+    /// Twenty contexts in a row, each dropped before the next, all on the first's
+    /// adapter. With an instance per context, NVIDIA's driver ran out after
+    /// sixteen and the rest landed on llvmpipe.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn contexts_past_sixteen_keep_the_same_adapter() {
+        let first = WgpuContext::new().await.unwrap().adapter.get_info();
+        for i in 1..20 {
+            let ctx = WgpuContext::new().await.unwrap();
+            let info = ctx.adapter.get_info();
+            assert_eq!(
+                (info.name.as_str(), info.device_type),
+                (first.name.as_str(), first.device_type),
+                "context {i} found a different adapter"
+            );
+        }
     }
 }

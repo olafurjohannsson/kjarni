@@ -45,7 +45,9 @@ async fn test_unreshape() -> Result<()> {
         crate::gpu::DType::F32,
         "Unreshape Output",
     );
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_unreshape.encode(&mut encoder, &gpu_input, &gpu_output);
     context.queue.submit(Some(encoder.finish()));
     let gpu_result = read_gpu_tensor_3d(&gpu_output).await?;

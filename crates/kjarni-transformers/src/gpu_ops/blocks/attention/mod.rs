@@ -290,7 +290,7 @@ impl GpuAttention {
 
     pub fn llama_attention(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         q_heads: &GpuTensor,
         k_heads: &GpuTensor,
         v_heads: &GpuTensor,
@@ -350,7 +350,7 @@ impl GpuAttention {
 
     pub fn forward_with_cache(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         key_value: Option<&GpuTensor>,
         weights: &GpuAttentionWeights,
@@ -478,7 +478,7 @@ impl GpuAttention {
 
     pub fn attend_cached(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         q_heads: &GpuTensor,
         cache_k: &GpuTensor,
         cache_v: &GpuTensor,
@@ -531,7 +531,7 @@ impl GpuAttention {
 
     pub fn forward_cross(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         key_value: &GpuTensor,
         weights: &GpuAttentionWeights,
@@ -596,7 +596,7 @@ impl GpuAttention {
 
     pub fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         key_value: Option<&GpuTensor>,
         weights: &GpuAttentionWeights,
@@ -621,7 +621,7 @@ impl GpuAttention {
 
     pub fn forward_seq2seq(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         weights: &GpuAttentionWeights,
         attention_mask: &GpuTensor,
@@ -735,7 +735,7 @@ impl GpuAttention {
 
     pub fn project_kv(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         key_value: &GpuTensor,
         weights: &GpuAttentionWeights,
         position_offset: usize,
@@ -771,7 +771,7 @@ impl GpuAttention {
 
     pub fn attend_with_physical_cache(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         physical_k: &GpuTensor,
         physical_v: &GpuTensor,
@@ -852,7 +852,7 @@ impl GpuAttention {
 
     pub fn attend(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         weights: &GpuAttentionWeights,
         attention_mask: &GpuTensor,
@@ -902,7 +902,7 @@ impl GpuAttention {
 
     pub fn project(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         weight: &GpuTensor,
         bias: Option<&GpuTensor>,
@@ -930,7 +930,7 @@ impl GpuAttention {
 
     pub fn split_heads(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
@@ -951,7 +951,7 @@ impl GpuAttention {
 
     pub fn merge_heads(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input: &GpuTensor,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
@@ -963,7 +963,7 @@ impl GpuAttention {
 
     pub fn bmm_4d(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         a: &GpuTensor,
         b: &GpuTensor,
         pool: &mut GpuTensorPool,
@@ -983,7 +983,7 @@ impl GpuAttention {
 
     fn apply_padding_mask(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         scores: &GpuTensor,
         mask: &GpuTensor,
         _pool: &mut GpuTensorPool,
@@ -1003,7 +1003,7 @@ impl GpuAttention {
     /// Pre-computes K and V from encoder states, with K already transposed for BMM.
     pub fn precompute_cross_kv(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         key_value: &GpuTensor,
         weights: &GpuAttentionWeights,
         pool: &mut GpuTensorPool,
@@ -1034,7 +1034,7 @@ impl GpuAttention {
     /// Forward pass using pre-computed K/V (skips K/V projection and K permutation).
     pub fn forward_cross_precomputed(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         query: &GpuTensor,
         precomputed_k: &GpuTensor,
         precomputed_v: &GpuTensor,

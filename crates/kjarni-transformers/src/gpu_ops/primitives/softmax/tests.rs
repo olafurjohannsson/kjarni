@@ -50,7 +50,9 @@ async fn test_softmax_simple_case() -> Result<()> {
     let cols = 128;
     let mut cpu_data = Array::random((rows, cols), Uniform::new(-1.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0); // scale = 1.0
     context.queue.submit(std::iter::once(encoder.finish()));
     for mut row in cpu_data.axis_iter_mut(Axis(0)) {
@@ -81,7 +83,9 @@ async fn test_softmax_padded_case() -> Result<()> {
 
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode_padded(&mut encoder, &gpu_tensor, logical_cols as u32, 1.0);
     context.queue.submit(std::iter::once(encoder.finish()));
     for mut row in valid_part.axis_iter_mut(Axis(0)) {
@@ -110,7 +114,9 @@ async fn test_softmax_simple_case2() -> Result<()> {
     let seq_len = 128;
     let mut cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-1.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0); // scale = 1.0
     context.queue.submit(std::iter::once(encoder.finish()));
     softmax_4d_inplace(&mut cpu_scores);
@@ -142,7 +148,9 @@ async fn test_softmax_padded_case2() -> Result<()> {
         .assign(&valid_part);
 
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data_padded)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode_padded(&mut encoder, &gpu_tensor, logical_cols as u32, 1.0);
     context.queue.submit(std::iter::once(encoder.finish()));
     softmax_4d_inplace(&mut valid_part);
@@ -170,7 +178,9 @@ async fn test_softmax_with_scaling() -> Result<()> {
 
     let cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-5.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode(&mut encoder, &gpu_tensor, scale);
     context.queue.submit(std::iter::once(encoder.finish()));
     let mut cpu_scores_scaled = &cpu_scores * scale;
@@ -194,7 +204,9 @@ async fn test_softmax_numerical_stability() -> Result<()> {
         Array::random((batch, heads, seq_len, seq_len), Uniform::new(100.0, 110.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0);
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -227,7 +239,9 @@ async fn test_softmax_rows_beyond_dispatch_limit() -> Result<()> {
         Array2::from_shape_fn((rows, cols), |(r, c)| ((r % 97) as f32) * 0.01 + c as f32);
 
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0);
     context.queue.submit(std::iter::once(encoder.finish()));
 

@@ -76,7 +76,7 @@ impl GpuArgMax {
 
     pub fn encode(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut crate::gpu::GpuEncoder,
         input_logits: &GpuTensor,    // Shape: [Batch, Vocab]
         output_index: &wgpu::Buffer, // A 4-byte buffer for the result
     ) {

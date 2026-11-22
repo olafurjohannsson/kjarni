@@ -246,7 +246,7 @@ impl GpuDecoder for LlamaGpuDecoder {
     }
     fn embed(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -262,7 +262,7 @@ impl GpuDecoder for LlamaGpuDecoder {
 
     fn embed_and_normalize(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
@@ -273,7 +273,7 @@ impl GpuDecoder for LlamaGpuDecoder {
 
     fn forward_layers(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
@@ -302,6 +302,7 @@ impl GpuDecoder for LlamaGpuDecoder {
             // Only the hidden state carries into the next layer (the KV cache owns
             // its own buffers); see GpuTensorPool::release_since.
             pool.release_since(&checkpoint, &[&current_state]);
+            kjarni_transformers::gpu::submit_between_layers(&self.context, encoder, i, end_layer);
         }
 
         Ok(current_state)
@@ -318,7 +319,7 @@ impl GpuDecoder for LlamaGpuDecoder {
     // Override default forward because Llama needs Final Layer Norm
     fn forward(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut kjarni_transformers::gpu::GpuEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         attention_mask: &GpuTensor,

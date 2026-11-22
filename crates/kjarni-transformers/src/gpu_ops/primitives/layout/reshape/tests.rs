@@ -25,7 +25,9 @@ async fn test_reshape_q_v_path() -> Result<()> {
         .to_owned();
     let gpu_output =
         GpuTensor::uninitialized(&context, vec![b, h, s, d], DType::F32, "Reshape Output Q/V");
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_reshape.encode(&mut encoder, &gpu_input, &gpu_output, false); // transpose_k = false
     context.queue.submit(Some(encoder.finish()));
     let gpu_result = read_gpu_tensor_4d(&gpu_output).await?;
@@ -52,7 +54,9 @@ async fn test_reshape_k_transpose_path() -> Result<()> {
         .to_owned();
     let gpu_output =
         GpuTensor::uninitialized(&context, vec![b, h, d, s], DType::F32, "Reshape Output K^T");
-    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::gpu::GpuEncoder::from_encoder(
+        context.device.create_command_encoder(&Default::default()),
+    );
     gpu_reshape.encode(&mut encoder, &gpu_input, &gpu_output, true); // transpose_k = true
     context.queue.submit(Some(encoder.finish()));
     let gpu_result = read_gpu_tensor_4d(&gpu_output).await?;
