@@ -724,17 +724,24 @@ impl LinearLayer {
                 GpuTensor::from_raw(ctx, &raw_tensor, label)
             }
             LinearData::Q6_K(matrix) => {
+                // Padded to whole words; see `pad_q6_k`.
                 let raw_tensor = TensorView {
                     name: label.to_string(),
-                    bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+                    bytes: Cow::Owned(crate::gpu::tensor::pad_q6_k(&matrix.blocks)),
                     shape: matrix.shape.to_vec(),
                     dtype: DType::Q6_K,
                 };
                 GpuTensor::from_raw(ctx, &raw_tensor, label)
             }
-            LinearData::Q5_K(_) => Err(anyhow!(
-                "'{label}' is Q5_K, which has no GPU kernel yet; run this model on the CPU"
-            )),
+            LinearData::Q5_K(matrix) => {
+                let raw_tensor = TensorView {
+                    name: label.to_string(),
+                    bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
+                    shape: matrix.shape.to_vec(),
+                    dtype: DType::Q5_K,
+                };
+                GpuTensor::from_raw(ctx, &raw_tensor, label)
+            }
         }
     }
 }

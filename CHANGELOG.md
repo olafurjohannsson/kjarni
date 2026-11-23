@@ -1,7 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.8.1
 
+- **Faster prompts on the GPU for quantised models.** Q4_K, Q5_K, Q6_K and
+  Q8_0 models read the prompt on the GPU's tensor cores in f16, as llama.cpp
+  does: on an RTX A2000, a 512-token prompt runs 1.8–1.9x faster (Qwen2.5-0.5B
+  2576 tokens/s, Llama 3.2 1B 1313, Qwen3.5-4B 436) and a 4096-token one
+  1.1–1.4x. Quantised models also keep their KV cache in f16 on the GPU.
+  `KJARNI_GPU_EXACT=1` turns both off, for output that matches the CPU.
+  Models with f32, f16 or bf16 weights are unchanged.
+- **GPU memory is freed with the model.** A GPU context and the buffers it
+  reused held on to each other, so dropping a model on the GPU kept its memory
+  until the process exited.
+- **Q5_K and Q6_K linear layers move to the GPU.** A Q5_K layer was refused
+  and a Q6_K layer gave NaN when moved on its own.
+- **wgpu 30.**
 - **Long prompts on the GPU.** A prompt that added thousands of tokens at once,
   such as a large tool result in the agent, could stop the daemon with "Buffer
   binding exceeds max_storage_buffer_binding_size": the attention scores for

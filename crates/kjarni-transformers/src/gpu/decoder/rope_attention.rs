@@ -199,7 +199,10 @@ impl GpuRoPEAttention {
                 wgpu::include_wgsl!("./rope_decode_combine.wgsl"),
                 &[true, true, false],
             ),
-            score_budget: (context.device.limits().max_storage_buffer_binding_size as u64)
+            score_budget: context
+                .device
+                .limits()
+                .max_storage_buffer_binding_size
                 .min(MAX_SCORE_BYTES),
         }
     }

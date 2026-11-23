@@ -322,7 +322,7 @@ impl GpuDecoderBackend {
             .ok_or_else(|| anyhow!("buffer mapping did not complete"))?
             .map_err(|e| anyhow!("buffer mapping failed: {:?}", e))?;
 
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range()?;
         let vec_data: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         buffer.unmap();

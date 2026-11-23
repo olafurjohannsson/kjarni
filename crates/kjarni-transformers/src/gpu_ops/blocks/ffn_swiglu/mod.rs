@@ -109,8 +109,8 @@ impl GpuSwiGLUFFN {
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some("SwiGLU Elementwise Layout"),
-                        bind_group_layouts: &[&elementwise_bind_group_layout],
-                        push_constant_ranges: &[],
+                        bind_group_layouts: &[Some(&elementwise_bind_group_layout)],
+                        immediate_size: 0,
                     }),
                 ),
                 module: &elementwise_shader,
@@ -303,20 +303,20 @@ impl GpuSwiGLUFFN {
 
         let layout_q4k = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Fused SwiGLU Q4_K Pipeline Layout"),
-            bind_group_layouts: &[&fused_bind_group_layout_q4k],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&fused_bind_group_layout_q4k)],
+            immediate_size: 0,
         });
 
         let layout_bf16 = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Fused SwiGLU BF16 Pipeline Layout"),
-            bind_group_layouts: &[&fused_bind_group_layout_bf16],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&fused_bind_group_layout_bf16)],
+            immediate_size: 0,
         });
 
         let layout_f32 = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Fused SwiGLU F32 Pipeline Layout"),
-            bind_group_layouts: &[&fused_bind_group_layout_f32],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&fused_bind_group_layout_f32)],
+            immediate_size: 0,
         });
 
         let make_pipeline = |layout: &wgpu::PipelineLayout, entry: &str| {

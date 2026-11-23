@@ -179,7 +179,7 @@ where
 
     rx.receive().await.unwrap()?;
 
-    let data = buffer_slice.get_mapped_range();
+    let data = buffer_slice.get_mapped_range()?;
     let result_slice: &[A] = bytemuck::cast_slice(&data);
     let result_vec = result_slice.to_vec();
 

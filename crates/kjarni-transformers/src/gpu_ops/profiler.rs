@@ -154,7 +154,9 @@ impl GpuProfiler {
         let period = context.queue.get_timestamp_period() as f64;
         let mut totals: Vec<(String, f64, usize)> = Vec::new();
         {
-            let data = slice.get_mapped_range();
+            let Ok(data) = slice.get_mapped_range() else {
+                return Vec::new();
+            };
             let timestamps: &[u64] = bytemuck::cast_slice(&data);
             for (i, label) in labels.iter().enumerate() {
                 let (start, end) = (timestamps[i * 2], timestamps[i * 2 + 1]);
@@ -191,7 +193,10 @@ impl GpuProfiler {
         crate::gpu_ops::context::drain(&context.device);
         rx.receive().await.unwrap().expect("RX ERROR"); // TODO: do better
 
-        let data = slice.get_mapped_range();
+        let Ok(data) = slice.get_mapped_range() else {
+            log::warn!("profiler timestamps could not be read");
+            return;
+        };
         let timestamps: &[u64] = bytemuck::cast_slice(&data);
 
         let period = context.queue.get_timestamp_period();

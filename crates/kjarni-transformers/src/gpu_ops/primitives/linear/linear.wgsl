@@ -674,8 +674,7 @@ fn gemm_load_w_q8(tid: u32, col0: u32, k0: u32) {
         let gn = col0 + r;
         var vals = vec4<f32>(0.0);
         if (gn < info.N) {
-            let gk = k0 + q * 4u;
-            vals = q8_unit_weights((gn * (info.K / 32u) + gk / 32u) * Q8_WORDS, (gk % 32u) / 4u);
+            vals = q8_four(gn, k0 + q * 4u);
         }
         let kk = q * 4u;
         gemm_w[kk * GEMM_BN + r] = vals.x;
@@ -698,26 +697,7 @@ fn gemm_load_w_q6k(tid: u32, col0: u32, k0: u32) {
         let gn = col0 + r;
         var vals = vec4<f32>(0.0);
         if (gn < info.N) {
-            let gk = k0 + q * 4u;
-            let blk = gk / 256u;
-            let t = gk % 256u;
-            let i = t / 128u;         // half-block
-            let p = t % 128u;
-            let quarter = p / 32u;
-            let jg = (p % 32u) / 4u;  // word within the quarter
-
-            let base = (gn * (info.K / 256u) + blk) * Q6K_WORDS;
-            let scale = unpack2x16float(W_Q6K[base + 52u]).x
-                * q6k_scale(base, i * 8u + quarter * 2u + jg / 4u);
-            let qlw = W_Q6K[base + i * 16u + jg + select(0u, 8u, (quarter & 1u) == 1u)];
-            let qhw = W_Q6K[base + 32u + i * 8u + jg];
-
-            // As in q6k_unit_values: quarters 0 and 1 take the low nibbles of
-            // their ql word, 2 and 3 the high, each with its two bits of qh.
-            var low = qlw & 0x0F0F0F0Fu;
-            if (quarter >= 2u) { low = (qlw >> 4u) & 0x0F0F0F0Fu; }
-            let high = ((qhw >> (quarter * 2u)) & 0x03030303u) << 4u;
-            vals = (vec4<f32>(unpack4xU8(low | high)) - vec4<f32>(32.0)) * scale;
+            vals = q6k_four(gn, k0 + q * 4u);
         }
         let kk = q * 4u;
         gemm_w[kk * GEMM_BN + r] = vals.x;
@@ -741,21 +721,7 @@ fn gemm_load_w_q4k(tid: u32, col0: u32, k0: u32) {
         let gn = col0 + r;
         var vals = vec4<f32>(0.0);
         if (gn < info.N) {
-            let gk = k0 + q * 4u;
-            let blk = gk / 256u;
-            let t = gk % 256u;
-            let g = t / 64u;          // which 64: one qs word range of 8
-            let within = t % 64u;
-            let hi = within >= 32u;   // high nibbles belong to the second sub-block
-            let wi = g * 8u + (within % 32u) / 4u;
-
-            let base = (gn * (info.K / 256u) + blk) * Q4K_WORDS;
-            let dd = unpack2x16float(W_Q4K[base]);
-            let sub = g * 2u + select(0u, 1u, hi);
-            let sm = q4k_scale_min(W_Q4K[base + 1u], W_Q4K[base + 2u], W_Q4K[base + 3u], sub);
-            let qword = W_Q4K[base + 4u + wi];
-            let nib = select(qword & 0x0F0F0F0Fu, (qword >> 4u) & 0x0F0F0F0Fu, hi);
-            vals = vec4<f32>(unpack4xU8(nib)) * (dd.x * sm.x) - vec4<f32>(dd.y * sm.y);
+            vals = q4k_four(gn, k0 + q * 4u);
         }
         let kk = q * 4u;
         gemm_w[kk * GEMM_BN + r] = vals.x;
@@ -1459,6 +1425,52 @@ fn q5k_four(n: u32, k: u32) -> vec4<f32> {
     let nib = select(qword & 0x0F0F0F0Fu, (qword >> 4u) & 0x0F0F0F0Fu, hi);
     let high = ((W_Q5K[base + 4u + l / 4u] >> sub) & 0x01010101u) << 4u;
     return vec4<f32>(unpack4xU8(nib | high)) * (dd.x * sm.x) - vec4<f32>(dd.y * sm.y);
+}
+
+/// Four Q4_K weights of row `gn` from `k`, a multiple of four.
+fn q4k_four(gn: u32, k: u32) -> vec4<f32> {
+    let blk = k / 256u;
+    let t = k % 256u;
+    let g = t / 64u;          // which 64: one qs word range of 8
+    let within = t % 64u;
+    let hi = within >= 32u;   // high nibbles belong to the second sub-block
+    let wi = g * 8u + (within % 32u) / 4u;
+
+    let base = (gn * (info.K / 256u) + blk) * Q4K_WORDS;
+    let dd = unpack2x16float(W_Q4K[base]);
+    let sub = g * 2u + select(0u, 1u, hi);
+    let sm = q4k_scale_min(W_Q4K[base + 1u], W_Q4K[base + 2u], W_Q4K[base + 3u], sub);
+    let qword = W_Q4K[base + 4u + wi];
+    let nib = select(qword & 0x0F0F0F0Fu, (qword >> 4u) & 0x0F0F0F0Fu, hi);
+    return vec4<f32>(unpack4xU8(nib)) * (dd.x * sm.x) - vec4<f32>(dd.y * sm.y);
+}
+
+/// Four Q6_K weights of row `gn` from `k`, a multiple of four.
+fn q6k_four(gn: u32, k: u32) -> vec4<f32> {
+    let blk = k / 256u;
+    let t = k % 256u;
+    let i = t / 128u;         // half-block
+    let p = t % 128u;
+    let quarter = p / 32u;
+    let jg = (p % 32u) / 4u;  // word within the quarter
+
+    let base = (gn * (info.K / 256u) + blk) * Q6K_WORDS;
+    let scale = unpack2x16float(W_Q6K[base + 52u]).x
+        * q6k_scale(base, i * 8u + quarter * 2u + jg / 4u);
+    let qlw = W_Q6K[base + i * 16u + jg + select(0u, 8u, (quarter & 1u) == 1u)];
+    let qhw = W_Q6K[base + 32u + i * 8u + jg];
+
+    // As in q6k_unit_values: quarters 0 and 1 take the low nibbles of
+    // their ql word, 2 and 3 the high, each with its two bits of qh.
+    var low = qlw & 0x0F0F0F0Fu;
+    if (quarter >= 2u) { low = (qlw >> 4u) & 0x0F0F0F0Fu; }
+    let high = ((qhw >> (quarter * 2u)) & 0x03030303u) << 4u;
+    return (vec4<f32>(unpack4xU8(low | high)) - vec4<f32>(32.0)) * scale;
+}
+
+/// Four Q8_0 weights of row `gn` from `k`, a multiple of four.
+fn q8_four(gn: u32, k: u32) -> vec4<f32> {
+    return q8_unit_weights((gn * (info.K / 32u) + k / 32u) * Q8_WORDS, (k % 32u) / 4u);
 }
 
 /// The low and high five-bit weights of one qs word and its qh word, for
