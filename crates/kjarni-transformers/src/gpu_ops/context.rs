@@ -15,6 +15,10 @@ use crate::gpu::GpuTensorPool;
 use crate::gpu_ops::profiler::GpuProfiler;
 use crate::gpu_ops::uniforms::GpuUniformBuffer;
 
+/// How many uploaded bytes may sit in staging before [`WgpuContext::upload_buffer`]
+/// waits for the copies to finish.
+const UPLOAD_DRAIN_BYTES: usize = 256 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct GpuMemoryInfo {
     pub max_buffer_size: u64,
@@ -51,6 +55,8 @@ pub struct WgpuContext {
     pub profiler: GpuProfiler,
     pub uniform_arena: GpuUniformBuffer,
     uniform_buffers: std::sync::Mutex<HashMap<Vec<u8>, wgpu::Buffer>>,
+    /// Bytes uploaded through [`Self::upload_buffer`] since its staging was last drained.
+    undrained_upload_bytes: AtomicUsize,
     /// Quantised GEMVs round their activations to int8 and multiply with
     /// dot4I8Packed. Off when [`GpuConfig::exact_quantized`] is set or the WGSL
     /// implementation lacks packed integer dot products.
@@ -126,6 +132,39 @@ impl WgpuContext {
 
     pub fn is_available() -> bool {
         true
+    }
+
+    /// A buffer initialised with `contents`.
+    ///
+    /// wgpu copies the contents through a staging buffer that it frees once a
+    /// submission carrying the copy completes, and on Vulkan it places staging
+    /// in VRAM when the device has host-visible VRAM. A model upload with no
+    /// submission in between would hold a second copy of its weights there, so
+    /// the staging is drained every [`UPLOAD_DRAIN_BYTES`].
+    pub fn upload_buffer(
+        &self,
+        label: &str,
+        contents: &[u8],
+        usage: wgpu::BufferUsages,
+    ) -> wgpu::Buffer {
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            });
+        let undrained = self
+            .undrained_upload_bytes
+            .fetch_add(contents.len(), Ordering::Relaxed)
+            + contents.len();
+        if undrained >= UPLOAD_DRAIN_BYTES {
+            self.undrained_upload_bytes.store(0, Ordering::Relaxed);
+            self.queue.submit(std::iter::empty());
+            // WebGPU cannot block here; the browser manages its staging itself.
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        buffer
     }
 
     /// A uniform buffer holding `value`, shared with every other use of the same bytes.
@@ -278,6 +317,7 @@ impl WgpuContext {
             adapter,
             memory_info,
             allocated_memory: AtomicUsize::new(0),
+            undrained_upload_bytes: AtomicUsize::new(0),
             inference_pool: OnceLock::new(),
             profiler,
             uniform_arena,

@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
-use wgpu::util::DeviceExt;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages};
 
 use crate::WgpuContext;
@@ -333,13 +332,11 @@ impl GpuTensor {
             (raw.bytes.len() as f64) / 1024.0 / 1024.0
         );
 
-        let buffer = ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: &raw.bytes,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-            });
+        let buffer = ctx.upload_buffer(
+            label,
+            &raw.bytes,
+            BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+        );
 
         Ok(Self::new_allocation(
             Arc::new(buffer),
@@ -391,13 +388,11 @@ impl GpuTensor {
             dtype
         );
 
-        let buffer = context
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: bytes,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            });
+        let buffer = context.upload_buffer(
+            label,
+            bytes,
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+        );
 
         Ok(Self::new_allocation(
             Arc::new(buffer),
@@ -486,13 +481,11 @@ impl GpuTensor {
         let size_in_bytes = dtype.buffer_size_for_shape(&shape)?;
         let zeros_data = vec![0u8; size_in_bytes];
 
-        let buffer = context
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: &zeros_data,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            });
+        let buffer = context.upload_buffer(
+            label,
+            &zeros_data,
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+        );
 
         Ok(Self::new_allocation(
             Arc::new(buffer),
@@ -581,17 +574,15 @@ impl GpuTensor {
         D: Dimension,
     {
         let shape = arr.shape().to_vec();
-        let buffer = context
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tensor from ndarray"),
-                contents: bytemuck::cast_slice(
-                    arr.as_standard_layout()
-                        .as_slice()
-                        .ok_or_else(|| anyhow!("failed to get slice from ndarray"))?,
-                ),
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            });
+        let buffer = context.upload_buffer(
+            "tensor from ndarray",
+            bytemuck::cast_slice(
+                arr.as_standard_layout()
+                    .as_slice()
+                    .ok_or_else(|| anyhow!("failed to get slice from ndarray"))?,
+            ),
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+        );
 
         Ok(Self::new_allocation(
             Arc::new(buffer),
@@ -931,6 +922,34 @@ mod tests {
 
     async fn setup_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()
+    }
+
+    /// Uploading 1 GiB of weights with no submission in between must not hold
+    /// a staging copy of each tensor until the end.
+    #[ignore = "GPU required"]
+    #[tokio::test]
+    async fn uploads_release_their_staging_as_they_go() {
+        const CHUNK: usize = 64 << 20;
+        const CHUNKS: usize = 16;
+        let ctx = setup_context().await;
+        let Some(before) = ctx.device.generate_allocator_report() else {
+            return; // the backend keeps no allocator report
+        };
+        let bytes = vec![0u8; CHUNK];
+        let tensors: Vec<_> = (0..CHUNKS)
+            .map(|_| {
+                GpuTensor::from_bytes(&ctx, &bytes, vec![CHUNK / 4], DType::F32, "weights").unwrap()
+            })
+            .collect();
+        let after = ctx.device.generate_allocator_report().unwrap();
+
+        let grown = after.total_allocated_bytes - before.total_allocated_bytes;
+        let uploaded = (CHUNK * CHUNKS) as u64;
+        assert!(
+            grown <= uploaded + uploaded / 2,
+            "{grown} bytes allocated for {uploaded} bytes of tensors"
+        );
+        drop(tensors);
     }
 
     #[ignore = "GPU required"]
