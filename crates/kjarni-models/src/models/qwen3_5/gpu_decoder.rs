@@ -10,7 +10,7 @@ use kjarni_transformers::{
     decoder::prelude::*,
     gpu::{
         ComputeKernel, GpuRoPEAttention, GpuTensor, GpuTensorPool, Kernel,
-        cache::{GpuKVCache, GpuRecurrentState},
+        cache::{GpuKVCache, GpuRecurrentState, kv_shader},
         normalization::{GpuRMSNorm, GpuRMSNormWeights},
     },
     gpu_ops::{
@@ -115,7 +115,9 @@ const DELTA_COLS: usize = 32;
 
 struct Kernels {
     prepare_q: ComputeKernel,
+    /// For an F32 KV store, and for an F16 one when the context has those.
     prepare_kv: ComputeKernel,
+    prepare_kv_f16: Option<ComputeKernel>,
     gate: ComputeKernel,
     conv: ComputeKernel,
     delta: ComputeKernel,
@@ -125,7 +127,16 @@ struct Kernels {
 }
 
 impl Kernels {
-    fn new(device: &wgpu::Device) -> Self {
+    fn new(device: &wgpu::Device, f16_kv_cache: bool) -> Self {
+        let prepare_kv = |dtype| {
+            let label = "Qwen 3.5 prepare kv";
+            ComputeKernel::new(
+                device,
+                label,
+                kv_shader(label, include_str!("gpu/prepare_kv.wgsl"), dtype),
+                &[true, true, true, true, true, false, false],
+            )
+        };
         Self {
             prepare_q: ComputeKernel::new(
                 device,
@@ -133,12 +144,8 @@ impl Kernels {
                 wgpu::include_wgsl!("gpu/prepare_q.wgsl"),
                 &[true, true, true, true, false],
             ),
-            prepare_kv: ComputeKernel::new(
-                device,
-                "Qwen 3.5 prepare kv",
-                wgpu::include_wgsl!("gpu/prepare_kv.wgsl"),
-                &[true, true, true, true, true, false, false],
-            ),
+            prepare_kv: prepare_kv(DType::F32),
+            prepare_kv_f16: f16_kv_cache.then(|| prepare_kv(DType::F16)),
             gate: ComputeKernel::new(
                 device,
                 "Qwen 3.5 output gate",
@@ -363,18 +370,20 @@ impl Qwen3_5GpuDecoder {
                 c.num_key_value_heads as u32,
             ),
             rope,
-            kernels: Kernels::new(&context.device),
+            kernels: Kernels::new(&context.device, context.f16_kv_cache),
             config,
         })
     }
 
     /// A cache for this decoder: K and V for its attention layers, and the
     /// convolution window and delta-rule state of each Gated DeltaNet layer.
+    /// `kv_dtype`: the decoder's [`GpuDecoder::kv_cache_dtype`].
     pub fn new_cache(
         context: &Arc<WgpuContext>,
         config: &Qwen3_5Config,
         batch: usize,
         max_len: usize,
+        kv_dtype: kjarni_transformers::gpu::DType,
     ) -> Result<GpuKVCache> {
         let linear_layers = config.num_hidden_layers - config.num_full_attention_layers();
         let mut shapes = Vec::with_capacity(2 * linear_layers);
@@ -388,13 +397,14 @@ impl Qwen3_5GpuDecoder {
             ]);
         }
         let recurrent = GpuRecurrentState::new(context, shapes, SNAPSHOTS)?;
-        Ok(GpuKVCache::new(
+        Ok(GpuKVCache::with_dtype(
             context,
             config.num_full_attention_layers(),
             batch,
             config.num_key_value_heads,
             config.head_dim,
             max_len,
+            kv_dtype,
         )?
         .with_recurrent(recurrent))
     }
@@ -475,7 +485,15 @@ impl Qwen3_5GpuDecoder {
             key_stride: capacity as u32,
             _pad: [0; 2],
         };
-        self.kernels.prepare_kv.encode(
+        let prepare_kv = match k_store.dtype() {
+            DType::F16 => self
+                .kernels
+                .prepare_kv_f16
+                .as_ref()
+                .expect("an F16 KV cache on a context without f16 KV caches"),
+            _ => &self.kernels.prepare_kv,
+        };
+        prepare_kv.encode(
             &self.context,
             encoder,
             &self.context.uniform_buffer(&info),
@@ -696,6 +714,9 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
 
         let rows = batch * seq;
         let mut current = hidden_states.view(vec![rows, hidden]);
+        // Each layer leaves its MLP output unsummed; the next layer adds it to
+        // the residual inside its input norm.
+        let mut pending: Option<GpuTensor> = None;
         let checkpoint = pool.checkpoint();
         for (i, layer) in self
             .layers
@@ -705,8 +726,15 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
             .skip(start_layer)
         {
             let normed = pool.get(vec![rows, hidden]);
-            self.norm
-                .encode(encoder, &layer.input_norm, &current, &normed);
+            if let Some(mlp) = pending.take() {
+                let sum = pool.get(vec![rows, hidden]);
+                self.norm
+                    .encode_add(encoder, &layer.input_norm, &current, &mlp, &sum, &normed);
+                current = sum;
+            } else {
+                self.norm
+                    .encode(encoder, &layer.input_norm, &current, &normed);
+            }
             let mixed = match &layer.mixer {
                 Mixer::Attention(attention) => self.attention(
                     encoder,
@@ -732,21 +760,27 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
                 ),
             };
             let mixed_in = pool.get(vec![rows, hidden]);
-            self.add.encode(
-                encoder,
-                &[&current, &mixed.view(vec![rows, hidden])],
-                &mixed_in,
-            );
             let normed = pool.get(vec![rows, hidden]);
-            self.norm
-                .encode(encoder, &layer.post_norm, &mixed_in, &normed);
+            self.norm.encode_add(
+                encoder,
+                &layer.post_norm,
+                &current,
+                &mixed.view(vec![rows, hidden]),
+                &mixed_in,
+                &normed,
+            );
             let mlp = pool.get(vec![rows, hidden]);
             self.ffn.encode(encoder, &layer.mlp, &normed, &mlp, pool);
-            let next = pool.get(vec![rows, hidden]);
-            self.add.encode(encoder, &[&mixed_in, &mlp], &next);
-            current = next;
-            pool.release_since(&checkpoint, &[&current]);
+            current = mixed_in;
+            pool.release_since(&checkpoint, &[&current, &mlp]);
+            pending = Some(mlp);
             kjarni_transformers::gpu::submit_between_layers(&self.context, encoder, i, end_layer);
+        }
+
+        if let Some(mlp) = pending {
+            let next = pool.get(vec![rows, hidden]);
+            self.add.encode(encoder, &[&current, &mlp], &next);
+            current = next;
         }
 
         if end_layer == self.layers.len() {
@@ -766,6 +800,16 @@ impl GpuDecoder for Qwen3_5GpuDecoder {
 
     fn num_layers(&self) -> usize {
         self.layers.len()
+    }
+
+    fn kv_cache_dtype(&self) -> kjarni_transformers::gpu::DType {
+        let quantized = self.layers.iter().any(|layer| match &layer.mixer {
+            Mixer::Attention(a) => [&a.q, &a.k, &a.v, &a.o]
+                .iter()
+                .any(|t| t.dtype().is_quantized()),
+            Mixer::DeltaNet(_) => false,
+        });
+        kjarni_transformers::gpu::cache::kv_cache_dtype(&self.context, quantized)
     }
 
     fn hidden_size(&self) -> usize {
@@ -819,7 +863,7 @@ mod tests {
     #[ignore = "GPU required"]
     async fn the_delta_step_matches_the_delta_rule_for_one_token() {
         let ctx = WgpuContext::new().await.unwrap();
-        let kernels = Kernels::new(&ctx.device);
+        let kernels = Kernels::new(&ctx.device, ctx.f16_kv_cache);
         let (batch, nk, nv, dk, dv) = (2usize, 2usize, 4usize, 128usize, 48usize);
         let channels = 2 * nk * dk + nv * dv;
         let tensor = |a: Array1<f32>| GpuTensor::from_ndarray(&ctx, &a).unwrap();

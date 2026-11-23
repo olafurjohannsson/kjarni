@@ -17,6 +17,11 @@ struct NormUniforms {
 @group(0) @binding(2) var<storage, read> gamma: array<u32>;  // Polymorphic: F32 or BF16
 @group(0) @binding(3) var<storage, read_write> output: array<f32>;
 
+// `add_main` only: `output` normalises `input + addend`, and `sum` receives
+// `input + addend` itself.
+@group(0) @binding(4) var<storage, read> addend: array<f32>;
+@group(0) @binding(5) var<storage, read_write> sum: array<f32>;
+
 var<workgroup> s_sum: array<f32, 256>;
 
 /// Fetches gamma value, handling F32 or BF16 format.
@@ -80,5 +85,54 @@ fn main(
     for (var i = tid; i < uniforms.n; i += 256u) {
         let idx = row_offset + i;
         output[idx] = input[idx] * inv_rms * get_gamma(i);
+    }
+}
+
+/// `sum = input + addend`, then `output = rms_norm(sum)`: a residual add and
+/// the norm after it in one pass. The sum is the same f32 addition the add
+/// kernel makes, so the result matches the two kernels run one after another.
+@compute @workgroup_size(256)
+fn add_main(
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(num_workgroups) grid: vec3<u32>,
+) {
+    let row = group_id.y * grid.x + group_id.x;
+    let tid = local_id.x;
+
+    if (row >= uniforms.m) { return; }
+
+    let row_offset = row * uniforms.n;
+
+    var sum_sq = 0.0;
+    for (var i = tid; i < uniforms.n; i += 256u) {
+        let idx = row_offset + i;
+        let val = input[idx] + addend[idx];
+        sum[idx] = val;
+        sum_sq += val * val;
+    }
+
+    s_sum[tid] = sum_sq;
+    workgroupBarrier();
+
+    for (var s = 128u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            s_sum[tid] += s_sum[tid + s];
+        }
+        workgroupBarrier();
+    }
+
+    if (tid == 0u) {
+        let mean = s_sum[0] / f32(uniforms.n);
+        s_sum[0] = 1.0 / sqrt(mean + uniforms.eps);
+    }
+    workgroupBarrier();
+
+    let inv_rms = s_sum[0];
+
+    // Each invocation reads back only the elements it wrote above.
+    for (var i = tid; i < uniforms.n; i += 256u) {
+        let idx = row_offset + i;
+        output[idx] = sum[idx] * inv_rms * get_gamma(i);
     }
 }

@@ -34,4 +34,27 @@ impl GpuNormalization {
             _ => panic!("Normalization type mismatch"),
         }
     }
+
+    /// `sum = input + addend` and `output = norm(sum)`; see
+    /// [`GpuRMSNorm::encode_add`]. RMSNorm only.
+    pub fn encode_add(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        weights: &GpuNormalizationWeights,
+        input: &GpuTensor,
+        addend: &GpuTensor,
+        sum: &GpuTensor,
+        output: &GpuTensor,
+    ) -> anyhow::Result<()> {
+        match (self, weights) {
+            (Self::RMSNorm(rms), GpuNormalizationWeights::RMSNorm(w)) => {
+                rms.encode_add(encoder, w, input, addend, sum, output);
+                Ok(())
+            }
+            (Self::LayerNorm(_), _) => {
+                anyhow::bail!("a fused residual add is implemented for RMSNorm only")
+            }
+            _ => panic!("Normalization type mismatch"),
+        }
+    }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 
 use crate::WgpuContext;
-use crate::gpu::{ComputeKernel, GpuTensor, GpuTensorPool};
+use crate::gpu::{ComputeKernel, DType, GpuTensor, GpuTensorPool, kv_shader};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::attention::ops::AttentionOps;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
@@ -113,6 +113,44 @@ impl Kernel {
     }
 }
 
+/// The kernels that write or read the KV store, built for one store dtype.
+struct StoreKernels {
+    write_kv: Kernel,
+    scores: Kernel,
+    output: Kernel,
+    decode_chunks: Kernel,
+}
+
+impl StoreKernels {
+    fn new(device: &wgpu::Device, dtype: DType) -> Self {
+        let make = |label: &str, source: &str, read_only: &[bool]| {
+            Kernel::new(device, label, kv_shader(label, source, dtype), read_only)
+        };
+        Self {
+            write_kv: make(
+                "RoPE write KV",
+                include_str!("./rope_write_kv.wgsl"),
+                &[true, true, true, true, true, false, false, false],
+            ),
+            scores: make(
+                "RoPE scores",
+                include_str!("./rope_scores.wgsl"),
+                &[true, true, true, false],
+            ),
+            output: make(
+                "RoPE context",
+                include_str!("./rope_context.wgsl"),
+                &[true, true, false],
+            ),
+            decode_chunks: make(
+                "RoPE decode chunks",
+                include_str!("./rope_decode_chunks.wgsl"),
+                &[true, true, true, true, false, false],
+            ),
+        }
+    }
+}
+
 /// Causal attention with rotary positions.
 ///
 /// One kernel rotates the step's queries and keys and writes keys and values
@@ -129,10 +167,10 @@ pub struct GpuRoPEAttention {
     context: Arc<WgpuContext>,
     ops: AttentionOps,
     softmax: GpuSoftmax,
-    write_kv: Kernel,
-    scores: Kernel,
-    output: Kernel,
-    decode_chunks: Kernel,
+    /// The kernels that touch the KV store, for an F32 store.
+    f32_store: StoreKernels,
+    /// The same for an F16 store, when the context has f16 KV caches.
+    f16_store: Option<StoreKernels>,
     decode_combine: Kernel,
     /// Bytes of scores per dispatch: the device's binding limit or
     /// `MAX_SCORE_BYTES`, whichever is smaller.
@@ -151,30 +189,10 @@ impl GpuRoPEAttention {
             context: context.clone(),
             ops: AttentionOps::new(context, hidden_size, num_heads, num_kv_heads),
             softmax: GpuSoftmax::new(context),
-            write_kv: Kernel::new(
-                device,
-                "RoPE write KV",
-                wgpu::include_wgsl!("./rope_write_kv.wgsl"),
-                &[true, true, true, true, true, false, false, false],
-            ),
-            scores: Kernel::new(
-                device,
-                "RoPE scores",
-                wgpu::include_wgsl!("./rope_scores.wgsl"),
-                &[true, true, true, false],
-            ),
-            output: Kernel::new(
-                device,
-                "RoPE context",
-                wgpu::include_wgsl!("./rope_context.wgsl"),
-                &[true, true, false],
-            ),
-            decode_chunks: Kernel::new(
-                device,
-                "RoPE decode chunks",
-                wgpu::include_wgsl!("./rope_decode_chunks.wgsl"),
-                &[true, true, true, true, false, false],
-            ),
+            f32_store: StoreKernels::new(device, DType::F32),
+            f16_store: context
+                .f16_kv_cache
+                .then(|| StoreKernels::new(device, DType::F16)),
             decode_combine: Kernel::new(
                 device,
                 "RoPE decode combine",
@@ -183,6 +201,18 @@ impl GpuRoPEAttention {
             ),
             score_budget: (context.device.limits().max_storage_buffer_binding_size as u64)
                 .min(MAX_SCORE_BYTES),
+        }
+    }
+
+    /// The kernels for a KV store of `store`'s dtype.
+    fn store_kernels(&self, store: &GpuTensor) -> &StoreKernels {
+        match store.dtype() {
+            DType::F32 => &self.f32_store,
+            DType::F16 => self
+                .f16_store
+                .as_ref()
+                .expect("an F16 KV cache on a context without f16 KV caches"),
+            other => panic!("a KV store holds F32 or F16, not {other:?}"),
         }
     }
 
@@ -359,7 +389,7 @@ impl GpuRoPEAttention {
             info.queries = queries as u32;
             let uniforms = self.context.uniform_buffer(&info);
             let rows = batch * heads * queries;
-            self.scores.encode(
+            self.store_kernels(k_store).scores.encode(
                 &self.context,
                 encoder,
                 &uniforms,
@@ -368,7 +398,7 @@ impl GpuRoPEAttention {
             );
             self.softmax
                 .encode(encoder, &scores, self.ops.scale_factor());
-            self.output.encode(
+            self.store_kernels(v_store).output.encode(
                 &self.context,
                 encoder,
                 &uniforms,
@@ -415,20 +445,23 @@ impl GpuRoPEAttention {
         let uniforms = self.context.uniform_buffer(&info);
         let stats = pool.get(vec![batch, heads, chunks, 2]);
         let partial = pool.get(vec![batch, heads, chunks, head_dim]);
-        self.decode_chunks.0.encode_workgroups(
-            &self.context,
-            encoder,
-            &uniforms,
-            &[
-                q_rotated,
-                k_store,
-                v_store,
-                attention_mask,
-                &stats,
-                &partial,
-            ],
-            [chunks as u32, kv_heads as u32, batch as u32],
-        );
+        self.store_kernels(k_store)
+            .decode_chunks
+            .0
+            .encode_workgroups(
+                &self.context,
+                encoder,
+                &uniforms,
+                &[
+                    q_rotated,
+                    k_store,
+                    v_store,
+                    attention_mask,
+                    &stats,
+                    &partial,
+                ],
+                [chunks as u32, kv_heads as u32, batch as u32],
+            );
         let attended = pool.get(vec![batch, 1, heads * head_dim]);
         self.decode_combine.0.encode_workgroups(
             &self.context,
@@ -469,7 +502,7 @@ impl GpuRoPEAttention {
             _pad: [0; 3],
         };
         let uniforms = self.context.uniform_buffer(&info);
-        self.write_kv.encode(
+        self.store_kernels(k_store).write_kv.encode(
             &self.context,
             encoder,
             &uniforms,
@@ -663,7 +696,8 @@ mod tests {
     }
 
     /// Attention spelled out on the CPU: project, rotate, softmax over the keys a
-    /// query may see, project. `mask` is one row per batch row.
+    /// query may see, project. `mask` is one row per batch row. `f16_kv`: the
+    /// rotated keys and the values rounded to f16, as an F16 KV store holds them.
     fn reference(
         hidden: &Array3<f32>,
         mask: &Array2<f32>,
@@ -671,7 +705,15 @@ mod tests {
         rope: &RoPE,
         heads: usize,
         kv_heads: usize,
+        f16_kv: bool,
     ) -> Array3<f32> {
+        let store = |x: f32| {
+            if f16_kv {
+                half::f16::from_f32(x).to_f32()
+            } else {
+                x
+            }
+        };
         let (batch, seq, size) = hidden.dim();
         let d = size / heads;
         let rotate = |row: &[f32], pos: usize| -> Vec<f32> {
@@ -697,7 +739,11 @@ mod tests {
                         if mask[[b, key]] == 0.0 {
                             continue;
                         }
-                        let kr = rotate(&k.row(key).as_slice().unwrap()[kv * d..(kv + 1) * d], key);
+                        let kr: Vec<f32> =
+                            rotate(&k.row(key).as_slice().unwrap()[kv * d..(kv + 1) * d], key)
+                                .into_iter()
+                                .map(store)
+                                .collect();
                         let dot: f32 = qh.iter().zip(&kr).map(|(a, b)| a * b).sum();
                         scores.push((key, dot / (d as f32).sqrt()));
                     }
@@ -706,7 +752,7 @@ mod tests {
                     for (key, score) in scores {
                         let w = (score - largest).exp() / total;
                         for i in 0..d {
-                            attended[[t, head * d + i]] += w * v[[key, kv * d + i]];
+                            attended[[t, head * d + i]] += w * store(v[[key, kv * d + i]]);
                         }
                     }
                 }
@@ -724,7 +770,23 @@ mod tests {
     #[tokio::test]
     #[ignore = "GPU required"]
     async fn attention_matches_reference_in_one_step_and_token_by_token() {
+        attention_case(DType::F32).await;
+    }
+
+    /// The same over an F16 KV cache, against the reference with keys and values
+    /// rounded to f16 where the cache holds them.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn attention_over_an_f16_cache_matches_reference() {
+        attention_case(DType::F16).await;
+    }
+
+    async fn attention_case(store: DType) {
         let ctx = setup().await;
+        if store == DType::F16 && !ctx.f16_kv_cache {
+            println!("Skipping: no f16 KV caches on this device");
+            return;
+        }
         let (hidden_size, heads, kv_heads) = (64usize, 8usize, 2usize);
         let d = hidden_size / heads;
         let kv_dim = kv_heads * d;
@@ -763,19 +825,35 @@ mod tests {
         let cpu_rope = RoPE::new(d, 128, 10000.0);
         let rope = GpuRoPE::from_cpu_rope(&ctx, &cpu_rope).unwrap();
         let attn = GpuRoPEAttention::new(&ctx, hidden_size as u32, heads as u32, kv_heads as u32);
-        let want = reference(
-            &hidden,
-            &mask,
-            [&q_w, &k_w, &v_w, &o_w],
-            &cpu_rope,
-            heads,
-            kv_heads,
-        );
+        let want_with = |f16_kv| {
+            reference(
+                &hidden,
+                &mask,
+                [&q_w, &k_w, &v_w, &o_w],
+                &cpu_rope,
+                heads,
+                kv_heads,
+                f16_kv,
+            )
+        };
+        // Without a cache the store is the pool's F32; with one, `store`.
+        let uncached = want_with(false);
+        let want = want_with(store == DType::F16);
+        // Rounding to f16 moves the output by more than the tolerance below, so
+        // an F16 cache that held f32, or an f32 one that rounded, fails.
+        let rounding = (&want - &uncached)
+            .iter()
+            .fold(0.0f32, |m, x| m.max(x.abs()));
+        if store == DType::F16 {
+            assert!(
+                rounding > 2e-4,
+                "f16 rounding moves the output by {rounding:.1e}"
+            );
+        }
 
-        let k_cache = Array4::<f32>::zeros((batch, kv_heads, 16, d));
-        let k_cache = GpuTensor::from_ndarray(&ctx, &k_cache).unwrap();
-        let v_cache = Array4::<f32>::zeros((batch, kv_heads, 16, d));
-        let v_cache = GpuTensor::from_ndarray(&ctx, &v_cache).unwrap();
+        let cache_shape = vec![batch, kv_heads, 16, d];
+        let k_cache = GpuTensor::uninitialized(&ctx, cache_shape.clone(), store, "k cache");
+        let v_cache = GpuTensor::uninitialized(&ctx, cache_shape, store, "v cache");
 
         // Scores for two queries at a time: a prompt is attended in slices, the last
         // one short, as a prompt too long for one buffer binding is.
@@ -828,7 +906,7 @@ mod tests {
 
         close(
             &run(false, &hidden, 0, false).await,
-            want.view(),
+            uncached.view(),
             0,
             "without a cache",
         );
@@ -859,7 +937,7 @@ mod tests {
 
         close(
             &run(true, &hidden, 0, false).await,
-            want.view(),
+            uncached.view(),
             0,
             "in slices without a cache",
         );

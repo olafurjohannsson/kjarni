@@ -160,6 +160,13 @@ pub trait GpuDecoder: Send + Sync {
 
     fn hidden_size(&self) -> usize;
 
+    /// The element type its KV cache should hold. F32 unless the decoder's
+    /// attention reads an F16 store, as `GpuRoPEAttention` does; see
+    /// [`crate::gpu::cache::kv_cache_dtype`].
+    fn kv_cache_dtype(&self) -> crate::gpu::DType {
+        crate::gpu::DType::F32
+    }
+
     /// Default full forward pass.
     fn forward(
         &self,

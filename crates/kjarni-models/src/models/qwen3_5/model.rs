@@ -179,11 +179,16 @@ impl LanguageModel for Qwen3_5Model {
             let context = self
                 .context()
                 .ok_or_else(|| anyhow!("GPU context required"))?;
+            let kv_dtype = self
+                .pipeline
+                .gpu_decoder()
+                .map_or(kjarni_transformers::gpu::DType::F32, |d| d.kv_cache_dtype());
             return Ok(Box::new(Qwen3_5GpuDecoder::new_cache(
                 &context,
                 &self.config,
                 batch_size,
                 max_len,
+                kv_dtype,
             )?));
         }
         Ok(Box::new(HybridCache::new(

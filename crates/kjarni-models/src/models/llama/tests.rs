@@ -321,3 +321,44 @@ async fn profile_on_the_gpu(m: &dyn DecoderLanguageModel, ctx: Arc<WgpuContext>)
     report("decode 4 tokens", ctx.profiler.totals(&ctx).await, wall);
     Ok(())
 }
+
+/// A quantised model gets an F16 KV cache on the GPU, and an F32 one in exact
+/// mode. A model with float weights keeps F32, so its GPU output stays in step
+/// with the CPU's. Qwen2.5-0.5B, from its GGUF and from its safetensors.
+#[tokio::test]
+#[ignore = "needs a GPU and Qwen2.5-0.5B as GGUF and safetensors"]
+async fn kv_cache_is_f16_over_quantised_weights_only() -> Result<()> {
+    use crate::models::qwen::model::QwenModel;
+    use kjarni_transformers::gpu::{DType, GpuKVCache};
+    use kjarni_transformers::gpu_ops::context::GpuConfig;
+
+    let dir = model_cache_dir("Qwen_Qwen2.5-0.5B-Instruct");
+    let cache_dtype = |path: std::path::PathBuf, ctx: Arc<WgpuContext>| -> Result<DType> {
+        let m = QwenModel::from_pretrained(&path, Device::Wgpu, Some(ctx), None, None)?;
+        let cache = m.new_cache(1, 64, 1)?;
+        let cache = cache
+            .as_any()
+            .downcast_ref::<GpuKVCache>()
+            .expect("a GPU model makes a GPU cache");
+        Ok(cache.dtype())
+    };
+
+    let ctx = WgpuContext::new().await?;
+    let quantised = if ctx.f16_kv_cache {
+        DType::F16
+    } else {
+        DType::F32
+    };
+    assert_eq!(cache_dtype(dir.join("model.gguf"), ctx.clone())?, quantised);
+    // The directory: it holds both, and safetensors is read first.
+    assert_eq!(cache_dtype(dir.clone(), ctx)?, DType::F32);
+
+    let exact = WgpuContext::with_config(GpuConfig {
+        exact_quantized: true,
+        ..Default::default()
+    })
+    .await?;
+    assert!(!exact.f16_kv_cache);
+    assert_eq!(cache_dtype(dir.join("model.gguf"), exact)?, DType::F32);
+    Ok(())
+}
