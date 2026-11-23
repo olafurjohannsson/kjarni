@@ -252,7 +252,7 @@ impl WgpuContext {
         self.inference_pool
             .get_or_init(|| {
                 log::debug!("creating shared inference pool");
-                Arc::new(Mutex::new(GpuTensorPool::new(self.clone())))
+                Arc::new(Mutex::new(GpuTensorPool::owned_by(self)))
             })
             .clone()
     }

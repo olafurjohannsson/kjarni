@@ -1,7 +1,7 @@
 //! GPU tensor memory pool for temporary buffer reuse.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use crate::WgpuContext;
 use crate::gpu::{DType, GpuTensor};
@@ -14,11 +14,27 @@ struct AllocationStats {
     allocations: usize,
 }
 
+/// The context a pool allocates from. The context's own inference pool holds
+/// it weakly, as the context holds that pool and a strong reference both ways
+/// would keep the device and every buffer alive after the last user drops it.
+enum PoolContext {
+    Strong(Arc<WgpuContext>),
+    Weak(Weak<WgpuContext>),
+}
+
+/// A pooled buffer. Kept without the tensor around it: a tensor holds its
+/// context, and the context holds its inference pool.
+struct Pooled {
+    buffer: Arc<wgpu::Buffer>,
+    id: u64,
+}
+
 /// A frame-based memory pool for temporary GPU tensors
 pub struct GpuTensorPool {
-    context: Arc<WgpuContext>,
+    context: PoolContext,
     current_frame_ids: HashSet<u64>,
-    buffer_pool: HashMap<usize, Vec<GpuTensor>>,
+    /// F32 buffers by element count.
+    buffer_pool: HashMap<usize, Vec<Pooled>>,
     #[cfg(debug_assertions)]
     stats: AllocationStats,
 }
@@ -26,6 +42,15 @@ pub struct GpuTensorPool {
 impl GpuTensorPool {
     /// Creates a new empty tensor pool.
     pub fn new(context: Arc<WgpuContext>) -> Self {
+        Self::with_context(PoolContext::Strong(context))
+    }
+
+    /// The pool a context keeps for itself; see [`WgpuContext::get_inference_pool`].
+    pub(crate) fn owned_by(context: &Arc<WgpuContext>) -> Self {
+        Self::with_context(PoolContext::Weak(Arc::downgrade(context)))
+    }
+
+    fn with_context(context: PoolContext) -> Self {
         Self {
             context,
             current_frame_ids: HashSet::new(),
@@ -71,43 +96,55 @@ impl GpuTensorPool {
 
     fn try_reuse_from_pool(&mut self, needed_size: usize, shape: Vec<usize>) -> Option<GpuTensor> {
         if let Some(buffers) = self.buffer_pool.get(&needed_size)
-            && let Some(tensor_to_reuse) = buffers
+            && let Some(pooled) = buffers
                 .iter()
-                .find(|t| !self.current_frame_ids.contains(&t.buffer_id()))
+                .find(|p| !self.current_frame_ids.contains(&p.id))
         {
             #[cfg(debug_assertions)]
             {
                 self.stats.reuses += 1;
             }
 
-            return Some(if tensor_to_reuse.shape() == shape.as_slice() {
-                tensor_to_reuse.clone()
-            } else {
-                tensor_to_reuse.view(shape)
-            });
+            return Some(GpuTensor::from_pooled(
+                &self.context(),
+                pooled.buffer.clone(),
+                pooled.id,
+                shape,
+            ));
         }
 
         None
     }
 
+    fn context(&self) -> Arc<WgpuContext> {
+        match &self.context {
+            PoolContext::Strong(context) => context.clone(),
+            // The pool is reached through its context, so the context is alive.
+            PoolContext::Weak(context) => context
+                .upgrade()
+                .expect("a context's inference pool used after the context was dropped"),
+        }
+    }
+
     fn create_and_store_tensor(&mut self, shape: Vec<usize>) -> GpuTensor {
+        let context = self.context();
         let tensor = {
             #[cfg(test)]
             {
-                GpuTensor::zeros(&self.context, shape.clone(), DType::F32, "GpuTensorPool")
+                GpuTensor::zeros(&context, shape.clone(), DType::F32, "GpuTensorPool")
                     .expect("failed to allocate temp tensor")
             }
             #[cfg(not(test))]
             {
-                GpuTensor::uninitialized(&self.context, shape, DType::F32, "GpuTensorPool")
+                GpuTensor::uninitialized(&context, shape, DType::F32, "GpuTensorPool")
             }
         };
 
         let size = tensor.num_elements();
-        self.buffer_pool
-            .entry(size)
-            .or_default()
-            .push(tensor.clone());
+        self.buffer_pool.entry(size).or_default().push(Pooled {
+            buffer: tensor.shared_buffer(),
+            id: tensor.buffer_id(),
+        });
 
         tensor
     }
@@ -123,7 +160,7 @@ impl GpuTensorPool {
     pub fn next_frame(&mut self) {
         let used = &self.current_frame_ids;
         for buffers in self.buffer_pool.values_mut() {
-            buffers.retain(|t| used.contains(&t.buffer_id()));
+            buffers.retain(|p| used.contains(&p.id));
         }
         self.buffer_pool.retain(|_, buffers| !buffers.is_empty());
         self.current_frame_ids.clear();
@@ -184,6 +221,30 @@ mod tests {
 
     fn pooled(pool: &GpuTensorPool) -> usize {
         pool.buffer_pool.values().map(Vec::len).sum()
+    }
+
+    /// A context whose inference pool has handed out buffers is freed when its
+    /// last user drops it, with the device and every pooled buffer. A model
+    /// switch builds a new context, so one kept alive holds its VRAM for good.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn a_context_and_its_pool_are_freed_together() -> anyhow::Result<()> {
+        let context = WgpuContext::new().await?;
+        let weak = Arc::downgrade(&context);
+        {
+            let pool = context.get_inference_pool();
+            let mut pool = pool.lock().await;
+            let first = pool.get(vec![64, 64]);
+            pool.next_frame();
+            let reused = pool.get(vec![64, 64]);
+            assert_eq!(first.buffer_id(), reused.buffer_id());
+        }
+        drop(context);
+        assert!(
+            weak.upgrade().is_none(),
+            "the context outlived its last user"
+        );
+        Ok(())
     }
 
     /// Decode asks for one more key position every step. If every size the pool has

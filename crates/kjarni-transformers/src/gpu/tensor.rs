@@ -780,6 +780,21 @@ impl GpuTensor {
         &self.buffer
     }
 
+    /// The buffer, shared, for [`GpuTensorPool`](super::GpuTensorPool) to keep.
+    pub(crate) fn shared_buffer(&self) -> Arc<Buffer> {
+        self.buffer.clone()
+    }
+
+    /// An F32 tensor over a pooled buffer, keeping the id the pool knows it by.
+    pub(crate) fn from_pooled(
+        context: &Arc<WgpuContext>,
+        buffer: Arc<Buffer>,
+        id: u64,
+        shape: Vec<usize>,
+    ) -> Self {
+        Self::new_view(buffer, shape, DType::F32, context.clone(), id)
+    }
+
     pub fn dtype(&self) -> DType {
         self.dtype
     }
