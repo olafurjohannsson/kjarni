@@ -1,6 +1,10 @@
 //! Keys and values of a gated attention layer: per-head RMSNorm and rotary on
 //! the keys, then both written into the KV store.
 
+// The KV store's element type: f32, or f16 in the variant that
+// `kjarni_transformers::gpu::kv_shader` builds for a half-precision cache.
+alias KV = f32;
+
 struct Info {
     rows: u32,
     seq: u32,
@@ -24,8 +28,8 @@ struct Info {
 @group(0) @binding(3) var<storage, read> norm: array<f32>;      // [D]
 @group(0) @binding(4) var<storage, read> cos_table: array<f32>;
 @group(0) @binding(5) var<storage, read> sin_table: array<f32>;
-@group(0) @binding(6) var<storage, read_write> k_store: array<f32>; // [B, KV, capacity, D]
-@group(0) @binding(7) var<storage, read_write> v_store: array<f32>;
+@group(0) @binding(6) var<storage, read_write> k_store: array<KV>; // [B, KV, capacity, D]
+@group(0) @binding(7) var<storage, read_write> v_store: array<KV>;
 
 const THREADS: u32 = 64u;
 var<workgroup> partial: array<f32, THREADS>;
@@ -70,13 +74,13 @@ fn main(
         let x1 = k_in[src + i + half] * inv * norm[i + half];
         let c = cos_table[table + i];
         let s = sin_table[table + i];
-        k_store[dst + i] = x0 * c - x1 * s;
-        k_store[dst + i + half] = x0 * s + x1 * c;
+        k_store[dst + i] = KV(x0 * c - x1 * s);
+        k_store[dst + i + half] = KV(x0 * s + x1 * c);
     }
     for (var i = 2u * half + t; i < d; i += THREADS) {
-        k_store[dst + i] = k_in[src + i] * inv * norm[i];
+        k_store[dst + i] = KV(k_in[src + i] * inv * norm[i]);
     }
     for (var i = t; i < d; i += THREADS) {
-        v_store[dst + i] = v_in[src + i];
+        v_store[dst + i] = KV(v_in[src + i]);
     }
 }

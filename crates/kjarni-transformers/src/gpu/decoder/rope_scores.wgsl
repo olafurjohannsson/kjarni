@@ -1,6 +1,10 @@
 //! Attention scores, q . k for every query and every key it may see, read from
 //! the KV store in place.
 
+// The KV store's element type: f32, or f16 in the variant that
+// `crate::gpu::kv_shader` builds for a half-precision cache.
+alias KV = f32;
+
 struct Info {
     batch: u32,
     seq: u32,
@@ -25,7 +29,7 @@ struct Info {
 
 @group(0) @binding(0) var<uniform> info: Info;
 @group(0) @binding(1) var<storage, read> q: array<f32>;       // [B, H, S, D]
-@group(0) @binding(2) var<storage, read> k_store: array<f32>; // [B, KV, capacity, D]
+@group(0) @binding(2) var<storage, read> k_store: array<KV>; // [B, KV, capacity, D]
 @group(0) @binding(3) var<storage, read> mask: array<f32>;    // [mask_rows, mask_stride]
 @group(0) @binding(4) var<storage, read_write> scores: array<f32>; // [B * H * queries, keys]
 
@@ -64,7 +68,7 @@ fn main(
 
     var total = 0.0;
     for (var i = 0u; i < d; i++) {
-        total += q[q_base + i] * k_store[k_base + i];
+        total += q[q_base + i] * f32(k_store[k_base + i]);
     }
     scores[idx] = total;
 }

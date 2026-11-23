@@ -90,14 +90,17 @@ impl GpuScale {
             ],
         });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Scale Out-of-Place Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.out_of_place_pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = size.div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Scale Out-of-Place Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.out_of_place_pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
+                let workgroups = size.div_ceil(256);
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+            }
+        );
     }
 }
 
@@ -133,14 +136,17 @@ fn run_internal_scale(
         ],
     });
 
-    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("Scale Pass"),
-        timestamp_writes: None,
-    });
-    compute_pass.set_pipeline(pipeline);
-    compute_pass.set_bind_group(0, &bind_group, &[]);
-    let workgroups = size.div_ceil(256);
-    crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+    crate::gpu_profile!(
+        context,
+        encoder,
+        "Scale Pass",
+        |compute_pass: &mut wgpu::ComputePass<'_>| {
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = size.div_ceil(256);
+            crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+        }
+    );
 }
 
 fn compile_out_of_place_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {

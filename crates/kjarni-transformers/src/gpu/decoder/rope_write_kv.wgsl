@@ -1,6 +1,10 @@
 //! Rotates a step's queries and keys, and writes keys and values straight into
 //! the KV store.
 
+// The KV store's element type: f32, or f16 in the variant that
+// `crate::gpu::kv_shader` builds for a half-precision cache.
+alias KV = f32;
+
 struct Info {
     batch: u32,
     seq: u32,
@@ -28,8 +32,8 @@ struct Info {
 @group(0) @binding(4) var<storage, read> cos_table: array<f32>; // [positions, D / 2]
 @group(0) @binding(5) var<storage, read> sin_table: array<f32>; // [positions, D / 2]
 @group(0) @binding(6) var<storage, read_write> q_out: array<f32>;   // [B, H, S, D]
-@group(0) @binding(7) var<storage, read_write> k_store: array<f32>; // [B, KV, capacity, D]
-@group(0) @binding(8) var<storage, read_write> v_store: array<f32>; // [B, KV, capacity, D]
+@group(0) @binding(7) var<storage, read_write> k_store: array<KV>; // [B, KV, capacity, D]
+@group(0) @binding(8) var<storage, read_write> v_store: array<KV>; // [B, KV, capacity, D]
 
 /// One thread per (batch, token, head). The first `kv_heads` heads also carry a
 /// key and a value.
@@ -70,8 +74,8 @@ fn main(
     let kv_dst = ((batch * info.kv_heads + head) * info.key_stride + info.write_offset + token) * d + i;
     let k0 = k_in[kv_src];
     let k1 = k_in[kv_src + half];
-    k_store[kv_dst] = k0 * c - k1 * s;
-    k_store[kv_dst + half] = k1 * c + k0 * s;
-    v_store[kv_dst] = v_in[kv_src];
-    v_store[kv_dst + half] = v_in[kv_src + half];
+    k_store[kv_dst] = KV(k0 * c - k1 * s);
+    k_store[kv_dst + half] = KV(k1 * c + k0 * s);
+    v_store[kv_dst] = KV(v_in[kv_src]);
+    v_store[kv_dst + half] = KV(v_in[kv_src + half]);
 }

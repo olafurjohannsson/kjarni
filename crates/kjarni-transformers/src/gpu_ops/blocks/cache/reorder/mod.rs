@@ -152,20 +152,22 @@ impl GpuReorderCache {
                 ],
             });
 
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Reorder Cache Pass"),
-            timestamp_writes: None,
-        });
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Reorder Cache Pass",
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
 
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
+                // Dispatch logic
+                let wg_x = (head_dim as u32).div_ceil(16);
+                let wg_y = (num_heads as u32).div_ceil(16);
+                let wg_z = (num_beams * current_seq_len) as u32;
 
-        // Dispatch logic
-        let wg_x = (head_dim as u32).div_ceil(16);
-        let wg_y = (num_heads as u32).div_ceil(16);
-        let wg_z = (num_beams * current_seq_len) as u32;
-
-        pass.dispatch_workgroups(wg_x, wg_y, wg_z);
+                pass.dispatch_workgroups(wg_x, wg_y, wg_z);
+            }
+        );
     }
 }
 

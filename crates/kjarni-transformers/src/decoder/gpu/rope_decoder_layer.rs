@@ -74,14 +74,62 @@ impl GpuRoPEDecoderLayer {
         pool: &mut GpuTensorPool,
         rope: &GpuRoPE,
     ) -> Result<GpuTensor> {
-        let residual = hidden_states;
-        let ln1_out = pool.get(hidden_states.shape().to_vec());
-        self.self_attn_norm.encode(
+        let (residual, ffn_out) = self.forward_deferred(
             encoder,
-            &self.self_attn_norm_weights,
             hidden_states,
-            &ln1_out,
-        );
+            None,
+            attention_mask,
+            layer_idx,
+            position_offset,
+            gpu_cache,
+            pool,
+            rope,
+        )?;
+        let output = pool.get(residual.shape().to_vec());
+        self.add.encode(encoder, &[&residual, &ffn_out], &output);
+        Ok(output)
+    }
+
+    /// The layer with its last residual add left to the caller: returns
+    /// `(residual, ffn_out)`, whose sum is the layer's output. `pending`, the
+    /// previous layer's `ffn_out`, is added to `hidden_states` here, in the same
+    /// dispatch as the input norm, so a stack of layers runs no separate adds.
+    pub fn forward_deferred(
+        &self,
+        encoder: &mut crate::gpu::GpuEncoder,
+        hidden_states: &GpuTensor,
+        pending: Option<&GpuTensor>,
+        attention_mask: &GpuTensor,
+        layer_idx: usize,
+        position_offset: usize,
+        gpu_cache: Option<&mut GpuKVCache>,
+        pool: &mut GpuTensorPool,
+        rope: &GpuRoPE,
+    ) -> Result<(GpuTensor, GpuTensor)> {
+        let ln1_out = pool.get(hidden_states.shape().to_vec());
+        let residual = match pending {
+            Some(delta) => {
+                let sum = pool.get(hidden_states.shape().to_vec());
+                self.self_attn_norm.encode_add(
+                    encoder,
+                    &self.self_attn_norm_weights,
+                    hidden_states,
+                    delta,
+                    &sum,
+                    &ln1_out,
+                )?;
+                sum
+            }
+            None => {
+                self.self_attn_norm.encode(
+                    encoder,
+                    &self.self_attn_norm_weights,
+                    hidden_states,
+                    &ln1_out,
+                );
+                hidden_states.clone()
+            }
+        };
 
         let cached_tensors = gpu_cache.as_ref().and_then(|c| c.get(layer_idx));
 
@@ -99,14 +147,16 @@ impl GpuRoPEDecoderLayer {
             pool,
         )?;
 
-        let attn_block_output = pool.get(hidden_states.shape().to_vec());
-        self.add
-            .encode(encoder, &[residual, &attn_output], &attn_block_output);
-
-        let residual_2 = &attn_block_output;
-        let ln2_out = pool.get(residual_2.shape().to_vec());
-        self.ffn_norm
-            .encode(encoder, &self.ffn_norm_weights, residual_2, &ln2_out);
+        let attn_block_output = pool.get(residual.shape().to_vec());
+        let ln2_out = pool.get(residual.shape().to_vec());
+        self.ffn_norm.encode_add(
+            encoder,
+            &self.ffn_norm_weights,
+            &residual,
+            &attn_output,
+            &attn_block_output,
+            &ln2_out,
+        )?;
 
         let (b, s, h) = ln2_out.dims3();
         let ln2_out_2d = ln2_out.view(vec![b * s, h]);
@@ -114,13 +164,8 @@ impl GpuRoPEDecoderLayer {
 
         self.feedforward
             .encode(encoder, &self.ff_weights, &ln2_out_2d, &ffn_out_2d, pool);
-        let ffn_out = ffn_out_2d.view(vec![b, s, h]);
 
-        let final_output = pool.get(residual_2.shape().to_vec());
-        self.add
-            .encode(encoder, &[residual_2, &ffn_out], &final_output);
-
-        Ok(final_output)
+        Ok((attn_block_output, ffn_out_2d.view(vec![b, s, h])))
     }
 }
 

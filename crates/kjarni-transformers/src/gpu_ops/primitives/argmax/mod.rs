@@ -98,14 +98,16 @@ impl GpuArgMax {
                 ],
             });
 
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("ArgMax Pass"),
-            timestamp_writes: None,
-        });
-
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.dispatch_workgroups(1, 1, 1);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "ArgMax Pass",
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+        );
     }
 }
 

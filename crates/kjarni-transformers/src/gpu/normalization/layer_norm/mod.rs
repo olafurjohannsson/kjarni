@@ -193,19 +193,22 @@ impl GpuLayerNorm {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("LayerNorm Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        if rows < WIDE_BELOW_ROWS {
-            compute_pass.set_pipeline(&self.wide_pipeline);
-            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, rows as u32);
-        } else {
-            compute_pass.set_pipeline(&self.pipeline);
-            let workgroups = (rows as u32).div_ceil(256);
-            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
-        }
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "LayerNorm Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_bind_group(0, &bind_group, &[]);
+                if rows < WIDE_BELOW_ROWS {
+                    compute_pass.set_pipeline(&self.wide_pipeline);
+                    crate::gpu_ops::utils::dispatch_1d(compute_pass, rows as u32);
+                } else {
+                    compute_pass.set_pipeline(&self.pipeline);
+                    let workgroups = (rows as u32).div_ceil(256);
+                    crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+                }
+            }
+        );
     }
 }
 

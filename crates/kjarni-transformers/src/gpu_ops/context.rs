@@ -55,6 +55,10 @@ pub struct WgpuContext {
     /// dot4I8Packed. Off when [`GpuConfig::exact_quantized`] is set or the WGSL
     /// implementation lacks packed integer dot products.
     pub int8_activations: bool,
+    /// Decoders over quantised weights keep their KV cache in f16. Off when
+    /// [`GpuConfig::exact_quantized`] is set or the device lacks
+    /// `SHADER_F16`.
+    pub f16_kv_cache: bool,
 }
 
 /// The largest workgroup any shader in the crate declares, `(32, 32, 1)`.
@@ -134,8 +138,10 @@ impl WgpuContext {
         // Requested, never required. A browser exposes timestamp queries only
         // behind a developer flag, and demanding them makes `request_device` fail
         // outright rather than merely losing the profiler.
-        const WANTED: Features =
-            Features::TIMESTAMP_QUERY.union(Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        // SHADER_F16 lets a KV cache hold f16.
+        const WANTED: Features = Features::TIMESTAMP_QUERY
+            .union(Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
+            .union(Features::SHADER_F16);
 
         let int8_activations = !config.exact_quantized
             && instance
@@ -154,6 +160,8 @@ impl WgpuContext {
         let adapter_limits = adapter.limits();
         let required_features = WANTED & adapter.features();
         let timestamps = required_features.contains(Features::TIMESTAMP_QUERY);
+        let f16_kv_cache =
+            !config.exact_quantized && required_features.contains(Features::SHADER_F16);
         if !timestamps {
             log::info!("adapter has no timestamp queries; GPU profiling is disabled");
         }
@@ -236,6 +244,7 @@ impl WgpuContext {
             uniform_arena,
             uniform_buffers: std::sync::Mutex::new(HashMap::new()),
             int8_activations,
+            f16_kv_cache,
         }))
     }
 

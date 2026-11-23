@@ -282,16 +282,20 @@ impl GpuDecoder for LlamaGpuDecoder {
         start_layer: usize,
         end_layer: usize,
     ) -> Result<GpuTensor> {
+        // Each layer leaves its output as a residual and an unsummed feed-forward
+        // output; the next layer adds them inside its input norm.
         let mut current_state: GpuTensor = hidden_states.clone();
+        let mut pending: Option<GpuTensor> = None;
 
         let checkpoint = pool.checkpoint();
         for i in start_layer..end_layer {
             let layer = &self.layers[i];
             let layer_cache = cache.as_deref_mut();
 
-            current_state = layer.forward(
+            let (residual, ffn_out) = layer.forward_deferred(
                 encoder,
                 &current_state,
+                pending.as_ref(),
                 attention_mask,
                 i,
                 position_offset,
@@ -299,17 +303,39 @@ impl GpuDecoder for LlamaGpuDecoder {
                 pool,
                 &self.gpu_rope, // Always passed for Llama
             )?;
-            // Only the hidden state carries into the next layer (the KV cache owns
-            // its own buffers); see GpuTensorPool::release_since.
-            pool.release_since(&checkpoint, &[&current_state]);
+            // Only these carry into the next layer (the KV cache owns its own
+            // buffers); see GpuTensorPool::release_since.
+            pool.release_since(&checkpoint, &[&residual, &ffn_out]);
+            current_state = residual;
+            pending = Some(ffn_out);
             kjarni_transformers::gpu::submit_between_layers(&self.context, encoder, i, end_layer);
         }
 
+        if let Some(ffn_out) = pending {
+            let output = pool.get(current_state.shape().to_vec());
+            kjarni_transformers::gpu::Kernel::encode(
+                &self.layers[end_layer - 1].add,
+                encoder,
+                &[&current_state, &ffn_out],
+                &output,
+            );
+            current_state = output;
+        }
         Ok(current_state)
     }
 
     fn num_layers(&self) -> usize {
         self.layers.len()
+    }
+
+    fn kv_cache_dtype(&self) -> kjarni_transformers::gpu::DType {
+        let quantized = self.layers.iter().any(|layer| {
+            let w = &layer.self_attn_weights;
+            [&w.q_weight, &w.k_weight, &w.v_weight, &w.output_weight]
+                .iter()
+                .any(|t| t.dtype().is_quantized())
+        });
+        kjarni_transformers::gpu::cache::kv_cache_dtype(&self.context, quantized)
     }
 
     fn hidden_size(&self) -> usize {

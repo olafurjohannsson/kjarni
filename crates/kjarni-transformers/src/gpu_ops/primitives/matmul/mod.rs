@@ -277,7 +277,9 @@ fn run_internal_matmul(
     });
     let label = format!("MatMul [{}x{} @ {}]", m, n, k);
 
-    context.profiler.profile(encoder, &label, |pass| {
+    crate::gpu_profile!(context, encoder, &label, |pass: &mut wgpu::ComputePass<
+        '_,
+    >| {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[offset]);
 

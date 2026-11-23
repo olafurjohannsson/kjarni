@@ -1,9 +1,9 @@
 use crate::WgpuContext;
 use crate::cache::Cache;
-use crate::gpu::GpuTensor;
 use crate::gpu::cache::GpuRecurrentState;
+use crate::gpu::{DType, GpuTensor};
 use crate::gpu_ops::blocks::cache::GpuUpdateCache;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ pub struct GpuKVCache {
 }
 
 impl GpuKVCache {
-    /// Creates a new, pre-allocated GPU KV cache.
+    /// Creates a new, pre-allocated GPU KV cache of f32.
     pub fn new(
         context: &Arc<WgpuContext>,
         num_layers: usize,
@@ -31,6 +31,37 @@ impl GpuKVCache {
         head_dim: usize,
         capacity: usize,
     ) -> Result<Self> {
+        Self::with_dtype(
+            context,
+            num_layers,
+            batch_size,
+            num_heads,
+            head_dim,
+            capacity,
+            DType::F32,
+        )
+    }
+
+    /// A cache of `dtype`, F32 or F16. An F16 cache is written and read only by
+    /// the kernels built with [`kv_shader`]: those of `GpuRoPEAttention` and the
+    /// decoders that share its attention.
+    pub fn with_dtype(
+        context: &Arc<WgpuContext>,
+        num_layers: usize,
+        batch_size: usize,
+        num_heads: usize,
+        head_dim: usize,
+        capacity: usize,
+        dtype: DType,
+    ) -> Result<Self> {
+        ensure!(
+            matches!(dtype, DType::F32 | DType::F16),
+            "a KV cache holds F32 or F16, not {dtype:?}"
+        );
+        ensure!(
+            dtype != DType::F16 || head_dim.is_multiple_of(2),
+            "an F16 KV cache needs an even head size, not {head_dim}"
+        );
         if capacity == 0 {
             return Err(anyhow!("Cache capacity cannot be zero."));
         }
@@ -48,13 +79,13 @@ impl GpuKVCache {
             k_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu::DType::F32,
+                dtype,
                 &format!("Layer {} K-Cache", i),
             ));
             v_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu::DType::F32,
+                dtype,
                 &format!("Layer {} V-Cache", i),
             ));
         }
@@ -100,6 +131,11 @@ impl GpuKVCache {
                 "Input tensors for cache update must be rank 3"
             ));
         }
+        ensure!(
+            self.dtype() == DType::F32,
+            "this update kernel writes F32 caches only, not {:?}",
+            self.dtype()
+        );
         let cache_k = &self.k_tensors[layer_idx];
         let cache_v = &self.v_tensors[layer_idx];
         // let position_offset = self.seq_length;
@@ -122,6 +158,12 @@ impl GpuKVCache {
     pub fn get_seq_length(&self) -> usize {
         self.seq_length
     }
+
+    /// The keys' and values' element type, F32 or F16.
+    pub fn dtype(&self) -> DType {
+        self.k_tensors.first().map_or(DType::F32, |t| t.dtype())
+    }
+
     pub fn max_seq_len(&self) -> usize {
         if self.k_tensors.is_empty() {
             0
@@ -203,5 +245,38 @@ impl Cache for GpuKVCache {
 
     fn increment_len(&mut self, new_tokens_len: usize) {
         self.increment_len(new_tokens_len);
+    }
+}
+
+/// A shader that reads or writes a KV store, for a store of `dtype`. The
+/// source declares `alias KV = f32;` and converts at every access; for F16 that
+/// becomes `enable f16; alias KV = f16;`.
+pub fn kv_shader<'a>(
+    label: &'a str,
+    source: &str,
+    dtype: DType,
+) -> wgpu::ShaderModuleDescriptor<'a> {
+    const ALIAS: &str = "alias KV = f32;";
+    assert_eq!(source.matches(ALIAS).count(), 1, "{label}: no `{ALIAS}`");
+    let source = match dtype {
+        DType::F32 => source.to_string(),
+        DType::F16 => source.replacen(ALIAS, "enable f16;\nalias KV = f16;", 1),
+        other => panic!("{label}: a KV store holds F32 or F16, not {other:?}"),
+    };
+    wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    }
+}
+
+/// The KV cache dtype for a decoder whose attention reads F32 or F16 stores:
+/// F16 over quantised weights when the context has f16 KV caches, as it does
+/// unless exact mode is on. Float weights keep an F32 cache, so their GPU output
+/// stays in step with the CPU's.
+pub fn kv_cache_dtype(context: &WgpuContext, quantized_weights: bool) -> DType {
+    if quantized_weights && context.f16_kv_cache {
+        DType::F16
+    } else {
+        DType::F32
     }
 }

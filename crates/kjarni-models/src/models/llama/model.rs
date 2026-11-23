@@ -230,13 +230,19 @@ impl LanguageModel for LlamaModel {
                     .context()
                     .ok_or_else(|| anyhow!("GPU cache requires WgpuContext"))?;
 
-                Ok(Box::new(GpuKVCache::new(
+                let kv_dtype = self
+                    .pipeline
+                    .gpu_decoder()
+                    .map_or(kjarni_transformers::gpu::DType::F32, |d| d.kv_cache_dtype());
+
+                Ok(Box::new(GpuKVCache::with_dtype(
                     &context,
                     meta.num_layers,
                     effective_batch_size,
                     meta.num_kv_heads,
                     head_dim,
                     effective_max_len,
+                    kv_dtype,
                 )?))
             }
             #[cfg(all(target_arch = "wasm32", not(feature = "wasm-gpu")))]

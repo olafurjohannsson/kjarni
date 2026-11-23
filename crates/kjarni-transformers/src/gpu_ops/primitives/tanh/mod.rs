@@ -68,16 +68,19 @@ impl GpuTanh {
                 }],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Tanh Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Tanh Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let num_elements = tensor.num_elements() as u32;
-        let workgroup_size = 256;
-        let workgroups = num_elements.div_ceil(workgroup_size);
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+                let num_elements = tensor.num_elements() as u32;
+                let workgroup_size = 256;
+                let workgroups = num_elements.div_ceil(workgroup_size);
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+            }
+        );
     }
 }

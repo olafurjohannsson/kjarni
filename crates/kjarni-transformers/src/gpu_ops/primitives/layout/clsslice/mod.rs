@@ -143,20 +143,22 @@ impl GpuClsSlice {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("CLS Slice Pass"),
-            timestamp_writes: None,
-        });
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "CLS Slice Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+                // One thread per (batch, hidden) element
+                let workgroup_size = 256;
+                let total_elements = (batch_size * hidden_size) as u32;
+                let num_workgroups = total_elements.div_ceil(workgroup_size);
 
-        // One thread per (batch, hidden) element
-        let workgroup_size = 256;
-        let total_elements = (batch_size * hidden_size) as u32;
-        let num_workgroups = total_elements.div_ceil(workgroup_size);
-
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, num_workgroups);
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, num_workgroups);
+            }
+        );
     }
 }
 

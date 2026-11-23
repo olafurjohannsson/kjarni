@@ -119,13 +119,18 @@ fn run_internal_add_bias(
     });
 
     let label = "AddBias".to_string();
-    context.profiler.profile(encoder, &label, |compute_pass| {
-        compute_pass.set_pipeline(pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+    crate::gpu_profile!(
+        context,
+        encoder,
+        &label,
+        |compute_pass: &mut wgpu::ComputePass<'_>| {
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroup_x = size.div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroup_x);
-    });
+            let workgroup_x = size.div_ceil(256);
+            crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroup_x);
+        }
+    );
 }
 
 /// The internal, private compilation function.

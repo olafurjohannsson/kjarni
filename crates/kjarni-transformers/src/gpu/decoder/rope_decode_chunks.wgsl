@@ -9,6 +9,10 @@
 //! workgroup memory, and the four parts are added up. The values are then
 //! summed four dimensions per thread.
 
+// The KV store's element type: f32, or f16 in the variant that
+// `crate::gpu::kv_shader` builds for a half-precision cache.
+alias KV = f32;
+
 struct Info {
     batch: u32,
     heads: u32,
@@ -39,8 +43,8 @@ const MASKED: f32 = -1e30;
 
 @group(0) @binding(0) var<uniform> info: Info;
 @group(0) @binding(1) var<storage, read> q: array<vec4<f32>>;       // [B, H, 1, D]
-@group(0) @binding(2) var<storage, read> k_store: array<vec4<f32>>; // [B, KV, capacity, D]
-@group(0) @binding(3) var<storage, read> v_store: array<vec4<f32>>; // [B, KV, capacity, D]
+@group(0) @binding(2) var<storage, read> k_store: array<vec4<KV>>; // [B, KV, capacity, D]
+@group(0) @binding(3) var<storage, read> v_store: array<vec4<KV>>; // [B, KV, capacity, D]
 @group(0) @binding(4) var<storage, read> mask: array<f32>;          // [mask_rows, mask_stride]
 @group(0) @binding(5) var<storage, read_write> stats: array<f32>;        // [B, H, chunks, 2]: max, sum
 @group(0) @binding(6) var<storage, read_write> partial: array<vec4<f32>>; // [B, H, chunks, D]
@@ -83,7 +87,7 @@ fn main(
     if (visible) {
         let k_base = (kv_row0 + key) * d4;
         for (var i = part; i < d4; i += PARTS) {
-            let k4 = k_store[k_base + i];
+            let k4 = vec4<f32>(k_store[k_base + i]);
             for (var g = 0u; g < MAX_GROUP; g++) {
                 if (g < group) {
                     dots[g] += dot(q_s[g * d4 + i], k4);
@@ -158,7 +162,7 @@ fn main(
         let i = idx % d4;
         var acc = vec4<f32>(0.0);
         for (var k = 0u; k < keys_here; k++) {
-            acc += scores[g * CHUNK + k] * v_store[(kv_row0 + first_key + k) * d4 + i];
+            acc += scores[g * CHUNK + k] * vec4<f32>(v_store[(kv_row0 + first_key + k) * d4 + i]);
         }
         partial[((q_row0 + g) * info.chunks + chunk) * d4 + i] = acc;
     }

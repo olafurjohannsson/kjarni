@@ -192,13 +192,18 @@ impl LanguageModel for MistralModel {
             #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-gpu"))]
             Device::Wgpu => {
                 let ctx = self.context().unwrap();
-                Ok(Box::new(GpuKVCache::new(
+                let kv_dtype = self
+                    .pipeline
+                    .gpu_decoder()
+                    .map_or(kjarni_transformers::gpu::DType::F32, |d| d.kv_cache_dtype());
+                Ok(Box::new(GpuKVCache::with_dtype(
                     &ctx,
                     meta.num_layers,
                     batch,
                     meta.num_kv_heads,
                     meta.head_dim,
                     max_len,
+                    kv_dtype,
                 )?))
             }
             #[cfg(all(target_arch = "wasm32", not(feature = "wasm-gpu")))]

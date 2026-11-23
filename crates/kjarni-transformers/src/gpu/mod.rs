@@ -14,7 +14,7 @@ pub use kernel::{ComputeKernel, Kernel};
 pub use tensor::{DType, GpuTensor};
 pub use tensor_pool::GpuTensorPool;
 
-pub use cache::{GpuBeamKVCache, GpuKVCache};
+pub use cache::{GpuBeamKVCache, GpuKVCache, kv_shader};
 
 pub use decoder::{backend::GpuDecoderBackend, rope_attention::GpuRoPEAttention};
 #[cfg(not(target_arch = "wasm32"))]
