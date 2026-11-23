@@ -19,7 +19,7 @@ exclude = ["crates/kjarni-examples"]
 
 
 [workspace.package]
-version = "0.8.0"
+version = "0.8.1"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 edition = "2024"
 # The oldest Rust that builds every crate here; wgpu needs 1.90.
@@ -37,11 +37,11 @@ categories = ["science", "text-processing", "command-line-utilities"]
 # than editing the dependency line in every member: cargo publish requires a
 # `version` alongside `path`, and a stale one silently resolves to an older
 # release from crates.io.
-kjarni = { path = "crates/kjarni", version = "0.8.0" }
-kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.8.0" }
-kjarni-models = { path = "crates/kjarni-models", version = "0.8.0" }
-kjarni-search = { path = "crates/kjarni-search", version = "0.8.0" }
-kjarni-rag = { path = "crates/kjarni-rag", version = "0.8.0" }
+kjarni = { path = "crates/kjarni", version = "0.8.1" }
+kjarni-transformers = { path = "crates/kjarni-transformers", version = "0.8.1" }
+kjarni-models = { path = "crates/kjarni-models", version = "0.8.1" }
+kjarni-search = { path = "crates/kjarni-search", version = "0.8.1" }
+kjarni-rag = { path = "crates/kjarni-rag", version = "0.8.1" }
 
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
