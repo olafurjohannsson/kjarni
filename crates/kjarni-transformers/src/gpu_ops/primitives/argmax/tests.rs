@@ -35,7 +35,7 @@ async fn read_output_index(context: &WgpuContext, buffer: &wgpu::Buffer) -> u32 
         .unwrap();
     rx.await.unwrap().unwrap();
 
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
     let result = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
     drop(data);
     staging.unmap();

@@ -19,7 +19,7 @@ use crate::gpu_ops::uniforms::GpuUniformBuffer;
 pub struct GpuMemoryInfo {
     pub max_buffer_size: u64,
     pub max_texture_dimension_2d: u32,
-    pub max_storage_buffer_binding_size: u32,
+    pub max_storage_buffer_binding_size: u64,
     pub available_memory: Option<u64>,
     pub reserved_for_kv_cache: u64,
 }
@@ -73,11 +73,10 @@ const REQUIRED_INVOCATIONS: u32 = 1024;
 const MAX_UNIFORM_BUFFERS: usize = 4096;
 
 fn new_instance() -> Instance {
-    Instance::new(&InstanceDescriptor {
-        backends: wgpu::Backends::PRIMARY,
-        flags: wgpu::InstanceFlags::empty(),
-        ..Default::default()
-    })
+    let mut descriptor = InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::PRIMARY;
+    descriptor.flags = wgpu::InstanceFlags::empty();
+    Instance::new(descriptor)
 }
 
 /// The process's one wgpu instance. NVIDIA's Vulkan driver gives a process about
@@ -153,6 +152,7 @@ impl WgpuContext {
                 power_preference: PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: None,
+                apply_limit_buckets: false,
             })
             .await?;
 

@@ -34,7 +34,7 @@ pub async fn read_buffer_2d(
     crate::gpu_ops::context::drain(&context.device);
 
     if let Some(Ok(())) = receiver.receive().await {
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice.get_mapped_range()?;
         let result_vec: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         staging_buffer.unmap();
@@ -77,7 +77,7 @@ pub async fn read_buffer_3d(
     crate::gpu_ops::context::drain(&context.device);
 
     if let Some(Ok(())) = receiver.receive().await {
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice.get_mapped_range()?;
         let result_vec: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         staging_buffer.unmap();

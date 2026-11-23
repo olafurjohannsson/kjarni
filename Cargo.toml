@@ -55,7 +55,7 @@ once_cell = "1.19"
 # enabled per target in the crates that use faer.
 faer = { version = "0.24", default-features = false, features = ["std"] }
 ndarray = { version = "0.16.1", features = ["rayon", "matrixmultiply-threading"] }
-wgpu = "27.0.1"
+wgpu = "30.0.2"
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive", "extern_crate_alloc"] }
 matrixmultiply = "0.3.10"

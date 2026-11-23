@@ -766,7 +766,7 @@ impl GpuTensor {
             .await
             .ok_or(anyhow!("GPU readback channel closed"))??;
 
-        let data = buffer_slice.get_mapped_range().to_vec();
+        let data = buffer_slice.get_mapped_range()?.to_vec();
         staging_buffer.unmap();
 
         Ok(data)

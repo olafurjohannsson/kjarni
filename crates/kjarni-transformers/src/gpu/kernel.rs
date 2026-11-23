@@ -57,8 +57,8 @@ impl ComputeKernel {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(label),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let module = device.create_shader_module(shader);
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
