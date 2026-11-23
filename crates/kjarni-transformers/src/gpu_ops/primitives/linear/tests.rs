@@ -1514,3 +1514,88 @@ async fn swiglu_q8_0_int8_matches_its_rounding() -> Result<()> {
     }
     Ok(())
 }
+
+/// Random blocks of one quantised format, as bytes with their scales set to
+/// realistic sizes, so every bit pattern of the packed weights is exercised.
+fn random_blocks<B: bytemuck::Pod>(
+    count: usize,
+    next: &mut impl FnMut() -> u64,
+    set: impl Fn(&mut B, &mut dyn FnMut() -> u64),
+) -> Vec<B> {
+    (0..count)
+        .map(|_| {
+            let mut block: B = bytemuck::Zeroable::zeroed();
+            for b in bytemuck::bytes_of_mut(&mut block).iter_mut() {
+                *b = next() as u8;
+            }
+            set(&mut block, next);
+            block
+        })
+        .collect()
+}
+
+/// `LinearLayer::to_gpu_tensor` uploads Q5_K and Q6_K weights in the layouts
+/// the kernels read: Q5_K as its blocks, Q6_K padded to whole words. A GEMV and
+/// a GEMM over each match the CPU's dequantisation in an exact context.
+#[tokio::test]
+#[ignore = "GPU required"]
+async fn linear_layer_uploads_q5k_and_q6k_as_the_kernels_read_them() -> Result<()> {
+    use crate::cpu::kernels::q_common::{BlockQ5_K, BlockQ6_K};
+    use crate::linear_layer::{F32MatmulStrategy, LinearData, LinearLayer};
+    use crate::tensor::QuantizedMatrix;
+    use half::f16;
+
+    let context = exact_context().await?;
+    let linear = GpuLinearLayer::new(&context);
+    let mut state = 0x0123_4567_89AB_CDEFu64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let (n, k) = (70usize, 512usize);
+    let q5k = random_blocks::<BlockQ5_K>(n * k / 256, &mut next, |b, r| {
+        b.d = f16::from_f32(0.002 + (r() % 1000) as f32 * 1e-5);
+        b.dmin = f16::from_f32((r() % 1000) as f32 * 1e-5);
+    });
+    let q6k = random_blocks::<BlockQ6_K>(n * k / 256, &mut next, |b, r| {
+        b.d = f16::from_f32(0.0005 + (r() % 1000) as f32 * 1e-6);
+    });
+    let q5k = QuantizedMatrix {
+        blocks: q5k,
+        shape: [n, k],
+    };
+    let q6k = QuantizedMatrix {
+        blocks: q6k,
+        shape: [n, k],
+    };
+    let cases = [
+        ("q5k", q5k.dequantize()?, LinearData::Q5_K(Arc::new(q5k))),
+        ("q6k", q6k.dequantize()?, LinearData::Q6_K(Arc::new(q6k))),
+    ];
+    for (name, dense, data) in cases {
+        let w = LinearLayer {
+            data,
+            bias: None,
+            f32_strategy: F32MatmulStrategy::Faer,
+        }
+        .to_gpu_tensor(&context, name)?;
+        for m in [1usize, 20] {
+            let input = Array2::from_shape_simple_fn((m, k), || {
+                ((next() >> 40) as f32 / 8_388_608.0) - 1.0
+            });
+            let gpu_in = GpuTensor::from_ndarray(&context, &input)?;
+            let out = GpuTensor::uninitialized(&context, vec![m, n], DType::F32, "o");
+            let mut enc = crate::gpu::GpuEncoder::new(&context.device, "upload");
+            linear.encode(&mut enc, &gpu_in, &w, &out);
+            context.queue.submit(Some(enc.finish()));
+            let got = read_gpu_tensor_to_vec::<f32>(&out).await?.0;
+            let want = input.dot(&dense.t());
+            let err = relative_error(&got, want.as_slice().unwrap());
+            println!("  {name} [{m}x{k} @ {n}]: {err:.2e}");
+            assert!(err < 1e-5, "{name} [{m}x{k} @ {n}]: {err:.2e}");
+        }
+    }
+    Ok(())
+}

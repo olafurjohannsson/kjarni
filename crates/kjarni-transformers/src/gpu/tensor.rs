@@ -204,10 +204,7 @@ impl GpuTensor {
             return GpuTensor::from_raw(ctx, &view, label);
         }
 
-        // Q6_K likewise reads packed, but its 210-byte block is not a multiple of
-        // four, so each block is padded to 212 on the way up. That costs 0.95% of the
-        // buffer and lets the shader index whole words instead of reassembling values
-        // that straddle a word boundary.
+        // Q6_K likewise reads packed, padded by `pad_q6_k`.
         //
         // Note this path is also how the embedding table arrives, and the lookup
         // shader cannot walk quantised blocks. `GpuEmbeddingWeights::new` forces a
@@ -217,16 +214,9 @@ impl GpuTensor {
             && target_dt.is_none_or(|t| t == DType::Q6_K)
             && let CpuTensor::Q6_K(matrix) = weights.get_typed_tensor(name)?
         {
-            const SRC: usize = 210;
-            const DST: usize = 212;
-            let src = bytemuck::cast_slice::<_, u8>(matrix.blocks.as_slice());
-            let mut padded = vec![0u8; matrix.blocks.len() * DST];
-            for (i, chunk) in src.chunks_exact(SRC).enumerate() {
-                padded[i * DST..i * DST + SRC].copy_from_slice(chunk);
-            }
             let view = TensorView {
                 name: name.to_string(),
-                bytes: Cow::Owned(padded),
+                bytes: Cow::Owned(pad_q6_k(&matrix.blocks)),
                 shape: matrix.shape.to_vec(),
                 dtype: DType::Q6_K,
             };
@@ -823,6 +813,20 @@ impl GpuTensor {
             DType::Q5_K => "q5_k",
         }
     }
+}
+
+/// Q6_K blocks as the GPU reads them: each 210-byte block padded to 212, a
+/// whole number of words, so the shaders index words instead of reassembling
+/// values that straddle a word boundary. Costs 0.95% of the buffer.
+pub(crate) fn pad_q6_k(blocks: &[crate::cpu::kernels::q_common::BlockQ6_K]) -> Vec<u8> {
+    const SRC: usize = 210;
+    const DST: usize = 212;
+    let src = bytemuck::cast_slice::<_, u8>(blocks);
+    let mut padded = vec![0u8; blocks.len() * DST];
+    for (i, chunk) in src.chunks_exact(SRC).enumerate() {
+        padded[i * DST..i * DST + SRC].copy_from_slice(chunk);
+    }
+    padded
 }
 
 /// Repack `BlockQ8_0` for the GPU: 34 packed bytes become 9 words.
