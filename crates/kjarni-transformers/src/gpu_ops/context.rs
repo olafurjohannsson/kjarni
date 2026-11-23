@@ -59,6 +59,11 @@ pub struct WgpuContext {
     /// [`GpuConfig::exact_quantized`] is set or the device lacks
     /// `SHADER_F16`.
     pub f16_kv_cache: bool,
+    /// Quantised prefill GEMMs run on tensor cores in f16 (`linear_tc.wgsl`).
+    /// Off when [`GpuConfig::exact_quantized`] is set, or the device lacks
+    /// 16x16x16 f16 cooperative matrices with f32 accumulators or does not run
+    /// 32-lane subgroups, which the kernels' warp layout assumes.
+    pub tensor_cores: bool,
 }
 
 /// The largest workgroup any shader in the crate declares, `(32, 32, 1)`.
@@ -71,6 +76,24 @@ const REQUIRED_INVOCATIONS: u32 = 1024;
 /// Distinct uniform values kept by [`WgpuContext::uniform_buffer`]. Far more than one
 /// token uses, so a decode step finds last step's buffers even with a few new ones.
 const MAX_UNIFORM_BUFFERS: usize = 4096;
+
+/// Whether `adapter` can run linear_tc.wgsl: f16 shaders, 16x16x16 cooperative
+/// matrices of f16 into f32, and 32-lane subgroups.
+fn tensor_cores_usable(adapter: &Adapter) -> bool {
+    let needed = Features::SHADER_F16 | Features::EXPERIMENTAL_COOPERATIVE_MATRIX;
+    if !adapter.features().contains(needed) {
+        return false;
+    }
+    let info = adapter.get_info();
+    if info.subgroup_min_size != 32 || info.subgroup_max_size != 32 {
+        return false;
+    }
+    adapter.cooperative_matrix_properties().iter().any(|p| {
+        (p.m_size, p.n_size, p.k_size) == (16, 16, 16)
+            && p.ab_type == wgpu::CooperativeScalarType::F16
+            && p.cr_type == wgpu::CooperativeScalarType::F32
+    })
+}
 
 fn new_instance() -> Instance {
     let mut descriptor = InstanceDescriptor::new_without_display_handle();
@@ -137,10 +160,12 @@ impl WgpuContext {
         // Requested, never required. A browser exposes timestamp queries only
         // behind a developer flag, and demanding them makes `request_device` fail
         // outright rather than merely losing the profiler.
-        // SHADER_F16 lets a KV cache hold f16.
+        // SHADER_F16 lets a KV cache hold f16; cooperative matrices run the
+        // tensor-core GEMMs.
         const WANTED: Features = Features::TIMESTAMP_QUERY
             .union(Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
-            .union(Features::SHADER_F16);
+            .union(Features::SHADER_F16)
+            .union(Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
 
         let int8_activations = !config.exact_quantized
             && instance
@@ -162,6 +187,11 @@ impl WgpuContext {
         let timestamps = required_features.contains(Features::TIMESTAMP_QUERY);
         let f16_kv_cache =
             !config.exact_quantized && required_features.contains(Features::SHADER_F16);
+        let tensor_cores = !config.exact_quantized && tensor_cores_usable(&adapter);
+        let mut required_features = required_features;
+        if !tensor_cores {
+            required_features.remove(Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
+        }
         if !timestamps {
             log::info!("adapter has no timestamp queries; GPU profiling is disabled");
         }
@@ -218,6 +248,15 @@ impl WgpuContext {
                 label: Some("transformer_gpu"),
                 required_features,
                 required_limits,
+                // SAFETY: the one experimental feature requested is
+                // EXPERIMENTAL_COOPERATIVE_MATRIX, used only by linear_tc.wgsl,
+                // and only on adapters that report the 16x16x16 configuration
+                // it uses (see tensor_cores_usable).
+                experimental_features: if tensor_cores {
+                    unsafe { wgpu::ExperimentalFeatures::enabled() }
+                } else {
+                    wgpu::ExperimentalFeatures::disabled()
+                },
                 ..Default::default()
             })
             .await?;
@@ -245,6 +284,7 @@ impl WgpuContext {
             uniform_buffers: std::sync::Mutex::new(HashMap::new()),
             int8_activations,
             f16_kv_cache,
+            tensor_cores,
         }))
     }
 

@@ -42,6 +42,17 @@ const SPLIT_MIN_INPUTS: u32 = 4096;
 /// The fewest outputs for a wide GEMM. Below this a workgroup per output is wasted.
 const GEMM_WIDE_MIN_OUTPUTS: u32 = 128;
 
+/// The tensor-core GEMMs of `linear_tc.wgsl`, one per quantised format.
+struct TensorCoreGemms {
+    q4k: wgpu::ComputePipeline,
+    q5k: wgpu::ComputePipeline,
+    q6k: wgpu::ComputePipeline,
+    q8: wgpu::ComputePipeline,
+}
+
+/// Output tile of the tensor-core GEMMs, square.
+const TC_TILE: u32 = 64;
+
 pub struct GpuLinearLayer {
     context: Arc<WgpuContext>,
     bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -73,6 +84,9 @@ pub struct GpuLinearLayer {
     gemm_wide_bf16: wgpu::ComputePipeline,
     gemm_few_rows_f32: wgpu::ComputePipeline,
     gemm_few_rows_bf16: wgpu::ComputePipeline,
+
+    /// Present when [`WgpuContext::tensor_cores`] is on.
+    tensor_cores: Option<TensorCoreGemms>,
 
     buffer: wgpu::Buffer,
     q8: q8::Q8Gemv,
@@ -205,6 +219,34 @@ impl GpuLinearLayer {
             })
         };
 
+        let tensor_cores = context.tensor_cores.then(|| {
+            let source = format!(
+                "enable f16;\nenable wgpu_cooperative_matrix;\n{}\n{}",
+                include_str!("linear.wgsl"),
+                include_str!("linear_tc.wgsl")
+            );
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("linear_tc.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            });
+            let make = |entry: &str| {
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(entry),
+                    layout: Some(&pipeline_layout),
+                    module: &module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            };
+            TensorCoreGemms {
+                q4k: make("tc_gemm_q4k"),
+                q5k: make("tc_gemm_q5k"),
+                q6k: make("tc_gemm_q6k"),
+                q8: make("tc_gemm_q8"),
+            }
+        });
+
         // Bound in the weight slots a dtype does not read. Large enough for any
         // kernel's view of a slot: wgpu 27 keeps the previous pipeline's minimum
         // binding sizes when the next pipeline in a pass has the same layout, so a
@@ -245,6 +287,7 @@ impl GpuLinearLayer {
             gemm_wide_bf16: make_pipeline("gemm_wide_bf16"),
             gemm_few_rows_f32: make_pipeline("gemm_few_rows_f32"),
             gemm_few_rows_bf16: make_pipeline("gemm_few_rows_bf16"),
+            tensor_cores,
             buffer,
             q8: q8::Q8Gemv::new(context),
         }
@@ -312,7 +355,21 @@ impl GpuLinearLayer {
             is_float && !is_gemv && m <= GEMM_WIDE_MAX_ROWS && n >= GEMM_WIDE_MIN_OUTPUTS;
         let few_rows = is_float && !is_gemv && !wide_gemm && m < GEMM_FEW_ROWS;
 
-        let pipeline = if use_q4k_kernel && split {
+        // Quantised prefill on tensor cores, when the context has them.
+        let tc_pipeline = match &self.tensor_cores {
+            Some(tc) if !few_quantized_rows => match weights.dtype() {
+                DType::Q4_K => Some(&tc.q4k),
+                DType::Q5_K => Some(&tc.q5k),
+                DType::Q6_K => Some(&tc.q6k),
+                DType::Q8_0 => Some(&tc.q8),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        let pipeline = if let Some(tc) = tc_pipeline {
+            tc
+        } else if use_q4k_kernel && split {
             &self.gemv_q4k_split
         } else if use_q4k_kernel {
             &self.gemv_q4k
@@ -439,7 +496,9 @@ impl GpuLinearLayer {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                if use_q8_narrow {
+                if tc_pipeline.is_some() {
+                    pass.dispatch_workgroups(n.div_ceil(TC_TILE), m.div_ceil(TC_TILE), 1);
+                } else if use_q8_narrow {
                     pass.dispatch_workgroups(n, 1, m);
                 } else if use_q4k_kernel || use_q5k_kernel || use_q6k_kernel || use_q8_kernel {
                     // Each workgroup produces 8 output rows for Q4_K and Q5_K, and 4 otherwise.
