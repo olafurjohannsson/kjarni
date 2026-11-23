@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795423507762,
+  "lastUpdate": 1795424973215,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2676,6 +2676,66 @@ window.BENCHMARK_DATA = {
             "value": 28.93,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.003"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c0af557e9edf3db6aa3752107fef2bb884a4299b",
+          "message": "Perf/gpu fuse f16kv (#135)\n\n* GPU: run every kernel on the shared compute pass\n\nThe remaining kernels (add, RoPE, RMSNorm's neighbours in the FFN block,\nlayout ops, softmax, argmax and others) each opened a compute pass of\ntheir own, about 10 µs of GPU time apiece, several times per layer per\ntoken. They now record through gpu_profile!, which reuses the encoder's\nopen pass, or a profiled pass when the profiling feature is on.\n\n* GPU: fuse the residual add into RMSNorm; f16 KV cache over quantised weights\n\nEach decoder layer returns its residual and FFN output unsummed, and the\nnext layer's input norm adds them in the same kernel (RMSNorm's add_main\nentry), as does the post-attention norm. One add runs after the last\nlayer. The sum is computed as the add kernel computes it, so the output\nis bitwise unchanged.\n\nLlama-family and Qwen 3.5 decoders whose attention weights are quantised\nstore keys and values as f16 when the device has SHADER_F16, halving the\ncache and its reads. Float weights and KJARNI_GPU_EXACT=1 keep f32, so\nGPU output stays in step with the CPU there.",
+          "timestamp": "2026-11-23T08:21:13Z",
+          "tree_id": "80cdd84bba209007a4117d7a878b256dc671b44b",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/c0af557e9edf3db6aa3752107fef2bb884a4299b"
+        },
+        "date": 1795424972312,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 488.78,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.000"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 35.41,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.992"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 579.98,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.945"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 38.9,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.941"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 536.54,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 106 Stepping 6, GenuineIntel; vs previous commit: 0.993"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 24.79,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 106 Stepping 6, GenuineIntel; vs previous commit: 1.002"
           }
         ]
       }
