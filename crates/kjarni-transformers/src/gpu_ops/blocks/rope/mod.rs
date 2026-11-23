@@ -198,9 +198,11 @@ impl GpuRoPE {
                     },
                 ],
             });
-        self.context
-            .profiler
-            .profile(encoder, "RoPE Rotation", |pass| {
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "RoPE Rotation",
+            |pass: &mut wgpu::ComputePass<'_>| {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
@@ -208,7 +210,8 @@ impl GpuRoPE {
                 let workgroups_y = seq_len as u32;
                 let workgroups_z = (batch_size * num_heads) as u32;
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-            });
+            }
+        );
     }
 }
 

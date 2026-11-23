@@ -265,13 +265,16 @@ impl GpuFeedForwardStd {
 
         let workgroups = (rows * intermediate_size).div_ceil(512);
         {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fc1 pass"),
-                timestamp_writes: None,
-            });
-            compute_pass.set_pipeline(&self.pipelines.fc1.0);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+            crate::gpu_profile!(
+                self.context,
+                encoder,
+                "fc1 pass",
+                |compute_pass: &mut wgpu::ComputePass<'_>| {
+                    compute_pass.set_pipeline(&self.pipelines.fc1.0);
+                    compute_pass.set_bind_group(0, &bind_group, &[]);
+                    crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+                }
+            );
         }
     }
 
@@ -336,13 +339,16 @@ impl GpuFeedForwardStd {
 
         let workgroups = (rows * hidden_size).div_ceil(512);
         {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fc2 pass"),
-                timestamp_writes: None,
-            });
-            compute_pass.set_pipeline(&self.pipelines.fc2.0);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-            crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+            crate::gpu_profile!(
+                self.context,
+                encoder,
+                "fc2 pass",
+                |compute_pass: &mut wgpu::ComputePass<'_>| {
+                    compute_pass.set_pipeline(&self.pipelines.fc2.0);
+                    compute_pass.set_bind_group(0, &bind_group, &[]);
+                    crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+                }
+            );
         }
     }
 }

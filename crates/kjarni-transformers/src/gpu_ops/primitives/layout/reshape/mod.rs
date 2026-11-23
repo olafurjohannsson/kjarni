@@ -91,17 +91,20 @@ impl GpuReshape {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Reshape Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Reshape Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroups_x = (s as u32).div_ceil(16);
-        let workgroups_y = (h as u32).div_ceil(16);
-        let workgroups_z = b as u32;
-        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                let workgroups_x = (s as u32).div_ceil(16);
+                let workgroups_y = (h as u32).div_ceil(16);
+                let workgroups_z = b as u32;
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            }
+        );
     }
 }
 

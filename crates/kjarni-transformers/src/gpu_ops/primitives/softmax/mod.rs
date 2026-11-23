@@ -113,13 +113,18 @@ fn run_internal_softmax(
     //     timestamp_writes: None,
     // });
     let label = "Softmax".to_string();
-    context.profiler.profile(encoder, &label, |compute_pass| {
-        compute_pass.set_pipeline(pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+    crate::gpu_profile!(
+        context,
+        encoder,
+        &label,
+        |compute_pass: &mut wgpu::ComputePass<'_>| {
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        // let workgroup_x = (rows + 255) / 256;
-        crate::gpu_ops::utils::dispatch_1d(compute_pass, rows);
-    });
+            // let workgroup_x = (rows + 255) / 256;
+            crate::gpu_ops::utils::dispatch_1d(compute_pass, rows);
+        }
+    );
 }
 
 fn compile_softmax_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {

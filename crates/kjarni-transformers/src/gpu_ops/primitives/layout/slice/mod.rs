@@ -166,17 +166,20 @@ impl GpuSlice {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Slice Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Slice Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroup_x = (dst_d as u32).div_ceil(16);
-        let workgroup_y = (dst_s as u32).div_ceil(4);
-        let workgroup_z = (dst_b * dst_h) as u32;
-        compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
+                let workgroup_x = (dst_d as u32).div_ceil(16);
+                let workgroup_y = (dst_s as u32).div_ceil(4);
+                let workgroup_z = (dst_b * dst_h) as u32;
+                compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
+            }
+        );
     }
 }
 

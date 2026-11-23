@@ -100,14 +100,17 @@ impl GpuAdd {
                 ],
             });
 
-        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Add Broadcast Row Pass"),
-            timestamp_writes: None,
-        });
-        cpass.set_pipeline(&self.broadcast_row_pipeline);
-        cpass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (a.num_elements() as u32).div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut cpass, workgroups);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Add Broadcast Row Pass",
+            |cpass: &mut wgpu::ComputePass<'_>| {
+                cpass.set_pipeline(&self.broadcast_row_pipeline);
+                cpass.set_bind_group(0, &bind_group, &[]);
+                let workgroups = (a.num_elements() as u32).div_ceil(256);
+                crate::gpu_ops::utils::dispatch_1d(cpass, workgroups);
+            }
+        );
     }
     /// Encodes standard element-wise addition: `output = a + b`.
     ///
@@ -241,14 +244,17 @@ impl GpuAdd {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Add Broadcast Offset Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.broadcast_offset_pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = uniforms.output_size.div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Add Broadcast Offset Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.broadcast_offset_pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
+                let workgroups = uniforms.output_size.div_ceil(256);
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+            }
+        );
     }
 }
 

@@ -272,24 +272,29 @@ fn run_internal_bmm(
     //     timestamp_writes: None,
     // });
     let label = "BMM".to_string();
-    context.profiler.profile(encoder, &label, |compute_pass| {
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+    crate::gpu_profile!(
+        context,
+        encoder,
+        &label,
+        |compute_pass: &mut wgpu::ComputePass<'_>| {
+            compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        if m < FEW_ROWS && k < n {
-            compute_pass.set_pipeline(few_rows_pipeline);
-            let threads = batch * m * n;
-            crate::gpu_ops::utils::dispatch_1d(compute_pass, threads.div_ceil(32));
-            return;
+            if m < FEW_ROWS && k < n {
+                compute_pass.set_pipeline(few_rows_pipeline);
+                let threads = batch * m * n;
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, threads.div_ceil(32));
+                return;
+            }
+
+            compute_pass.set_pipeline(pipeline);
+            const TILE_DIM: u32 = 32;
+            let workgroup_x = n.div_ceil(TILE_DIM);
+            let workgroup_y = m.div_ceil(TILE_DIM);
+            let workgroup_z = batch;
+
+            compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
         }
-
-        compute_pass.set_pipeline(pipeline);
-        const TILE_DIM: u32 = 32;
-        let workgroup_x = n.div_ceil(TILE_DIM);
-        let workgroup_y = m.div_ceil(TILE_DIM);
-        let workgroup_z = batch;
-
-        compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
-    });
+    );
 }
 
 fn compile_bmm_pipeline(

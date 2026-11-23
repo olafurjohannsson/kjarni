@@ -118,14 +118,17 @@ impl GpuLookup {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Lookup Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = uniforms.output_size.div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, workgroups);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Lookup Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
+                let workgroups = uniforms.output_size.div_ceil(256);
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, workgroups);
+            }
+        );
     }
 }
 

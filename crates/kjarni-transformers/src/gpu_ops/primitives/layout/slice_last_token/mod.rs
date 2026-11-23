@@ -139,20 +139,22 @@ impl GpuLastTokenSlice {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Last Token Slice Pass"),
-            timestamp_writes: None,
-        });
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Last Token Slice Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+                // Dispatch: cover all batches and vocab elements
+                // Workgroup: 256 threads per group (common size)
+                let workgroup_size = 256;
+                let total_elements = (batch_size * vocab_size) as u32;
+                let num_workgroups = total_elements.div_ceil(workgroup_size);
 
-        // Dispatch: cover all batches and vocab elements
-        // Workgroup: 256 threads per group (common size)
-        let workgroup_size = 256;
-        let total_elements = (batch_size * vocab_size) as u32;
-        let num_workgroups = total_elements.div_ceil(workgroup_size);
-
-        crate::gpu_ops::utils::dispatch_1d(&mut compute_pass, num_workgroups);
+                crate::gpu_ops::utils::dispatch_1d(compute_pass, num_workgroups);
+            }
+        );
     }
 }

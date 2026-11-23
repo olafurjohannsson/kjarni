@@ -135,14 +135,17 @@ impl GpuBroadcast {
                 ],
             });
 
-        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Broadcast Pass"),
-            timestamp_writes: None,
-        });
-        cpass.set_pipeline(&self.pipeline);
-        cpass.set_bind_group(0, &bind_group, &[]);
-        let dispatch_count = (dst.num_elements() as u32).div_ceil(256);
-        crate::gpu_ops::utils::dispatch_1d(&mut cpass, dispatch_count);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Broadcast Pass",
+            |cpass: &mut wgpu::ComputePass<'_>| {
+                cpass.set_pipeline(&self.pipeline);
+                cpass.set_bind_group(0, &bind_group, &[]);
+                let dispatch_count = (dst.num_elements() as u32).div_ceil(256);
+                crate::gpu_ops::utils::dispatch_1d(cpass, dispatch_count);
+            }
+        );
     }
 }
 

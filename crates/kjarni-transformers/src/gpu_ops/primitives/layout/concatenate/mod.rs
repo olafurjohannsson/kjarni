@@ -201,19 +201,22 @@ impl GpuConcatenate {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Concat Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        crate::gpu_profile!(
+            self.context,
+            encoder,
+            "Concat Pass",
+            |compute_pass: &mut wgpu::ComputePass<'_>| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroup_size = (8, 8, 8);
-        let workgroups_x = (out_shape[3] as u32).div_ceil(workgroup_size.0);
-        let workgroups_y = (out_shape[2] as u32).div_ceil(workgroup_size.1);
-        let workgroups_z = (out_shape[0] * out_shape[1]).div_ceil(workgroup_size.2);
+                let workgroup_size = (8, 8, 8);
+                let workgroups_x = (out_shape[3] as u32).div_ceil(workgroup_size.0);
+                let workgroups_y = (out_shape[2] as u32).div_ceil(workgroup_size.1);
+                let workgroups_z = (out_shape[0] * out_shape[1]).div_ceil(workgroup_size.2);
 
-        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z as u32);
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z as u32);
+            }
+        );
     }
 }
 
