@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795364292815,
+  "lastUpdate": 1795423507762,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2616,6 +2616,66 @@ window.BENCHMARK_DATA = {
             "value": 27.61,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 1.006"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "821bbe6f8a5d6616a519e0cf82a3d602e2147cda",
+          "message": "Transcribe the speech after a Whisper window that ends early (#134)\n\nWhisper can end a 30-second window before its audio does. On a LibriVox\nreading of the Gettysburg Address, whisper-small closed the first window\nafter the LibriVox notice and the transcript went straight from it to \"a new\nnation, conceived in liberty\", missing the title, the date and \"Four score\nand seven years ago our fathers brought forth on this continent\". Later in\nthe same recording \"in vain; that this nation, under God, shall have a new\nbirth of freedom; and that\" was missing the same way.\n\nopenai-whisper moves on from the last timestamp a window reached, so it\ndecodes that audio again. Kjarni decodes fixed windows in a batch, so a window\nthat stopped early lost its remainder. Now, when a window's transcript ends\nmore than a second before its audio and the rest is not silence, the rest is\ndecoded as a window of its own, up to four times. This applies to transcribe\nand to streaming with timestamps. Without timestamps a window is one segment\nthat spans it, so it never ends early.\n\nTranscripts of the JFK sample, the same with 8 s of trailing or 4 s of leading\nsilence, and the 55 s benchmark clip are unchanged.\n\nAdds a 40-second public-domain fixture and tests that fail without the change.",
+          "timestamp": "2026-11-23T08:20:17Z",
+          "tree_id": "dd72b44078789c857e38121b7fff1d7c3fea9375",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/821bbe6f8a5d6616a519e0cf82a3d602e2147cda"
+        },
+        "date": 1795423506732,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 437.7,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 0.999"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 44.7,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.006"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 567.34,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.011"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 38.65,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.028"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 689.16,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.007"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 28.93,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.003"
           }
         ]
       }
