@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Longer prompts fit on the GPU.** Memory freed after a long prompt stayed
+  reserved around the cache's smaller buffers, so a long prompt held gigabytes
+  it no longer used: Qwen3.5-9B ran out of a 12 GB card at 8,192 tokens. It
+  now runs that prompt with a peak of 11 GB, and smaller models use less GPU
+  memory as well, at the same speed.
+
 ## 0.8.1
 
 - **Faster prompts on the GPU for quantised models.** Q4_K, Q5_K, Q6_K and

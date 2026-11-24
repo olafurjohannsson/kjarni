@@ -296,6 +296,14 @@ impl WgpuContext {
                 } else {
                     wgpu::ExperimentalFeatures::disabled()
                 },
+                // Buffers share memory blocks, and a block is freed only once
+                // every buffer in it is. A prompt's attention temporaries grow
+                // with its length and the cache snapshots made meanwhile outlive
+                // them, so with wgpu's default 256 MB blocks each snapshot held
+                // a block of freed temporaries: gigabytes on a long prompt.
+                // These hints cap shared blocks at 64 MB and give larger
+                // buffers memory of their own.
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })
             .await?;
@@ -580,5 +588,53 @@ mod instance_tests {
                 "context {i} found a different adapter"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::WgpuContext;
+
+    fn storage(context: &WgpuContext, bytes: u64) -> wgpu::Buffer {
+        context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("memory test"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// A prompt's attention temporaries grow with its length, and the buffers
+    /// that outlive it (cache snapshots) are created while they are alive.
+    /// The memory the device holds once the temporaries are gone has to stay
+    /// close to what is still in use.
+    #[tokio::test]
+    #[ignore = "GPU required"]
+    async fn short_lived_buffers_free_their_memory_around_long_lived_ones() {
+        const MB: u64 = 1 << 20;
+        let context = WgpuContext::new().await.unwrap();
+        let mut kept = Vec::new();
+        for i in 0..16 {
+            let temporary = storage(&context, 40 * MB + i * 12 * MB);
+            kept.push(storage(&context, MB));
+            drop(temporary);
+        }
+        context.queue.submit(std::iter::empty());
+        context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+
+        let Some(report) = context.device.generate_allocator_report() else {
+            return; // the backend keeps no allocator report
+        };
+        let idle = report.total_reserved_bytes - report.total_allocated_bytes;
+        assert!(
+            idle <= 128 * MB,
+            "{} MB reserved and unused around {} MB of live buffers",
+            idle / MB,
+            report.total_allocated_bytes / MB
+        );
+        drop(kept);
     }
 }
