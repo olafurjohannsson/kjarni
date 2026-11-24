@@ -102,6 +102,14 @@ def build_photos(out: Path) -> int:
     return 4
 
 
+def projected(features):
+    """The projected embeddings: transformers 4 returns them as a tensor, and
+    transformers 5 as the pooler output of a model output."""
+    if isinstance(features, torch.Tensor):
+        return features
+    return features.pooler_output
+
+
 def main() -> None:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/clip-fixtures")
     out.mkdir(parents=True, exist_ok=True)
@@ -115,7 +123,7 @@ def main() -> None:
     np.asarray(pixel_values[0].numpy(), dtype=np.float32).tofile(out / "pixel_values.f32")
 
     with torch.no_grad():
-        feats = model.get_image_features(pixel_values=pixel_values)[0]
+        feats = projected(model.get_image_features(pixel_values=pixel_values))[0]
         feats = feats / feats.norm()
     np.asarray(feats.numpy(), dtype=np.float32).tofile(out / "image_embeds.f32")
 
@@ -133,7 +141,7 @@ def main() -> None:
         encoded = tokenizer(caption, return_tensors="pt")
         ids = encoded["input_ids"][0].tolist()
         with torch.no_grad():
-            text_feats = model.get_text_features(**encoded)[0]
+            text_feats = projected(model.get_text_features(**encoded))[0]
             text_feats = text_feats / text_feats.norm()
         np.asarray(text_feats.numpy(), dtype=np.float32).tofile(out / f"text_{i}.f32")
         # CLIP pools the end-of-text position, which under a causal mask is the
@@ -175,7 +183,7 @@ def main() -> None:
         images=Image.open(out / "fixture.jpg").convert("RGB"), return_tensors="pt"
     )["pixel_values"]
     with torch.no_grad():
-        jf = model.get_image_features(pixel_values=jpeg_px)[0]
+        jf = projected(model.get_image_features(pixel_values=jpeg_px))[0]
         jf = jf / jf.norm()
     png_vs_jpeg = float((feats * jf).sum())
     json.dump(
