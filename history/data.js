@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795441008339,
+  "lastUpdate": 1795510483235,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2856,6 +2856,66 @@ window.BENCHMARK_DATA = {
             "value": 39.19,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d979c28631eaa9999d8b54184093f82ddeb43815",
+          "message": "GPU: allocate in 64 MB blocks so long prompts free their memory (#137)\n\ngpu-allocator frees a memory block only when every buffer in it is gone.\nA prompt's attention temporaries grow with its length, and the cache\nsnapshots created meanwhile outlive them, so with wgpu's default 256 MB\nblocks each snapshot pinned a block of freed temporaries. After an\n8192-token prompt on Qwen3.5-4B, 7.4 GB was reserved for 4.7 GB in use,\nand Qwen3.5-9B ran out of a 12 GB card at 8192 tokens.\n\nMemoryHints::MemoryUsage caps shared blocks at 64 MB and gives larger\nbuffers memory of their own: 5.2 GB reserved for the same 4.7 GB, and 9B\nruns 8192 tokens at an 11.0 GB peak. Prompt and generation speed on\nQwen2.5-0.5B, Llama 3.2 1B and Qwen3.5-4B are unchanged.",
+          "timestamp": "2026-11-24T08:37:29Z",
+          "tree_id": "7ccba9f2bdb435f922d1d9dea68e9780c8544e63",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/d979c28631eaa9999d8b54184093f82ddeb43815"
+        },
+        "date": 1795510482268,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 495.32,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.999"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 36.08,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.998"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 396.04,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.098"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 26.02,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.133"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 976.04,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.003"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 53.27,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.035"
           }
         ]
       }
