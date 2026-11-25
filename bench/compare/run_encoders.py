@@ -1,5 +1,6 @@
-"""Runs every engine on every encoder task, each in its own process, twice, and
-keeps the faster run. Writes results/encoders.json, including how far each
+"""Runs every engine on every encoder task, each in its own process, twice at its
+default thread count and twice at 8 (one per P-core on a hybrid CPU), and keeps
+the faster run. Writes results/encoders.json, including how far each
 engine's output is from PyTorch's.
 """
 import json, os, subprocess, sys
@@ -11,6 +12,7 @@ OUT = os.path.join(HERE, "results"); os.makedirs(OUT, exist_ok=True)
 TASKS = ["embed-minilm", "embed-mpnet", "rerank", "classify"]
 ENGINES = ["kjarni", "torch", "onnx"]
 REPEATS = 2
+THREADS = {"kjarni": "RAYON_NUM_THREADS", "torch": "TORCH_THREADS", "onnx": "ORT_THREADS"}
 
 
 def load_avg():
@@ -21,11 +23,12 @@ rows = []
 for task in TASKS:
     for engine in ENGINES:
         best = None
-        for r in range(REPEATS):
+        for n in [None, "8"] * REPEATS:
             npy = os.path.join(OUT, f"{task}.{engine}.npy")
             wait_idle()
+            env = {**os.environ, **({THREADS[engine]: n} if n else {})}
             p = subprocess.run([sys.executable, os.path.join(HERE, "encoder_worker.py"), engine, task, npy],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env=env)
             if p.returncode != 0:
                 print(f"{task} {engine} FAILED\n{p.stderr[-2000:]}", file=sys.stderr); break
             d = json.loads(p.stdout.strip().splitlines()[-1])

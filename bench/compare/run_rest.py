@@ -20,6 +20,18 @@ def run(args, env=None):
     return json.loads(p.stdout.strip().splitlines()[-1])
 
 
+# Each engine runs at its default thread count and at 8 (one per P-core on a
+# hybrid CPU); the faster run is kept.
+THREADS = {"kjarni": "RAYON_NUM_THREADS", "torch": "TORCH_THREADS", "openai-whisper": "TORCH_THREADS",
+           "open_clip": "TORCH_THREADS", "faster-whisper": "CT2_THREADS", "faster-whisper-int8": "CT2_THREADS"}
+
+
+def best_of_threads(args, engine, key, n=1):
+    runs = [{**r, "threads": t or "default"} for t in [None, "8"] for _ in range(n)
+            if (r := run(args, {THREADS[engine]: t} if t else None))]
+    return min(runs, key=key) if runs else None
+
+
 def save(name, rows):
     json.dump(rows, open(os.path.join(OUT, f"{name}.json"), "w"), indent=2)
 
@@ -32,7 +44,7 @@ if "whisper" not in ONLY:
     rows = json.load(open(os.path.join(OUT, "whisper.json")))
 for audio in ([] if "whisper" not in ONLY else ["/home/olafurj/dev/edgebert/crates/kjarni/tests/fixtures/speech.wav", f"{BENCH}/speech_55s.wav"]):
     for engine in ["kjarni", "faster-whisper", "faster-whisper-int8", "openai-whisper"]:
-        r = run([PY, f"{HERE}/whisper_worker.py", engine, audio])
+        r = best_of_threads([PY, f"{HERE}/whisper_worker.py", engine, audio], engine, lambda r: r["secs"])
         if r:
             rows.append(r)
             print(f"whisper {r['audio']:<16}{engine:<22}{r['secs']:6.2f}s  {r['realtime_x']:5.1f}x realtime  load {r['load_ms']:6.0f}ms  rss {r['peak_rss_mb']:5.0f}MB", flush=True)
@@ -43,9 +55,8 @@ if "seq2seq" in ONLY:
     rows = []
     for task in ["summarize", "translate"]:
         for engine in ["kjarni", "torch"]:
-            runs = [r for _ in range(2) if (r := run([PY, f"{HERE}/seq2seq_worker.py", engine, task]))]
-            if runs:
-                r = min(runs, key=lambda r: r["ms"])
+            r = best_of_threads([PY, f"{HERE}/seq2seq_worker.py", engine, task], engine, lambda r: r["ms"], n=2)
+            if r:
                 rows.append(r)
                 print(f"{task:<10}{engine:<8}{r['ms']:8.0f}ms  load {r['load_ms']:6.0f}ms  rss {r['peak_rss_mb']:5.0f}MB  | {r['output'][:70]}", flush=True)
     save("seq2seq", rows)
@@ -54,7 +65,7 @@ if "seq2seq" in ONLY:
 if "clip" in ONLY:
     rows = []
     for engine in ["kjarni", "open_clip"]:
-        r = run([PY, f"{HERE}/clip_worker.py", engine, f"{BENCH}/photos64"])
+        r = best_of_threads([PY, f"{HERE}/clip_worker.py", engine, f"{BENCH}/photos64"], engine, lambda r: -r["images_per_s"])
         if r:
             rows.append(r)
             print(f"clip {engine:<10}{r['images_per_s']:7.1f} img/s  query {r['query_ms']:5.1f}ms  top={r['top_hit']}  load {r['load_ms']:6.0f}ms  rss {r['peak_rss_mb']:5.0f}MB", flush=True)

@@ -8,14 +8,14 @@
 <text x="118.4" y="76" font-size="12.5" fill="#52514e">llama.cpp</text>
 <text x="176" y="113.5" text-anchor="end" font-size="13" fill="#0b0b0b">Qwen2.5 0.5B Q4_K_M</text>
 <line x1="190" y1="89" x2="190" y2="129" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,92 h448.656626971398 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-448.656626971398 z" fill="#2a78d6"><title>Kjarni: 651 tok/s</title></path>
-<text x="649.656626971398" y="104.5" font-size="12" fill="#52514e" font-weight="600">651 tok/s</text>
-<path d="M191,110 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp: 690 tok/s</title></path>
-<text x="677.0" y="122.5" font-size="12" fill="#52514e">690 tok/s</text>
+<path d="M191,92 h440.40499430180273 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-440.40499430180273 z" fill="#2a78d6"><title>Kjarni: 655 tok/s</title></path>
+<text x="641.4049943018027" y="104.5" font-size="12" fill="#52514e" font-weight="600">655 tok/s</text>
+<path d="M191,110 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp: 707 tok/s</title></path>
+<text x="677.0" y="122.5" font-size="12" fill="#52514e">707 tok/s</text>
 <text x="176" y="165.5" text-anchor="end" font-size="13" fill="#0b0b0b">Llama 3.2 1B Q4_K_M</text>
 <line x1="190" y1="141" x2="190" y2="181" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,144 h210.0516001838046 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-210.0516001838046 z" fill="#2a78d6"><title>Kjarni: 308 tok/s</title></path>
-<text x="411.05160018380457" y="156.5" font-size="12" fill="#52514e" font-weight="600">308 tok/s</text>
-<path d="M191,162 h353.4279541429734 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-353.4279541429734 z" fill="#1baf7a"><title>llama.cpp: 514 tok/s</title></path>
-<text x="554.4279541429735" y="174.5" font-size="12" fill="#52514e">514 tok/s</text>
+<path d="M191,144 h204.93282203601916 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-204.93282203601916 z" fill="#2a78d6"><title>Kjarni: 308 tok/s</title></path>
+<text x="405.93282203601916" y="156.5" font-size="12" fill="#52514e" font-weight="600">308 tok/s</text>
+<path d="M191,162 h321.8639158984913 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-321.8639158984913 z" fill="#1baf7a"><title>llama.cpp: 480 tok/s</title></path>
+<text x="522.8639158984913" y="174.5" font-size="12" fill="#52514e">480 tok/s</text>
 </svg>

@@ -4,8 +4,10 @@ Prints JSON.
 
     python torch_decoder_worker.py MODEL_NAME MODEL_DIR
 
-512 prompt tokens and 128 generated, like llama-bench's pp512 / tg128. float32 on
-the CPU; with BENCH_DEVICE=gpu, bfloat16 on CUDA, the usual way to run these there.
+512 prompt tokens and 128 generated, like llama-bench's pp512 / tg128. bfloat16,
+the dtype the safetensors are stored in and Kjarni runs them in, on CUDA with
+BENCH_DEVICE=gpu and on the CPU; TORCH_DTYPE=float32 upcasts them, which can be
+faster for PyTorch on a CPU without native bfloat16 arithmetic.
 """
 import json, os, sys, time, resource
 import torch
@@ -16,6 +18,9 @@ from transformers.generation.streamers import BaseStreamer
 MODEL, DIR = sys.argv[1], sys.argv[2]
 GPU = os.environ.get("BENCH_DEVICE") == "gpu"
 DEVICE = "cuda" if GPU else "cpu"
+DTYPE = os.environ.get("TORCH_DTYPE", "bfloat16")
+if "TORCH_THREADS" in os.environ:
+    torch.set_num_threads(int(os.environ["TORCH_THREADS"]))
 PROMPT_TOKENS, GEN_TOKENS = 512, 128
 
 tok = Tokenizer.from_file(os.path.join(DIR, "tokenizer.json"))
@@ -24,7 +29,7 @@ filler = ("The committee reviewed the quarterly figures, the supplier contracts 
 ids = torch.tensor([tok.encode(filler).ids[:PROMPT_TOKENS]], device=DEVICE)
 
 t0 = time.perf_counter()
-model = AutoModelForCausalLM.from_pretrained(DIR, dtype=torch.bfloat16 if GPU else torch.float32).eval().to(DEVICE)
+model = AutoModelForCausalLM.from_pretrained(DIR, dtype=getattr(torch, DTYPE)).eval().to(DEVICE)
 load_ms = (time.perf_counter() - t0) * 1000
 
 
@@ -67,5 +72,5 @@ once()
 _, stamps = once()
 best["gen_short_tok_s"] = (len(stamps) - 1) / (stamps[-1] - stamps[0])
 print(json.dumps(dict(engine="torch", device="gpu" if GPU else "cpu", model=MODEL, load_ms=load_ms,
-                      threads=torch.get_num_threads(), dtype="bfloat16" if GPU else "float32",
+                      threads=torch.get_num_threads(), dtype=DTYPE,
                       peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, **best)))

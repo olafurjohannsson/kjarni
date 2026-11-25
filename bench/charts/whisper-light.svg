@@ -12,22 +12,22 @@
 <text x="438.6" y="76" font-size="12.5" fill="#52514e">openai-whisper</text>
 <text x="176" y="131.5" text-anchor="end" font-size="13" fill="#0b0b0b">11 s of speech</text>
 <line x1="190" y1="89" x2="190" y2="165" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,92 h181.57693985944738 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-181.57693985944738 z" fill="#2a78d6"><title>Kjarni: 6.1×</title></path>
-<text x="382.5769398594474" y="104.5" font-size="12" fill="#52514e" font-weight="600">6.1×</text>
-<path d="M191,110 h172.71047505267447 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-172.71047505267447 z" fill="#1baf7a"><title>faster-whisper: 5.8×</title></path>
-<text x="373.7104750526745" y="122.5" font-size="12" fill="#52514e">5.8×</text>
-<path d="M191,128 h335.3456076122882 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-335.3456076122882 z" fill="#eda100"><title>faster-whisper int8: 11.2×</title></path>
-<text x="536.3456076122882" y="140.5" font-size="12" fill="#52514e">11.2×</text>
-<path d="M191,146 h208.75699037840346 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-208.75699037840346 z" fill="#eb6834"><title>openai-whisper: 7.0×</title></path>
-<text x="409.75699037840343" y="158.5" font-size="12" fill="#52514e">7.0×</text>
+<path d="M191,92 h157.42743260278516 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-157.42743260278516 z" fill="#2a78d6"><title>Kjarni: 6.2×</title></path>
+<text x="358.4274326027852" y="104.5" font-size="12" fill="#52514e" font-weight="600">6.2×</text>
+<path d="M191,110 h183.25720792994835 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-183.25720792994835 z" fill="#1baf7a"><title>faster-whisper: 7.1×</title></path>
+<text x="384.2572079299483" y="122.5" font-size="12" fill="#52514e">7.1×</text>
+<path d="M191,128 h324.658991203404 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-324.658991203404 z" fill="#eda100"><title>faster-whisper int8: 12.5×</title></path>
+<text x="525.658991203404" y="140.5" font-size="12" fill="#52514e">12.5×</text>
+<path d="M191,146 h231.52274796687368 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-231.52274796687368 z" fill="#eb6834"><title>openai-whisper: 9.0×</title></path>
+<text x="432.5227479668737" y="158.5" font-size="12" fill="#52514e">9.0×</text>
 <text x="176" y="219.5" text-anchor="end" font-size="13" fill="#0b0b0b">58 s of speech</text>
 <line x1="190" y1="177" x2="190" y2="253" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,180 h320.13691635724206 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-320.13691635724206 z" fill="#2a78d6"><title>Kjarni: 10.7×</title></path>
-<text x="521.1369163572421" y="192.5" font-size="12" fill="#52514e" font-weight="600">10.7×</text>
-<path d="M191,198 h225.54289131366676 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-225.54289131366676 z" fill="#1baf7a"><title>faster-whisper: 7.6×</title></path>
-<text x="426.54289131366676" y="210.5" font-size="12" fill="#52514e">7.6×</text>
-<path d="M191,216 h475.99999999999994 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-475.99999999999994 z" fill="#eda100"><title>faster-whisper int8: 15.8×</title></path>
-<text x="677.0" y="228.5" font-size="12" fill="#52514e">15.8×</text>
-<path d="M191,234 h265.16404924279783 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-265.16404924279783 z" fill="#eb6834"><title>openai-whisper: 8.9×</title></path>
-<text x="466.16404924279783" y="246.5" font-size="12" fill="#52514e">8.9×</text>
+<path d="M191,180 h277.6585036316162 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-277.6585036316162 z" fill="#2a78d6"><title>Kjarni: 10.7×</title></path>
+<text x="478.6585036316162" y="192.5" font-size="12" fill="#52514e" font-weight="600">10.7×</text>
+<path d="M191,198 h233.8233564210403 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-233.8233564210403 z" fill="#1baf7a"><title>faster-whisper: 9.1×</title></path>
+<text x="434.82335642104033" y="210.5" font-size="12" fill="#52514e">9.1×</text>
+<path d="M191,216 h475.99999999999994 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-475.99999999999994 z" fill="#eda100"><title>faster-whisper int8: 18.3×</title></path>
+<text x="677.0" y="228.5" font-size="12" fill="#52514e">18.3×</text>
+<path d="M191,234 h274.17803676008924 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-274.17803676008924 z" fill="#eb6834"><title>openai-whisper: 10.6×</title></path>
+<text x="475.17803676008924" y="246.5" font-size="12" fill="#52514e">10.6×</text>
 </svg>

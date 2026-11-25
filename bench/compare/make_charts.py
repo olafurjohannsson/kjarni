@@ -202,28 +202,32 @@ if matrix:
          lambda v: f"{v:.1f}×", per_group=True)
 
     models = [("qwen2.5-0.5b-instruct", "Qwen2.5 0.5B"), ("llama3.2-1b-instruct", "Llama 3.2 1B")]
-    model_labels = [l for _, l in models]
+    # Every panel compares engines on the same weights: the Q4_K_M GGUF for Kjarni
+    # and llama.cpp, the bfloat16 safetensors for Kjarni and PyTorch.
+    panels = [(m, w, f"{label} · {'Q4_K_M' if w == 'Q4_K_M' else 'bf16'}") for m, label in models for w in ["Q4_K_M", "safetensors"]]
+    panel_labels = [p[2] for p in panels]
+    kj = lambda m, w, d, f: value(cell(kind="decoder", model=m, engine="kjarni", weights=w, device=d), f)
     # llama-bench's generation figure starts from an empty context, so the others are
     # shown from a nearly empty one too.
-    cpu_gen = lambda m: [value(cell(kind="decoder", model=m, engine="kjarni", weights="Q4_K_M", device="cpu"), "gen_short_tok_s"),
-                         value(cell(kind="decoder", model=m, engine="llama.cpp", backend="cpu"), "gen_tok_s"),
-                         value(cell(kind="decoder", model=m, engine="torch", device="cpu"), "gen_short_tok_s")]
-    gpu_row = lambda m, kjarni, llama, torch: [
-        value(cell(kind="decoder", model=m, engine="kjarni", weights="Q4_K_M", device="gpu"), kjarni),
-        value(cell(kind="decoder", model=m, engine="llama.cpp", backend="vulkan"), llama),
-        value(cell(kind="decoder", model=m, engine="llama.cpp", backend="cuda"), llama),
-        value(cell(kind="decoder", model=m, engine="torch", device="gpu"), torch)]
+    cpu_gen = lambda m, w: [kj(m, w, "cpu", "gen_short_tok_s"),
+                            value(cell(kind="decoder", model=m, engine="llama.cpp", backend="cpu"), "gen_tok_s") if w == "Q4_K_M" else None,
+                            value(cell(kind="decoder", model=m, engine="torch", device="cpu"), "gen_short_tok_s") if w != "Q4_K_M" else None]
+    gpu_row = lambda m, w, kjarni, llama, torch: [
+        kj(m, w, "gpu", kjarni),
+        value(cell(kind="decoder", model=m, engine="llama.cpp", backend="vulkan"), llama) if w == "Q4_K_M" else None,
+        value(cell(kind="decoder", model=m, engine="llama.cpp", backend="cuda"), llama) if w == "Q4_K_M" else None,
+        value(cell(kind="decoder", model=m, engine="torch", device="gpu"), torch) if w != "Q4_K_M" else None]
     tok = lambda v: f"{v:,.0f} tok/s"
     both("matrix-generation-cpu", "Text generation on the CPU (higher is better)",
-         f"Q4_K_M GGUF, float32 for PyTorch, from a nearly empty context, {machine} · tokens per second",
-         model_labels, ["Kjarni", "llama.cpp", "PyTorch"], [cpu_gen(m) for m, _ in models], tok, per_group=True)
+         f"Same weights in each panel, from a nearly empty context, {machine} · tokens per second",
+         panel_labels, ["Kjarni", "llama.cpp", "PyTorch"], [cpu_gen(m, w) for m, w, _ in panels], tok, per_group=True)
     gpu_names = ["Kjarni WebGPU", "llama.cpp Vulkan", "llama.cpp CUDA", "PyTorch CUDA"]
     both("matrix-generation-gpu", "Text generation on the GPU (higher is better)",
-         f"Q4_K_M GGUF, bfloat16 for PyTorch, from a nearly empty context, {card} · tokens per second", model_labels, gpu_names,
-         [gpu_row(m, "gen_short_tok_s", "gen_tok_s", "gen_short_tok_s") for m, _ in models], tok, per_group=True)
+         f"Same weights in each panel, from a nearly empty context, {card} · tokens per second", panel_labels, gpu_names,
+         [gpu_row(m, w, "gen_short_tok_s", "gen_tok_s", "gen_short_tok_s") for m, w, _ in panels], tok, per_group=True)
     both("matrix-prompt-gpu", "Prompt processing on the GPU (higher is better)",
-         f"512-token prompt, Q4_K_M GGUF, bfloat16 for PyTorch, {card} · tokens per second", model_labels, gpu_names,
-         [gpu_row(m, "prompt_tok_s", "prompt_tok_s", "prompt_tok_s") for m, _ in models], tok, per_group=True)
+         f"512-token prompt, same weights in each panel, {card} · tokens per second", panel_labels, gpu_names,
+         [gpu_row(m, w, "prompt_tok_s", "prompt_tok_s", "prompt_tok_s") for m, w, _ in panels], tok, per_group=True)
 
     # Package pages (PyPI, NuGet, crates.io) take a plain image and may not render SVG.
     if shutil.which("rsvg-convert"):

@@ -2,37 +2,41 @@
   {
     "engine": "kjarni",
     "task": "summarize",
-    "load_ms": 845.0293740002053,
-    "ms": 1798.530516000028,
+    "load_ms": 540.7181209993723,
+    "ms": 1652.1017180002673,
     "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
-    "peak_rss_mb": 1328.28515625,
-    "rss_mb": 1280.609375
+    "peak_rss_mb": 1324.78125,
+    "rss_mb": 1247.19140625,
+    "threads": "8"
   },
   {
     "engine": "torch",
     "task": "summarize",
-    "load_ms": 2311.23631499986,
-    "ms": 2027.150318999702,
+    "load_ms": 2271.9644520002475,
+    "ms": 1755.8283339994887,
     "output": "The library will include a children's wing, a maker space with 3D printers, and a cafe . Construction is expected to begin next spring and take about eighteen months . Several residents spoke in favour of the plan at the meeting, citing the lack of quiet study spaces in the area .",
-    "peak_rss_mb": 1749.1640625,
-    "rss_mb": 1713.9375
+    "peak_rss_mb": 1745.1796875,
+    "rss_mb": 1747.9609375,
+    "threads": "8"
   },
   {
     "engine": "kjarni",
     "task": "translate",
-    "load_ms": 514.352413000779,
-    "ms": 710.5551779995949,
+    "load_ms": 549.3216779996146,
+    "ms": 625.1064190000761,
     "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
-    "peak_rss_mb": 1249.33203125,
-    "rss_mb": 1051.74609375
+    "peak_rss_mb": 1249.51953125,
+    "rss_mb": 1050.5859375,
+    "threads": "8"
   },
   {
     "engine": "torch",
     "task": "translate",
-    "load_ms": 2293.7141369993697,
-    "ms": 695.441216999825,
+    "load_ms": 2277.8721309987304,
+    "ms": 584.673011000632,
     "output": "Das Haus ist klein, aber das Garten hinter es ist gro\u00df und voll von alten B\u00e4umen.",
-    "peak_rss_mb": 1408.66796875,
-    "rss_mb": 1400.63671875
+    "peak_rss_mb": 1409.14453125,
+    "rss_mb": 1402.67578125,
+    "threads": "8"
   }
 ]

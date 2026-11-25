@@ -2,23 +2,25 @@
   {
     "engine": "kjarni",
     "photos": 64,
-    "load_ms": 584.8999199997706,
-    "images_ms": 973.3080340001834,
-    "images_per_s": 65.75513379558515,
-    "query_ms": 15.217086999655294,
+    "load_ms": 575.2105809988279,
+    "images_ms": 989.6212589992501,
+    "images_per_s": 64.67120569410534,
+    "query_ms": 16.633612000077846,
     "top_hit": "red_car_0.png",
-    "peak_rss_mb": 874.12890625,
-    "rss_mb": 779.54296875
+    "peak_rss_mb": 872.44140625,
+    "rss_mb": 785.75,
+    "threads": "default"
   },
   {
     "engine": "open_clip",
     "photos": 64,
-    "load_ms": 3448.3958660002827,
-    "images_ms": 1109.056619000512,
-    "images_per_s": 57.70670216789938,
-    "query_ms": 15.760479000164196,
+    "load_ms": 3193.133704999127,
+    "images_ms": 913.3892079989891,
+    "images_per_s": 70.06870613263347,
+    "query_ms": 12.063221000062185,
     "top_hit": "red_car_0.png",
-    "peak_rss_mb": 1679.13671875,
-    "rss_mb": 1176.67578125
+    "peak_rss_mb": 1680.5078125,
+    "rss_mb": 1183.08203125,
+    "threads": "8"
   }
 ]
