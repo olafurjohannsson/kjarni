@@ -8,7 +8,7 @@
       "engine": "kjarni",
       "task": "embed-minilm",
       "device": "cpu",
-      "load_ms": 86.42028300164384,
+      "load_ms": 79.1776519981795,
       "first_call_ms": 16.74505200026033,
       "single_ms": {
         "min": 2.028990000326303,
@@ -54,7 +54,7 @@
       "engine": "onnx",
       "task": "embed-minilm",
       "device": "cpu",
-      "load_ms": 683.8856849990407,
+      "load_ms": 477.76358899864135,
       "first_call_ms": 4.3598629999905825,
       "single_ms": {
         "min": 1.4120739997451892,
@@ -77,7 +77,7 @@
       "engine": "kjarni",
       "task": "embed-mpnet",
       "device": "cpu",
-      "load_ms": 438.834405000307,
+      "load_ms": 205.68834499863442,
       "first_call_ms": 26.56435900098586,
       "single_ms": {
         "min": 18.689186999836238,
@@ -123,7 +123,7 @@
       "engine": "onnx",
       "task": "embed-mpnet",
       "device": "cpu",
-      "load_ms": 1201.8182499996328,
+      "load_ms": 927.3316549988522,
       "first_call_ms": 17.68368999910308,
       "single_ms": {
         "min": 14.119904000835959,
@@ -146,7 +146,7 @@
       "engine": "kjarni",
       "task": "rerank",
       "device": "cpu",
-      "load_ms": 141.27661299971805,
+      "load_ms": 102.67810499863117,
       "first_call_ms": 15.589843000270776,
       "single_ms": {
         "min": 8.545532000425737,
@@ -190,7 +190,7 @@
       "engine": "onnx",
       "task": "rerank",
       "device": "cpu",
-      "load_ms": 669.06405500049,
+      "load_ms": 657.989892999467,
       "first_call_ms": 6.208392000189633,
       "single_ms": {
         "min": 4.019826999865472,
@@ -212,7 +212,7 @@
       "engine": "kjarni",
       "task": "classify",
       "device": "cpu",
-      "load_ms": 332.95373900000413,
+      "load_ms": 198.60977999996976,
       "first_call_ms": 16.374845999962417,
       "single_ms": {
         "min": 9.659339999416261,
@@ -256,7 +256,7 @@
       "engine": "onnx",
       "task": "classify",
       "device": "cpu",
-      "load_ms": 1001.6522749992873,
+      "load_ms": 781.8564750014048,
       "first_call_ms": 9.913967998727458,
       "single_ms": {
         "min": 7.340137999563012,

@@ -22,7 +22,7 @@ def load_avg():
 rows = []
 for task in TASKS:
     for engine in ENGINES:
-        best = None
+        best, loads = None, []
         for n in [None, "8"] * REPEATS:
             npy = os.path.join(OUT, f"{task}.{engine}.npy")
             wait_idle()
@@ -33,9 +33,13 @@ for task in TASKS:
                 print(f"{task} {engine} FAILED\n{p.stderr[-2000:]}", file=sys.stderr); break
             d = json.loads(p.stdout.strip().splitlines()[-1])
             d["load_avg_before"] = load_avg()
+            loads.append(d["load_ms"])
             if best is None or d["batch_ms"]["min"] < best["batch_ms"]["min"]:
                 best = d
         if best:
+            # The first run can include reading the model from disk; report the
+            # fastest load, as for the batch.
+            best["load_ms"] = min(loads)
             rows.append(best)
             print(f"{task:<13}{engine:<8} load {best['load_ms']:7.0f} ms  single {best['single_ms']['min']:7.2f} ms  "
                   f"batch {best['batch_ms']['min']:8.1f} ms  ({best['batch_per_s']:6.0f}/s)  rss {best['peak_rss_mb']:5.0f} MB", flush=True)

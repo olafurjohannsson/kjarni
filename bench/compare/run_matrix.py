@@ -87,6 +87,10 @@ if "encoders" in ONLY:
                 good = [r for r in runs if "error" not in r]
                 best = min(good, key=lambda r: r["batch_ms"]["min"]) if good else runs[0]
                 row = {**best, "kind": "encoder", "task": task, "engine": engine, "device": device}
+                # The first run can include reading the model from disk; report the
+                # fastest load, as for the batch.
+                if good:
+                    row["load_ms"] = min(r["load_ms"] for r in good)
                 ref = os.path.join(OUT, f"matrix.{task}.torch.cpu.npy")
                 if good and os.path.exists(ref):
                     a, b = np.load(npy), np.load(ref)

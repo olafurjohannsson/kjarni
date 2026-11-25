@@ -65,18 +65,18 @@ Start to first embedding: a new Python process imports the library, loads all-Mi
 
 | Task | Engine | Batch of 64 | One text | Load | Memory after | Peak memory | Max diff vs PyTorch |
 |---|---|--:|--:|--:|--:|--:|--:|
-| Embed · all-MiniLM-L6-v2 | **Kjarni** | 194 ms (330/s) | 2.0 ms | 86 ms | 273 MB | 292 MB | 2e-07 |
+| Embed · all-MiniLM-L6-v2 | **Kjarni** | 194 ms (330/s) | 2.0 ms | 79 ms | 273 MB | 292 MB | 2e-07 |
 | Embed · all-MiniLM-L6-v2 | PyTorch | 164 ms (389/s) | 3.1 ms | 2,393 ms | 649 MB | 731 MB | reference |
-| Embed · all-MiniLM-L6-v2 | ONNX Runtime | 175 ms (365/s) | 1.4 ms | 684 ms | 417 MB | 415 MB | 2e-07 |
-| Embed · all-mpnet-base-v2 | **Kjarni** | 1231 ms (52/s) | 18.7 ms | 439 ms | 710 MB | 750 MB | 2e-07 |
+| Embed · all-MiniLM-L6-v2 | ONNX Runtime | 175 ms (365/s) | 1.4 ms | 478 ms | 417 MB | 415 MB | 2e-07 |
+| Embed · all-mpnet-base-v2 | **Kjarni** | 1231 ms (52/s) | 18.7 ms | 206 ms | 710 MB | 750 MB | 2e-07 |
 | Embed · all-mpnet-base-v2 | PyTorch | 1317 ms (49/s) | 14.9 ms | 2,371 ms | 908 MB | 1,162 MB | reference |
-| Embed · all-mpnet-base-v2 | ONNX Runtime | 1189 ms (54/s) | 14.1 ms | 1,202 ms | 935 MB | 932 MB | 3e-07 |
-| Rerank · ms-marco-MiniLM-L6 | **Kjarni** | 227 ms (282/s) | 8.5 ms | 141 ms | 309 MB | 323 MB | 4e-06 |
+| Embed · all-mpnet-base-v2 | ONNX Runtime | 1189 ms (54/s) | 14.1 ms | 927 ms | 935 MB | 932 MB | 3e-07 |
+| Rerank · ms-marco-MiniLM-L6 | **Kjarni** | 227 ms (282/s) | 8.5 ms | 103 ms | 309 MB | 323 MB | 4e-06 |
 | Rerank · ms-marco-MiniLM-L6 | PyTorch | 210 ms (305/s) | 7.8 ms | 2,391 ms | 657 MB | 762 MB | reference |
-| Rerank · ms-marco-MiniLM-L6 | ONNX Runtime | 214 ms (299/s) | 4.0 ms | 669 ms | 377 MB | 375 MB | 6e-06 |
-| Classify · DistilBERT SST-2 | **Kjarni** | 144 ms (446/s) | 9.7 ms | 333 ms | 401 MB | 503 MB | 1e-07 |
+| Rerank · ms-marco-MiniLM-L6 | ONNX Runtime | 214 ms (299/s) | 4.0 ms | 658 ms | 377 MB | 375 MB | 6e-06 |
+| Classify · DistilBERT SST-2 | **Kjarni** | 144 ms (446/s) | 9.7 ms | 199 ms | 401 MB | 503 MB | 1e-07 |
 | Classify · DistilBERT SST-2 | PyTorch | 143 ms (449/s) | 6.8 ms | 2,035 ms | 684 MB | 742 MB | reference |
-| Classify · DistilBERT SST-2 | ONNX Runtime | 147 ms (435/s) | 7.3 ms | 1,002 ms | 412 MB | 439 MB | 1e-07 |
+| Classify · DistilBERT SST-2 | ONNX Runtime | 147 ms (435/s) | 7.3 ms | 782 ms | 412 MB | 439 MB | 1e-07 |
 
 ## Speech to text
 
@@ -175,18 +175,18 @@ Reproduce with `bench/compare/run_matrix.py`. CPU as above; GPU an NVIDIA RTX A2
 
 | Model | Device | Engine | Batch of 64 | One text | Load | Max diff vs PyTorch on CPU |
 |---|---|---|--:|--:|--:|--:|
-| minilm | CPU | **Kjarni** | 326.8/s | 2.0 ms | 81 ms | 2e-07 |
+| minilm | CPU | **Kjarni** | 326.8/s | 2.0 ms | 80 ms | 2e-07 |
 | minilm | CPU | PyTorch | 400.6/s | 3.0 ms | 2,367 ms | reference |
 | minilm | CPU | ONNX Runtime | 342.8/s | 1.2 ms | 626 ms | 2e-07 |
-| bge-m3 | CPU | **Kjarni** | 15.8/s | 67.2 ms | 2,603 ms | 1e-06 |
-| bge-m3 | CPU | PyTorch | 12.9/s | 52.6 ms | 7,271 ms | reference |
+| bge-m3 | CPU | **Kjarni** | 15.8/s | 67.2 ms | 1,250 ms | 1e-06 |
+| bge-m3 | CPU | PyTorch | 12.9/s | 52.6 ms | 6,819 ms | reference |
 | bge-m3 | CPU | ONNX Runtime | 13.8/s | 46.8 ms | 1,296 ms | 5e-07 |
-| minilm | GPU | **Kjarni** | 573.9/s | 5.5 ms | 540 ms | 2e-07 |
-| minilm | GPU | PyTorch | 1,771.9/s | 1.8 ms | 2,358 ms | 2e-07 |
-| minilm | GPU | ONNX Runtime | 2,750.0/s | 1.1 ms | 707 ms | 1e-04 |
-| bge-m3 | GPU | **Kjarni** | 31.6/s | 52.0 ms | 2,852 ms | 2e-06 |
-| bge-m3 | GPU | PyTorch | 75.3/s | 10.4 ms | 9,470 ms | 9e-07 |
-| bge-m3 | GPU | ONNX Runtime | 180.4/s | 7.4 ms | 1,299 ms | 4e-04 |
+| minilm | GPU | **Kjarni** | 573.9/s | 5.5 ms | 487 ms | 2e-07 |
+| minilm | GPU | PyTorch | 1,771.9/s | 1.8 ms | 2,331 ms | 2e-07 |
+| minilm | GPU | ONNX Runtime | 2,750.0/s | 1.1 ms | 558 ms | 1e-04 |
+| bge-m3 | GPU | **Kjarni** | 31.6/s | 52.0 ms | 2,776 ms | 2e-06 |
+| bge-m3 | GPU | PyTorch | 75.3/s | 10.4 ms | 6,857 ms | 9e-07 |
+| bge-m3 | GPU | ONNX Runtime | 180.4/s | 7.4 ms | 1,253 ms | 4e-04 |
 
 | Device | Engine | 58 s of speech | Faster than real time |
 |---|---|--:|--:|

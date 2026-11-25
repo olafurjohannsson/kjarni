@@ -207,7 +207,7 @@
     "engine": "kjarni",
     "task": "embed-minilm",
     "device": "cpu",
-    "load_ms": 81.23426199927053,
+    "load_ms": 79.84548199965502,
     "first_call_ms": 12.56913300130691,
     "single_ms": {
       "min": 2.013278999584145,
@@ -273,7 +273,7 @@
     "engine": "kjarni",
     "task": "embed-bge-m3",
     "device": "cpu",
-    "load_ms": 2603.217019999647,
+    "load_ms": 1250.3102730006503,
     "first_call_ms": 75.78477900096914,
     "single_ms": {
       "min": 67.24933100122144,
@@ -295,7 +295,7 @@
     "engine": "torch",
     "task": "embed-bge-m3",
     "device": "cpu",
-    "load_ms": 7271.371638998971,
+    "load_ms": 6818.56470600178,
     "first_call_ms": 78.36666799994418,
     "single_ms": {
       "min": 52.60940599691821,
@@ -395,7 +395,7 @@
     "engine": "kjarni",
     "task": "embed-minilm",
     "device": "gpu",
-    "load_ms": 540.090513000905,
+    "load_ms": 487.28350900273654,
     "first_call_ms": 13.602487000753172,
     "single_ms": {
       "min": 5.450779000966577,
@@ -418,7 +418,7 @@
     "engine": "torch",
     "task": "embed-minilm",
     "device": "gpu",
-    "load_ms": 2357.828146999964,
+    "load_ms": 2331.1651119984163,
     "first_call_ms": 125.26626500039129,
     "single_ms": {
       "min": 1.7948530003195629,
@@ -441,7 +441,7 @@
     "engine": "onnx",
     "task": "embed-minilm",
     "device": "gpu",
-    "load_ms": 706.6396819973306,
+    "load_ms": 557.8659409984539,
     "first_call_ms": 90.34363500177278,
     "single_ms": {
       "min": 1.1482759982754942,
@@ -464,7 +464,7 @@
     "engine": "kjarni",
     "task": "embed-bge-m3",
     "device": "gpu",
-    "load_ms": 2851.916934003384,
+    "load_ms": 2775.9852039998805,
     "first_call_ms": 81.02312600021833,
     "single_ms": {
       "min": 52.03425699801301,
@@ -487,7 +487,7 @@
     "engine": "torch",
     "task": "embed-bge-m3",
     "device": "gpu",
-    "load_ms": 9469.773623000947,
+    "load_ms": 6856.562616001611,
     "first_call_ms": 170.13995700108353,
     "single_ms": {
       "min": 10.423085997899761,
@@ -510,7 +510,7 @@
     "engine": "onnx",
     "task": "embed-bge-m3",
     "device": "gpu",
-    "load_ms": 1299.1048949988908,
+    "load_ms": 1252.9224840000097,
     "first_call_ms": 90.69540099881124,
     "single_ms": {
       "min": 7.353842000156874,
