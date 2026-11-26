@@ -1,9 +1,14 @@
+#[cfg(feature = "alloc-stats")]
 use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(feature = "alloc-stats")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(feature = "alloc-stats")]
 pub struct TracingAllocator;
 
+#[cfg(feature = "alloc-stats")]
 static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "alloc-stats")]
 static PEAK_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 /// How many times the allocator has been called.
@@ -12,8 +17,10 @@ static PEAK_BYTES: AtomicUsize = AtomicUsize::new(0);
 /// the allocator", which is the number that matters when chasing per-call
 /// overhead. A forward pass that allocates nine times per layer pays nine
 /// synchronisation points and nine chances to miss cache, regardless of size.
+#[cfg(feature = "alloc-stats")]
 static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(feature = "alloc-stats")]
 unsafe impl GlobalAlloc for TracingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         unsafe {
@@ -57,23 +64,76 @@ unsafe impl GlobalAlloc for TracingAllocator {
     }
 }
 
+#[cfg(feature = "alloc-stats")]
 pub fn get_current_ram_usage_mb() -> f64 {
     ALLOCATED_BYTES.load(Ordering::Relaxed) as f64 / 1_048_576.0
 }
 
+#[cfg(not(feature = "alloc-stats"))]
+pub fn get_current_ram_usage_mb() -> f64 {
+    0.0
+}
+
+#[cfg(feature = "alloc-stats")]
 pub fn get_peak_ram_usage_mb() -> f64 {
     PEAK_BYTES.load(Ordering::Relaxed) as f64 / 1_048_576.0
 }
 
+#[cfg(not(feature = "alloc-stats"))]
+pub fn get_peak_ram_usage_mb() -> f64 {
+    0.0
+}
+
 /// Total allocator calls since the process started, or since the last reset.
+#[cfg(feature = "alloc-stats")]
 pub fn alloc_count() -> usize {
     ALLOC_COUNT.load(Ordering::Relaxed)
+}
+
+/// Allocation statistics are disabled unless the `alloc-stats` feature is enabled.
+#[cfg(not(feature = "alloc-stats"))]
+pub fn alloc_count() -> usize {
+    0
 }
 
 /// Zeroes the allocation counter so a region can be measured on its own.
 ///
 /// The counter is global and counts every thread, which is what you want for a
 /// rayon-parallel forward pass: work handed to another thread still allocates.
+#[cfg(feature = "alloc-stats")]
 pub fn reset_alloc_count() {
     ALLOC_COUNT.store(0, Ordering::Relaxed);
+}
+
+/// No-op when allocation statistics are disabled.
+#[cfg(not(feature = "alloc-stats"))]
+pub fn reset_alloc_count() {}
+
+#[cfg(all(test, feature = "alloc-stats"))]
+mod tests {
+    use super::{alloc_count, get_current_ram_usage_mb, reset_alloc_count};
+
+    #[test]
+    fn enabled_feature_counts_allocations() {
+        reset_alloc_count();
+        let mut bytes = Vec::with_capacity(32);
+        bytes.extend_from_slice(&[0_u8; 32]);
+        assert!(!bytes.is_empty());
+        assert!(alloc_count() > 0);
+        assert!(get_current_ram_usage_mb() >= 0.0);
+    }
+}
+
+#[cfg(all(test, not(feature = "alloc-stats")))]
+mod tests {
+    use super::{alloc_count, get_current_ram_usage_mb, get_peak_ram_usage_mb, reset_alloc_count};
+
+    #[test]
+    fn disabled_feature_is_a_noop() {
+        reset_alloc_count();
+        let _bytes = Box::new([0_u8; 32]);
+        assert_eq!(alloc_count(), 0);
+        assert_eq!(get_current_ram_usage_mb(), 0.0);
+        assert_eq!(get_peak_ram_usage_mb(), 0.0);
+    }
 }
