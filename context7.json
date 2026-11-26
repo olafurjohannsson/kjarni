@@ -1,0 +1,35 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Kjarni",
+  "description": "Transformer inference library written in Rust, with bindings for Python, C#/.NET, Go, C/C++, the browser (WebAssembly) and a command line. Runs embeddings, reranking, classification, semantic search, speech-to-text (Whisper), summarisation, translation, CLIP image search and chat models in-process on CPU or GPU, with output matching PyTorch.",
+  "excludeFolders": [
+    "tests",
+    "fixtures",
+    "bench",
+    "target",
+    "node_modules",
+    "dist",
+    "crates/kjarni-cli/web",
+    "crates/kjarni-wasm/plugins",
+    "**/fonts"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md",
+    "LICENSE.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "DOCUMENTATION.md",
+    "CMakeLists.txt",
+    "requirements.txt"
+  ],
+  "rules": [
+    "Models are referred to by Kjarni registry names such as minilm-l6-v2, mpnet-base-v2, bge-m3, minilm-l6-v2-cross-encoder, distilbert-sentiment, qwen2.5-0.5b-instruct and llama3.2-1b-instruct. `kjarni model list` prints the full registry.",
+    "Models download on first use and are cached; after that everything runs offline. `kjarni model download <name>` fetches one ahead of time.",
+    "Python: `pip install kjarni`. The classes are Embedder, Reranker, Classifier, Indexer, Searcher, Chat, Transcriber, Summarizer, Translator and ImageIndex, e.g. `kjarni.Embedder(model=\"minilm-l6-v2\")`.",
+    "C#/.NET: `dotnet add package Kjarni`. The Kjarni.Extensions.AI package implements IEmbeddingGenerator<string, Embedding<float>> and IChatClient from Microsoft.Extensions.AI. Tool calling is not supported: setting ChatOptions.Tools throws.",
+    "Go: the kjarni-go module exposes NewEmbedder, NewReranker, NewClassifier, NewIndexer, NewSearcher, NewChat, NewTranscriber, NewSummarizer, NewTranslator and NewImageIndex.",
+    "Browser: `npm i kjarni-wasm`. It runs inference in a Web Worker and loads `.kjq` model files (config, tokenizer and int8 weights in one file).",
+    "Pass device=\"gpu\" (or the binding's equivalent) to run on the GPU through WebGPU: Vulkan, DirectX 12 or Metal, with no CUDA install. The default is the CPU.",
+    "Kjarni runs inference only; it does not train or fine-tune models."
+  ]
+}
