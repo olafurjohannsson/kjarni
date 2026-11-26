@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="278" viewBox="0 0 760 278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Text generation on the GPU (higher is better)">
-<rect width="760" height="278" rx="8" fill="#fcfcfb"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="346" viewBox="0 0 760 346" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Text generation on the GPU (higher is better)">
+<rect width="760" height="346" rx="8" fill="#fcfcfb"/>
 <text x="20" y="32" font-size="17" font-weight="600" fill="#0b0b0b">Text generation on the GPU (higher is better)</text>
-<text x="20" y="54" font-size="13" fill="#52514e">Q4_K_M GGUF, bfloat16 for PyTorch, from a nearly empty context, RTX A2000 12 GB · tokens per second</text>
+<text x="20" y="54" font-size="13" fill="#52514e">Same weights in each panel, from a nearly empty context, RTX A2000 12 GB · tokens per second</text>
 <rect x="20" y="66" width="11" height="11" rx="3" fill="#2a78d6"/>
 <text x="36" y="76" font-size="12.5" fill="#52514e">Kjarni WebGPU</text>
 <rect x="154.2" y="66" width="11" height="11" rx="3" fill="#eda100"/>
@@ -10,25 +10,35 @@
 <text x="326.6" y="76" font-size="12.5" fill="#52514e">llama.cpp CUDA</text>
 <rect x="452.20000000000005" y="66" width="11" height="11" rx="3" fill="#eb6834"/>
 <text x="468.20000000000005" y="76" font-size="12.5" fill="#52514e">PyTorch CUDA</text>
-<text x="176" y="131.5" text-anchor="end" font-size="13" fill="#0b0b0b">Qwen2.5 0.5B</text>
-<line x1="190" y1="89" x2="190" y2="165" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,92 h103.82024969155492 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-103.82024969155492 z" fill="#2a78d6"><title>Kjarni WebGPU: 75 tok/s</title></path>
-<text x="304.8202496915549" y="104.5" font-size="12" fill="#52514e" font-weight="600">75 tok/s</text>
-<path d="M191,110 h339.5031147673169 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-339.5031147673169 z" fill="#eda100"><title>llama.cpp Vulkan: 239 tok/s</title></path>
-<text x="540.5031147673169" y="122.5" font-size="12" fill="#52514e">239 tok/s</text>
-<path d="M191,128 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp CUDA: 333 tok/s</title></path>
-<text x="677.0" y="140.5" font-size="12" fill="#52514e">333 tok/s</text>
-<path d="M191,146 h188.40379997878725 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-188.40379997878725 z" fill="#eb6834"><title>PyTorch CUDA: 134 tok/s</title></path>
-<text x="389.4037999787872" y="158.5" font-size="12" fill="#52514e">134 tok/s</text>
-<line x1="20" y1="170.0" x2="740" y2="170.0" stroke="#c3c2b7" stroke-width="0.5" stroke-dasharray="2 3"/>
-<text x="176" y="219.5" text-anchor="end" font-size="13" fill="#0b0b0b">Llama 3.2 1B</text>
-<line x1="190" y1="177" x2="190" y2="253" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,180 h222.74069435228978 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-222.74069435228978 z" fill="#2a78d6"><title>Kjarni WebGPU: 104 tok/s</title></path>
-<text x="423.7406943522898" y="192.5" font-size="12" fill="#52514e" font-weight="600">104 tok/s</text>
-<path d="M191,198 h429.92289580440126 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-429.92289580440126 z" fill="#eda100"><title>llama.cpp Vulkan: 198 tok/s</title></path>
-<text x="630.9228958044013" y="210.5" font-size="12" fill="#52514e">198 tok/s</text>
-<path d="M191,216 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp CUDA: 219 tok/s</title></path>
-<text x="677.0" y="228.5" font-size="12" fill="#52514e">219 tok/s</text>
-<path d="M191,234 h171.21714113250772 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-171.21714113250772 z" fill="#eb6834"><title>PyTorch CUDA: 80 tok/s</title></path>
-<text x="372.2171411325077" y="246.5" font-size="12" fill="#52514e">80 tok/s</text>
+<text x="176" y="122.5" text-anchor="end" font-size="13" fill="#0b0b0b">Qwen2.5 0.5B · Q4_K_M</text>
+<line x1="190" y1="89" x2="190" y2="147" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,92 h316.59215314329094 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-316.59215314329094 z" fill="#2a78d6"><title>Kjarni WebGPU: 222 tok/s</title></path>
+<text x="517.592153143291" y="104.5" font-size="12" fill="#52514e" font-weight="600">222 tok/s</text>
+<path d="M191,110 h337.83885922672476 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-337.83885922672476 z" fill="#eda100"><title>llama.cpp Vulkan: 236 tok/s</title></path>
+<text x="538.8388592267247" y="122.5" font-size="12" fill="#52514e">236 tok/s</text>
+<path d="M191,128 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp CUDA: 332 tok/s</title></path>
+<text x="677.0" y="140.5" font-size="12" fill="#52514e">332 tok/s</text>
+<line x1="20" y1="152.0" x2="740" y2="152.0" stroke="#c3c2b7" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="183.5" text-anchor="end" font-size="13" fill="#0b0b0b">Qwen2.5 0.5B · bf16</text>
+<line x1="190" y1="159" x2="190" y2="199" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,162 h389.72277425085355 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-389.72277425085355 z" fill="#2a78d6"><title>Kjarni WebGPU: 109 tok/s</title></path>
+<text x="590.7227742508535" y="174.5" font-size="12" fill="#52514e" font-weight="600">109 tok/s</text>
+<path d="M191,180 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#eb6834"><title>PyTorch CUDA: 133 tok/s</title></path>
+<text x="677.0" y="192.5" font-size="12" fill="#52514e">133 tok/s</text>
+<line x1="20" y1="204.0" x2="740" y2="204.0" stroke="#c3c2b7" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="244.5" text-anchor="end" font-size="13" fill="#0b0b0b">Llama 3.2 1B · Q4_K_M</text>
+<line x1="190" y1="211" x2="190" y2="269" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,214 h420.0131737767987 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-420.0131737767987 z" fill="#2a78d6"><title>Kjarni WebGPU: 191 tok/s</title></path>
+<text x="621.0131737767987" y="226.5" font-size="12" fill="#52514e" font-weight="600">191 tok/s</text>
+<path d="M191,232 h425.1281804105967 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-425.1281804105967 z" fill="#eda100"><title>llama.cpp Vulkan: 193 tok/s</title></path>
+<text x="626.1281804105968" y="244.5" font-size="12" fill="#52514e">193 tok/s</text>
+<path d="M191,250 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#1baf7a"><title>llama.cpp CUDA: 216 tok/s</title></path>
+<text x="677.0" y="262.5" font-size="12" fill="#52514e">216 tok/s</text>
+<line x1="20" y1="274.0" x2="740" y2="274.0" stroke="#c3c2b7" stroke-width="0.5" stroke-dasharray="2 3"/>
+<text x="176" y="305.5" text-anchor="end" font-size="13" fill="#0b0b0b">Llama 3.2 1B · bf16</text>
+<line x1="190" y1="281" x2="190" y2="321" stroke="#c3c2b7" stroke-width="1"/>
+<path d="M191,284 h428.7827201850026 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-428.7827201850026 z" fill="#2a78d6"><title>Kjarni WebGPU: 72 tok/s</title></path>
+<text x="629.7827201850025" y="296.5" font-size="12" fill="#52514e" font-weight="600">72 tok/s</text>
+<path d="M191,302 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#eb6834"><title>PyTorch CUDA: 79 tok/s</title></path>
+<text x="677.0" y="314.5" font-size="12" fill="#52514e">79 tok/s</text>
 </svg>

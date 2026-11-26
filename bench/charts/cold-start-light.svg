@@ -8,14 +8,14 @@
 <text x="118.4" y="76" font-size="12.5" fill="#52514e">PyTorch</text>
 <text x="176" y="113.5" text-anchor="end" font-size="13" fill="#0b0b0b">Warm OS cache</text>
 <line x1="190" y1="89" x2="190" y2="129" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,92 h8.729463265430605 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-8.729463265430605 z" fill="#2a78d6"><title>Kjarni: 99 ms</title></path>
-<text x="209.7294632654306" y="104.5" font-size="12" fill="#52514e" font-weight="600">99 ms</text>
-<path d="M191,110 h348.62899082915544 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-348.62899082915544 z" fill="#eb6834"><title>PyTorch: 2.73 s</title></path>
-<text x="549.6289908291554" y="122.5" font-size="12" fill="#52514e">2.73 s</text>
+<path d="M191,92 h7.779712938527057 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-7.779712938527057 z" fill="#2a78d6"><title>Kjarni: 91 ms</title></path>
+<text x="208.77971293852707" y="104.5" font-size="12" fill="#52514e" font-weight="600">91 ms</text>
+<path d="M191,110 h352.0381208165967 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-352.0381208165967 z" fill="#eb6834"><title>PyTorch: 2.76 s</title></path>
+<text x="553.0381208165967" y="122.5" font-size="12" fill="#52514e">2.76 s</text>
 <text x="176" y="165.5" text-anchor="end" font-size="13" fill="#0b0b0b">After a reboot</text>
 <line x1="190" y1="141" x2="190" y2="181" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M191,144 h16.107009290821058 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-16.107009290821058 z" fill="#2a78d6"><title>Kjarni: 156 ms</title></path>
-<text x="217.10700929082105" y="156.5" font-size="12" fill="#52514e" font-weight="600">156 ms</text>
+<path d="M191,144 h15.612238943525185 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-15.612238943525185 z" fill="#2a78d6"><title>Kjarni: 152 ms</title></path>
+<text x="216.6122389435252" y="156.5" font-size="12" fill="#52514e" font-weight="600">152 ms</text>
 <path d="M191,162 h476.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-476.0 z" fill="#eb6834"><title>PyTorch: 3.72 s</title></path>
 <text x="677.0" y="174.5" font-size="12" fill="#52514e">3.72 s</text>
 </svg>

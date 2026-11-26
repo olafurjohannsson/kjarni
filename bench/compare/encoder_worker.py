@@ -90,6 +90,8 @@ def load_kjarni():
 def load_torch():
     import torch
     torch.set_grad_enabled(False)
+    if "TORCH_THREADS" in os.environ:
+        torch.set_num_threads(int(os.environ["TORCH_THREADS"]))
     path = os.path.join(CACHE, T["local"])
     k = T["kind"]
     if k == "embed":
@@ -128,7 +130,10 @@ def load_onnx():
     tok.enable_padding()
     if DEVICE == "gpu":
         ort.preload_dlls()
-    sess = ort.InferenceSession(model, providers=["CUDAExecutionProvider" if DEVICE == "gpu" else "CPUExecutionProvider"])
+    opts = ort.SessionOptions()
+    if "ORT_THREADS" in os.environ:
+        opts.intra_op_num_threads = int(os.environ["ORT_THREADS"])
+    sess = ort.InferenceSession(model, opts, providers=["CUDAExecutionProvider" if DEVICE == "gpu" else "CPUExecutionProvider"])
     if DEVICE == "gpu" and sess.get_providers()[0] != "CUDAExecutionProvider":
         sys.exit("ONNX Runtime fell back from CUDA")
     names = {i.name for i in sess.get_inputs()}
@@ -170,6 +175,8 @@ def threads():
     if ENGINE == "torch":
         import torch; return torch.get_num_threads()
     if ENGINE == "onnx":
+        if "ORT_THREADS" in os.environ:
+            return int(os.environ["ORT_THREADS"])
         import psutil; return psutil.cpu_count(logical=False)  # ORT's default intra-op pool
     return int(os.environ.get("RAYON_NUM_THREADS") or os.cpu_count())  # rayon's default
 

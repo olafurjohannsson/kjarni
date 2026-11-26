@@ -49,7 +49,9 @@ w("- **Machine:** Intel Core i7-13700 (8 performance and 8 efficiency cores, 24 
 w("- **Isolation:** every engine runs in its own fresh process, so load time and memory are its own.")
 w("- **Memory:** *memory after* is what the process holds once the work is done; *peak* is the most it held at any point, usually while loading.")
 w("- **Timing:** minimum of repeated calls after warm-up, the least noisy estimate of what each engine can do. Medians are in the raw JSON.")
-w("- **Threads:** each engine's default. Kjarni uses rayon's pool; PyTorch and ONNX Runtime use the physical core count. For the LLMs, both engines get the better of 8 and 16 threads for each of prompt processing and generation.")
+w("- **Threads:** every engine on the CPU is run at its default thread count and at 8, one per performance core, and the faster run is reported. On this CPU PyTorch and CTranslate2 are fastest at 8; Kjarni is usually fastest at its default of 24, except on summarisation and translation. For the LLMs, each engine gets the better of 8 and 16 threads for each of prompt processing and generation.")
+w("- **Precision:** PyTorch runs the same safetensors as Kjarni, in bf16 and in f32, and the faster is reported. Quantised (Q4_K_M) models are compared only with llama.cpp, on the same GGUF file.")
+w("- **Scope:** one Linux machine. Windows, macOS and ARM have not been benchmarked to any extent, and other CPUs, particularly ones without separate performance and efficiency cores, may rank the engines differently.")
 w("- **Agreement:** encoder outputs are compared with PyTorch's; the largest difference is listed with each row. Generated text is recorded so the engines can be checked to have done the same work.")
 v = versions()
 if v:

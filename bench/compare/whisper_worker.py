@@ -30,13 +30,15 @@ if ENGINE == "kjarni":
     run = lambda: m.transcribe_file(AUDIO).text
 elif ENGINE == "openai-whisper":
     import whisper, torch
+    if "TORCH_THREADS" in os.environ:
+        torch.set_num_threads(int(os.environ["TORCH_THREADS"]))
     m = whisper.load_model("small", device="cuda" if GPU else "cpu")
     run = lambda: m.transcribe(AUDIO, language="en", temperature=0.0, fp16=GPU, beam_size=None)["text"]
 else:
     import numpy as np, wave
     from faster_whisper import WhisperModel
     int8 = ENGINE.endswith("int8")
-    m = WhisperModel("small", device="cuda" if GPU else "cpu",
+    m = WhisperModel("small", device="cuda" if GPU else "cpu", cpu_threads=int(os.environ.get("CT2_THREADS", 0)),
                      compute_type=("int8_float16" if int8 else "float16") if GPU else ("int8" if int8 else "float32"))
     # Decoded here and passed as samples: faster-whisper's own decoder needs a
     # PyAV older than the one installed. The file is 16 kHz mono PCM already,

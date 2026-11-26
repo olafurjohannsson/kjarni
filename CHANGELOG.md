@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.2
 
 - **Longer prompts fit on the GPU.** Memory freed after a long prompt stayed
   reserved around the cache's smaller buffers, so a long prompt held gigabytes

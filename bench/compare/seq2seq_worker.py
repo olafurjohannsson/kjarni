@@ -39,6 +39,8 @@ else:
     import torch
     from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
     torch.set_grad_enabled(False)
+    if "TORCH_THREADS" in os.environ:
+        torch.set_num_threads(int(os.environ["TORCH_THREADS"]))
     path = os.path.join(CACHE, "olafuraron_distilbart-cnn-12-6" if TASK == "summarize" else "google_flan-t5-base")
     tok = AutoTokenizer.from_pretrained(path)
     model = AutoModelForSeq2SeqLM.from_pretrained(path).eval()

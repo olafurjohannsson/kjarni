@@ -40,6 +40,8 @@ else:
     import torch, open_clip
     from PIL import Image
     torch.set_grad_enabled(False)
+    if "TORCH_THREADS" in os.environ:
+        torch.set_num_threads(int(os.environ["TORCH_THREADS"]))
     model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="laion2b_s34b_b79k")
     tokenizer = open_clip.get_tokenizer("ViT-B-32")
     model.eval()

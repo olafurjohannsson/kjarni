@@ -29,8 +29,11 @@ KINDS = {"encoders": "encoder", "whisper": "whisper", "decoders": "decoder"}
 rerun = {KINDS[s] for s in ONLY.split(",") if s in KINDS}
 # TASKS=embed-bge-m3 limits the encoder section to those tasks and keeps the others.
 TASKS = [t for t in os.environ.get("TASKS", "").split(",") if t]
+# ENGINES=torch limits the decoder section to those engines and keeps the others' rows.
+ENGINES = [e for e in os.environ.get("ENGINES", "").split(",") if e]
 rows = [r for r in rows if not (r.get("kind") in rerun and r.get("device") in DEVICES
-                                and (not TASKS or r.get("kind") != "encoder" or r.get("task") in TASKS))]
+                                and (not TASKS or r.get("kind") != "encoder" or r.get("task") in TASKS)
+                                and (not ENGINES or r.get("kind") != "decoder" or r.get("engine") in ENGINES))]
 
 
 def save():
@@ -75,10 +78,19 @@ if "encoders" in ONLY:
             for engine in ["kjarni", "torch", "onnx"]:
                 npy = os.path.join(OUT, f"matrix.{task}.{engine}.{device}.npy")
                 py = GPU_PY if device == "gpu" and engine != "kjarni" else CPU_PY
-                runs = [run(py, [f"{HERE}/encoder_worker.py", engine, task, npy], {"BENCH_DEVICE": device}) for _ in range(2)]
+                # On the CPU each engine gets its default thread count and 8 (one per
+                # P-core on a hybrid CPU), and keeps its faster one.
+                var = {"kjarni": "RAYON_NUM_THREADS", "torch": "TORCH_THREADS", "onnx": "ORT_THREADS"}[engine]
+                counts = [None, "8"] if device == "cpu" else [None]
+                runs = [run(py, [f"{HERE}/encoder_worker.py", engine, task, npy], {"BENCH_DEVICE": device, **({var: n} if n else {})})
+                        for n in counts for _ in range(2)]
                 good = [r for r in runs if "error" not in r]
                 best = min(good, key=lambda r: r["batch_ms"]["min"]) if good else runs[0]
                 row = {**best, "kind": "encoder", "task": task, "engine": engine, "device": device}
+                # The first run can include reading the model from disk; report the
+                # fastest load, as for the batch.
+                if good:
+                    row["load_ms"] = min(r["load_ms"] for r in good)
                 ref = os.path.join(OUT, f"matrix.{task}.torch.cpu.npy")
                 if good and os.path.exists(ref):
                     a, b = np.load(npy), np.load(ref)
@@ -92,26 +104,54 @@ if "whisper" in ONLY:
             env = {"BENCH_DEVICE": device}
             if device == "gpu" and engine.startswith("faster"):
                 env["LD_LIBRARY_PATH"] = CT2_LIBS
-            add({**run(py, [f"{HERE}/whisper_worker.py", engine, AUDIO], env), "kind": "whisper", "engine": engine, "device": device}, f"whisper {engine} {device}")
+            # On the CPU each engine also runs at 8 threads, one per P-core, and keeps the faster run.
+            var = "RAYON_NUM_THREADS" if engine == "kjarni" else "TORCH_THREADS" if engine == "openai-whisper" else "CT2_THREADS"
+            runs = [{**run(py, [f"{HERE}/whisper_worker.py", engine, AUDIO], {**env, **({var: n} if n else {})}), "threads": n or "default"}
+                    for n in ([None, "8"] if device == "cpu" else [None])]
+            good = [r for r in runs if "error" not in r]
+            best = min(good, key=lambda r: r["secs"]) if good else runs[0]
+            add({**best, "kind": "whisper", "engine": engine, "device": device}, f"whisper {engine} {device}")
 
 if "decoders" in ONLY:
     MODELS = [("qwen2.5-0.5b-instruct", "Qwen_Qwen2.5-0.5B-Instruct"), ("llama3.2-1b-instruct", "meta-llama_Llama-3.2-1B-Instruct")]
     for model, local in MODELS:
         d = f"{CACHE}/{local}"
         worker = [f"{HERE}/decoder_worker.py", model, f"{d}/model.gguf", f"{d}/tokenizer.json"]
-        for quantized, weights in [("1", "Q4_K_M"), ("0", "safetensors")]:
-            cpu = [r for t in ["8", "16"] if "error" not in (r := run(CPU_PY, worker, {"RAYON_NUM_THREADS": t, "KJARNI_QUANTIZED": quantized}))]
+        for quantized, weights in [("1", "Q4_K_M"), ("0", "safetensors")] if not ENGINES or "kjarni" in ENGINES else []:
+            if "cpu" not in DEVICES:
+                cpu = None
+            else:
+                cpu = [r for t in ["8", "16"] if "error" not in (r := run(CPU_PY, worker, {"RAYON_NUM_THREADS": t, "KJARNI_QUANTIZED": quantized}))]
             base = dict(kind="decoder", model=model, engine="kjarni", weights=weights)
-            if cpu:
+            if cpu is None:
+                pass
+            elif cpu:
                 pp, tg = max(cpu, key=lambda r: r["prompt_tok_s"]), max(cpu, key=lambda r: r["gen_tok_s"])
                 short = max(r["gen_short_tok_s"] for r in cpu)
                 add({**tg, **base, "device": "cpu", "prompt_tok_s": pp["prompt_tok_s"], "gen_short_tok_s": short, "threads": [pp["threads"], tg["threads"]]}, f"{model} kjarni {weights} cpu")
             else:
                 add({**base, "device": "cpu", "error": "failed at 8 and 16 threads"}, f"{model} kjarni {weights} cpu")
-            add({**run(CPU_PY, worker, {"BENCH_DEVICE": "gpu", "KJARNI_QUANTIZED": quantized}), **base, "device": "gpu"}, f"{model} kjarni {weights} gpu")
-        for device, py in [("cpu", CPU_PY), ("gpu", GPU_PY)]:
-            add({**run(py, [f"{HERE}/torch_decoder_worker.py", model, d], {"BENCH_DEVICE": device}), "kind": "decoder", "model": model, "engine": "torch", "device": device, "weights": "safetensors"}, f"{model} torch {device}")
-        for backend in LLAMA:
+            if "gpu" in DEVICES:
+                add({**run(CPU_PY, worker, {"BENCH_DEVICE": "gpu", "KJARNI_QUANTIZED": quantized}), **base, "device": "gpu"}, f"{model} kjarni {weights} gpu")
+        # PyTorch runs the same safetensors. On the CPU it gets the better of bfloat16,
+        # as stored, and float32, and of 8 and 16 threads, for each figure.
+        for device, py, dtypes, threads in [("cpu", CPU_PY, ["bfloat16", "float32"], ["8", "16"]), ("gpu", GPU_PY, ["bfloat16"], [None])]:
+            if device not in DEVICES or (ENGINES and "torch" not in ENGINES):
+                continue
+            tries = [run(py, [f"{HERE}/torch_decoder_worker.py", model, d],
+                         {"BENCH_DEVICE": device, "TORCH_DTYPE": t, **({"TORCH_THREADS": n} if n else {})})
+                     for t in dtypes for n in threads]
+            good = [r for r in tries if "error" not in r]
+            if good:
+                pp, tg = max(good, key=lambda r: r["prompt_tok_s"]), max(good, key=lambda r: r["gen_tok_s"])
+                short = max(good, key=lambda r: r["gen_short_tok_s"])
+                best = {**tg, "prompt_tok_s": pp["prompt_tok_s"], "gen_short_tok_s": short["gen_short_tok_s"],
+                        "dtype": [pp["dtype"], tg["dtype"]], "threads": [pp["threads"], tg["threads"]],
+                        "tries": [{k: r[k] for k in ("dtype", "threads", "prompt_tok_s", "gen_tok_s", "gen_short_tok_s")} for r in good]}
+            else:
+                best = tries[0]
+            add({**best, "kind": "decoder", "model": model, "engine": "torch", "device": device, "weights": "safetensors"}, f"{model} torch {device}")
+        for backend in [b for b in LLAMA if ("cpu" if b == "cpu" else "gpu") in DEVICES and (not ENGINES or "llama.cpp" in ENGINES)]:
             add(llama_bench(model, f"{d}/model.gguf", backend), f"{model} llama.cpp {backend}")
 
 print("done", flush=True)

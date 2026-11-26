@@ -250,14 +250,22 @@ stage_clip_fixtures() {
     "$py" bench/clip_reference.py "$KJARNI_CLIP_FIXTURES" || return 1
 }
 
+# The CLIP parity tests fail on a fixtures path that is set but missing, to
+# catch a typo. When no fixtures were generated, unset it so they skip instead.
+skip_clip_without_fixtures() {
+    [ -d "$KJARNI_CLIP_FIXTURES" ] || unset KJARNI_CLIP_FIXTURES KJARNI_CLIP_PHOTOS
+}
+
 # Debug: `debug_assert!` is live here
 stage_test_debug() {
+    skip_clip_without_fixtures
     cargo test --workspace --no-fail-fast --features kjarni-models/image-io -- --test-threads=1
 }
 
 # Release: the same tests at usable speed, and the only place release-only
 # behaviour (overflow wrapping, elided bounds checks) can show itself.
 stage_test_release() {
+    skip_clip_without_fixtures
     cargo test --workspace --release --no-fail-fast --features kjarni-models/image-io -- \
         --include-ignored --test-threads=1
 }
