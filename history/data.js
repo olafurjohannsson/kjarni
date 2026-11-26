@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795694226634,
+  "lastUpdate": 1795694812408,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2976,6 +2976,66 @@ window.BENCHMARK_DATA = {
             "value": 50.09,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.008"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f141e29fc3fef8b078d6641ec44b2c60e6b711b3",
+          "message": "Add CONTRIBUTING.md (#155)\n\nHow to build and test, what a pull request needs (a regression test, PyTorch parity, no speed regressions, the CI checks), and where to start.",
+          "timestamp": "2026-11-26T11:42:29Z",
+          "tree_id": "694b4148f69b315538d4810bdbdf950e22179f03",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/f141e29fc3fef8b078d6641ec44b2c60e6b711b3"
+        },
+        "date": 1795694811487,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 657.3,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 0.991"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 61.16,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V45 96-Core Processor; vs previous commit: 1.010"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 525.41,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.943"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 37.04,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.962"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 554.55,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.001"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 38.14,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 0.990"
           }
         ]
       }
