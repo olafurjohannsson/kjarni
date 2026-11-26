@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795510483235,
+  "lastUpdate": 1795694226634,
   "repoUrl": "https://github.com/olafurjohannsson/kjarni",
   "entries": {
     "Benchmark": [
@@ -2916,6 +2916,66 @@ window.BENCHMARK_DATA = {
             "value": 53.27,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.035"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e84beb40fd60fbd8286dfdb537c21c7d5678a3ab",
+          "message": "CLIP fixtures with transformers 5; skip CLIP parity tests without fix… (#139)\n\n* CLIP fixtures with transformers 5; skip CLIP parity tests without fixtures\n\ntransformers 5 returns a model output from get_image_features and\nget_text_features, so indexing it took the hidden states instead of the\nprojected embedding and every parity test failed against a 1-wide\nreference. test-everything.sh said the CLIP parity tests would skip\nwithout a torch Python, but exported a fixtures path that did not exist,\nwhich those tests treat as an error.\n\n* 0.8.2\n\n* Benchmarks: every engine at its best thread count and precision\n\nEach engine on the CPU is now run at its default thread count and at 8,\nand PyTorch in bf16 and f32 on the same safetensors, and the faster run is\nreported. Quantised models are compared only with llama.cpp. All results\nre-measured on one fresh boot; charts, BENCHMARKS.md and the README's\nbenchmark section regenerated from them. The README states the one-machine\nscope.\n\n* Benchmarks: report the fastest load of each engine's runs\n\nThe first run can include reading the model from disk, so the load time\nfrom the run with the fastest batch was sometimes a cold one. Loads\nre-timed warm, three times each, keeping the faster figure.",
+          "timestamp": "2026-11-26T11:37:57Z",
+          "tree_id": "3a18c06a06e6cbea034ea24d0d7d06bba246082a",
+          "url": "https://github.com/olafurjohannsson/kjarni/commit/e84beb40fd60fbd8286dfdb537c21c7d5678a3ab"
+        },
+        "date": 1795694226042,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 603.99,
+            "unit": "sentences/s",
+            "extra": "CPU: INTEL(R) XEON(R) PLATINUM 8573C; vs previous commit: 1.000"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 34.57,
+            "unit": "tokens/s",
+            "extra": "CPU: INTEL(R) XEON(R) PLATINUM 8573C; vs previous commit: 1.013"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 366.88,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.009"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 20.04,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.021"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 903.96,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.020"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 50.09,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.008"
           }
         ]
       }
