@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/kjarni-ai/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
 </p>
 
 # Kjarni for Python
@@ -285,17 +285,17 @@ and error code.
 
 An i7-13700 and an RTX A2000 12 GB, each engine in its own process. On this NVIDIA card, engines using CUDA are well ahead of Kjarni's WebGPU; what WebGPU gives you is the same code on NVIDIA, AMD, Intel and Apple hardware with nothing to install.
 
-![Embeddings per second on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
+![Embeddings per second on the CPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
 
-![Embeddings per second on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
+![Embeddings per second on the GPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
 
-![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-whisper-light.png)
+![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-whisper-light.png)
 
-![Text generation on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
+![Text generation on the CPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
 
-![Text generation on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
+![Text generation on the GPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
 
-Calling through Python costs nothing measurable: one short MiniLM embedding takes 3.49 ms, against 3.44 ms calling the C ABI directly, a difference within run-to-run noise. Method and every number: [BENCHMARKS.md](https://github.com/olafurjohannsson/kjarni/blob/main/bench/BENCHMARKS.md).
+Calling through Python costs nothing measurable: one short MiniLM embedding takes 3.49 ms, against 3.44 ms calling the C ABI directly, a difference within run-to-run noise. Method and every number: [BENCHMARKS.md](https://github.com/kjarni-ai/kjarni/blob/main/bench/BENCHMARKS.md).
 
 ## The same engine elsewhere
 
@@ -303,10 +303,10 @@ There is one Rust engine behind all of these, and one set of kernels. The number
 this page are the numbers the other packages print.
 
 - [kjarni.ai](https://kjarni.ai) - documentation and worked examples
-- [GitHub](https://github.com/olafurjohannsson/kjarni) - source, issues, releases
+- [GitHub](https://github.com/kjarni-ai/kjarni) - source, issues, releases
 - [NuGet](https://www.nuget.org/packages/Kjarni) - the same engine from C#
 - [npm](https://www.npmjs.com/package/kjarni-wasm) - the same engine in the browser, via WebAssembly
-- [Go module](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go) - the same engine from Go
+- [Go module](https://pkg.go.dev/github.com/kjarni-ai/kjarni-go) - the same engine from Go
 - [Semantic Search in C++](https://kjarni.ai/blog/cppinference/) - the C ABI this package wraps, used directly
 - [Why I Built a Native ML Inference Engine in Rust](https://kjarni.ai/blog/nativeinference/) - what is underneath all of it
 - [ML from the Command Line](https://kjarni.ai/blog/cli/) - the same models as a UNIX tool

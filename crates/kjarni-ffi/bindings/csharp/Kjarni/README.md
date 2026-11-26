@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/kjarni-ai/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
 </p>
 
 # Kjarni
@@ -283,17 +283,17 @@ The native library links only against glibc, so it runs on anything from a moder
 
 An i7-13700 and an RTX A2000 12 GB, each engine in its own process. On this NVIDIA card, engines using CUDA are well ahead of Kjarni's WebGPU; what WebGPU gives you is the same code on NVIDIA, AMD, Intel and Apple hardware with nothing to install.
 
-![Embeddings per second on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
+![Embeddings per second on the CPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-embeddings-cpu-light.png)
 
-![Embeddings per second on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
+![Embeddings per second on the GPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-embeddings-gpu-light.png)
 
-![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-whisper-light.png)
+![Speech to text speed on CPU and GPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-whisper-light.png)
 
-![Text generation on the CPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
+![Text generation on the CPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-generation-cpu-light.png)
 
-![Text generation on the GPU](https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
+![Text generation on the GPU](https://raw.githubusercontent.com/kjarni-ai/kjarni/main/bench/charts/matrix-generation-gpu-light.png)
 
-Calling through .NET costs nothing measurable: one short MiniLM embedding takes 3.47 ms, against 3.44 ms calling the C ABI directly, a difference within run-to-run noise. Method and every number: [BENCHMARKS.md](https://github.com/olafurjohannsson/kjarni/blob/main/bench/BENCHMARKS.md).
+Calling through .NET costs nothing measurable: one short MiniLM embedding takes 3.47 ms, against 3.44 ms calling the C ABI directly, a difference within run-to-run noise. Method and every number: [BENCHMARKS.md](https://github.com/kjarni-ai/kjarni/blob/main/bench/BENCHMARKS.md).
 
 ## The same engine elsewhere
 
@@ -304,10 +304,10 @@ half of the same product, or want to try it before installing anything:
   in your own browser tab, nothing installed
 - **[kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)** on npm: the same
   engine compiled to WebAssembly, running in a Web Worker
-- **[Go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)**,
-  **[C++](https://github.com/olafurjohannsson/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
+- **[Go](https://pkg.go.dev/github.com/kjarni-ai/kjarni-go)**,
+  **[C++](https://github.com/kjarni-ai/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
   and a CLI that reads stdin and writes JSON
-- **[Source and issues](https://github.com/olafurjohannsson/kjarni)**
+- **[Source and issues](https://github.com/kjarni-ai/kjarni)**
 
 - **[Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI)**:
   the Microsoft.Extensions.AI provider

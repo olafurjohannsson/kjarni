@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	kjarni "github.com/olafurjohannsson/kjarni-go"
+	kjarni "github.com/kjarni-ai/kjarni-go"
 )
 
 func main() {

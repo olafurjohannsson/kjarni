@@ -3,13 +3,13 @@
 ## Quickstart
 
 Four commands, no build system and no package manager. Linux x86_64 shown; the
-[releases page](https://github.com/olafurjohannsson/kjarni/releases/latest) has
+[releases page](https://github.com/kjarni-ai/kjarni/releases/latest) has
 macOS and Windows builds.
 
 ```bash
 mkdir kjarni-quickstart && cd kjarni-quickstart
-curl -sL https://github.com/olafurjohannsson/kjarni/releases/latest/download/kjarni-x86_64-linux.tar.gz | tar xz
-curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-ffi/examples/cpp/hello.cpp
+curl -sL https://github.com/kjarni-ai/kjarni/releases/latest/download/kjarni-x86_64-linux.tar.gz | tar xz
+curl -sO https://raw.githubusercontent.com/kjarni-ai/kjarni/main/crates/kjarni-ffi/examples/cpp/hello.cpp
 g++ -std=c++23 hello.cpp -I. -L. -lkjarni_ffi -Wl,-rpath,'$ORIGIN' -o hello && ./hello
 ```
 
@@ -61,7 +61,7 @@ that every language binding in this project is built on, and it works from C++11
 the RAII and the `std::expected` returns, which is about fifteen lines to put back:
 
 ```bash
-curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-ffi/examples/cpp/hello_c_api.cpp
+curl -sO https://raw.githubusercontent.com/kjarni-ai/kjarni/main/crates/kjarni-ffi/examples/cpp/hello_c_api.cpp
 g++ -std=c++11 hello_c_api.cpp -I. -L. -lkjarni_ffi -Wl,-rpath,'$ORIGIN' -o hello_c_api && ./hello_c_api
 ```
 
@@ -217,7 +217,7 @@ Image search needs a library built with its default features; define
 ## Getting the library
 
 Download the archive for your platform from
-[releases](https://github.com/olafurjohannsson/kjarni/releases), or build it:
+[releases](https://github.com/kjarni-ai/kjarni/releases), or build it:
 
 ```bash
 cargo build --release -p kjarni-ffi     # target/release/libkjarni_ffi.so

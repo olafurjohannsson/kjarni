@@ -8,11 +8,11 @@
 // The same engine ships for other runtimes: Kjarni on NuGet for C#, kjarni-wasm
 // on npm for the browser, and a command line binary. Documentation and guides
 // live at https://kjarni.ai and the source is at
-// https://github.com/olafurjohannsson/kjarni
+// https://github.com/kjarni-ai/kjarni
 //
 // # Getting started
 //
-//	import "github.com/olafurjohannsson/kjarni-go"
+//	import "github.com/kjarni-ai/kjarni-go"
 //
 //	emb, err := kjarni.NewEmbedder("minilm-l6-v2")
 //	if err != nil {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	kjarni "github.com/olafurjohannsson/kjarni-go"
+	kjarni "github.com/kjarni-ai/kjarni-go"
 )
 
 // rerank documents by relevance to a query using a cross-encoder model.

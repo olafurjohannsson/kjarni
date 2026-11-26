@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	kjarni "github.com/olafurjohannsson/kjarni-go"
+	kjarni "github.com/kjarni-ai/kjarni-go"
 )
 
 const (

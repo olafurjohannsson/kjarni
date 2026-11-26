@@ -25,7 +25,7 @@ edition = "2024"
 # The oldest Rust that builds every crate here; wgpu needs 1.90.
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/olafurjohannsson/kjarni"
+repository = "https://github.com/kjarni-ai/kjarni"
 homepage = "https://kjarni.ai"
 documentation = "https://docs.rs/kjarni"
 keywords = ["inference", "llm", "embeddings", "machine-learning", "transformers"]

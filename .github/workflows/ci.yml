@@ -908,7 +908,7 @@ jobs:
       # Go users raised. Attesting each one lets anyone check that a library was
       # built by this workflow from this commit, not uploaded by hand:
       #
-      #   gh attestation verify libkjarni_ffi.so --repo olafurjohannsson/kjarni
+      #   gh attestation verify libkjarni_ffi.so --repo kjarni-ai/kjarni
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
@@ -1185,7 +1185,7 @@ jobs:
           GO_REPO_TOKEN: ${{ secrets.GO_REPO_PAT }}
         run: |
           DEST=$(mktemp -d)
-          git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-go.git "$DEST"
+          git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/kjarni-ai/kjarni-go.git "$DEST"
           # Mirror the module rather than copy over it. Copying left lib_unix.go and
           # lib_windows.go in place after they became dl_unix.go and dl_windows.go,
           # and each pair declares openLibrary, so v0.4.3 and v0.4.4 did not build

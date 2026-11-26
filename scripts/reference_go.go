@@ -65,7 +65,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	pkg := doc.New(pkgs["kjarni"], "github.com/olafurjohannsson/kjarni-go", 0)
+	pkg := doc.New(pkgs["kjarni"], "github.com/kjarni-ai/kjarni-go", 0)
 
 	out.WriteString("# kjarni-go\n\n")
 	// Package docs carry their own "# Heading"s, which sit under the page's sections.

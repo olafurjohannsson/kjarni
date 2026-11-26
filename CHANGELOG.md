@@ -7,6 +7,9 @@
   it no longer used: Qwen3.5-9B ran out of a 12 GB card at 8,192 tokens. It
   now runs that prompt with a peak of 11 GB, and smaller models use less GPU
   memory as well, at the same speed.
+- **Kjarni moved to the kjarni-ai organisation on GitHub.** The Go module is
+  now `github.com/kjarni-ai/kjarni-go`: change the import path to upgrade.
+  Old links to `olafurjohannsson/kjarni` redirect.
 
 ## 0.8.1
 

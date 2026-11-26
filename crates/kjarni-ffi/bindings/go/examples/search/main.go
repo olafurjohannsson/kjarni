@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	kjarni "github.com/olafurjohannsson/kjarni-go"
+	kjarni "github.com/kjarni-ai/kjarni-go"
 )
 
 // build a search index from text files and query it three ways.

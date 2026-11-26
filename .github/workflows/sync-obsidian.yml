@@ -57,11 +57,11 @@ jobs:
           OBSIDIAN_REPO_TOKEN: ${{ secrets.OBSIDIAN_REPO_PAT }}
         run: |
           DEST=$(mktemp -d)
-          git clone https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-obsidian.git "$DEST" 2>/dev/null || {
+          git clone https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/kjarni-ai/kjarni-obsidian.git "$DEST" 2>/dev/null || {
             mkdir -p "$DEST"
             cd "$DEST"
             git init
-            git remote add origin https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-obsidian.git
+            git remote add origin https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/kjarni-ai/kjarni-obsidian.git
             git checkout -b main
           }
           cd "$DEST"
@@ -84,7 +84,7 @@ jobs:
         run: |
           # BRAT and Obsidian community installer expect individual assets
           gh release create "${{ github.event.release.tag_name }}" \
-            --repo olafurjohannsson/kjarni-obsidian \
+            --repo kjarni-ai/kjarni-obsidian \
             --title "${{ github.event.release.tag_name }}" \
             --generate-notes \
             plugin-push/main.js \

@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/kjarni-ai/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
 </p>
 
 # Kjarni.Extensions.AI
@@ -211,10 +211,10 @@ half of the same product, or want to try it before installing anything:
   in your own browser tab, nothing installed
 - **[kjarni-wasm](https://www.npmjs.com/package/kjarni-wasm)** on npm: the same
   engine compiled to WebAssembly, running in a Web Worker
-- **[Go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)**,
-  **[C++](https://github.com/olafurjohannsson/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
+- **[Go](https://pkg.go.dev/github.com/kjarni-ai/kjarni-go)**,
+  **[C++](https://github.com/kjarni-ai/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
   and a CLI that reads stdin and writes JSON
-- **[Source and issues](https://github.com/olafurjohannsson/kjarni)**
+- **[Source and issues](https://github.com/kjarni-ai/kjarni)**
 
 - **[Kjarni](https://www.nuget.org/packages/Kjarni)**: the underlying package, with
   indexing, search and the direct API this one wraps

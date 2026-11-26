@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/kjarni-ai/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
 </p>
 
 # kjarni-wasm
@@ -29,7 +29,7 @@ One file, nothing installed. Save it as `quickstart.html`, serve the directory,
 open it: a real model downloads and ranks three sentences by meaning.
 
 ```bash
-curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-wasm/examples/quickstart.html
+curl -sO https://raw.githubusercontent.com/kjarni-ai/kjarni/main/crates/kjarni-wasm/examples/quickstart.html
 python3 -m http.server 8000
 # then open http://localhost:8000/quickstart.html
 ```
@@ -225,13 +225,13 @@ you need the server half of the same product:
 - **[Kjarni](https://www.nuget.org/packages/Kjarni)** and
   **[Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI)**
   on NuGet for C#, including `IEmbeddingGenerator` and `IChatClient`
-- **[Go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)**,
-  **[C++](https://github.com/olafurjohannsson/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
+- **[Go](https://pkg.go.dev/github.com/kjarni-ai/kjarni-go)**,
+  **[C++](https://github.com/kjarni-ai/kjarni/tree/main/crates/kjarni-ffi/examples/cpp)**
   and a CLI that reads stdin and writes JSON
-- **[Source and issues](https://github.com/olafurjohannsson/kjarni)**
+- **[Source and issues](https://github.com/kjarni-ai/kjarni)**
 
 ## Making your own `.kjq`
 
-See [the format guide](https://github.com/olafurjohannsson/kjarni/blob/main/crates/kjarni-wasm/scripts/README.md). Any BERT-family encoder,
+See [the format guide](https://github.com/kjarni-ai/kjarni/blob/main/crates/kjarni-wasm/scripts/README.md). Any BERT-family encoder,
 cross-encoder, classifier or small decoder from Hugging Face converts with one
 script.

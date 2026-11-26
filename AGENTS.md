@@ -130,4 +130,4 @@ kjarni classify -q --format json "$TEXT" | jq -r '.label'
   with an error that gives the size needed, and dropping `--gpu` runs it on the CPU.
 - Model names come from `kjarni model list`; that is the authoritative registry.
 
-MIT licensed. Source: https://github.com/olafurjohannsson/kjarni
+MIT licensed. Source: https://github.com/kjarni-ai/kjarni
