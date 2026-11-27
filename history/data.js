@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795775841193,
+  "lastUpdate": 1795778659491,
   "repoUrl": "https://github.com/kjarni-ai/kjarni",
   "entries": {
     "Benchmark": [
@@ -3216,6 +3216,66 @@ window.BENCHMARK_DATA = {
             "value": 25.95,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.016"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3039b76b87659f672efb0d61c3c0c7858ae19612",
+          "message": "Registry metadata: PyPI keywords and Beta status, more search terms (#160)\n\n* Registry metadata: PyPI keywords and Beta status, more NuGet, npm and crates.io search terms\n\n* glama.json: claim the MCP server on Glama",
+          "timestamp": "2026-11-27T11:05:14Z",
+          "tree_id": "604b17c3fc08110d606240247cd40202f2bd1cca",
+          "url": "https://github.com/kjarni-ai/kjarni/commit/3039b76b87659f672efb0d61c3c0c7858ae19612"
+        },
+        "date": 1795778658803,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 512.22,
+            "unit": "sentences/s",
+            "extra": "CPU: INTEL(R) XEON(R) PLATINUM 8573C; vs previous commit: 0.999"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 30.38,
+            "unit": "tokens/s",
+            "extra": "CPU: INTEL(R) XEON(R) PLATINUM 8573C; vs previous commit: 0.998"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 394.21,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.916"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 23.11,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.871"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 1006.31,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.000"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 54.38,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 0.972"
           }
         ]
       }
