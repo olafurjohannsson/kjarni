@@ -74,6 +74,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/conversations/{id}/compact", post(compact))
         .route("/api/models", get(list_models))
         .route("/api/models/current", put(switch_model))
+        .route("/api/thinking", put(set_thinking))
         .route("/api/memory", get(list_memory).post(remember))
         .route("/api/memory/{id}", delete(forget))
         .route("/api/schedules", get(list_schedules).post(create_schedule))
@@ -441,7 +442,21 @@ async fn list_models(State(state): State<AppState>) -> Json<serde_json::Value> {
         "phase": models.phase(),
         "downloaded_bytes": models.download_progress(),
         "choices": choices,
+        "thinking": models.thinking(),
     }))
+}
+
+#[derive(Deserialize)]
+struct ThinkingBody {
+    thinking: bool,
+}
+
+/// Turns reasoning before answering on or off, from the next turn.
+async fn set_thinking(State(state): State<AppState>, Json(body): Json<ThinkingBody>) -> Response {
+    match state.models.set_thinking(body.thinking) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => internal(e),
+    }
 }
 
 #[derive(Deserialize)]

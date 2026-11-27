@@ -599,6 +599,11 @@ pub enum Commands {
         #[arg(long, default_value_t = 16)]
         max_steps: usize,
 
+        /// Let the model reason before it answers, for models that can, such
+        /// as Qwen 3.5. The reasoning is shown dimmed.
+        #[arg(long)]
+        think: bool,
+
         /// Suppress the banner and progress output
         #[arg(short, long)]
         quiet: bool,
@@ -622,7 +627,7 @@ pub enum Commands {
         temperature: f32,
 
         /// Max tokens per response
-        #[arg(short = 'n', long, default_value_t = 512)]
+        #[arg(short = 'n', long, default_value_t = 4096)]
         max_tokens: usize,
 
         /// Run on the GPU
@@ -745,6 +750,11 @@ pub enum DaemonCommands {
         #[arg(short, long)]
         model: Option<String>,
 
+        /// Load the chat model from a local file or folder instead of the
+        /// registry, such as a GGUF beside its tokenizer and chat template
+        #[arg(long, conflicts_with = "model")]
+        model_path: Option<String>,
+
         /// Run the model on the GPU
         #[arg(long)]
         gpu: bool,
@@ -752,6 +762,11 @@ pub enum DaemonCommands {
         /// Load full-precision safetensors instead of the Q4_K_M GGUF
         #[arg(long)]
         full_precision: bool,
+
+        /// Let the model reason before it answers. The web UI's settings turn
+        /// it on and off too; this turns it on for this run
+        #[arg(long)]
+        think: bool,
 
         /// Port to listen on
         #[arg(short, long, default_value_t = DEFAULT_DAEMON_PORT)]
@@ -1369,7 +1384,7 @@ mod tests {
                 assert_eq!(model, DEFAULT_CHAT_MODEL);
                 assert!(system.is_none());
                 assert!((temperature - 0.7).abs() < 0.001);
-                assert_eq!(max_tokens, 512);
+                assert_eq!(max_tokens, 4096);
                 assert!(!gpu);
                 assert!(!quiet);
             }

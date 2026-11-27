@@ -45,6 +45,9 @@ pub struct AgentConfig {
     /// Notes on the project in that folder, such as
     /// [`ProjectNotes::text`](super::ProjectNotes::text).
     pub project_notes: Option<String>,
+    /// Whether a model that can reason before answering does; `None` leaves
+    /// it to the model's chat template, which in Kjarni means off.
+    pub thinking: Option<bool>,
 }
 
 impl Default for AgentConfig {
@@ -58,6 +61,7 @@ impl Default for AgentConfig {
             facts_in_prompt: 20,
             workdir: None,
             project_notes: None,
+            thinking: None,
         }
     }
 }
@@ -241,6 +245,11 @@ impl Agent {
         self.read_facts();
     }
 
+    /// Turns reasoning before answering on or off from the next reply.
+    pub fn set_thinking(&mut self, thinking: Option<bool>) {
+        self.config.thinking = thinking;
+    }
+
     /// The system prompt: instructions, where and when, project notes, saved
     /// facts, and the summary of earlier messages.
     pub fn system_prompt(&self) -> String {
@@ -284,6 +293,7 @@ impl Agent {
         // Earlier turns render as they did when they were the latest, so the
         // next prompt starts with the last one and its cache is reused.
         c.set_preserve_thinking(true);
+        c.set_thinking(self.config.thinking);
         for m in &self.messages {
             c.push(m.clone());
         }
@@ -388,6 +398,12 @@ impl Agent {
         prompt: String,
         events: &mut dyn AgentEvents,
     ) -> anyhow::Result<String> {
+        // A template that opens the `<think>` block in the prompt leaves the
+        // reply without it; front ends are shown it, so they can tell the
+        // reasoning from the answer while it streams.
+        if prompt.trim_end().ends_with("<think>") {
+            events.text("<think>\n").await;
+        }
         let mut stream = self.model.stream(prompt).await?;
         let mut text = String::new();
         let mut shown = 0;

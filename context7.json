@@ -31,5 +31,7 @@
     "Browser: `npm i kjarni-wasm`. It runs inference in a Web Worker and loads `.kjq` model files (config, tokenizer and int8 weights in one file).",
     "Pass device=\"gpu\" (or the binding's equivalent) to run on the GPU through WebGPU: Vulkan, DirectX 12 or Metal, with no CUDA install. The default is the CPU.",
     "Kjarni runs inference only; it does not train or fine-tune models."
-  ]
+  ],
+  "url": "https://context7.com/kjarni-ai/kjarni",
+  "public_key": "pk_wfwim7uP3zUIozlGpl026"
 }

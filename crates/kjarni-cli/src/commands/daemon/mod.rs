@@ -25,6 +25,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -77,8 +78,10 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
     match action {
         DaemonCommands::Run {
             model,
+            model_path,
             gpu,
             full_precision,
+            think,
             port,
             listen,
             allow_host,
@@ -95,8 +98,10 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
             }
             serve_daemon(RunOptions {
                 model,
+                model_path,
                 gpu,
                 full_precision,
+                think,
                 port,
                 listen,
                 allow_hosts,
@@ -151,8 +156,12 @@ pub async fn run(action: DaemonCommands) -> Result<()> {
 struct RunOptions {
     /// `--model`; without it, the saved choice.
     model: Option<String>,
+    /// `--model-path`: a local file or folder, instead of a registry model.
+    model_path: Option<String>,
     gpu: bool,
     full_precision: bool,
+    /// `--think`: reasoning on for this run, whatever the settings say.
+    think: bool,
     port: u16,
     listen: Option<String>,
     /// Names besides loopback the daemon answers to.
@@ -226,7 +235,19 @@ pub fn router(state: Arc<DaemonState>, serve_state: Arc<serve::AppState>, log: b
 }
 
 async fn load_chat(model: &str, gpu: bool, full_precision: bool) -> Result<Chat> {
-    let _ = crate::commands::util::resolve_model(model, Some("decoder"))?;
+    load_chat_from(model, None, gpu, full_precision).await
+}
+
+/// Loads `model` from the registry, or from `path` when given.
+async fn load_chat_from(
+    model: &str,
+    path: Option<&str>,
+    gpu: bool,
+    full_precision: bool,
+) -> Result<Chat> {
+    if path.is_none() {
+        let _ = crate::commands::util::resolve_model(model, Some("decoder"))?;
+    }
     let mut builder = Chat::builder(model)
         .temperature(0.7)
         .max_tokens(AGENT_MAX_TOKENS)
@@ -235,12 +256,17 @@ async fn load_chat(model: &str, gpu: bool, full_precision: bool) -> Result<Chat>
         )
         .quiet();
     if gpu {
-        if let Some(mt) = kjarni::ModelType::from_cli_name(model) {
+        if path.is_none()
+            && let Some(mt) = kjarni::ModelType::from_cli_name(model)
+        {
             crate::commands::util::check_gpu_capacity(mt, !full_precision)?;
         }
         builder = builder.gpu();
     } else {
         builder = builder.cpu();
+    }
+    if let Some(path) = path {
+        builder = builder.model_path(path);
     }
     if !full_precision {
         builder = builder.with_load_config(|c| c.prefer_gguf(true));
@@ -248,7 +274,7 @@ async fn load_chat(model: &str, gpu: bool, full_precision: bool) -> Result<Chat>
     let chat = builder
         .build()
         .await
-        .map_err(|e| anyhow!("failed to load {model}: {e}"))?;
+        .map_err(|e| anyhow!("failed to load {}: {e}", path.unwrap_or(model)))?;
     if !chat.supports_tools() {
         bail!(
             "{} has no tool-calling format. Use a Qwen 3.5 model, such as qwen3.5-4b.",
@@ -347,10 +373,29 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
         })?;
 
     let settings = model::settings_path(&dir);
-    let model = model::starting_model(options.model.as_deref(), &model::Settings::load(&settings));
-    download_missing(&model, !options.full_precision, !options.no_memory).await?;
-    eprintln!("Loading {model}...");
-    let chat = load_chat(&model, options.gpu, options.full_precision).await?;
+    let saved = model::Settings::load(&settings);
+    let thinking = Arc::new(AtomicBool::new(options.think || saved.thinking));
+    let chat = match &options.model_path {
+        Some(path) => {
+            if !options.no_memory {
+                download_missing(MEMORY_MODEL, false, false).await?;
+            }
+            eprintln!("Loading {path}...");
+            load_chat_from(
+                kjarni_cli::DEFAULT_AGENT_MODEL,
+                Some(path),
+                options.gpu,
+                options.full_precision,
+            )
+            .await?
+        }
+        None => {
+            let model = model::starting_model(options.model.as_deref(), &saved);
+            download_missing(&model, !options.full_precision, !options.no_memory).await?;
+            eprintln!("Loading {model}...");
+            load_chat(&model, options.gpu, options.full_precision).await?
+        }
+    };
     let model = chat.model_name().to_string();
     let serve_state = Arc::new(serve::AppState {
         models: serve::Models::new(
@@ -373,7 +418,8 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
         }),
         model.clone(),
         settings,
-        options.model.clone(),
+        options.model.clone().or_else(|| options.model_path.clone()),
+        thinking.clone(),
     ));
 
     let agent_home = kjarni::agent::data_dir();
@@ -399,6 +445,7 @@ async fn serve_daemon(options: RunOptions) -> Result<()> {
                 workdir: workdir.clone(),
                 max_steps: options.max_steps,
                 approve_all: options.yes,
+                thinking,
             },
             agent_home.join("sessions"),
         )),
@@ -701,10 +748,10 @@ async fn install(options: InstallOptions) -> Result<()> {
     download_missing(&model, !options.full_precision, !options.no_memory).await?;
 
     auth::load_or_create_token(&dir.join("token"))?;
-    model::Settings {
-        model: Some(model.clone()),
-    }
-    .save(&model::settings_path(&dir))?;
+    let settings = model::settings_path(&dir);
+    let mut saved = model::Settings::load(&settings);
+    saved.model = Some(model.clone());
+    saved.save(&settings)?;
     let workdir = working_folder(options.dir.as_deref())?;
     let log = logs::log_path(&dir);
     if let Some(logs_dir) = log.parent() {
