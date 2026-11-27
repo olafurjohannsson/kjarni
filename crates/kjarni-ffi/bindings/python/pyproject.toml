@@ -13,9 +13,22 @@ requires-python = ">=3.8"
 # falls back to a list of lists when it is absent.
 dependencies = []
 readme = "README.md"
+keywords = [
+    "embeddings", "sentence-transformers", "reranking", "cross-encoder",
+    "semantic-search", "rag", "classification", "llm", "speech-to-text",
+    "whisper", "transformers", "inference", "local", "offline",
+]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
     "License :: OSI Approved :: MIT License",
     "License :: OSI Approved :: Apache Software License",
 ]

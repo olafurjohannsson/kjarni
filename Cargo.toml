@@ -28,7 +28,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/kjarni-ai/kjarni"
 homepage = "https://kjarni.ai"
 documentation = "https://docs.rs/kjarni"
-keywords = ["inference", "llm", "embeddings", "machine-learning", "transformers"]
+keywords = ["inference", "llm", "embeddings", "reranking", "transformers"]
 categories = ["science", "text-processing", "command-line-utilities"]
 
 

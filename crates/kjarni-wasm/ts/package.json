@@ -41,6 +41,12 @@
     "bert",
     "rag",
     "semantic-search",
-    "web-worker"
+    "web-worker",
+    "reranking",
+    "transformers",
+    "sentence-transformers",
+    "webgpu",
+    "inference",
+    "llm"
   ]
 }
