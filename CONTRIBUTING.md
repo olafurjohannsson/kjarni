@@ -1,8 +1,8 @@
 # Contributing to Kjarni
 
 Thanks for helping. The easiest places to start are the issues labelled
-[`good first issue`](https://github.com/olafurjohannsson/kjarni/labels/good%20first%20issue),
-and adding a model: [#140](https://github.com/olafurjohannsson/kjarni/issues/140)
+[`good first issue`](https://github.com/kjarni-ai/kjarni/labels/good%20first%20issue),
+and adding a model: [#140](https://github.com/kjarni-ai/kjarni/issues/140)
 walks through it.
 
 ## Before you start
@@ -56,7 +56,7 @@ script runs them with `--include-ignored`.
 Numbers in the README and `bench/BENCHMARKS.md` come from `bench/compare/`. When you
 quote a comparison, both engines run the same weights at their best settings, and
 the machine is named. Results from other hardware are welcome:
-[#153](https://github.com/olafurjohannsson/kjarni/issues/153).
+[#153](https://github.com/kjarni-ai/kjarni/issues/153).
 
 ## License
 

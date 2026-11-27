@@ -55,7 +55,7 @@ jobs:
           GO_REPO_TOKEN: ${{ secrets.GO_REPO_PAT }}
         run: |
           DEST=$(mktemp -d)
-          git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-go.git "$DEST"
+          git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/kjarni-ai/kjarni-go.git "$DEST"
           cd "$DEST"
 
           # Mirror the Go files, examples and libraries, so a file removed or

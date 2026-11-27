@@ -1,6 +1,6 @@
 # kjarni-search
 
-Search primitives for [Kjarni](https://github.com/olafurjohannsson/kjarni), a
+Search primitives for [Kjarni](https://github.com/kjarni-ai/kjarni), a
 transformer inference library: a BM25 keyword index (`Bm25Index`), an exact vector
 store (`VectorStore`), and hybrid search that combines the two by reciprocal rank
 fusion.

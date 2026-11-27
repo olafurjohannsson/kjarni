@@ -266,7 +266,7 @@ def c_header(header: str, out_path: str) -> None:
     out = [
         "# Overview\n\n",
         "`kjarni.h` is the whole C API, and each [release archive]"
-        "(https://github.com/olafurjohannsson/kjarni/releases) ships it with the shared "
+        "(https://github.com/kjarni-ai/kjarni/releases) ships it with the shared "
         "library. Fallible functions return a `KjarniErrorCode`; "
         "`kjarni_last_error_message` describes the last failure on the calling thread. "
         "Anything the library allocates has a matching `_free` function.\n\n",

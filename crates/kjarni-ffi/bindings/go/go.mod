@@ -1,4 +1,4 @@
-module github.com/olafurjohannsson/kjarni-go
+module github.com/kjarni-ai/kjarni-go
 
 go 1.21
 

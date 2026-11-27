@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="Kjarni: run transformer models inside your program" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/kjarni-ai/kjarni/main/assets/kjarni-banner.png" alt="Kjarni: run transformer models inside your program" width="600"></a>
 </p>
 
 # Kjarni
@@ -7,8 +7,8 @@
 [![NuGet](https://img.shields.io/nuget/v/Kjarni?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Kjarni)
 [![PyPI](https://img.shields.io/pypi/v/kjarni?logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/kjarni/)
 [![Crates.io](https://img.shields.io/crates/v/kjarni?logo=rust&label=crates.io)](https://crates.io/crates/kjarni)
-[![Go Reference](https://pkg.go.dev/badge/github.com/olafurjohannsson/kjarni-go.svg)](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)
-[![CI](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/kjarni-ai/kjarni-go.svg)](https://pkg.go.dev/github.com/kjarni-ai/kjarni-go)
+[![CI](https://github.com/kjarni-ai/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/kjarni-ai/kjarni/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 **Run transformer models inside your program, in any language. Same output as PyTorch.**
@@ -48,7 +48,7 @@ Console.WriteLine(embedder.Similarity("doctor", "physician"));   // 0.8598
 
 ```bash
 dotnet add package Kjarni                             # C# / .NET
-go get github.com/olafurjohannsson/kjarni-go@latest   # Go
+go get github.com/kjarni-ai/kjarni-go@latest   # Go
 ```
 
 [Every language below](#install), including C++ and the browser.
@@ -67,10 +67,10 @@ go get github.com/olafurjohannsson/kjarni-go@latest   # Go
 dotnet add package Kjarni
 ```
 
-**Go** — [pkg.go.dev/github.com/olafurjohannsson/kjarni-go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)
+**Go** — [pkg.go.dev/github.com/kjarni-ai/kjarni-go](https://pkg.go.dev/github.com/kjarni-ai/kjarni-go)
 
 ```bash
-go get github.com/olafurjohannsson/kjarni-go@latest
+go get github.com/kjarni-ai/kjarni-go@latest
 ```
 
 **CLI**
@@ -101,8 +101,8 @@ cargo add kjarni
 
 ```bash
 mkdir kjarni-quickstart && cd kjarni-quickstart
-curl -sL https://github.com/olafurjohannsson/kjarni/releases/latest/download/kjarni-x86_64-linux.tar.gz | tar xz
-curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-ffi/examples/cpp/hello.cpp
+curl -sL https://github.com/kjarni-ai/kjarni/releases/latest/download/kjarni-x86_64-linux.tar.gz | tar xz
+curl -sO https://raw.githubusercontent.com/kjarni-ai/kjarni/main/crates/kjarni-ffi/examples/cpp/hello.cpp
 g++ -std=c++23 hello.cpp -I. -L. -lkjarni_ffi -Wl,-rpath,'$ORIGIN' -o hello && ./hello
 ```
 
@@ -113,7 +113,7 @@ unrelated: -0.0630
 
 The archive holds the shared library, `kjarni.h` (the C ABI) and `kjarni.hpp` (a
 header-only C++23 wrapper with RAII handles and `std::expected` errors). macOS and
-Windows builds are on the same [releases](https://github.com/olafurjohannsson/kjarni/releases)
+Windows builds are on the same [releases](https://github.com/kjarni-ai/kjarni/releases)
 page; see [the C++ guide](crates/kjarni-ffi/examples/cpp/README.md) for those and for
 classification, reranking and chat.
 
@@ -140,7 +140,7 @@ Nothing installed at all: one file that downloads a model and ranks sentences by
 meaning in your browser.
 
 ```bash
-curl -sO https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/crates/kjarni-wasm/examples/quickstart.html
+curl -sO https://raw.githubusercontent.com/kjarni-ai/kjarni/main/crates/kjarni-wasm/examples/quickstart.html
 python3 -m http.server 8000    # then open http://localhost:8000/quickstart.html
 ```
 
@@ -149,7 +149,7 @@ no build step. See [the browser examples](crates/kjarni-wasm/examples) for searc
 classification and chat, and [the package guide](crates/kjarni-wasm/ts/README.md)
 for the `Kjarni` wrapper that moves inference off the main thread.
 
-The package runs inference in a Web Worker, so loading a model or generating a reply never freezes the page. The raw wasm-bindgen bundle is also in `kjarni-wasm.tar.gz` on [releases](https://github.com/olafurjohannsson/kjarni/releases) if you would rather drive it yourself.
+The package runs inference in a Web Worker, so loading a model or generating a reply never freezes the page. The raw wasm-bindgen bundle is also in `kjarni-wasm.tar.gz` on [releases](https://github.com/kjarni-ai/kjarni/releases) if you would rather drive it yourself.
 
 Models for the browser are packed as `.kjq`, a single file holding config, tokenizer and int8 weights. See [the format guide](crates/kjarni-wasm/scripts/README.md) for how to make your own.
 
@@ -542,7 +542,7 @@ every release also carries a `SHA256SUMS` file and a signed build-provenance
 attestation for each library, so you can check where a binary came from:
 
 ```bash
-gh attestation verify libkjarni_ffi.so --repo olafurjohannsson/kjarni
+gh attestation verify libkjarni_ffi.so --repo kjarni-ai/kjarni
 ```
 
 Or build it yourself: `cargo build --release -p kjarni-ffi` produces the same library.
@@ -553,7 +553,7 @@ For small to medium corpora, yes — the built-in index handles storage, BM25, v
 
 ### Does it run in the browser?
 
-Yes. The encoder path compiles to WebAssembly and runs client-side, which means text never leaves the user's machine — it powers the [Obsidian semantic-search plugin](https://github.com/olafurjohannsson/kjarni), which does all of its indexing and querying locally in the browser runtime.
+Yes. The encoder path compiles to WebAssembly and runs client-side, which means text never leaves the user's machine — it powers the [Obsidian semantic-search plugin](https://github.com/kjarni-ai/kjarni), which does all of its indexing and querying locally in the browser runtime.
 
 ### Which platforms are supported?
 

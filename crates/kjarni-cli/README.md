@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/olafurjohannsson/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
+  <a href="https://kjarni.ai"><img src="https://raw.githubusercontent.com/kjarni-ai/kjarni/main/assets/kjarni-banner.png" alt="kjarni: local AI inference in a single native library" width="600"></a>
 </p>
 
 # Kjarni CLI

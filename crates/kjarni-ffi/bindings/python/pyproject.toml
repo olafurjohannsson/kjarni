@@ -26,9 +26,9 @@ numpy = ["numpy>=1.20"]
 [project.urls]
 Homepage = "https://kjarni.ai"
 Documentation = "https://kjarni.ai"
-Repository = "https://github.com/olafurjohannsson/kjarni"
-Issues = "https://github.com/olafurjohannsson/kjarni/issues"
-Changelog = "https://github.com/olafurjohannsson/kjarni/blob/main/CHANGELOG.md"
+Repository = "https://github.com/kjarni-ai/kjarni"
+Issues = "https://github.com/kjarni-ai/kjarni/issues"
+Changelog = "https://github.com/kjarni-ai/kjarni/blob/main/CHANGELOG.md"
 
 [tool.setuptools.package-data]
 kjarni = ["*.so", "*.dylib", "*.dll", "lib/*"]
