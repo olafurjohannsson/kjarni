@@ -51,6 +51,7 @@ export const api = {
   forget: (id) => request('DELETE', `/api/memory/${id}`),
   models: () => request('GET', '/api/models'),
   switchModel: (model) => request('PUT', '/api/models/current', { model }),
+  setThinking: (thinking) => request('PUT', '/api/thinking', { thinking }),
 };
 
 /** Follows a conversation's events after `after`, calling `onEvent` for

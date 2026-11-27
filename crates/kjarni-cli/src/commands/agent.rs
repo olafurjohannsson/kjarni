@@ -14,6 +14,8 @@ use kjarni::agent::{
     ToolOutcome, data_dir, tools,
 };
 use kjarni::chat::Chat;
+
+use crate::commands::reasoning::ReasoningSplit;
 use kjarni::embedder::Embedder;
 
 /// Embedding model for recalling memories by meaning.
@@ -35,6 +37,7 @@ pub struct AgentArgs {
     pub max_steps: usize,
     pub quiet: bool,
     pub list_sessions: bool,
+    pub think: bool,
 }
 
 pub async fn run(args: AgentArgs) -> Result<()> {
@@ -61,6 +64,7 @@ pub async fn run(args: AgentArgs) -> Result<()> {
         max_steps: args.max_steps,
         workdir: Some(workdir.display().to_string()),
         project_notes: notes.as_ref().map(|n| n.text.clone()),
+        thinking: Some(args.think),
         ..Default::default()
     };
 
@@ -356,6 +360,8 @@ fn print_help() {
 struct Terminal {
     /// Whether text is mid-line.
     in_text: bool,
+    /// The reply so far, split into reasoning, shown dimmed, and answer.
+    split: ReasoningSplit,
 }
 
 impl Terminal {
@@ -364,21 +370,23 @@ impl Terminal {
             println!();
             self.in_text = false;
         }
+        self.split = ReasoningSplit::default();
     }
 }
 
 #[async_trait]
 impl AgentEvents for Terminal {
     async fn text(&mut self, delta: &str) {
-        let delta = if self.in_text {
-            delta
+        let out = self.split.push(delta);
+        let (reasoning, answer) = if self.in_text {
+            (out.reasoning.as_str(), out.answer.as_str())
         } else {
-            delta.trim_start()
+            (out.reasoning.trim_start(), out.answer.trim_start())
         };
-        if delta.is_empty() {
+        if reasoning.is_empty() && answer.is_empty() {
             return;
         }
-        print!("{delta}");
+        print!("{}{answer}", reasoning.dimmed());
         let _ = io::stdout().flush();
         self.in_text = true;
     }

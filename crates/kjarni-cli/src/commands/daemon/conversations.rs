@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use std::panic::AssertUnwindSafe;
@@ -177,6 +178,8 @@ pub struct Live {
     pub changes: Changes,
     /// The agent's working folder, which changed paths are shown relative to.
     pub workdir: PathBuf,
+    /// Whether the model reasons before answering, read at each turn.
+    thinking: Arc<AtomicBool>,
 }
 
 /// What the conversations share: the sequence numbers of events and
@@ -397,6 +400,7 @@ impl Live {
         let live = self.clone();
         let task = tokio::spawn(async move {
             let mut agent = live.agent.lock().await;
+            agent.set_thinking(Some(live.thinking.load(Ordering::Relaxed)));
             let mut events = Relay {
                 live: live.clone(),
                 call: 0,
@@ -610,6 +614,8 @@ pub struct AgentSetup {
     pub max_steps: usize,
     /// Run every call without asking, as `kjarni agent --yes` does.
     pub approve_all: bool,
+    /// Whether the model reasons before answering; the settings change it.
+    pub thinking: Arc<AtomicBool>,
 }
 
 /// The daemon's conversations, loaded from disk as they are used.
@@ -787,6 +793,7 @@ impl Conversations {
             hub: self.hub.clone(),
             changes,
             workdir: self.setup.workdir.clone(),
+            thinking: self.setup.thinking.clone(),
         })
     }
 }

@@ -132,6 +132,7 @@ fn daemon_with(model: Arc<dyn AgentModel>, guard: Guard, loader: Arc<FakeLoader>
     let data = tempfile::tempdir().unwrap();
     let memory = Arc::new(Memory::open(data.path(), None).unwrap());
     let slot = Arc::new(model::Slot::new(model));
+    let thinking = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let state = Arc::new(DaemonState {
         conversations: Arc::new(Conversations::new(
             AgentSetup {
@@ -140,6 +141,7 @@ fn daemon_with(model: Arc<dyn AgentModel>, guard: Guard, loader: Arc<FakeLoader>
                 workdir: workdir.path().to_path_buf(),
                 max_steps: 4,
                 approve_all: false,
+                thinking: thinking.clone(),
             },
             data.path().join("sessions"),
         )),
@@ -151,6 +153,7 @@ fn daemon_with(model: Arc<dyn AgentModel>, guard: Guard, loader: Arc<FakeLoader>
             "scripted".into(),
             model::settings_path(data.path()),
             None,
+            thinking,
         )),
         gpu: false,
         schedules: Arc::new(schedules::Store::open(data.path().join("schedules.json")).unwrap()),
@@ -1715,6 +1718,7 @@ fn the_model_given_wins_over_the_saved_one_and_the_saved_one_over_the_default() 
     );
     model::Settings {
         model: Some("qwen3.5-9b".into()),
+        ..Default::default()
     }
     .save(&path)
     .unwrap();
@@ -1724,4 +1728,60 @@ fn the_model_given_wins_over_the_saved_one_and_the_saved_one_over_the_default() 
         model::starting_model(Some("qwen3.5-2b"), &saved),
         "qwen3.5-2b"
     );
+}
+
+/// Answers "Hi." and records whether each prompt asked the model to think.
+#[derive(Default)]
+struct ThinkingProbe(Mutex<Vec<Option<bool>>>);
+
+#[async_trait]
+impl AgentModel for ThinkingProbe {
+    fn render(&self, conversation: &Conversation) -> Result<String> {
+        self.0.lock().unwrap().push(conversation.thinking());
+        Ok(String::new())
+    }
+    async fn stream(&self, _: String) -> Result<TextStream> {
+        Ok(Box::pin(futures::stream::iter([Ok("Hi.".to_string())])))
+    }
+    fn count_tokens(&self, text: &str) -> Result<usize> {
+        Ok(text.len() / 4)
+    }
+    fn context_size(&self) -> usize {
+        32_768
+    }
+    fn name(&self) -> String {
+        "scripted".into()
+    }
+}
+
+#[tokio::test]
+async fn thinking_is_turned_on_from_the_settings_and_saved() {
+    let probe = Arc::new(ThinkingProbe::default());
+    let d = daemon(probe.clone(), false);
+    assert_eq!(d.api("GET", "/api/models", None).await.1["thinking"], false);
+    let id = d.new_conversation().await;
+    d.ask_in(&id, "Hello").await;
+
+    let (status, _) = d
+        .api("PUT", "/api/thinking", Some(json!({ "thinking": true })))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(d.api("GET", "/api/models", None).await.1["thinking"], true);
+    d.ask_in(&id, "Hello again").await;
+
+    let asked = probe.0.lock().unwrap().clone();
+    assert_eq!(asked.first(), Some(&Some(false)));
+    assert_eq!(asked.last(), Some(&Some(true)));
+    let saved = model::Settings::load(&model::settings_path(d.data.path()));
+    assert!(saved.thinking);
+}
+
+#[test]
+fn settings_saved_before_thinking_existed_load_with_it_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = model::settings_path(dir.path());
+    std::fs::write(&path, r#"{"model": "qwen3.5-9b"}"#).unwrap();
+    let saved = model::Settings::load(&path);
+    assert_eq!(saved.model.as_deref(), Some("qwen3.5-9b"));
+    assert!(!saved.thinking);
 }

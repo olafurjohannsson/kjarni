@@ -10,6 +10,16 @@
 - **Kjarni moved to the kjarni-ai organisation on GitHub.** The Go module is
   now `github.com/kjarni-ai/kjarni-go`: change the import path to upgrade.
   Old links to `olafurjohannsson/kjarni` redirect.
+- **Models from a folder answer instead of reasoning forever.** A model loaded
+  with `--model-path` uses its own chat template, and Qwen's thinks unless told
+  not to; Kjarni now tells it, so thinking is off unless asked for, as with
+  registry models.
+- **Thinking in the daemon and the agent.** The web UI's settings turn
+  reasoning before answering on and off, and the reply shows it folded while
+  it streams. `kjarni daemon run --think` and `kjarni agent --think` turn it on
+  from the command line.
+- **`kjarni daemon run --model-path`** runs a local GGUF or model folder.
+- **`kjarni chat` replies run to 4,096 tokens** by default, up from 512.
 
 ## 0.8.1
 

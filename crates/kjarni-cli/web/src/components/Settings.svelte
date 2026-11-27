@@ -48,6 +48,19 @@
     }
   }
 
+  async function toggleThinking() {
+    problem = '';
+    const on = !models.thinking;
+    models.thinking = on;
+    try {
+      await api.setThinking(on);
+    } catch (e) {
+      models.thinking = !on;
+      if (e instanceof SignedOut) onsignedout?.();
+      else problem = e.message;
+    }
+  }
+
   async function showCode() {
     showing = true;
     problem = '';
@@ -106,6 +119,14 @@
       {#if problem}<div class="problem"><Icon name="alert" size={15} /> {problem}</div>{/if}
 
       <div class="choices" role="radiogroup" aria-label="Model">
+        {#if !models.choices.some((c) => c.name === models.current)}
+          <div class="choice current" role="radio" aria-checked="true">
+            <span class="mark"><Icon name="check" size={15} /></span>
+            <span class="name mono">{models.current}</span>
+            <span class="size"></span>
+            <span class="state">Running on the {models.gpu ? 'GPU' : 'CPU'}</span>
+          </div>
+        {/if}
         {#each models.choices as c (c.name)}
           {@const current = c.name === models.current}
           {@const target = busy && models.phase.model === c.name}
@@ -140,13 +161,38 @@
       </p>
       {#if models.pinned && models.pinned !== models.current}
         <p class="hint">
-          The daemon was started with <code>--model {models.pinned}</code>, so it loads that again at its next start.
+          The daemon was started with
+          <code>{models.choices.some((c) => c.name === models.pinned) ? '--model' : '--model-path'} {models.pinned}</code>,
+          so it loads that again at its next start.
         </p>
       {/if}
     {:else if problem}
       <div class="problem"><Icon name="alert" size={15} /> {problem}</div>
     {/if}
   </section>
+
+  {#if models}
+    <section>
+      <h2>Thinking</h2>
+      <div class="row">
+        <div>
+          <div class="label">Think before answering</div>
+          <p class="hint">
+            The model reasons first, which you can open under each reply. Answers come later and use more of the
+            reply's tokens. Applies from the next message.
+          </p>
+        </div>
+        <button
+          class="switch"
+          class:on={models.thinking}
+          role="switch"
+          aria-checked={models.thinking}
+          aria-label="Think before answering"
+          onclick={toggleThinking}><span></span></button
+        >
+      </div>
+    </section>
+  {/if}
 
   <section>
     <h2>Other devices</h2>
@@ -212,6 +258,44 @@
   section {
     display: grid;
     gap: 12px;
+  }
+  .row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .label {
+    font-weight: 600;
+  }
+  .switch {
+    flex: none;
+    width: 40px;
+    height: 24px;
+    margin-top: 2px;
+    border-radius: 99px;
+    background: var(--bg4);
+    border: 1px solid var(--border-strong);
+    position: relative;
+    transition: background 0.15s;
+  }
+  .switch span {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform 0.15s, background 0.15s;
+  }
+  .switch.on {
+    background: var(--core-soft);
+    border-color: var(--core-line);
+  }
+  .switch.on span {
+    transform: translateX(16px);
+    background: var(--core);
   }
   h2 {
     font-family: var(--mono);

@@ -695,3 +695,37 @@ fn project_notes_follow_the_working_directory_in_the_system_prompt() {
         "{prompt}"
     );
 }
+
+/// With thinking on, Qwen 3.5's template opens the `<think>` block in the
+/// prompt; the reasoning streams after it, and front ends are shown the
+/// opening tag so they can tell it from the answer.
+#[tokio::test]
+async fn a_thinking_reply_is_shown_with_its_opening_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = ScriptedModel::new(&["Two and two.\n</think>\n\nFour.", "Hi."]);
+    let config = AgentConfig {
+        thinking: Some(true),
+        ..Default::default()
+    };
+    let workspace = Arc::new(tools::Workspace::new(dir.path()));
+    let mut agent = Agent::new(model.clone(), tools::builtin(workspace, None), config);
+    let mut events = Recorder::default();
+
+    agent.send("What is 2+2?", &mut events).await.unwrap();
+    assert!(
+        model.prompts()[0].ends_with("<think>\n"),
+        "{}",
+        model.prompts()[0]
+    );
+    assert_eq!(events.text, "<think>\nTwo and two.\n</think>\n\nFour.");
+
+    agent.set_thinking(Some(false));
+    let mut events = Recorder::default();
+    agent.send("Thanks", &mut events).await.unwrap();
+    assert!(
+        model.prompts()[1].ends_with("<think>\n\n</think>\n\n"),
+        "{}",
+        model.prompts()[1]
+    );
+    assert_eq!(events.text, "Hi.");
+}

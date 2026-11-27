@@ -165,6 +165,9 @@ impl JinjaChatTemplate {
             tools => tools,
             documents => Value::from(()),
             add_generation_prompt => add_generation_prompt,
+            // Off unless the conversation asks for it, as with Kjarni's own
+            // templates; Qwen's templates think when this is left undefined.
+            enable_thinking => conversation.thinking().unwrap_or(false),
             ..Value::from_serialize(&self.special_tokens)
         };
         template
@@ -357,6 +360,24 @@ mod tests {
             "<|im_start|>system\nBe brief.<|im_end|>\n<|im_start|>user\nHæ!<|im_end|>\n<|im_start|>assistant\n"
         );
         assert_eq!(t.stop_sequences(), ["<|im_end|>"]);
+    }
+
+    /// The end of Qwen 3.5's template, which opens a `<think>` block unless
+    /// `enable_thinking` is false.
+    #[test]
+    fn thinking_is_off_unless_the_conversation_turns_it_on() {
+        let source = "{%- if add_generation_prompt %}{{- '<|im_start|>assistant\\n' }}{%- if enable_thinking is defined and enable_thinking is false %}{{- '<think>\\n\\n</think>\\n\\n' }}{%- else %}{{- '<think>\\n' }}{%- endif %}{%- endif %}";
+        let t = JinjaChatTemplate::new(source, &Default::default()).unwrap();
+        let mut c = convo(&[(Role::User, "Hi")]);
+        let off = "<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        assert_eq!(t.render(&c, true).unwrap(), off);
+        c.set_thinking(Some(false));
+        assert_eq!(t.render(&c, true).unwrap(), off);
+        c.set_thinking(Some(true));
+        assert_eq!(
+            t.render(&c, true).unwrap(),
+            "<|im_start|>assistant\n<think>\n"
+        );
     }
 
     #[test]

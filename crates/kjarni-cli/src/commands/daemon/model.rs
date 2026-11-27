@@ -7,6 +7,7 @@
 //! start loads it too.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{Result, anyhow};
@@ -33,6 +34,9 @@ pub const CHOICES: [&str; 6] = [
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
 pub struct Settings {
     pub model: Option<String>,
+    /// Whether the model reasons before answering.
+    #[serde(default)]
+    pub thinking: bool,
 }
 
 impl Settings {
@@ -165,9 +169,12 @@ pub struct Models {
     current: Mutex<String>,
     phase: Mutex<Phase>,
     settings: PathBuf,
-    /// The daemon was started with `--model`, which the next start loads
-    /// again whatever is chosen here.
+    /// The daemon was started with `--model` or `--model-path`, which the
+    /// next start loads again whatever is chosen here.
     pub pinned: Option<String>,
+    /// Whether the model reasons before answering, which conversations read
+    /// at each turn.
+    thinking: Arc<AtomicBool>,
 }
 
 impl Models {
@@ -177,6 +184,7 @@ impl Models {
         current: String,
         settings: PathBuf,
         pinned: Option<String>,
+        thinking: Arc<AtomicBool>,
     ) -> Self {
         Self {
             slot,
@@ -185,7 +193,21 @@ impl Models {
             phase: Mutex::new(Phase::Idle),
             settings,
             pinned,
+            thinking,
         }
+    }
+
+    pub fn thinking(&self) -> bool {
+        self.thinking.load(Ordering::Relaxed)
+    }
+
+    /// Turns reasoning before answering on or off from the next turn, and
+    /// saves the choice.
+    pub fn set_thinking(&self, on: bool) -> Result<()> {
+        self.thinking.store(on, Ordering::Relaxed);
+        let mut saved = Settings::load(&self.settings);
+        saved.thinking = on;
+        saved.save(&self.settings)
     }
 
     pub fn current(&self) -> String {
@@ -281,9 +303,8 @@ impl Models {
             Ok(model) => {
                 self.slot.set(Some(model));
                 *self.current.lock().expect("current model lock") = name.clone();
-                let saved = Settings {
-                    model: Some(name.clone()),
-                };
+                let mut saved = Settings::load(&self.settings);
+                saved.model = Some(name.clone());
                 if let Err(e) = saved.save(&self.settings) {
                     eprintln!("Could not save the model choice: {e:#}");
                 }

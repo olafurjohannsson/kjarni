@@ -351,6 +351,7 @@ async fn main() -> Result<()> {
             temperature,
             max_tokens,
             max_steps,
+            think,
             quiet,
         } => {
             commands::agent::run(commands::agent::AgentArgs {
@@ -367,6 +368,7 @@ async fn main() -> Result<()> {
                 temperature,
                 max_tokens,
                 max_steps,
+                think,
                 quiet,
                 list_sessions: sessions,
             })
