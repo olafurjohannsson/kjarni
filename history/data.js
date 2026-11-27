@@ -1,6 +1,6 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795694812408,
-  "repoUrl": "https://github.com/olafurjohannsson/kjarni",
+  "lastUpdate": 1795772751200,
+  "repoUrl": "https://github.com/kjarni-ai/kjarni",
   "entries": {
     "Benchmark": [
       {
@@ -3036,6 +3036,66 @@ window.BENCHMARK_DATA = {
             "value": 38.14,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 0.990"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c7ab4f1f8a3861ad42d221bad38415f9f76e67e2",
+          "message": "Move to the kjarni-ai organisation (#156)\n\nRepository, package metadata, README and banner links, the Go module path\n(github.com/kjarni-ai/kjarni-go), and the Go and Obsidian sync targets. The\nwebsite stays on the personal account.",
+          "timestamp": "2026-11-27T09:23:27Z",
+          "tree_id": "65bbc85007a79b8393e374767b556124807c7118",
+          "url": "https://github.com/kjarni-ai/kjarni/commit/c7ab4f1f8a3861ad42d221bad38415f9f76e67e2"
+        },
+        "date": 1795772750526,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 493.6,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.004"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 36.04,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 0.991"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 395.9,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.934"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 24.32,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 1.068"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 558.08,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 0.999"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 39.5,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD; vs previous commit: 1.031"
           }
         ]
       }
