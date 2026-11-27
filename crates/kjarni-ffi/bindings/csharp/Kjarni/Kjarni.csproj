@@ -14,7 +14,7 @@
     <Version>0.8.2</Version>
     <Authors>Ólafur Aron Jóhannsson</Authors>
     <Description>Run transformer models inside your .NET program: embeddings, classification, reranking, search, chat, speech-to-text, summarization and translation. Same output as PyTorch. No Python runtime, no ONNX Runtime, no Ollama daemon, no CUDA toolkit. GPU support runs on Vulkan, DirectX 12 and Metal, so AMD, Intel and Apple Silicon work without NVIDIA.</Description>
-    <PackageTags>ai;ml;embeddings;classification;reranking;rag;search;nlp;inference;transformers;local;offline;dotnet;csharp;onnx;sentence-transformers;semantic-kernel;microsoft-extensions-ai;gpu;webgpu</PackageTags>
+    <PackageTags>ai;ml;embeddings;classification;reranking;rerank;cross-encoder;rag;search;nlp;inference;transformers;local;offline;dotnet;csharp;onnx;sentence-transformers;semantic-kernel;microsoft-extensions-ai;gpu;webgpu;llm;chat;whisper;speech-to-text;transcription;clip;image-search</PackageTags>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/kjarni-ai/kjarni</PackageProjectUrl>
     <RepositoryUrl>https://github.com/kjarni-ai/kjarni</RepositoryUrl>
