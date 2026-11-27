@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795774073034,
+  "lastUpdate": 1795775841193,
   "repoUrl": "https://github.com/kjarni-ai/kjarni",
   "entries": {
     "Benchmark": [
@@ -3156,6 +3156,66 @@ window.BENCHMARK_DATA = {
             "value": 56.28,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 26 Model 2 Stepping 1, AuthenticAMD; vs previous commit: 1.102"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "olafurjohannss@gmail.com",
+            "name": "Ólafur Aron Jóhannsson",
+            "username": "olafurjohannsson"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e4c1c19ffa6615a30c68736dd4a09a8e105345d7",
+          "message": "Thinking on and off for folder models, the daemon and the agent; daem… (#159)\n\n* Thinking on and off for folder models, the daemon and the agent; daemon --model-path\n\nA Jinja chat template is given enable_thinking, false unless the conversation\nasks for it, so a Qwen 3.5 model loaded from a folder answers instead of\nreasoning until it runs out of tokens.\n\nThe agent takes a thinking setting and shows front ends the <think> tag a\ntemplate opens in the prompt, so the reasoning is told from the answer while\nit streams. The daemon keeps the setting in settings.json, turned on and off\nfrom the web UI or with --think; `kjarni agent --think` shows the reasoning\ndimmed. `kjarni daemon run --model-path` loads a local file or folder.\n`kjarni chat` replies default to 4,096 tokens.\n\n* context7.json: claim the library",
+          "timestamp": "2026-11-27T10:16:11Z",
+          "tree_id": "327b7e0f338be4ec83fb57d98dbbe32964ea4e7a",
+          "url": "https://github.com/kjarni-ai/kjarni/commit/e4c1c19ffa6615a30c68736dd4a09a8e105345d7"
+        },
+        "date": 1795775840721,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 639.76,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel(R) Xeon(R) 6975P-C; vs previous commit: 0.998"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 29.07,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel(R) Xeon(R) 6975P-C; vs previous commit: 1.003"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 387.72,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.917"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 21.73,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.897"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 580.96,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.001"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 25.95,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 1.016"
           }
         ]
       }
