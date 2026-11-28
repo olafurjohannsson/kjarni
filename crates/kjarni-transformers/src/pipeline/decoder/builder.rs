@@ -69,7 +69,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
             .as_ref()
             .ok_or_else(|| anyhow!("Pipeline requires a DecoderLayout in ModelLayout"))?;
 
+        #[cfg(feature = "alloc-stats")]
         let start_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        #[cfg(feature = "alloc-stats")]
         log::debug!("[Builder] Pre-Embeddings RAM: {:.2} MB", start_ram);
 
         // Load Embeddings
@@ -112,7 +114,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
             )?
         };
 
+        #[cfg(feature = "alloc-stats")]
         let mid_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        #[cfg(feature = "alloc-stats")]
         log::debug!(
             "[Builder] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)",
             mid_ram,
@@ -175,7 +179,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
             LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
             target_dt,
         )?;
+        #[cfg(feature = "alloc-stats")]
         let end_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        #[cfg(feature = "alloc-stats")]
         log::debug!(
             "[Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)",
             end_ram,

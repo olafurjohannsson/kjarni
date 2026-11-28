@@ -101,6 +101,9 @@ tempfile = "3.23.0"
 # Compile the wgpu compute stack for the browser. Off by default: it pulls
 # wgpu into the wasm graph, and the CPU bundle should not pay for it.
 wasm-gpu = ["dep:wgpu", "dep:futures-intrusive"]
+# Install the process-wide tracing allocator for allocation diagnostics. Off by
+# default so library users do not pay the allocator's atomic counter overhead.
+alloc-stats = []
 default = []
 profiling = []
 rubato = []

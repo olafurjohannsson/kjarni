@@ -2,6 +2,8 @@
 
 ## 0.8.2
 
+- **Allocation tracing is opt-in.** The tracing allocator is no longer installed by default; enable the `alloc-stats` feature for allocation counts.
+
 - **Longer prompts fit on the GPU.** Memory freed after a long prompt stayed
   reserved around the cache's smaller buffers, so a long prompt held gigabytes
   it no longer used: Qwen3.5-9B ran out of a 12 GB card at 8,192 tokens. It

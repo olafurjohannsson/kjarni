@@ -38,6 +38,7 @@ jobs:
       # image modules compiled clean for days while only the default build
       # was being linted.
       - run: cargo clippy --workspace --all-targets --features kjarni-models/image-io -- -D warnings
+      - run: cargo clippy -p kjarni-transformers --features alloc-stats --all-targets -- -D warnings
 
   # ─── Format ─────────────────────────────────────────────────────
   #

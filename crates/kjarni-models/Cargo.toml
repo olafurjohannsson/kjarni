@@ -68,6 +68,8 @@ workspace = true
 
 [features]
 default = []
+# Forward the optional allocation diagnostics to the transformer crate.
+alloc-stats = ["kjarni-transformers/alloc-stats"]
 
 # Compile the GPU stack for the browser. Forwards to the engine's own gate.
 wasm-gpu = ["kjarni-transformers/wasm-gpu"]
