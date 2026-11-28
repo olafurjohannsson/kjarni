@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795860953300,
+  "lastUpdate": 1795874735266,
   "repoUrl": "https://github.com/kjarni-ai/kjarni",
   "entries": {
     "Benchmark": [
@@ -3396,6 +3396,66 @@ window.BENCHMARK_DATA = {
             "value": 24.41,
             "unit": "tokens/s",
             "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 0.999"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "isyan23ti@mahasiswa.pcr.ac.id",
+            "name": "Muhammad Isyan Maulana",
+            "username": "isyanpcr"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "65c09103baca7b278cd1949b9f9c9886ee0b1e07",
+          "message": "feat(transcribe): add SRT and VTT subtitle output for CLI, server, and bindings (#184)\n\n* feat(transcribe): add SRT and VTT subtitle formatting for CLI, server, and bindings\n\n* refactor(ffi): expose subtitle formatting via C ABI and thin binding wrappers",
+          "timestamp": "2026-11-28T13:44:39Z",
+          "tree_id": "6b4651c194b2b8a8f62bc4a1338cdb8b5db85183",
+          "url": "https://github.com/kjarni-ai/kjarni/commit/65c09103baca7b278cd1949b9f9c9886ee0b1e07"
+        },
+        "date": 1795874734709,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 438.53,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.000"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 45.37,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 9V74 80-Core Processor; vs previous commit: 1.013"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 481.71,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.921"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 27.13,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.716"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 469.61,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.996"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 27.08,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.995"
           }
         ]
       }
