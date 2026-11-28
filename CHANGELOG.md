@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Document IDs stay the same when the index changes.** A document's ID used
+  to be its position, so removing a file or merging segments renumbered the
+  documents after it, and an ID saved from an earlier search could point to a
+  different document. IDs are now assigned once and never reused. Indexes now
+  use format 3; earlier indexes must be rebuilt.
+
 ## 0.8.2
 
 - **Longer prompts fit on the GPU.** Memory freed after a long prompt stayed

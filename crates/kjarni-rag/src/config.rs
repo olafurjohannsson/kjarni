@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The newest on-disk format this build reads.
-pub const INDEX_VERSION: u32 = 2;
+pub const INDEX_VERSION: u32 = 3;
 
 /// Index configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

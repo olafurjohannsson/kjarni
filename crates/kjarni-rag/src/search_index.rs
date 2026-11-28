@@ -18,6 +18,10 @@ pub struct SearchIndex {
     vectors: VectorStore,
     documents: Vec<String>,
     metadata: Vec<HashMap<String, String>>,
+    /// Stable IDs parallel to the in-memory document arrays.
+    document_ids: Vec<usize>,
+    /// Next ID for a newly added document; IDs are never reused.
+    next_document_id: usize,
 }
 
 impl SearchIndex {
@@ -28,6 +32,8 @@ impl SearchIndex {
             vectors: VectorStore::default(),
             documents: Vec::new(),
             metadata: Vec::new(),
+            document_ids: Vec::new(),
+            next_document_id: 0,
         }
     }
 
@@ -38,6 +44,8 @@ impl SearchIndex {
             vectors: VectorStore::with_dimension(dimension),
             documents: Vec::new(),
             metadata: Vec::new(),
+            document_ids: Vec::new(),
+            next_document_id: 0,
         }
     }
 
@@ -59,12 +67,14 @@ impl SearchIndex {
         let mut new_docs = Vec::new();
         let mut new_embeddings = Vec::new();
         let mut new_metadata = Vec::new();
+        let mut new_document_ids = Vec::new();
 
         for (i, &keep_it) in keep.iter().enumerate() {
             if keep_it {
                 new_docs.push(std::mem::take(&mut self.documents[i]));
                 new_embeddings.push(std::mem::take(&mut self.vectors.embeddings[i]));
                 new_metadata.push(std::mem::take(&mut self.metadata[i]));
+                new_document_ids.push(self.document_ids[i]);
             }
         }
 
@@ -77,6 +87,7 @@ impl SearchIndex {
         self.documents = new_docs;
         self.vectors.embeddings = new_embeddings;
         self.metadata = new_metadata;
+        self.document_ids = new_document_ids;
         self.bm25 = bm25;
 
         removed
@@ -119,12 +130,16 @@ impl SearchIndex {
         } else {
             metadata
         };
+        let document_ids = (0..documents.len()).collect();
+        let next_document_id = documents.len();
 
         Ok(Self {
             bm25,
             vectors,
             documents,
             metadata,
+            document_ids,
+            next_document_id,
         })
     }
     /// Save index in binary format (much smaller than JSON)
@@ -171,10 +186,11 @@ impl SearchIndex {
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<usize> {
-        let doc_id = self.documents.len();
+        let doc_id = self.next_document_id;
+        let local_id = self.documents.len();
 
-        // Add to BM25
-        self.bm25.add_document(doc_id, &text);
+        // BM25 addresses the in-memory slot; document_id remains stable after removal.
+        self.bm25.add_document(local_id, &text);
 
         // Add to vector store
         self.vectors.add(embedding)?;
@@ -182,6 +198,8 @@ impl SearchIndex {
         // Store document and metadata
         self.documents.push(text);
         self.metadata.push(metadata.unwrap_or_default());
+        self.document_ids.push(doc_id);
+        self.next_document_id += 1;
 
         Ok(doc_id)
     }
@@ -275,7 +293,7 @@ impl SearchIndex {
                 if idx < self.documents.len() {
                     Some(SearchResult {
                         score,
-                        document_id: idx,
+                        document_id: self.document_ids[idx],
                         text: self.documents[idx].clone(),
                         metadata: self.metadata.get(idx).cloned().unwrap_or_default(),
                     })
@@ -288,12 +306,14 @@ impl SearchIndex {
 
     /// Get document by ID
     pub fn get_document(&self, id: usize) -> Option<&str> {
-        self.documents.get(id).map(|s| s.as_str())
+        self.local_id(id)
+            .and_then(|local| self.documents.get(local))
+            .map(|s| s.as_str())
     }
 
     /// Get metadata by document ID
     pub fn get_metadata(&self, id: usize) -> Option<&HashMap<String, String>> {
-        self.metadata.get(id)
+        self.local_id(id).and_then(|local| self.metadata.get(local))
     }
 
     /// Get number of indexed documents
@@ -319,6 +339,10 @@ impl SearchIndex {
     /// Load index from JSON
     pub fn load_json(json: &str) -> Result<Self> {
         serde_json::from_str(json).map_err(Into::into)
+    }
+
+    fn local_id(&self, document_id: usize) -> Option<usize> {
+        self.document_ids.iter().position(|&id| id == document_id)
     }
 }
 
@@ -449,6 +473,49 @@ mod tests {
             .unwrap();
         assert_eq!(id, 1);
         assert_eq!(index.len(), 2);
+    }
+
+    #[test]
+    fn document_ids_survive_removal() {
+        let mut index = SearchIndex::with_dimension(4);
+        let source = |value: &str| HashMap::from([("source".to_string(), value.to_string())]);
+
+        assert_eq!(
+            index
+                .add_document("alpha".to_string(), mock_embedding(1.0), Some(source("a")))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            index
+                .add_document("bravo".to_string(), mock_embedding(2.0), Some(source("b")))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            index
+                .add_document(
+                    "charlie".to_string(),
+                    mock_embedding(3.0),
+                    Some(source("c"))
+                )
+                .unwrap(),
+            2
+        );
+
+        assert_eq!(index.remove_by_source("a"), 1);
+        let kept = index.search_keywords("bravo", 1).pop().unwrap();
+        assert_eq!(kept.document_id, 1);
+        assert_eq!(index.get_document(1), Some("bravo"));
+
+        let new_id = index
+            .add_document("delta".to_string(), mock_embedding(4.0), Some(source("d")))
+            .unwrap();
+        assert_eq!(new_id, 3);
+        assert_eq!(
+            index.search_keywords("delta", 1).pop().unwrap().document_id,
+            3
+        );
     }
 
     #[test]

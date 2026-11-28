@@ -115,6 +115,7 @@ pub struct IndexReader {
     config: IndexConfig,
     manifest: Manifest,
     segments: Vec<Segment>,
+    doc_locations: HashMap<usize, (usize, usize)>,
     total_docs: usize,
 }
 
@@ -223,6 +224,14 @@ impl IndexReader {
         };
 
         let total_docs = segments.iter().map(|s| s.len()).sum();
+        let mut doc_locations = HashMap::with_capacity(total_docs);
+        for (seg_idx, segment) in segments.iter().enumerate() {
+            for local_id in 0..segment.len() {
+                if let Some(doc_id) = segment.document_id(local_id) {
+                    doc_locations.insert(doc_id, (seg_idx, local_id));
+                }
+            }
+        }
 
         log::info!(
             "Opened index with {} segments, {} documents",
@@ -235,6 +244,7 @@ impl IndexReader {
             config,
             manifest,
             segments,
+            doc_locations,
             total_docs,
         })
     }
@@ -326,7 +336,9 @@ impl IndexReader {
         let to_global = |ranked: Vec<(usize, usize, f32)>| -> Vec<(usize, f32)> {
             ranked
                 .into_iter()
-                .map(|(seg_idx, doc_id, score)| (self.local_to_global(seg_idx, doc_id), score))
+                .filter_map(|(seg_idx, doc_id, score)| {
+                    Some((self.local_to_global(seg_idx, doc_id)?, score))
+                })
                 .collect()
         };
 
@@ -347,7 +359,7 @@ impl IndexReader {
             .into_iter()
             .filter_map(|(seg_idx, doc_id, score)| {
                 let segment = &self.segments[seg_idx];
-                let global_id = self.local_to_global(seg_idx, doc_id);
+                let global_id = self.local_to_global(seg_idx, doc_id)?;
 
                 let text = segment.get_document(doc_id).ok()?;
                 let metadata = segment.get_metadata(doc_id).ok()?;
@@ -362,25 +374,16 @@ impl IndexReader {
             .collect()
     }
 
-    /// Convert segment index + local doc ID to global ID
-    fn local_to_global(&self, segment_idx: usize, local_doc_id: usize) -> usize {
-        let mut offset = 0;
-        for i in 0..segment_idx {
-            offset += self.segments[i].len();
-        }
-        offset + local_doc_id
+    /// Convert segment index + local position to the stable document ID.
+    fn local_to_global(&self, segment_idx: usize, local_doc_id: usize) -> Option<usize> {
+        self.segments
+            .get(segment_idx)
+            .and_then(|segment| segment.document_id(local_doc_id))
     }
 
-    /// Convert global ID to (segment index, local doc ID)
+    /// Convert a stable document ID to (segment index, local position).
     fn global_to_local(&self, global_id: usize) -> Option<(usize, usize)> {
-        let mut offset = 0;
-        for (seg_idx, segment) in self.segments.iter().enumerate() {
-            if global_id < offset + segment.len() {
-                return Some((seg_idx, global_id - offset));
-            }
-            offset += segment.len();
-        }
-        None
+        self.doc_locations.get(&global_id).copied()
     }
 
     /// Get document by global ID
@@ -402,6 +405,13 @@ impl IndexReader {
     /// Total documents across all segments
     pub fn len(&self) -> usize {
         self.total_docs
+    }
+
+    /// Iterate over the stable IDs of all live documents.
+    pub fn document_ids(&self) -> impl Iterator<Item = usize> + '_ {
+        self.segments.iter().flat_map(|segment| {
+            (0..segment.len()).filter_map(|local_id| segment.document_id(local_id))
+        })
     }
 
     pub fn is_empty(&self) -> bool {

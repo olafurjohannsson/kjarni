@@ -31,6 +31,7 @@ pub struct SegmentBuilder {
     docs_writer: BufWriter<File>,
     docs_path: PathBuf,
     doc_offsets: Vec<u64>,
+    doc_ids: Vec<usize>,
     current_offset: u64,
 
     // In memory BM25
@@ -69,6 +70,7 @@ impl SegmentBuilder {
             docs_writer,
             docs_path,
             doc_offsets: Vec::with_capacity(max_docs),
+            doc_ids: Vec::with_capacity(max_docs),
             current_offset: 0,
             bm25: Bm25Index::new(),
             metadata_writer,
@@ -84,6 +86,18 @@ impl SegmentBuilder {
         embedding: &[f32],
         metadata: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<usize> {
+        let doc_id = self.doc_count;
+        self.add_with_id(doc_id, text, embedding, metadata)
+    }
+
+    /// Add a document while retaining its stable index-wide ID.
+    pub fn add_with_id(
+        &mut self,
+        doc_id: usize,
+        text: &str,
+        embedding: &[f32],
+        metadata: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<usize> {
         if embedding.len() != self.dimension {
             return Err(anyhow!(
                 "Embedding dimension mismatch: got {}, expected {}",
@@ -92,14 +106,13 @@ impl SegmentBuilder {
             ));
         }
 
-        let doc_id = self.doc_count;
-
         // Write raw f32 bytes embedding to vectors file
         for &val in embedding {
             self.vectors_writer.write_all(&val.to_le_bytes())?;
         }
 
         self.doc_offsets.push(self.current_offset);
+        self.doc_ids.push(doc_id);
         let text_bytes = text.as_bytes();
         self.docs_writer.write_all(text_bytes)?;
         self.docs_writer.write_all(b"\n")?;
@@ -110,8 +123,8 @@ impl SegmentBuilder {
         self.metadata_writer.write_all(meta_json.as_bytes())?;
         self.metadata_writer.write_all(b"\n")?;
 
-        // add to bm25 idx
-        self.bm25.add_document(doc_id, text);
+        // BM25 uses the local position; the stable ID is persisted separately.
+        self.bm25.add_document(self.doc_count, text);
 
         self.doc_count += 1;
         Ok(doc_id)
@@ -160,6 +173,8 @@ impl SegmentBuilder {
         // Write document offsets index
         let offsets_data = bincode::serialize(&self.doc_offsets)?;
         write_synced(&segment_dir.join("docs.idx"), &offsets_data)?;
+        let ids_data = bincode::serialize(&self.doc_ids)?;
+        write_synced(&segment_dir.join("ids.idx"), &ids_data)?;
 
         // Write BM25 index
         let bm25_data = bincode::serialize(&self.bm25)?;
@@ -202,6 +217,8 @@ pub struct Segment {
 
     // Document offsets for retrieval
     doc_offsets: Vec<u64>,
+    // Stable index-wide document IDs, parallel to doc_offsets
+    doc_ids: Vec<usize>,
 
     // BM25 index
     bm25: Bm25Index,
@@ -219,6 +236,12 @@ impl Segment {
 
         // Load document offsets (small)
         let doc_offsets: Vec<u64> = bincode::deserialize(&fs::read(path.join("docs.idx"))?)?;
+        let doc_ids: Vec<usize> = bincode::deserialize(&fs::read(path.join("ids.idx"))?)?;
+        if doc_offsets.len() != meta.doc_count || doc_ids.len() != meta.doc_count {
+            return Err(anyhow!(
+                "segment document indexes do not match its document count"
+            ));
+        }
 
         // Load BM25 index
         let bm25: Bm25Index = bincode::deserialize(&fs::read(path.join("bm25.bin"))?)?;
@@ -228,6 +251,7 @@ impl Segment {
             path: path.to_path_buf(),
             vectors_mmap,
             doc_offsets,
+            doc_ids,
             bm25,
         })
     }
@@ -252,6 +276,11 @@ impl Segment {
         };
 
         Some(floats)
+    }
+
+    /// Get the stable index-wide ID for a local document position.
+    pub fn document_id(&self, local_id: usize) -> Option<usize> {
+        self.doc_ids.get(local_id).copied()
     }
 
     /// Get document text by ID (reads from disk)
@@ -434,6 +463,24 @@ mod tests {
         // Search
         let results = segment.search_vectors(&[1.0, 0.0, 0.0, 0.0], 10);
         assert_eq!(results[0].0, 0); // First doc is most similar
+    }
+
+    #[test]
+    fn document_ids_preserve_unsorted_order_and_require_ids_file() {
+        let temp = TempDir::new().unwrap();
+        let build_dir = temp.path().join("build");
+        let segment_dir = temp.path().join("seg_0");
+        let mut builder = SegmentBuilder::new(&build_dir, 2, 100).unwrap();
+        builder.add_with_id(8, "eight", &[1.0, 0.0], None).unwrap();
+        builder.add_with_id(0, "zero", &[0.0, 1.0], None).unwrap();
+        builder.flush(&segment_dir, 0).unwrap();
+
+        let segment = Segment::open(&segment_dir).unwrap();
+        assert_eq!(segment.document_id(0), Some(8));
+        assert_eq!(segment.document_id(1), Some(0));
+
+        std::fs::remove_file(segment_dir.join("ids.idx")).unwrap();
+        assert!(Segment::open(&segment_dir).is_err());
     }
 
     #[test]

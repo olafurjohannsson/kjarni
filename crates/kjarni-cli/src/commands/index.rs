@@ -426,9 +426,9 @@ fn format_index_info(index_path: &str, reader: &IndexReader) -> Result<String> {
     if !reader.is_empty() {
         output.push('\n');
         output.push_str("Sample documents:\n");
-        for i in 0..3.min(reader.len()) {
-            if let Ok(doc) = reader.get_document(i) {
-                output.push_str(&format!("  [{}] {}\n", i, truncate(&doc, 60)));
+        for id in reader.document_ids().take(3) {
+            if let Ok(doc) = reader.get_document(id) {
+                output.push_str(&format!("  [{}] {}\n", id, truncate(&doc, 60)));
             }
         }
     }

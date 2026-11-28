@@ -28,6 +28,8 @@ pub(crate) struct Manifest {
     /// and of a new index later built at the same path.
     pub(crate) written_at_ns: u64,
     pub(crate) segments: Vec<String>,
+    /// The next ID assigned to a newly added document. IDs are never reused.
+    pub(crate) next_document_id: usize,
 }
 
 pub(crate) fn read_manifest(root: &Path) -> Result<Manifest> {
@@ -104,6 +106,7 @@ pub struct IndexWriter {
     config: IndexConfig,
     current_builder: Option<SegmentBuilder>,
     next_segment_id: u64,
+    next_document_id: usize,
     total_docs: usize,
     /// Segments from earlier commits, as this writer will leave them.
     committed: Vec<SegmentEntry>,
@@ -133,13 +136,14 @@ impl IndexWriter {
             &root.join("config.json"),
             &serde_json::to_string_pretty(&config)?,
         )?;
-        Self::write_manifest(&root, Vec::new())?;
+        Self::write_manifest(&root, Vec::new(), 0)?;
 
         Ok(Self {
             root,
             config,
             current_builder: None,
             next_segment_id: 0,
+            next_document_id: 0,
             total_docs: 0,
             committed: Vec::new(),
             added: Vec::new(),
@@ -158,6 +162,7 @@ impl IndexWriter {
         check_version(&config)?;
 
         let manifest = read_manifest(&root)?;
+        let next_document_id = manifest.next_document_id;
         let published: HashSet<String> = manifest.segments.iter().cloned().collect();
         // Left behind by a writer that was killed before it committed.
         Self::remove_unpublished(&root, &published);
@@ -183,6 +188,7 @@ impl IndexWriter {
             config,
             current_builder: None,
             next_segment_id,
+            next_document_id,
             total_docs,
             committed,
             added: Vec::new(),
@@ -191,13 +197,14 @@ impl IndexWriter {
         })
     }
 
-    fn write_manifest(root: &Path, segments: Vec<String>) -> Result<()> {
+    fn write_manifest(root: &Path, segments: Vec<String>, next_document_id: usize) -> Result<()> {
         let written_at_ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos() as u64;
         let manifest = Manifest {
             written_at_ns,
             segments,
+            next_document_id,
         };
         write_atomic(
             &root.join(MANIFEST_FILE),
@@ -277,11 +284,13 @@ impl IndexWriter {
             self.current_builder = Some(self.new_builder()?);
         }
 
+        let document_id = self.next_document_id;
         let builder = self
             .current_builder
             .as_mut()
             .ok_or_else(|| anyhow!("no segment builder"))?;
-        builder.add(text, embedding, metadata)?;
+        builder.add_with_id(document_id, text, embedding, metadata)?;
+        self.next_document_id += 1;
         self.total_docs += 1;
 
         // Flush if full
@@ -363,7 +372,10 @@ impl IndexWriter {
                 let current = builder
                     .as_mut()
                     .ok_or_else(|| anyhow!("no segment builder"))?;
-                current.add(&text, embedding, Some(meta))?;
+                let document_id = segment
+                    .document_id(doc_id)
+                    .ok_or_else(|| anyhow!("segment {} is missing a document ID", source.name))?;
+                current.add_with_id(document_id, &text, embedding, Some(meta))?;
                 if current.is_full()
                     && let Some(full) = builder.take()
                 {
@@ -409,7 +421,7 @@ impl IndexWriter {
         self.merge_small_segments()?;
 
         let segments: Vec<String> = self.committed.iter().map(|s| s.name.clone()).collect();
-        Self::write_manifest(&self.root, segments.clone())?;
+        Self::write_manifest(&self.root, segments.clone(), self.next_document_id)?;
         self.published = segments.into_iter().collect();
 
         log::info!(
