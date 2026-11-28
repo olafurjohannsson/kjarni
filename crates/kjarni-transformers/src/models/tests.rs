@@ -176,8 +176,8 @@ fn test_display_group() {
 #[test]
 fn test_repo_id_extraction() {
     let model = ModelType::Llama3_2_1B_Instruct;
-    // URL: https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/...
-    assert_eq!(model.repo_id(), "meta-llama/Llama-3.2-1B-Instruct");
+    // URL: https://huggingface.co/kjarni-ai/Llama-3.2-1B-Instruct/resolve/...
+    assert_eq!(model.repo_id(), "kjarni-ai/Llama-3.2-1B-Instruct");
 
     let bert = ModelType::MiniLML6V2;
     // URL: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/...
