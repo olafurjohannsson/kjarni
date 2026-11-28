@@ -116,11 +116,16 @@ mod tests {
     #[test]
     fn enabled_feature_counts_allocations() {
         reset_alloc_count();
-        let mut bytes = Vec::with_capacity(32);
-        bytes.extend_from_slice(&[0_u8; 32]);
-        assert!(!bytes.is_empty());
+        let before_mb = get_current_ram_usage_mb();
+        let mut bytes = Vec::with_capacity(64 * 1024);
+        bytes.extend_from_slice(&[1_u8; 64 * 1024]);
+        let after_mb = get_current_ram_usage_mb();
+        assert!(
+            after_mb > before_mb,
+            "expected tracked RAM usage to grow while allocation is alive (before={before_mb}, after={after_mb})"
+        );
         assert!(alloc_count() > 0);
-        assert!(get_current_ram_usage_mb() >= 0.0);
+        assert_eq!(std::hint::black_box(&bytes).len(), 64 * 1024);
     }
 }
 
