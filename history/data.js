@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795780468488,
+  "lastUpdate": 1795860953300,
   "repoUrl": "https://github.com/kjarni-ai/kjarni",
   "entries": {
     "Benchmark": [
@@ -3336,6 +3336,66 @@ window.BENCHMARK_DATA = {
             "value": 26.98,
             "unit": "tokens/s",
             "extra": "CPU: AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD; vs previous commit: 0.989"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wsj040303@gmail.com",
+            "name": "ledd",
+            "username": "wsj040303"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c49720392549529c6004ca4f10e08811e4cf7bf2",
+          "message": "Keep document IDs stable across index rewrites (#138)\n\nA document's ID was its position, so removing a file or merging segments renumbered the documents after it, and an ID saved from an earlier search could point to a different document. IDs are now assigned once, stored per segment in ids.idx, and never reused. Indexes use format 3; older indexes are refused with a message to rebuild them.",
+          "timestamp": "2026-11-28T09:54:48Z",
+          "tree_id": "4e684d2c2537a1117561818d97a1fb6c48a86cb1",
+          "url": "https://github.com/kjarni-ai/kjarni/commit/c49720392549529c6004ca4f10e08811e4cf7bf2"
+        },
+        "date": 1795860952389,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "linux-x64 embed",
+            "value": 492.76,
+            "unit": "sentences/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.003"
+          },
+          {
+            "name": "linux-x64 decode",
+            "value": 36.45,
+            "unit": "tokens/s",
+            "extra": "CPU: AMD EPYC 7763 64-Core Processor; vs previous commit: 1.005"
+          },
+          {
+            "name": "macos-arm64 embed",
+            "value": 371.81,
+            "unit": "sentences/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.977"
+          },
+          {
+            "name": "macos-arm64 decode",
+            "value": 20.18,
+            "unit": "tokens/s",
+            "extra": "CPU: Apple M1 (Virtual); vs previous commit: 0.989"
+          },
+          {
+            "name": "windows-x64 embed",
+            "value": 570.82,
+            "unit": "sentences/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 0.997"
+          },
+          {
+            "name": "windows-x64 decode",
+            "value": 24.41,
+            "unit": "tokens/s",
+            "extra": "CPU: Intel64 Family 6 Model 207 Stepping 2, GenuineIntel; vs previous commit: 0.999"
           }
         ]
       }
