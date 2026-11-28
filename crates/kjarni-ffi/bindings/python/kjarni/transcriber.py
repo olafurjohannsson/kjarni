@@ -2,15 +2,12 @@
 
 import math
 import os
-from typing import List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import List, NamedTuple, Optional, Sequence, Union
 from ctypes import (
     c_void_p, c_char_p, c_int, c_int32, c_float, c_size_t, c_uint32, byref, POINTER, Structure,
 )
 
-from ._ffi import _lib, check_error, encode_or_none, KjarniDevice
-
-_MAX_LINE_CHARS = 42
-_MAX_LINES = 2
+from ._ffi import _lib, check_error, encode_or_none, take_string, KjarniDevice
 
 
 class KjarniTranscriberConfig(Structure):
@@ -56,6 +53,14 @@ _lib.kjarni_transcriber_transcribe_pcm.argtypes = [
 ]
 _lib.kjarni_transcription_free.restype = None
 _lib.kjarni_transcription_free.argtypes = [KjarniTranscription]
+_lib.kjarni_transcription_to_srt.restype = c_int
+_lib.kjarni_transcription_to_srt.argtypes = [
+    POINTER(KjarniTranscriptionSegment), c_size_t, POINTER(c_void_p)
+]
+_lib.kjarni_transcription_to_vtt.restype = c_int
+_lib.kjarni_transcription_to_vtt.argtypes = [
+    POINTER(KjarniTranscriptionSegment), c_size_t, POINTER(c_void_p)
+]
 
 
 class Segment(NamedTuple):
@@ -76,8 +81,8 @@ class Transcript(NamedTuple):
     def to_srt(self) -> str:
         """Format this transcript as SubRip (.srt) subtitle text."""
         if not self.segments:
-            if not self.text.strip():
-                return ""
+            if not self.text:
+                return segments_to_srt([])
             end = max(0.0, self.duration_secs) if math.isfinite(self.duration_secs) else 0.0
             return segments_to_srt([Segment(0.0, end, self.text)])
         return segments_to_srt(self.segments)
@@ -85,8 +90,8 @@ class Transcript(NamedTuple):
     def to_vtt(self) -> str:
         """Format this transcript as WebVTT (.vtt) subtitle text."""
         if not self.segments:
-            if not self.text.strip():
-                return "WEBVTT\n\n"
+            if not self.text:
+                return segments_to_vtt([])
             end = max(0.0, self.duration_secs) if math.isfinite(self.duration_secs) else 0.0
             return segments_to_vtt([Segment(0.0, end, self.text)])
         return segments_to_vtt(self.segments)
@@ -98,7 +103,7 @@ def segments_to_srt(segments: Sequence[Segment]) -> str:
     Long segments are split on word boundaries into lines of at most 42
     characters and 2 lines per cue, with timestamps distributed proportionally.
     """
-    return _format_subtitles(segments, is_vtt=False)
+    return _format_subtitles(segments, _lib.kjarni_transcription_to_srt)
 
 
 def segments_to_vtt(segments: Sequence[Segment]) -> str:
@@ -108,113 +113,26 @@ def segments_to_vtt(segments: Sequence[Segment]) -> str:
     boundaries into lines of at most 42 characters and 2 lines per cue, with
     timestamps distributed proportionally.
     """
-    return _format_subtitles(segments, is_vtt=True)
+    return _format_subtitles(segments, _lib.kjarni_transcription_to_vtt)
 
 
-def _format_subtitles(segments: Sequence[Segment], is_vtt: bool) -> str:
-    parts: List[str] = ["WEBVTT\n\n"] if is_vtt else []
-    decimal = "." if is_vtt else ","
-    cue_index = 1
+def _format_subtitles(segments: Sequence[Segment], c_fn) -> str:
+    seg_list = list(segments)
+    out = c_void_p()
+    if not seg_list:
+        check_error(c_fn(None, 0, byref(out)))
+        return take_string(out)
 
-    for segment in segments:
-        cues = _build_segment_cues(segment.text, is_vtt)
-        if not cues:
-            continue
+    # Keep encoded UTF-8 byte buffers alive for the duration of the FFI call.
+    encoded = [("" if seg.text is None else seg.text).encode("utf-8") for seg in seg_list]
+    c_segments = (KjarniTranscriptionSegment * len(seg_list))()
+    for i, (seg, text_bytes) in enumerate(zip(seg_list, encoded)):
+        c_segments[i].start = seg.start
+        c_segments[i].end = seg.end
+        c_segments[i].text = text_bytes
 
-        start_ms = _to_millis(segment.start)
-        end_ms = max(start_ms, _to_millis(segment.end))
-        for cue_start, cue_end, cue_text in _distribute_timestamps(cues, start_ms, end_ms):
-            if not is_vtt:
-                parts.append(f"{cue_index}\n")
-                cue_index += 1
-            parts.append(
-                f"{_format_timestamp(cue_start, decimal)} --> "
-                f"{_format_timestamp(cue_end, decimal)}\n{cue_text}\n\n"
-            )
-
-    return "".join(parts)
-
-
-def _build_segment_cues(text: str, is_vtt: bool) -> List[str]:
-    words = text.split()
-    if not words:
-        return []
-    if is_vtt:
-        joined = " ".join(words)
-        if "-->" in joined:
-            words = joined.replace("-->", "-- >").split()
-
-    lines = _wrap_words(words, _MAX_LINE_CHARS)
-    return ["\n".join(lines[i:i + _MAX_LINES]) for i in range(0, len(lines), _MAX_LINES)]
-
-
-def _wrap_words(words: Sequence[str], max_line_chars: int) -> List[str]:
-    lines: List[str] = []
-    current_parts: List[str] = []
-    current_chars = 0
-
-    for word in words:
-        word_chars = len(word)
-        if current_chars == 0:
-            current_parts.append(word)
-            current_chars = word_chars
-        elif current_chars + 1 + word_chars <= max_line_chars:
-            current_parts.append(word)
-            current_chars += 1 + word_chars
-        else:
-            lines.append(" ".join(current_parts))
-            current_parts = [word]
-            current_chars = word_chars
-
-    if current_chars > 0:
-        lines.append(" ".join(current_parts))
-
-    return lines
-
-
-def _distribute_timestamps(
-    cues: Sequence[str], start_ms: int, end_ms: int
-) -> List[Tuple[int, int, str]]:
-    count = len(cues)
-    if count == 1:
-        return [(start_ms, end_ms, cues[0])]
-
-    weights = [max(len(c), 1) for c in cues]
-    total_weight = sum(weights)
-    total_dur = end_ms - start_ms
-
-    out: List[Tuple[int, int, str]] = []
-    prev_end = start_ms
-    cum_weight = 0
-    for i, cue in enumerate(cues):
-        cue_start = prev_end
-        if i + 1 == count:
-            cue_end = end_ms
-        else:
-            cum_weight += weights[i]
-            offset = (total_dur * cum_weight + total_weight // 2) // total_weight
-            cue_end = min(end_ms, max(cue_start, start_ms + offset))
-        out.append((cue_start, cue_end, cue))
-        prev_end = cue_end
-
-    return out
-
-
-def _to_millis(seconds: float) -> int:
-    if not math.isfinite(seconds) or seconds <= 0.0:
-        return 0
-    ms = float(seconds) * 1000.0
-    whole = math.floor(ms)
-    return int(whole + 1 if (ms - whole) >= 0.5 else whole)
-
-
-def _format_timestamp(millis: int, decimal: str) -> str:
-    ms = millis % 1000
-    total_secs = millis // 1000
-    s = total_secs % 60
-    m = (total_secs // 60) % 60
-    h = total_secs // 3600
-    return f"{h:02d}:{m:02d}:{s:02d}{decimal}{ms:03d}"
+    check_error(c_fn(c_segments, len(seg_list), byref(out)))
+    return take_string(out)
 
 
 def _decode(b: Optional[bytes]) -> str:

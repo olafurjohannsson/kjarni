@@ -972,6 +972,18 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         public static extern void kjarni_transcription_free(KjarniTranscription transcription);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_transcription_to_srt(
+            KjarniTranscriptionSegment[]? segments,
+            UIntPtr len,
+            out IntPtr result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_transcription_to_vtt(
+            KjarniTranscriptionSegment[]? segments,
+            UIntPtr len,
+            out IntPtr result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniSummarizerConfig kjarni_summarizer_config_default();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]

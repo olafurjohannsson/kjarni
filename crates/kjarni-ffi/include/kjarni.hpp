@@ -40,9 +40,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstddef>
-#include <cstdio>
 #include <expected>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -950,228 +948,18 @@ struct Transcript {
 
 namespace detail {
 
-inline bool is_ascii_space(char c) noexcept {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
-}
-
-inline bool has_non_whitespace(std::string_view s) noexcept {
-    for (char c : s) {
-        if (!is_ascii_space(c)) return true;
+template <auto Fn>
+inline Result<std::string> format_subtitles(std::span<const Segment> segments) {
+    std::vector<KjarniTranscriptionSegment> raw;
+    raw.reserve(segments.size());
+    for (const auto& s : segments) {
+        raw.push_back(KjarniTranscriptionSegment{s.start, s.end, const_cast<char*>(s.text.c_str())});
     }
-    return false;
-}
-
-inline std::size_t utf8_char_count(std::string_view s) noexcept {
-    std::size_t count = 0;
-    for (unsigned char c : s) {
-        if ((c & 0xC0u) != 0x80u) ++count;
+    char* out = nullptr;
+    if (auto e = check(Fn(raw.empty() ? nullptr : raw.data(), raw.size(), &out)); !e) {
+        return std::unexpected(e.error());
     }
-    return count;
-}
-
-inline std::vector<std::string_view> split_whitespace_views(std::string_view s) {
-    std::vector<std::string_view> words;
-    std::size_t i = 0;
-    while (i < s.size()) {
-        while (i < s.size() && is_ascii_space(s[i])) ++i;
-        if (i >= s.size()) break;
-        const std::size_t start = i;
-        while (i < s.size() && !is_ascii_space(s[i])) ++i;
-        words.push_back(s.substr(start, i - start));
-    }
-    return words;
-}
-
-inline std::string join_words(std::span<const std::string_view> words) {
-    std::string out;
-    for (std::size_t i = 0; i < words.size(); ++i) {
-        if (i > 0) out.push_back(' ');
-        out.append(words[i]);
-    }
-    return out;
-}
-
-inline void replace_vtt_arrows(std::string& text) {
-    std::size_t pos = 0;
-    while ((pos = text.find("-->", pos)) != std::string::npos) {
-        text.replace(pos, 3, "-- >");
-        pos += 4;
-    }
-}
-
-inline std::vector<std::string> build_segment_cues(std::string_view text, bool is_vtt) {
-    constexpr std::size_t max_line_chars = 42;
-    constexpr std::size_t max_lines = 2;
-
-    std::vector<std::string_view> words = split_whitespace_views(text);
-    if (words.empty()) return {};
-
-    std::string escaped_storage;
-    if (is_vtt) {
-        std::string joined = join_words(words);
-        if (joined.find("-->") != std::string::npos) {
-            replace_vtt_arrows(joined);
-            escaped_storage = std::move(joined);
-            words = split_whitespace_views(escaped_storage);
-        }
-    }
-
-    std::vector<std::string> lines;
-    std::string current;
-    std::size_t current_chars = 0;
-    for (std::string_view word : words) {
-        const std::size_t word_chars = utf8_char_count(word);
-        if (current_chars == 0) {
-            current.append(word);
-            current_chars = word_chars;
-        } else if (current_chars + 1 + word_chars <= max_line_chars) {
-            current.push_back(' ');
-            current.append(word);
-            current_chars += 1 + word_chars;
-        } else {
-            lines.push_back(std::move(current));
-            current.clear();
-            current.append(word);
-            current_chars = word_chars;
-        }
-    }
-    if (current_chars > 0) {
-        lines.push_back(std::move(current));
-    }
-
-    std::vector<std::string> cues;
-    cues.reserve((lines.size() + max_lines - 1) / max_lines);
-    for (std::size_t i = 0; i < lines.size(); i += max_lines) {
-        std::string cue = std::move(lines[i]);
-        for (std::size_t j = 1; j < max_lines && i + j < lines.size(); ++j) {
-            cue.push_back('\n');
-            cue.append(lines[i + j]);
-        }
-        cues.push_back(std::move(cue));
-    }
-    return cues;
-}
-
-inline std::uint64_t subtitle_to_millis(float seconds) noexcept {
-    const double d = static_cast<double>(seconds);
-    if (!std::isfinite(d) || d <= 0.0) return 0;
-    const double ms = d * 1000.0;
-    if (ms >= static_cast<double>(std::numeric_limits<std::int64_t>::max())) {
-        return static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
-    }
-    const long long rounded = std::llround(ms);
-    return rounded <= 0 ? 0ULL : static_cast<std::uint64_t>(rounded);
-}
-
-inline std::uint64_t mul_div_round(std::uint64_t a, std::uint64_t b, std::uint64_t denom) noexcept {
-    if (a == 0 || b == 0) return 0;
-    if (b <= (std::numeric_limits<std::uint64_t>::max() - denom / 2) / a) {
-        return (a * b + denom / 2) / denom;
-    }
-    const std::uint64_t a_hi = a >> 32, a_lo = a & 0xFFFFFFFFULL;
-    const std::uint64_t b_hi = b >> 32, b_lo = b & 0xFFFFFFFFULL;
-    const std::uint64_t p0 = a_lo * b_lo;
-    const std::uint64_t p1 = a_lo * b_hi;
-    const std::uint64_t p2 = a_hi * b_lo;
-    const std::uint64_t p3 = a_hi * b_hi;
-    const std::uint64_t mid = (p0 >> 32) + (p1 & 0xFFFFFFFFULL) + (p2 & 0xFFFFFFFFULL);
-    std::uint64_t lo = (p0 & 0xFFFFFFFFULL) | (mid << 32);
-    std::uint64_t hi = p3 + (p1 >> 32) + (p2 >> 32) + (mid >> 32);
-    const std::uint64_t half = denom / 2;
-    if (lo > std::numeric_limits<std::uint64_t>::max() - half) ++hi;
-    lo += half;
-    std::uint64_t q = 0;
-    std::uint64_t rem = 0;
-    for (int bit = 127; bit >= 0; --bit) {
-        const std::uint64_t carry = (bit >= 64) ? ((hi >> (bit - 64)) & 1ULL) : ((lo >> bit) & 1ULL);
-        rem = (rem << 1) | carry;
-        if (rem >= denom) {
-            rem -= denom;
-            if (bit < 64) q |= (1ULL << bit);
-        }
-    }
-    return q;
-}
-
-inline void append_subtitle_timestamp(std::string& out, std::uint64_t millis, char decimal) {
-    const std::uint64_t ms = millis % 1000;
-    const std::uint64_t total_secs = millis / 1000;
-    const std::uint64_t s = total_secs % 60;
-    const std::uint64_t m = (total_secs / 60) % 60;
-    const std::uint64_t h = total_secs / 3600;
-    char buf[32];
-    const int n = std::snprintf(
-        buf, sizeof(buf), "%02llu:%02llu:%02llu%c%03llu",
-        static_cast<unsigned long long>(h),
-        static_cast<unsigned long long>(m),
-        static_cast<unsigned long long>(s),
-        decimal,
-        static_cast<unsigned long long>(ms));
-    if (n > 0) out.append(buf, static_cast<std::size_t>(n));
-}
-
-inline std::string format_subtitles(std::span<const Segment> segments, bool is_vtt) {
-    std::string out = is_vtt ? std::string{"WEBVTT\n\n"} : std::string{};
-    const char decimal = is_vtt ? '.' : ',';
-    std::size_t cue_index = 1;
-
-    for (const auto& segment : segments) {
-        std::vector<std::string> cues = build_segment_cues(segment.text, is_vtt);
-        if (cues.empty()) continue;
-
-        const std::uint64_t start_ms = subtitle_to_millis(segment.start);
-        const std::uint64_t end_ms = std::max(start_ms, subtitle_to_millis(segment.end));
-        const std::size_t count = cues.size();
-
-        if (count == 1) {
-            if (!is_vtt) {
-                out.append(std::to_string(cue_index++));
-                out.push_back('\n');
-            }
-            append_subtitle_timestamp(out, start_ms, decimal);
-            out.append(" --> ");
-            append_subtitle_timestamp(out, end_ms, decimal);
-            out.push_back('\n');
-            out.append(cues[0]);
-            out.append("\n\n");
-            continue;
-        }
-
-        std::vector<std::uint64_t> weights;
-        weights.reserve(count);
-        std::uint64_t total_weight = 0;
-        for (const auto& cue : cues) {
-            const std::uint64_t w = std::max<std::uint64_t>(1, utf8_char_count(cue));
-            weights.push_back(w);
-            total_weight += w;
-        }
-
-        const std::uint64_t total_dur = end_ms - start_ms;
-        std::uint64_t prev_end = start_ms;
-        std::uint64_t cum_weight = 0;
-        for (std::size_t i = 0; i < count; ++i) {
-            const std::uint64_t cue_start = prev_end;
-            std::uint64_t cue_end = end_ms;
-            if (i + 1 < count) {
-                cum_weight += weights[i];
-                const std::uint64_t offset = mul_div_round(total_dur, cum_weight, total_weight);
-                cue_end = std::clamp(start_ms + offset, cue_start, end_ms);
-            }
-            if (!is_vtt) {
-                out.append(std::to_string(cue_index++));
-                out.push_back('\n');
-            }
-            append_subtitle_timestamp(out, cue_start, decimal);
-            out.append(" --> ");
-            append_subtitle_timestamp(out, cue_end, decimal);
-            out.push_back('\n');
-            out.append(cues[i]);
-            out.append("\n\n");
-            prev_end = cue_end;
-        }
-    }
-
-    return out;
+    return adopt(out);
 }
 
 }  // namespace detail
@@ -1180,17 +968,17 @@ inline std::string format_subtitles(std::span<const Segment> segments, bool is_v
 ///
 /// Long segments are wrapped on word boundaries at around 42 characters per
 /// line and at most 2 lines per cue, with timestamps distributed proportionally.
-[[nodiscard]] inline std::string to_srt(std::span<const Segment> segments) {
-    return detail::format_subtitles(segments, false);
+[[nodiscard]] inline Result<std::string> to_srt(std::span<const Segment> segments) {
+    return detail::format_subtitles<kjarni_transcription_to_srt>(segments);
 }
 
 /// Formats a transcript as SubRip (`.srt`) subtitle text.
 ///
 /// Falls back to a single segment spanning `0.0..duration_secs` when
 /// `segments` is empty and `text` is non-empty.
-[[nodiscard]] inline std::string to_srt(const Transcript& transcript) {
+[[nodiscard]] inline Result<std::string> to_srt(const Transcript& transcript) {
     if (transcript.segments.empty()) {
-        if (!detail::has_non_whitespace(transcript.text)) return {};
+        if (transcript.text.empty()) return to_srt(std::span<const Segment>{});
         const float end = std::isfinite(transcript.duration_secs)
                               ? std::max(0.f, transcript.duration_secs)
                               : 0.f;
@@ -1205,17 +993,17 @@ inline std::string format_subtitles(std::span<const Segment> segments, bool is_v
 /// Always begins with the `WEBVTT` header. Long segments are wrapped on word
 /// boundaries at around 42 characters per line and at most 2 lines per cue, with
 /// timestamps distributed proportionally.
-[[nodiscard]] inline std::string to_vtt(std::span<const Segment> segments) {
-    return detail::format_subtitles(segments, true);
+[[nodiscard]] inline Result<std::string> to_vtt(std::span<const Segment> segments) {
+    return detail::format_subtitles<kjarni_transcription_to_vtt>(segments);
 }
 
 /// Formats a transcript as WebVTT (`.vtt`) subtitle text.
 ///
 /// Falls back to a single segment spanning `0.0..duration_secs` when
 /// `segments` is empty and `text` is non-empty.
-[[nodiscard]] inline std::string to_vtt(const Transcript& transcript) {
+[[nodiscard]] inline Result<std::string> to_vtt(const Transcript& transcript) {
     if (transcript.segments.empty()) {
-        if (!detail::has_non_whitespace(transcript.text)) return "WEBVTT\n\n";
+        if (transcript.text.empty()) return to_vtt(std::span<const Segment>{});
         const float end = std::isfinite(transcript.duration_secs)
                               ? std::max(0.f, transcript.duration_secs)
                               : 0.f;

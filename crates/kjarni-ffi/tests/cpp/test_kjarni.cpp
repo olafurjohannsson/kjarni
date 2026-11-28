@@ -448,8 +448,10 @@ void test_transcriber() {
         bool ordered = true;
         for (const auto& s : r->segments) ordered = ordered && s.end >= s.start;
         ok(ordered, "every segment ends after it starts");
-        ok(!kjarni::to_srt(*r).empty(), "transcript formats to SRT");
-        ok(kjarni::to_vtt(*r).starts_with("WEBVTT\n\n"), "transcript formats to VTT");
+        auto srt = kjarni::to_srt(*r);
+        ok(srt && !srt->empty(), "transcript formats to SRT");
+        auto vtt = kjarni::to_vtt(*r);
+        ok(vtt && vtt->starts_with("WEBVTT\n\n"), "transcript formats to VTT");
     }
 
     // A second of silence at 8 kHz exercises resampling and must not fail.
@@ -462,8 +464,10 @@ void test_transcriber() {
 void test_subtitles() {
     section("subtitles");
 
-    ok(kjarni::to_srt(std::vector<kjarni::Segment>{}).empty(), "empty segments produce empty SRT");
-    ok(kjarni::to_vtt(std::vector<kjarni::Segment>{}) == "WEBVTT\n\n",
+    auto empty_srt = kjarni::to_srt(std::vector<kjarni::Segment>{});
+    ok(empty_srt && empty_srt->empty(), "empty segments produce empty SRT");
+    auto empty_vtt = kjarni::to_vtt(std::vector<kjarni::Segment>{});
+    ok(empty_vtt && *empty_vtt == "WEBVTT\n\n",
        "empty segments produce WEBVTT header");
 
     const std::vector<kjarni::Segment> short_segs{
@@ -471,11 +475,13 @@ void test_subtitles() {
         {1.5f, 2.0f, "  \n\t  "},
         {61.25f, 3725.004f, " General\n\tKenobi. "},
     };
-    ok(kjarni::to_srt(short_segs) ==
+    auto short_srt = kjarni::to_srt(short_segs);
+    ok(short_srt && *short_srt ==
            "1\n00:00:00,000 --> 00:00:01,500\nHello there.\n\n"
            "2\n00:01:01,250 --> 01:02:05,004\nGeneral Kenobi.\n\n",
        "short SRT skips whitespace-only segments without cue numbering gaps");
-    ok(kjarni::to_vtt(short_segs) ==
+    auto short_vtt = kjarni::to_vtt(short_segs);
+    ok(short_vtt && *short_vtt ==
            "WEBVTT\n\n"
            "00:00:00.000 --> 00:00:01.500\nHello there.\n\n"
            "00:01:01.250 --> 01:02:05.004\nGeneral Kenobi.\n\n",
@@ -484,7 +490,8 @@ void test_subtitles() {
     const std::vector<kjarni::Segment> wrap_seg{
         {0.0f, 4.0f, "This is a moderately long subtitle line that should wrap onto two lines."},
     };
-    ok(kjarni::to_srt(wrap_seg) ==
+    auto wrap_srt = kjarni::to_srt(wrap_seg);
+    ok(wrap_srt && *wrap_srt ==
            "1\n00:00:00,000 --> 00:00:04,000\n"
            "This is a moderately long subtitle line\n"
            "that should wrap onto two lines.\n\n",
@@ -496,7 +503,8 @@ void test_subtitles() {
          "hotel india juliet kilo lima mike november "
          "oscar papa quebec."},
     };
-    ok(kjarni::to_srt(long_seg) ==
+    auto long_srt = kjarni::to_srt(long_seg);
+    ok(long_srt && *long_srt ==
            "1\n00:00:10,000 --> 00:00:17,404\n"
            "Alpha bravo charlie delta echo foxtrot\n"
            "golf hotel india juliet kilo lima mike\n\n"
@@ -508,14 +516,16 @@ void test_subtitles() {
     const std::vector<kjarni::Segment> long_word_seg{
         {0.0f, 6.0f, "Prefix " + long_word + " suffix"},
     };
-    ok(kjarni::to_srt(long_word_seg) ==
+    auto long_word_srt = kjarni::to_srt(long_word_seg);
+    ok(long_word_srt && *long_word_srt ==
            "1\n00:00:00,000 --> 00:00:05,390\nPrefix\n" + long_word + "\n\n"
            "2\n00:00:05,390 --> 00:00:06,000\nsuffix\n\n",
        "single word over 42 chars stays intact on its own line");
 
     const std::string icelandic = "Þórður sagði halló við alla í Reykjavík í";
     const std::vector<kjarni::Segment> unicode_seg{{0.0f, 3.0f, icelandic + " dag."}};
-    ok(kjarni::to_srt(unicode_seg) ==
+    auto unicode_srt = kjarni::to_srt(unicode_seg);
+    ok(unicode_srt && *unicode_srt ==
            "1\n00:00:00,000 --> 00:00:03,000\n" + icelandic + "\ndag.\n\n",
        "counts Unicode scalar characters rather than UTF-8 bytes");
 
@@ -527,7 +537,8 @@ void test_subtitles() {
         {-2.5f, -1.0f, "Negative."},
         {5.0f, 3.0f, "Reversed."},
     };
-    ok(kjarni::to_srt(edge_segs) ==
+    auto edge_srt = kjarni::to_srt(edge_segs);
+    ok(edge_srt && *edge_srt ==
            "1\n00:00:00,000 --> 00:00:01,000\nRounding up.\n\n"
            "2\n00:00:00,000 --> 00:00:00,000\nNon-finite.\n\n"
            "3\n00:00:00,000 --> 00:00:00,000\nNegative.\n\n"
@@ -535,18 +546,23 @@ void test_subtitles() {
        "handles rounding, non-finite, negative, and reversed bounds");
 
     const std::vector<kjarni::Segment> arrow_seg{{0.0f, 2.0f, "From A --> B and x-->y"}};
-    ok(kjarni::to_vtt(arrow_seg) ==
+    auto arrow_vtt = kjarni::to_vtt(arrow_seg);
+    ok(arrow_vtt && *arrow_vtt ==
            "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nFrom A -- > B and x-- >y\n\n",
        "VTT escapes timing arrow in cue text");
 
     const kjarni::Transcript fallback{"  Just full text. ", "en", 4.5f, {}};
-    ok(kjarni::to_srt(fallback) == "1\n00:00:00,000 --> 00:00:04,500\nJust full text.\n\n",
+    auto fb_srt = kjarni::to_srt(fallback);
+    ok(fb_srt && *fb_srt == "1\n00:00:00,000 --> 00:00:04,500\nJust full text.\n\n",
        "Transcript to_srt falls back to text when segments empty");
-    ok(kjarni::to_vtt(fallback) == "WEBVTT\n\n00:00:00.000 --> 00:00:04.500\nJust full text.\n\n",
+    auto fb_vtt = kjarni::to_vtt(fallback);
+    ok(fb_vtt && *fb_vtt == "WEBVTT\n\n00:00:00.000 --> 00:00:04.500\nJust full text.\n\n",
        "Transcript to_vtt falls back to text when segments empty");
     const kjarni::Transcript empty{"   ", "en", 1.0f, {}};
-    ok(kjarni::to_srt(empty).empty(), "empty Transcript to_srt is empty");
-    ok(kjarni::to_vtt(empty) == "WEBVTT\n\n", "empty Transcript to_vtt is WEBVTT header");
+    auto empty_tr_srt = kjarni::to_srt(empty);
+    ok(empty_tr_srt && empty_tr_srt->empty(), "empty Transcript to_srt is empty");
+    auto empty_tr_vtt = kjarni::to_vtt(empty);
+    ok(empty_tr_vtt && *empty_tr_vtt == "WEBVTT\n\n", "empty Transcript to_vtt is WEBVTT header");
 }
 
 // ─── Summarizer and translator ───────────────────────────────────

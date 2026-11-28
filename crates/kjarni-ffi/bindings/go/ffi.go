@@ -155,6 +155,9 @@ var (
 	_transcriberTranscribeFileSym uintptr
 	_transcriberTranscribePCMSym  uintptr
 	_transcriptionFreeSym         uintptr
+	// Subtitle helpers: optional so an un-rebuilt embedded binary still loads.
+	_transcriptionToSRTSym uintptr
+	_transcriptionToVTTSym uintptr
 
 	// Summarizer
 	_summarizerNewSym       uintptr
@@ -382,6 +385,8 @@ func initFFI() error {
 	if _transcriptionFreeSym, err = symbol(handle, "kjarni_transcription_free"); err != nil {
 		return err
 	}
+	_transcriptionToSRTSym, _ = symbol(handle, "kjarni_transcription_to_srt")
+	_transcriptionToVTTSym, _ = symbol(handle, "kjarni_transcription_to_vtt")
 
 	// Summarizer
 	if _summarizerNewSym, err = symbol(handle, "kjarni_summarizer_new"); err != nil {

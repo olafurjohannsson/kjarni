@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -28,8 +27,8 @@ namespace Kjarni
         {
             if (Segments == null || Segments.Length == 0)
             {
-                if (string.IsNullOrWhiteSpace(Text))
-                    return string.Empty;
+                if (string.IsNullOrEmpty(Text))
+                    return ToSrt(Array.Empty<TranscriptSegment>());
                 var end = IsFinite(DurationSecs) ? Math.Max(0f, DurationSecs) : 0f;
                 return ToSrt(new[] { new TranscriptSegment(0f, end, Text) });
             }
@@ -44,8 +43,8 @@ namespace Kjarni
         {
             if (Segments == null || Segments.Length == 0)
             {
-                if (string.IsNullOrWhiteSpace(Text))
-                    return "WEBVTT\n\n";
+                if (string.IsNullOrEmpty(Text))
+                    return ToVtt(Array.Empty<TranscriptSegment>());
                 var end = IsFinite(DurationSecs) ? Math.Max(0f, DurationSecs) : 0f;
                 return ToVtt(new[] { new TranscriptSegment(0f, end, Text) });
             }
@@ -61,7 +60,7 @@ namespace Kjarni
         public static string ToSrt(IReadOnlyList<TranscriptSegment> segments)
         {
             if (segments == null) throw new ArgumentNullException(nameof(segments));
-            return SubtitleFormatter.Format(segments, isVtt: false);
+            return FormatSubtitles(segments, isVtt: false);
         }
 
         /// <summary>
@@ -73,194 +72,59 @@ namespace Kjarni
         public static string ToVtt(IReadOnlyList<TranscriptSegment> segments)
         {
             if (segments == null) throw new ArgumentNullException(nameof(segments));
-            return SubtitleFormatter.Format(segments, isVtt: true);
+            return FormatSubtitles(segments, isVtt: true);
         }
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
-    }
 
-    internal static class SubtitleFormatter
-    {
-        private const int MaxLineChars = 42;
-        private const int MaxLines = 2;
-
-        public static string Format(IReadOnlyList<TranscriptSegment> segments, bool isVtt)
+        private static string FormatSubtitles(IReadOnlyList<TranscriptSegment> segments, bool isVtt)
         {
-            var sb = new StringBuilder();
-            if (isVtt)
-                sb.Append("WEBVTT\n\n");
-
-            var decimalSep = isVtt ? '.' : ',';
-            int cueIndex = 1;
-
-            for (int s = 0; s < segments.Count; s++)
+            if (segments.Count == 0)
             {
-                var segment = segments[s];
-                var cues = BuildSegmentCues(segment.Text ?? string.Empty, isVtt);
-                if (cues.Count == 0)
-                    continue;
+                Native.CheckError(isVtt
+                    ? Native.kjarni_transcription_to_vtt(null, UIntPtr.Zero, out var emptyPtr)
+                    : Native.kjarni_transcription_to_srt(null, UIntPtr.Zero, out emptyPtr));
+                return Native.TakeString(emptyPtr);
+            }
 
-                ulong startMs = ToMillis(segment.Start);
-                ulong endMs = Math.Max(startMs, ToMillis(segment.End));
-
-                foreach (var (cueStart, cueEnd, cueText) in DistributeTimestamps(cues, startMs, endMs))
+            var nativeSegs = new Native.KjarniTranscriptionSegment[segments.Count];
+            var textPtrs = new IntPtr[segments.Count];
+            try
+            {
+                for (int i = 0; i < segments.Count; i++)
                 {
-                    if (!isVtt)
+                    var seg = segments[i];
+                    if (!string.IsNullOrEmpty(seg.Text))
                     {
-                        sb.Append(cueIndex.ToString(CultureInfo.InvariantCulture));
-                        sb.Append('\n');
-                        cueIndex++;
+                        var byteCount = Encoding.UTF8.GetByteCount(seg.Text);
+                        var bytes = new byte[byteCount + 1];
+                        Encoding.UTF8.GetBytes(seg.Text, 0, seg.Text.Length, bytes, 0);
+                        bytes[byteCount] = 0;
+                        var ptr = Marshal.AllocHGlobal(bytes.Length);
+                        textPtrs[i] = ptr;
+                        Marshal.Copy(bytes, 0, ptr, bytes.Length);
                     }
-                    AppendTimestamp(sb, cueStart, decimalSep);
-                    sb.Append(" --> ");
-                    AppendTimestamp(sb, cueEnd, decimalSep);
-                    sb.Append('\n');
-                    sb.Append(cueText);
-                    sb.Append("\n\n");
+                    nativeSegs[i] = new Native.KjarniTranscriptionSegment
+                    {
+                        Start = seg.Start,
+                        End = seg.End,
+                        Text = textPtrs[i],
+                    };
                 }
+
+                Native.CheckError(isVtt
+                    ? Native.kjarni_transcription_to_vtt(nativeSegs, (UIntPtr)nativeSegs.Length, out var resultPtr)
+                    : Native.kjarni_transcription_to_srt(nativeSegs, (UIntPtr)nativeSegs.Length, out resultPtr));
+                return Native.TakeString(resultPtr);
             }
-
-            return sb.ToString();
-        }
-
-        private static List<string> BuildSegmentCues(string text, bool isVtt)
-        {
-            var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (words.Length == 0)
-                return new List<string>();
-
-            if (isVtt)
+            finally
             {
-                var joined = string.Join(" ", words);
-                if (joined.IndexOf("-->", StringComparison.Ordinal) >= 0)
-                    words = joined.Replace("-->", "-- >").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            }
-
-            var lines = WrapWords(words);
-            var cues = new List<string>((lines.Count + MaxLines - 1) / MaxLines);
-            for (int i = 0; i < lines.Count; i += MaxLines)
-            {
-                int count = Math.Min(MaxLines, lines.Count - i);
-                cues.Add(string.Join("\n", lines.GetRange(i, count)));
-            }
-            return cues;
-        }
-
-        private static List<string> WrapWords(string[] words)
-        {
-            var lines = new List<string>();
-            var current = new StringBuilder();
-            int currentChars = 0;
-
-            foreach (var word in words)
-            {
-                int wordChars = RuneCount(word);
-                if (currentChars == 0)
+                for (int i = 0; i < textPtrs.Length; i++)
                 {
-                    current.Append(word);
-                    currentChars = wordChars;
-                }
-                else if (currentChars + 1 + wordChars <= MaxLineChars)
-                {
-                    current.Append(' ');
-                    current.Append(word);
-                    currentChars += 1 + wordChars;
-                }
-                else
-                {
-                    lines.Add(current.ToString());
-                    current.Clear();
-                    current.Append(word);
-                    currentChars = wordChars;
+                    if (textPtrs[i] != IntPtr.Zero)
+                        Marshal.FreeHGlobal(textPtrs[i]);
                 }
             }
-
-            if (currentChars > 0)
-                lines.Add(current.ToString());
-
-            return lines;
-        }
-
-        private static List<(ulong Start, ulong End, string Text)> DistributeTimestamps(
-            List<string> cues, ulong startMs, ulong endMs)
-        {
-            int count = cues.Count;
-            if (count == 1)
-                return new List<(ulong, ulong, string)> { (startMs, endMs, cues[0]) };
-
-            var weights = new ulong[count];
-            ulong totalWeight = 0;
-            for (int i = 0; i < count; i++)
-            {
-                ulong w = Math.Max(1UL, (ulong)RuneCount(cues[i]));
-                weights[i] = w;
-                totalWeight += w;
-            }
-
-            ulong totalDur = endMs - startMs;
-            var result = new List<(ulong, ulong, string)>(count);
-            ulong prevEnd = startMs;
-            ulong cumWeight = 0;
-
-            for (int i = 0; i < count; i++)
-            {
-                ulong cueStart = prevEnd;
-                ulong cueEnd;
-                if (i + 1 == count)
-                {
-                    cueEnd = endMs;
-                }
-                else
-                {
-                    cumWeight += weights[i];
-                    ulong offset = totalDur == 0 || cumWeight <= (ulong.MaxValue - totalWeight / 2) / totalDur
-                        ? (totalDur * cumWeight + totalWeight / 2) / totalWeight
-                        : (ulong)(((decimal)totalDur * cumWeight + (decimal)totalWeight / 2m) / totalWeight);
-                    cueEnd = Math.Min(endMs, Math.Max(cueStart, startMs + offset));
-                }
-                result.Add((cueStart, cueEnd, cues[i]));
-                prevEnd = cueEnd;
-            }
-
-            return result;
-        }
-
-        private static int RuneCount(string s)
-        {
-            int count = 0;
-            for (int i = 0; i < s.Length; i++)
-            {
-                if (char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
-                    i++;
-                count++;
-            }
-            return count;
-        }
-
-        private static ulong ToMillis(float seconds)
-        {
-            if (float.IsNaN(seconds) || float.IsInfinity(seconds) || seconds <= 0f)
-                return 0;
-            double ms = (double)seconds * 1000.0;
-            if (ms >= 18446744073709551616.0)
-                return ulong.MaxValue;
-            return (ulong)Math.Round(ms, MidpointRounding.AwayFromZero);
-        }
-
-        private static void AppendTimestamp(StringBuilder sb, ulong millis, char decimalSep)
-        {
-            ulong ms = millis % 1000;
-            ulong totalSecs = millis / 1000;
-            ulong s = totalSecs % 60;
-            ulong m = (totalSecs / 60) % 60;
-            ulong h = totalSecs / 3600;
-            sb.Append(h.ToString("D2", CultureInfo.InvariantCulture));
-            sb.Append(':');
-            sb.Append(m.ToString("D2", CultureInfo.InvariantCulture));
-            sb.Append(':');
-            sb.Append(s.ToString("D2", CultureInfo.InvariantCulture));
-            sb.Append(decimalSep);
-            sb.Append(ms.ToString("D3", CultureInfo.InvariantCulture));
         }
     }
 
