@@ -2,11 +2,21 @@ package kjarni
 
 import (
 	"errors"
+	"fmt"
+	"math"
+	"math/bits"
 	"runtime"
+	"strings"
 	"sync"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+)
+
+const (
+	subtitleMaxLineChars = 42
+	subtitleMaxLines     = 2
 )
 
 // Segment is one timed piece of a transcript, in seconds from the start.
@@ -23,6 +33,231 @@ type Transcript struct {
 	Language     string
 	DurationSecs float32
 	Segments     []Segment
+}
+
+// ToSRT formats the transcript as SubRip (.srt) subtitle text.
+func (t *Transcript) ToSRT() string {
+	if t == nil {
+		return ""
+	}
+	if len(t.Segments) == 0 {
+		if strings.TrimSpace(t.Text) == "" {
+			return ""
+		}
+		end := float32(0)
+		d := float64(t.DurationSecs)
+		if !math.IsNaN(d) && !math.IsInf(d, 0) && t.DurationSecs > 0 {
+			end = t.DurationSecs
+		}
+		return SegmentsToSRT([]Segment{{Start: 0, End: end, Text: t.Text}})
+	}
+	return SegmentsToSRT(t.Segments)
+}
+
+// ToVTT formats the transcript as WebVTT (.vtt) subtitle text.
+func (t *Transcript) ToVTT() string {
+	if t == nil {
+		return "WEBVTT\n\n"
+	}
+	if len(t.Segments) == 0 {
+		if strings.TrimSpace(t.Text) == "" {
+			return "WEBVTT\n\n"
+		}
+		end := float32(0)
+		d := float64(t.DurationSecs)
+		if !math.IsNaN(d) && !math.IsInf(d, 0) && t.DurationSecs > 0 {
+			end = t.DurationSecs
+		}
+		return SegmentsToVTT([]Segment{{Start: 0, End: end, Text: t.Text}})
+	}
+	return SegmentsToVTT(t.Segments)
+}
+
+// SegmentsToSRT formats timed segments as SubRip (.srt) subtitle text.
+// Long segments are wrapped on word boundaries at around 42 characters per
+// line and at most 2 lines per cue, with timestamps split proportionally.
+func SegmentsToSRT(segments []Segment) string {
+	return formatSubtitles(segments, false)
+}
+
+// SegmentsToVTT formats timed segments as WebVTT (.vtt) subtitle text.
+// Always starts with the WEBVTT header. Long segments are wrapped on word
+// boundaries at around 42 characters per line and at most 2 lines per cue,
+// with timestamps split proportionally.
+func SegmentsToVTT(segments []Segment) string {
+	return formatSubtitles(segments, true)
+}
+
+func formatSubtitles(segments []Segment, isVTT bool) string {
+	var out strings.Builder
+	decimal := ','
+	if isVTT {
+		out.WriteString("WEBVTT\n\n")
+		decimal = '.'
+	}
+
+	cueIndex := 1
+	for _, seg := range segments {
+		cues := buildSegmentCues(seg.Text, isVTT)
+		if len(cues) == 0 {
+			continue
+		}
+
+		startMs := subtitleToMillis(seg.Start)
+		endMs := subtitleToMillis(seg.End)
+		if endMs < startMs {
+			endMs = startMs
+		}
+
+		for _, cue := range distributeSubtitleTimestamps(cues, startMs, endMs) {
+			if !isVTT {
+				fmt.Fprintf(&out, "%d\n", cueIndex)
+				cueIndex++
+			}
+			fmt.Fprintf(
+				&out,
+				"%s --> %s\n%s\n\n",
+				formatSubtitleTimestamp(cue.start, decimal),
+				formatSubtitleTimestamp(cue.end, decimal),
+				cue.text,
+			)
+		}
+	}
+
+	return out.String()
+}
+
+func buildSegmentCues(text string, isVTT bool) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+	if isVTT {
+		joined := strings.Join(words, " ")
+		if strings.Contains(joined, "-->") {
+			words = strings.Fields(strings.ReplaceAll(joined, "-->", "-- >"))
+		}
+	}
+
+	lines := wrapSubtitleWords(words, subtitleMaxLineChars)
+	cues := make([]string, 0, (len(lines)+subtitleMaxLines-1)/subtitleMaxLines)
+	for i := 0; i < len(lines); i += subtitleMaxLines {
+		end := i + subtitleMaxLines
+		if end > len(lines) {
+			end = len(lines)
+		}
+		cues = append(cues, strings.Join(lines[i:end], "\n"))
+	}
+	return cues
+}
+
+func wrapSubtitleWords(words []string, maxLineChars int) []string {
+	var lines []string
+	var current strings.Builder
+	currentChars := 0
+
+	for _, word := range words {
+		wordChars := utf8.RuneCountInString(word)
+		if currentChars == 0 {
+			current.WriteString(word)
+			currentChars = wordChars
+		} else if currentChars+1+wordChars <= maxLineChars {
+			current.WriteByte(' ')
+			current.WriteString(word)
+			currentChars += 1 + wordChars
+		} else {
+			lines = append(lines, current.String())
+			current.Reset()
+			current.WriteString(word)
+			currentChars = wordChars
+		}
+	}
+
+	if currentChars > 0 {
+		lines = append(lines, current.String())
+	}
+
+	return lines
+}
+
+type timedCue struct {
+	start uint64
+	end   uint64
+	text  string
+}
+
+func distributeSubtitleTimestamps(cues []string, startMs, endMs uint64) []timedCue {
+	count := len(cues)
+	if count == 1 {
+		return []timedCue{{start: startMs, end: endMs, text: cues[0]}}
+	}
+
+	weights := make([]uint64, count)
+	var totalWeight uint64
+	for i, c := range cues {
+		w := uint64(utf8.RuneCountInString(c))
+		if w == 0 {
+			w = 1
+		}
+		weights[i] = w
+		totalWeight += w
+	}
+
+	totalDur := endMs - startMs
+	out := make([]timedCue, 0, count)
+	prevEnd := startMs
+	var cumWeight uint64
+
+	for i, cue := range cues {
+		cueStart := prevEnd
+		var cueEnd uint64
+		if i+1 == count {
+			cueEnd = endMs
+		} else {
+			cumWeight += weights[i]
+			offset := mulDivRound(totalDur, cumWeight, totalWeight)
+			cueEnd = startMs + offset
+			if cueEnd < cueStart {
+				cueEnd = cueStart
+			}
+			if cueEnd > endMs {
+				cueEnd = endMs
+			}
+		}
+		out = append(out, timedCue{start: cueStart, end: cueEnd, text: cue})
+		prevEnd = cueEnd
+	}
+
+	return out
+}
+
+func mulDivRound(a, b, denom uint64) uint64 {
+	hi, lo := bits.Mul64(a, b)
+	lo, carry := bits.Add64(lo, denom/2, 0)
+	hi += carry
+	q, _ := bits.Div64(hi, lo, denom)
+	return q
+}
+
+func subtitleToMillis(seconds float32) uint64 {
+	d := float64(seconds)
+	if math.IsNaN(d) || math.IsInf(d, 0) || d <= 0 {
+		return 0
+	}
+	ms := d * 1000.0
+	if ms >= float64(math.MaxUint64) {
+		return math.MaxUint64
+	}
+	return uint64(math.Round(ms))
+}
+
+func formatSubtitleTimestamp(millis uint64, decimal rune) string {
+	ms := millis % 1000
+	totalSecs := millis / 1000
+	s := totalSecs % 60
+	m := (totalSecs / 60) % 60
+	h := totalSecs / 3600
+	return fmt.Sprintf("%02d:%02d:%02d%c%03d", h, m, s, decimal, ms)
 }
 
 type ffiTranscriberConfig struct {

@@ -5,7 +5,29 @@ use futures::{StreamExt, pin_mut};
 use std::io::{self, Write};
 use std::path::Path;
 
-use kjarni::transcriber::Transcriber;
+use kjarni::transcriber::{Transcriber, TranscriptionResult};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Text,
+    Srt,
+    Vtt,
+}
+
+impl OutputFormat {
+    fn parse(format: &str) -> Result<Self> {
+        match format.trim().to_ascii_lowercase().as_str() {
+            "text" => Ok(Self::Text),
+            "srt" => Ok(Self::Srt),
+            "vtt" => Ok(Self::Vtt),
+            other => Err(anyhow!("Unknown format: '{}'. Use: text, srt, vtt", other)),
+        }
+    }
+
+    fn needs_timestamps(self) -> bool {
+        matches!(self, Self::Srt | Self::Vtt)
+    }
+}
 
 /// Run the transcribe command.
 pub async fn run(
@@ -15,11 +37,15 @@ pub async fn run(
     language: Option<&str>,
     translate: bool,
     timestamps: bool,
+    format: &str,
     max_tokens: Option<usize>,
     no_stream: bool,
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
+    let output_format = OutputFormat::parse(format)?;
+    let need_timestamps = timestamps || output_format.needs_timestamps();
+
     // Validate input file exists
     let path = Path::new(file);
     if !path.exists() {
@@ -53,7 +79,7 @@ pub async fn run(
         builder = builder.translate();
     }
 
-    if timestamps {
+    if need_timestamps {
         builder = builder.timestamps(true);
     }
 
@@ -81,26 +107,13 @@ pub async fn run(
         eprintln!();
     }
 
-    if !streams(no_stream, timestamps) {
+    if !streams(no_stream, need_timestamps) {
         // Full result mode
         let result = transcriber
             .transcribe_file(file)
             .map_err(|e| anyhow!("Transcription failed: {}", e))?;
 
-        if timestamps && !result.segments.is_empty() {
-            // Print with timestamps
-            for segment in &result.segments {
-                println!(
-                    "[{} --> {}] {}",
-                    format_timestamp(segment.start),
-                    format_timestamp(segment.end),
-                    segment.text.trim()
-                );
-            }
-        } else {
-            // Print plain text
-            println!("{}", result.text.trim());
-        }
+        print!("{}", render_output(&result, output_format, timestamps));
 
         if !quiet {
             eprintln!();
@@ -139,9 +152,32 @@ pub async fn run(
 }
 
 /// Whether to print tokens as they decode. Streamed tokens carry no times, so
-/// `--timestamps` waits for the full result, which has them per segment.
-fn streams(no_stream: bool, timestamps: bool) -> bool {
-    !no_stream && !timestamps
+/// `--timestamps` and subtitle formats wait for the full result.
+fn streams(no_stream: bool, need_timestamps: bool) -> bool {
+    !no_stream && !need_timestamps
+}
+
+fn render_output(result: &TranscriptionResult, format: OutputFormat, timestamps: bool) -> String {
+    match format {
+        OutputFormat::Srt => result.to_srt(),
+        OutputFormat::Vtt => result.to_vtt(),
+        OutputFormat::Text => {
+            if timestamps && !result.segments.is_empty() {
+                let mut out = String::new();
+                for segment in &result.segments {
+                    out.push_str(&format!(
+                        "[{} --> {}] {}\n",
+                        format_timestamp(segment.start),
+                        format_timestamp(segment.end),
+                        segment.text.trim()
+                    ));
+                }
+                out
+            } else {
+                format!("{}\n", result.text.trim())
+            }
+        }
+    }
 }
 
 /// Format seconds as HH:MM:SS.mmm or MM:SS.mmm
@@ -164,6 +200,7 @@ fn format_timestamp(seconds: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kjarni::transcriber::TranscriptionSegment;
 
     #[test]
     fn timestamps_turn_off_streaming() {
@@ -178,5 +215,67 @@ mod tests {
         assert_eq!(format_timestamp(0.0), "00:00.000");
         assert_eq!(format_timestamp(29.54), "00:29.540");
         assert_eq!(format_timestamp(3725.5), "01:02:05.500");
+    }
+
+    #[test]
+    fn parses_supported_formats_and_rejects_unknown() {
+        assert_eq!(OutputFormat::parse("text").unwrap(), OutputFormat::Text);
+        assert_eq!(OutputFormat::parse("srt").unwrap(), OutputFormat::Srt);
+        assert_eq!(OutputFormat::parse("VTT").unwrap(), OutputFormat::Vtt);
+        assert!(!OutputFormat::Text.needs_timestamps());
+        assert!(OutputFormat::Srt.needs_timestamps());
+        assert!(OutputFormat::Vtt.needs_timestamps());
+
+        let err = OutputFormat::parse("json").unwrap_err().to_string();
+        assert!(err.contains("Unknown format"));
+        assert!(err.contains("text, srt, vtt"));
+    }
+
+    #[test]
+    fn renders_srt_vtt_and_text_outputs() {
+        let result = TranscriptionResult {
+            text: " Hello world. This is a longer sentence that should wrap across lines cleanly."
+                .into(),
+            segments: vec![
+                TranscriptionSegment {
+                    start: 0.0,
+                    end: 1.2,
+                    text: " Hello world.".into(),
+                },
+                TranscriptionSegment {
+                    start: 1.2,
+                    end: 5.0,
+                    text: " This is a longer sentence that should wrap across lines cleanly."
+                        .into(),
+                },
+            ],
+            language: "en".into(),
+            duration_secs: 5.0,
+        };
+
+        assert_eq!(
+            render_output(&result, OutputFormat::Text, false),
+            "Hello world. This is a longer sentence that should wrap across lines cleanly.\n"
+        );
+        assert_eq!(
+            render_output(&result, OutputFormat::Text, true),
+            "[00:00.000 --> 00:01.200] Hello world.\n\
+             [00:01.200 --> 00:05.000] This is a longer sentence that should wrap across lines cleanly.\n"
+        );
+        assert_eq!(
+            render_output(&result, OutputFormat::Srt, false),
+            "1\n00:00:00,000 --> 00:00:01,200\nHello world.\n\n\
+             2\n00:00:01,200 --> 00:00:05,000\n\
+             This is a longer sentence that should wrap\n\
+             across lines cleanly.\n\n"
+        );
+        assert_eq!(
+            render_output(&result, OutputFormat::Vtt, false),
+            "WEBVTT\n\n\
+             00:00:00.000 --> 00:00:01.200\nHello world.\n\n\
+             00:00:01.200 --> 00:00:05.000\n\
+             This is a longer sentence that should wrap\n\
+             across lines cleanly.\n\n"
+        );
     }
 }

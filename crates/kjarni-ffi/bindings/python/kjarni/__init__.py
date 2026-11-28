@@ -18,7 +18,7 @@ from .ner import EntityRecognizer, Entity
 from .indexer import Indexer, IndexStats, IndexInfo, Progress, CancelToken
 from .searcher import Searcher, SearchResult, SearchMode
 from .chat import Chat, Conversation, Turn
-from .transcriber import Transcriber, Transcript, Segment
+from .transcriber import Transcriber, Transcript, Segment, segments_to_srt, segments_to_vtt
 from .summarizer import Summarizer
 from .translator import Translator
 from .image_index import ImageIndex, ImageHit, ScanReport
@@ -49,6 +49,8 @@ __all__ = [
     "Transcriber",
     "Transcript",
     "Segment",
+    "segments_to_srt",
+    "segments_to_vtt",
     # Images
     "ImageIndex",
     "ImageHit",

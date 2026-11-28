@@ -393,6 +393,10 @@ pub enum Commands {
         #[arg(short, long)]
         timestamps: bool,
 
+        /// Output format: text, srt, vtt
+        #[arg(short, long, default_value = "text")]
+        format: String,
+
         /// Maximum tokens per 30-second chunk
         #[arg(long)]
         max_tokens: Option<usize>,
@@ -2061,11 +2065,13 @@ mod tests {
                 file,
                 model,
                 language,
+                format,
                 ..
             } => {
                 assert_eq!(file, "audio.wav");
                 assert_eq!(model, "whisper-small");
                 assert!(language.is_none());
+                assert_eq!(format, "text");
             }
             _ => panic!("Expected Transcribe command"),
         }
@@ -2092,6 +2098,8 @@ mod tests {
             "whisper-large-v3",
             "--language",
             "is",
+            "--format",
+            "srt",
         ])
         .unwrap();
 
@@ -2100,11 +2108,24 @@ mod tests {
                 file,
                 model,
                 language,
+                format,
                 ..
             } => {
                 assert_eq!(file, "audio.mp3");
                 assert_eq!(model, "whisper-large-v3");
                 assert_eq!(language, Some("is".to_string()));
+                assert_eq!(format, "srt");
+            }
+            _ => panic!("Expected Transcribe command"),
+        }
+    }
+
+    #[test]
+    fn test_transcribe_with_short_format() {
+        let cli = parse_args(&["transcribe", "audio.wav", "-f", "vtt"]).unwrap();
+        match cli.command {
+            Commands::Transcribe { format, .. } => {
+                assert_eq!(format, "vtt");
             }
             _ => panic!("Expected Transcribe command"),
         }

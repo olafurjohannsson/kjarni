@@ -86,42 +86,12 @@ pub fn audio_format(file_name: Option<&str>, bytes: &[u8]) -> Result<&'static st
     })
 }
 
-fn timestamp(seconds: f32, decimal: char) -> String {
-    let millis = (seconds.max(0.0) * 1000.0).round() as u64;
-    let (h, m, s, ms) = (
-        millis / 3_600_000,
-        millis / 60_000 % 60,
-        millis / 1000 % 60,
-        millis % 1000,
-    );
-    format!("{h:02}:{m:02}:{s:02}{decimal}{ms:03}")
-}
-
 pub fn srt(result: &TranscriptionResult) -> String {
-    let mut out = String::new();
-    for (i, segment) in result.segments.iter().enumerate() {
-        out.push_str(&format!(
-            "{}\n{} --> {}\n{}\n\n",
-            i + 1,
-            timestamp(segment.start, ','),
-            timestamp(segment.end, ','),
-            segment.text.trim()
-        ));
-    }
-    out
+    result.to_srt()
 }
 
 pub fn vtt(result: &TranscriptionResult) -> String {
-    let mut out = String::from("WEBVTT\n\n");
-    for segment in &result.segments {
-        out.push_str(&format!(
-            "{} --> {}\n{}\n\n",
-            timestamp(segment.start, '.'),
-            timestamp(segment.end, '.'),
-            segment.text.trim()
-        ));
-    }
-    out
+    result.to_vtt()
 }
 
 pub fn render(result: &TranscriptionResult, format: Format, task: Task) -> Response {
