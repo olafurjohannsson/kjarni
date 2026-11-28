@@ -348,12 +348,9 @@ impl Indexer {
         let loader = DocumentLoader::new(self.loader_config.clone());
 
         let mut total_docs = 0usize;
-        let mut total_chunks = 0usize;
         let mut files_processed = 0usize;
         let mut files_skipped = 0usize;
-
-        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
-        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
+        let mut chunks_to_embed: Vec<(String, HashMap<String, String>)> = Vec::new();
 
         for (file_idx, file_path) in files.iter().enumerate() {
             if check_cancelled() {
@@ -369,25 +366,11 @@ impl Indexer {
 
             match loader.load_file(file_path) {
                 Ok(chunks) => {
-                    total_chunks += chunks.len();
                     files_processed += 1;
                     let stamp = file_stamp(file_path);
-
                     for chunk in chunks {
-                        batch_texts.push(chunk.text);
-                        batch_metadata.push(stamped(chunk.metadata.to_hashmap(), &stamp));
-
-                        if batch_texts.len() >= self.batch_size {
-                            if check_cancelled() {
-                                return Err(IndexerError::Cancelled);
-                            }
-
-                            let added = self
-                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                                .await?;
-                            total_docs += added;
-                            report(ProgressStage::Embedding, total_docs, 0, None);
-                        }
+                        chunks_to_embed
+                            .push((chunk.text, stamped(chunk.metadata.to_hashmap(), &stamp)));
                     }
                 }
                 Err(e) => {
@@ -399,13 +382,27 @@ impl Indexer {
             }
         }
 
-        // Flush remaining
-        if !batch_texts.is_empty() {
+        let total_chunks = chunks_to_embed.len();
+        let batch_size = self.batch_size.max(1);
+        let mut batch_texts: Vec<String> = Vec::with_capacity(batch_size);
+        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(batch_size);
+
+        while !chunks_to_embed.is_empty() {
+            if check_cancelled() {
+                return Err(IndexerError::Cancelled);
+            }
+
+            let take = batch_size.min(chunks_to_embed.len());
+            for (text, meta) in chunks_to_embed.drain(..take) {
+                batch_texts.push(text);
+                batch_metadata.push(meta);
+            }
+
             let added = self
                 .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                 .await?;
             total_docs += added;
-            report(ProgressStage::Embedding, total_docs, 0, None);
+            report(ProgressStage::Embedding, total_docs, total_chunks, None);
         }
 
         report(
@@ -526,8 +523,7 @@ impl Indexer {
 
         let mut total_docs = 0usize;
         let mut replaced = HashSet::new();
-        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
-        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
+        let mut chunks_to_embed: Vec<(String, HashMap<String, String>)> = Vec::new();
 
         for (file_idx, file_path) in files.iter().enumerate() {
             if check_cancelled() {
@@ -546,20 +542,8 @@ impl Indexer {
                     replaced.insert(source_path(file_path));
                     let stamp = file_stamp(file_path);
                     for chunk in chunks {
-                        batch_texts.push(chunk.text);
-                        batch_metadata.push(stamped(chunk.metadata.to_hashmap(), &stamp));
-
-                        if batch_texts.len() >= self.batch_size {
-                            if check_cancelled() {
-                                return Err(IndexerError::Cancelled);
-                            }
-
-                            let added = self
-                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                                .await?;
-                            total_docs += added;
-                            report(ProgressStage::Embedding, total_docs, 0, None);
-                        }
+                        chunks_to_embed
+                            .push((chunk.text, stamped(chunk.metadata.to_hashmap(), &stamp)));
                     }
                 }
                 Err(e) => {
@@ -570,12 +554,27 @@ impl Indexer {
             }
         }
 
-        if !batch_texts.is_empty() {
+        let total_chunks = chunks_to_embed.len();
+        let batch_size = self.batch_size.max(1);
+        let mut batch_texts: Vec<String> = Vec::with_capacity(batch_size);
+        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(batch_size);
+
+        while !chunks_to_embed.is_empty() {
+            if check_cancelled() {
+                return Err(IndexerError::Cancelled);
+            }
+
+            let take = batch_size.min(chunks_to_embed.len());
+            for (text, meta) in chunks_to_embed.drain(..take) {
+                batch_texts.push(text);
+                batch_metadata.push(meta);
+            }
+
             let added = self
                 .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                 .await?;
             total_docs += added;
-            report(ProgressStage::Embedding, total_docs, 0, None);
+            report(ProgressStage::Embedding, total_docs, total_chunks, None);
         }
 
         report(
@@ -1431,9 +1430,9 @@ mod indexer_tests {
             .unwrap();
 
         let reports = std::sync::Mutex::new(Vec::new());
-        let on_progress = |stage, current, _total, _msg: Option<&str>| {
+        let on_progress = |stage, current, total, _msg: Option<&str>| {
             if matches!(stage, ProgressStage::Embedding) {
-                reports.lock().unwrap().push(current);
+                reports.lock().unwrap().push((current, total));
             }
         };
         let index = dir.path().join("notes.idx");
@@ -1449,7 +1448,7 @@ mod indexer_tests {
             .unwrap();
 
         assert_eq!(stats.documents_indexed, 5);
-        assert_eq!(*reports.lock().unwrap(), [2, 4, 5]);
+        assert_eq!(*reports.lock().unwrap(), [(2, 5), (4, 5), (5, 5)]);
 
         let more = dir.path().join("more");
         fs::create_dir_all(&more).unwrap();
@@ -1464,7 +1463,64 @@ mod indexer_tests {
             )
             .await
             .unwrap();
-        assert_eq!(*reports.lock().unwrap(), [1]);
+        assert_eq!(*reports.lock().unwrap(), [(1, 1)]);
+    }
+
+    #[tokio::test]
+    async fn progress_stages_report_known_totals_in_order() {
+        let dir = TempDir::new().unwrap();
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        for i in 0..3 {
+            fs::write(docs.join(format!("doc{i}.txt")), format!("document {i}")).unwrap();
+        }
+
+        let stored_events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stored_clone = stored_events.clone();
+        let indexer = Indexer::builder("minilm-l6-v2")
+            .batch_size(2)
+            .quiet(true)
+            .on_progress(move |p, _| {
+                stored_clone
+                    .lock()
+                    .unwrap()
+                    .push((p.stage, p.current, p.total));
+            })
+            .build()
+            .await
+            .unwrap();
+
+        let index = dir.path().join("three.idx");
+        indexer
+            .create(index.to_str().unwrap(), &[docs.to_str().unwrap()])
+            .await
+            .unwrap();
+
+        let events = stored_events.lock().unwrap().clone();
+        assert!(!events.is_empty());
+        for (stage, current, total) in &events {
+            if *current > 0 {
+                let total = total.unwrap_or(0);
+                assert!(
+                    total >= *current,
+                    "stage {stage:?} reported {current}/{total}"
+                );
+            }
+        }
+        for pair in events.windows(2) {
+            assert!(
+                (pair[0].0 as u8) <= (pair[1].0 as u8),
+                "progress stages regressed from {:?} to {:?}",
+                pair[0].0,
+                pair[1].0
+            );
+        }
+        let embedding: Vec<_> = events
+            .iter()
+            .filter(|(s, _, _)| matches!(s, ProgressStage::Embedding))
+            .map(|(_, c, t)| (*c, *t))
+            .collect();
+        assert_eq!(embedding, vec![(2, Some(3)), (3, Some(3))]);
     }
 
     #[test]

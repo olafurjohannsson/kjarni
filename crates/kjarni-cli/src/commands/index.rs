@@ -208,7 +208,10 @@ async fn build_indexer(
     if !quiet && std::io::IsTerminal::is_terminal(&std::io::stderr()) {
         builder = builder.on_progress(|progress, _| {
             if matches!(progress.stage, ProgressStage::Embedding) {
-                eprint!("\r  Indexed {} documents", progress.current);
+                match progress.total {
+                    Some(total) => eprint!("\r  Indexed {}/{total} documents", progress.current),
+                    None => eprint!("\r  Indexed {} documents", progress.current),
+                }
             }
         });
     }
