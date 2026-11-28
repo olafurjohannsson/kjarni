@@ -462,6 +462,8 @@ mod audio_files {
     #[test]
     fn response_formats() {
         assert_eq!(Format::parse("srt").unwrap(), Format::Srt);
+        assert_eq!(Format::parse("vtt").unwrap(), Format::Vtt);
+        assert_eq!(Format::parse("verbose_json").unwrap(), Format::VerboseJson);
         assert!(Format::parse("xml").is_err());
     }
 
@@ -501,6 +503,67 @@ mod audio_files {
             "WEBVTT\n\n00:00:00.000 --> 00:00:01.500\nHello there.\n\n\
              00:01:01.250 --> 01:02:05.004\nGeneral Kenobi.\n\n"
         );
+    }
+
+    #[test]
+    fn srt_and_vtt_wrap_long_segments_and_split_timestamps() {
+        let long = TranscriptionResult {
+            text: "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec.".into(),
+            segments: vec![
+                TranscriptionSegment {
+                    start: 0.0,
+                    end: 1.0,
+                    text: "   ".into(),
+                },
+                TranscriptionSegment {
+                    start: 10.0,
+                    end: 20.0,
+                    text: "Alpha bravo charlie delta echo foxtrot golf \
+                           hotel india juliet kilo lima mike november \
+                           oscar papa quebec."
+                        .into(),
+                },
+            ],
+            language: "en".into(),
+            duration_secs: 20.0,
+        };
+        assert_eq!(
+            srt(&long),
+            "1\n00:00:10,000 --> 00:00:17,404\n\
+             Alpha bravo charlie delta echo foxtrot\n\
+             golf hotel india juliet kilo lima mike\n\n\
+             2\n00:00:17,404 --> 00:00:20,000\n\
+             november oscar papa quebec.\n\n"
+        );
+        assert_eq!(
+            vtt(&long),
+            "WEBVTT\n\n\
+             00:00:10.000 --> 00:00:17.404\n\
+             Alpha bravo charlie delta echo foxtrot\n\
+             golf hotel india juliet kilo lima mike\n\n\
+             00:00:17.404 --> 00:00:20.000\n\
+             november oscar papa quebec.\n\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_verbose_json_matches_openai_shape() {
+        let response = super::super::audio::render(
+            &result(),
+            Format::VerboseJson,
+            kjarni::transcriber::Task::Transcribe,
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["task"], "transcribe");
+        assert_eq!(body["language"], "en");
+        assert_eq!(body["duration"], 3726.0);
+        assert_eq!(body["text"], "Hello there. General Kenobi.");
+        let segs = body["segments"].as_array().unwrap();
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0]["id"], 0);
+        assert_eq!(segs[1]["id"], 1);
     }
 }
 

@@ -7,7 +7,10 @@
 
 use crate::error::set_last_error;
 use crate::{KjarniDevice, KjarniErrorCode, get_runtime, opt_str};
-use kjarni::transcriber::{Transcriber, TranscriberError, TranscriptionResult};
+use kjarni::transcriber::{
+    Transcriber, TranscriberError, TranscriptionResult, TranscriptionSegment, segments_to_srt,
+    segments_to_vtt,
+};
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 
@@ -142,6 +145,108 @@ pub unsafe extern "C" fn kjarni_transcription_free(transcription: KjarniTranscri
             let _ = Box::from_raw(slice as *mut [KjarniTranscriptionSegment]);
         }
     })
+}
+
+unsafe fn format_subtitles(
+    fn_name: &'static str,
+    segments: *const KjarniTranscriptionSegment,
+    len: usize,
+    out: *mut *mut c_char,
+    format: fn(&[TranscriptionSegment]) -> String,
+) -> KjarniErrorCode {
+    crate::panic::guard(fn_name, KjarniErrorCode::Panic, || -> KjarniErrorCode {
+        unsafe {
+            if out.is_null() {
+                return KjarniErrorCode::NullPointer;
+            }
+            *out = ptr::null_mut();
+            if len == 0 {
+                *out = crate::owned_c_string(&format(&[]));
+                return KjarniErrorCode::Ok;
+            }
+            if segments.is_null() {
+                return KjarniErrorCode::NullPointer;
+            }
+            let raw_segments = std::slice::from_raw_parts(segments, len);
+            let mut rust_segments = Vec::with_capacity(len);
+            for raw in raw_segments {
+                let text = if raw.text.is_null() {
+                    String::new()
+                } else {
+                    match CStr::from_ptr(raw.text).to_str() {
+                        Ok(s) => s.to_string(),
+                        Err(_) => return KjarniErrorCode::InvalidUtf8,
+                    }
+                };
+                rust_segments.push(TranscriptionSegment {
+                    start: raw.start,
+                    end: raw.end,
+                    text,
+                });
+            }
+            *out = crate::owned_c_string(&format(&rust_segments));
+            KjarniErrorCode::Ok
+        }
+    })
+}
+
+/// Format transcription segments as SubRip (`.srt`) subtitle text.
+///
+/// Long segments are wrapped on word boundaries at 42 characters per line and at
+/// most 2 lines per cue, with timestamps distributed proportionally.
+///
+/// # Safety
+///
+/// - `segments` must point to `len` readable `KjarniTranscriptionSegment`
+///   values (it may be null when `len` is 0). Each non-null `text` pointer must
+///   be nul-terminated UTF-8.
+/// - `out` must be a valid, writable pointer. On success it receives a string
+///   the caller frees with `kjarni_string_free`; on failure it is set to null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kjarni_transcription_to_srt(
+    segments: *const KjarniTranscriptionSegment,
+    len: usize,
+    out: *mut *mut c_char,
+) -> KjarniErrorCode {
+    unsafe {
+        format_subtitles(
+            "kjarni_transcription_to_srt",
+            segments,
+            len,
+            out,
+            segments_to_srt,
+        )
+    }
+}
+
+/// Format transcription segments as WebVTT (`.vtt`) subtitle text.
+///
+/// Always begins with the `WEBVTT` header. Long segments are wrapped on word
+/// boundaries at 42 characters per line and at most 2 lines per cue, with
+/// timestamps distributed proportionally.
+///
+/// # Safety
+///
+/// - `segments` must point to `len` readable `KjarniTranscriptionSegment`
+///   values (it may be null when `len` is 0). Each non-null `text` pointer must
+///   be nul-terminated UTF-8.
+/// - `out` must be a valid, writable pointer. On success it receives a string
+///   the caller frees with `kjarni_string_free`; on failure it is set to null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kjarni_transcription_to_vtt(
+    segments: *const KjarniTranscriptionSegment,
+    len: usize,
+    out: *mut *mut c_char,
+) -> KjarniErrorCode {
+    unsafe {
+        format_subtitles(
+            "kjarni_transcription_to_vtt",
+            segments,
+            len,
+            out,
+            segments_to_vtt,
+        )
+    }
 }
 
 fn error_code(e: &TranscriberError) -> KjarniErrorCode {
@@ -456,6 +561,112 @@ mod tests {
             assert_eq!(CStr::from_ptr(out.language).to_str().unwrap(), "en");
             kjarni_transcription_free(out);
             kjarni_transcriber_free(t);
+        }
+    }
+
+    #[test]
+    fn subtitle_null_and_empty_inputs_behave_as_documented() {
+        unsafe {
+            assert_eq!(
+                kjarni_transcription_to_srt(ptr::null(), 0, ptr::null_mut()),
+                KjarniErrorCode::NullPointer
+            );
+            assert_eq!(
+                kjarni_transcription_to_vtt(ptr::null(), 0, ptr::null_mut()),
+                KjarniErrorCode::NullPointer
+            );
+
+            let mut out = ptr::dangling_mut::<c_char>();
+            assert_eq!(
+                kjarni_transcription_to_srt(ptr::null(), 1, &mut out),
+                KjarniErrorCode::NullPointer
+            );
+            assert!(out.is_null());
+
+            out = ptr::dangling_mut::<c_char>();
+            assert_eq!(
+                kjarni_transcription_to_vtt(ptr::null(), 1, &mut out),
+                KjarniErrorCode::NullPointer
+            );
+            assert!(out.is_null());
+
+            assert_eq!(
+                kjarni_transcription_to_srt(ptr::null(), 0, &mut out),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(CStr::from_ptr(out).to_str().unwrap(), "");
+            crate::kjarni_string_free(out);
+
+            assert_eq!(
+                kjarni_transcription_to_vtt(ptr::null(), 0, &mut out),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(CStr::from_ptr(out).to_str().unwrap(), "WEBVTT\n\n");
+            crate::kjarni_string_free(out);
+        }
+    }
+
+    #[test]
+    fn subtitle_c_api_formats_segments_and_rejects_invalid_utf8() {
+        let first = CString::new("From A --> B").unwrap();
+        let third = CString::new("Þórður sagði halló við alla í Reykjavík í dag.").unwrap();
+        let segs = [
+            KjarniTranscriptionSegment {
+                start: 0.0,
+                end: 1.5,
+                text: first.as_ptr() as *mut c_char,
+            },
+            KjarniTranscriptionSegment {
+                start: 1.5,
+                end: 2.0,
+                text: ptr::null_mut(),
+            },
+            KjarniTranscriptionSegment {
+                start: 2.0,
+                end: 5.0,
+                text: third.as_ptr() as *mut c_char,
+            },
+        ];
+
+        unsafe {
+            let mut srt = ptr::null_mut();
+            assert_eq!(
+                kjarni_transcription_to_srt(segs.as_ptr(), segs.len(), &mut srt),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(
+                CStr::from_ptr(srt).to_str().unwrap(),
+                "1\n00:00:00,000 --> 00:00:01,500\nFrom A --> B\n\n\
+                 2\n00:00:02,000 --> 00:00:05,000\n\
+                 Þórður sagði halló við alla í Reykjavík í\ndag.\n\n"
+            );
+            crate::kjarni_string_free(srt);
+
+            let mut vtt = ptr::null_mut();
+            assert_eq!(
+                kjarni_transcription_to_vtt(segs.as_ptr(), segs.len(), &mut vtt),
+                KjarniErrorCode::Ok
+            );
+            assert_eq!(
+                CStr::from_ptr(vtt).to_str().unwrap(),
+                "WEBVTT\n\n00:00:00.000 --> 00:00:01.500\nFrom A -- > B\n\n\
+                 00:00:02.000 --> 00:00:05.000\n\
+                 Þórður sagði halló við alla í Reykjavík í\ndag.\n\n"
+            );
+            crate::kjarni_string_free(vtt);
+
+            let bad_utf8: [u8; 2] = [0xff, 0x00];
+            let bad_seg = [KjarniTranscriptionSegment {
+                start: 0.0,
+                end: 1.0,
+                text: bad_utf8.as_ptr() as *mut c_char,
+            }];
+            let mut err_out = ptr::dangling_mut::<c_char>();
+            assert_eq!(
+                kjarni_transcription_to_srt(bad_seg.as_ptr(), bad_seg.len(), &mut err_out),
+                KjarniErrorCode::InvalidUtf8
+            );
+            assert!(err_out.is_null());
         }
     }
 }

@@ -37,6 +37,7 @@
 #include "kjarni.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <expected>
@@ -944,6 +945,73 @@ struct Transcript {
     float duration_secs{};
     std::vector<Segment> segments;
 };
+
+namespace detail {
+
+template <auto Fn>
+inline Result<std::string> format_subtitles(std::span<const Segment> segments) {
+    std::vector<KjarniTranscriptionSegment> raw;
+    raw.reserve(segments.size());
+    for (const auto& s : segments) {
+        raw.push_back(KjarniTranscriptionSegment{s.start, s.end, const_cast<char*>(s.text.c_str())});
+    }
+    char* out = nullptr;
+    if (auto e = check(Fn(raw.empty() ? nullptr : raw.data(), raw.size(), &out)); !e) {
+        return std::unexpected(e.error());
+    }
+    return adopt(out);
+}
+
+}  // namespace detail
+
+/// Formats timed segments as SubRip (`.srt`) subtitle text.
+///
+/// Long segments are wrapped on word boundaries at around 42 characters per
+/// line and at most 2 lines per cue, with timestamps distributed proportionally.
+[[nodiscard]] inline Result<std::string> to_srt(std::span<const Segment> segments) {
+    return detail::format_subtitles<kjarni_transcription_to_srt>(segments);
+}
+
+/// Formats a transcript as SubRip (`.srt`) subtitle text.
+///
+/// Falls back to a single segment spanning `0.0..duration_secs` when
+/// `segments` is empty and `text` is non-empty.
+[[nodiscard]] inline Result<std::string> to_srt(const Transcript& transcript) {
+    if (transcript.segments.empty()) {
+        if (transcript.text.empty()) return to_srt(std::span<const Segment>{});
+        const float end = std::isfinite(transcript.duration_secs)
+                              ? std::max(0.f, transcript.duration_secs)
+                              : 0.f;
+        const Segment fallback{0.f, end, transcript.text};
+        return to_srt(std::span<const Segment>{&fallback, 1});
+    }
+    return to_srt(std::span<const Segment>{transcript.segments});
+}
+
+/// Formats timed segments as WebVTT (`.vtt`) subtitle text.
+///
+/// Always begins with the `WEBVTT` header. Long segments are wrapped on word
+/// boundaries at around 42 characters per line and at most 2 lines per cue, with
+/// timestamps distributed proportionally.
+[[nodiscard]] inline Result<std::string> to_vtt(std::span<const Segment> segments) {
+    return detail::format_subtitles<kjarni_transcription_to_vtt>(segments);
+}
+
+/// Formats a transcript as WebVTT (`.vtt`) subtitle text.
+///
+/// Falls back to a single segment spanning `0.0..duration_secs` when
+/// `segments` is empty and `text` is non-empty.
+[[nodiscard]] inline Result<std::string> to_vtt(const Transcript& transcript) {
+    if (transcript.segments.empty()) {
+        if (transcript.text.empty()) return to_vtt(std::span<const Segment>{});
+        const float end = std::isfinite(transcript.duration_secs)
+                              ? std::max(0.f, transcript.duration_secs)
+                              : 0.f;
+        const Segment fallback{0.f, end, transcript.text};
+        return to_vtt(std::span<const Segment>{&fallback, 1});
+    }
+    return to_vtt(std::span<const Segment>{transcript.segments});
+}
 
 struct TranscriberOptions {
     std::string model = "whisper-small";

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Kjarni
 {
@@ -15,7 +17,116 @@ namespace Kjarni
     /// <param name="Language">ISO code of the language transcribed: the one given, or the one detected.</param>
     /// <param name="DurationSecs">Length of the audio.</param>
     /// <param name="Segments">The transcript split into timed pieces.</param>
-    public record Transcript(string Text, string Language, float DurationSecs, TranscriptSegment[] Segments);
+    public record Transcript(string Text, string Language, float DurationSecs, TranscriptSegment[] Segments)
+    {
+        /// <summary>
+        /// Format this transcript as SubRip (<c>.srt</c>) subtitle text.
+        /// </summary>
+        /// <returns>The formatted SRT subtitles, or an empty string if there is no speech.</returns>
+        public string ToSrt()
+        {
+            if (Segments == null || Segments.Length == 0)
+            {
+                if (string.IsNullOrEmpty(Text))
+                    return ToSrt(Array.Empty<TranscriptSegment>());
+                var end = IsFinite(DurationSecs) ? Math.Max(0f, DurationSecs) : 0f;
+                return ToSrt(new[] { new TranscriptSegment(0f, end, Text) });
+            }
+            return ToSrt(Segments);
+        }
+
+        /// <summary>
+        /// Format this transcript as WebVTT (<c>.vtt</c>) subtitle text.
+        /// </summary>
+        /// <returns>The formatted WebVTT subtitles, beginning with <c>WEBVTT</c>.</returns>
+        public string ToVtt()
+        {
+            if (Segments == null || Segments.Length == 0)
+            {
+                if (string.IsNullOrEmpty(Text))
+                    return ToVtt(Array.Empty<TranscriptSegment>());
+                var end = IsFinite(DurationSecs) ? Math.Max(0f, DurationSecs) : 0f;
+                return ToVtt(new[] { new TranscriptSegment(0f, end, Text) });
+            }
+            return ToVtt(Segments);
+        }
+
+        /// <summary>
+        /// Format timed segments as SubRip (<c>.srt</c>) subtitle text, wrapping long
+        /// segments on word boundaries at 42 characters per line and 2 lines per cue.
+        /// </summary>
+        /// <param name="segments">Timed transcription segments.</param>
+        /// <returns>The formatted SRT subtitles.</returns>
+        public static string ToSrt(IReadOnlyList<TranscriptSegment> segments)
+        {
+            if (segments == null) throw new ArgumentNullException(nameof(segments));
+            return FormatSubtitles(segments, isVtt: false);
+        }
+
+        /// <summary>
+        /// Format timed segments as WebVTT (<c>.vtt</c>) subtitle text, wrapping long
+        /// segments on word boundaries at 42 characters per line and 2 lines per cue.
+        /// </summary>
+        /// <param name="segments">Timed transcription segments.</param>
+        /// <returns>The formatted WebVTT subtitles.</returns>
+        public static string ToVtt(IReadOnlyList<TranscriptSegment> segments)
+        {
+            if (segments == null) throw new ArgumentNullException(nameof(segments));
+            return FormatSubtitles(segments, isVtt: true);
+        }
+
+        private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+
+        private static string FormatSubtitles(IReadOnlyList<TranscriptSegment> segments, bool isVtt)
+        {
+            if (segments.Count == 0)
+            {
+                Native.CheckError(isVtt
+                    ? Native.kjarni_transcription_to_vtt(null, UIntPtr.Zero, out var emptyPtr)
+                    : Native.kjarni_transcription_to_srt(null, UIntPtr.Zero, out emptyPtr));
+                return Native.TakeString(emptyPtr);
+            }
+
+            var nativeSegs = new Native.KjarniTranscriptionSegment[segments.Count];
+            var textPtrs = new IntPtr[segments.Count];
+            try
+            {
+                for (int i = 0; i < segments.Count; i++)
+                {
+                    var seg = segments[i];
+                    if (!string.IsNullOrEmpty(seg.Text))
+                    {
+                        var byteCount = Encoding.UTF8.GetByteCount(seg.Text);
+                        var bytes = new byte[byteCount + 1];
+                        Encoding.UTF8.GetBytes(seg.Text, 0, seg.Text.Length, bytes, 0);
+                        bytes[byteCount] = 0;
+                        var ptr = Marshal.AllocHGlobal(bytes.Length);
+                        textPtrs[i] = ptr;
+                        Marshal.Copy(bytes, 0, ptr, bytes.Length);
+                    }
+                    nativeSegs[i] = new Native.KjarniTranscriptionSegment
+                    {
+                        Start = seg.Start,
+                        End = seg.End,
+                        Text = textPtrs[i],
+                    };
+                }
+
+                Native.CheckError(isVtt
+                    ? Native.kjarni_transcription_to_vtt(nativeSegs, (UIntPtr)nativeSegs.Length, out var resultPtr)
+                    : Native.kjarni_transcription_to_srt(nativeSegs, (UIntPtr)nativeSegs.Length, out resultPtr));
+                return Native.TakeString(resultPtr);
+            }
+            finally
+            {
+                for (int i = 0; i < textPtrs.Length; i++)
+                {
+                    if (textPtrs[i] != IntPtr.Zero)
+                        Marshal.FreeHGlobal(textPtrs[i]);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Speech to text with Whisper.

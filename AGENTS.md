@@ -38,6 +38,8 @@ Every command reads from stdin where it makes sense and writes to stdout. Add
 ```bash
 kjarni transcribe -q recording.mp3
 kjarni transcribe -q --timestamps interview.wav
+kjarni transcribe -q --format srt interview.wav
+kjarni transcribe -q --format vtt interview.wav
 kjarni transcribe -q --translate icelandic.wav      # translate to English
 ```
 
@@ -110,8 +112,9 @@ kjarni chat --model llama3.2-3b-instruct        # interactive
 ## Output formats
 
 `classify`, `rerank` and `search` accept `--format json` (also `jsonl`, and
-`docs` for rerank). `embed` writes raw floats. `similarity` writes a single
-float. `transcribe` writes plain text.
+`docs` for rerank). `transcribe` writes plain text by default and accepts
+`--format srt` and `--format vtt`. `embed` writes raw floats. `similarity` writes a single
+float.
 
 Pair `-q` with `--format json` and pipe into `jq`:
 

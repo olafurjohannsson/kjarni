@@ -17,6 +17,7 @@
 mod builder;
 mod model;
 mod presets;
+mod subtitle;
 mod types;
 mod validation;
 
@@ -27,6 +28,7 @@ mod tests;
 pub use builder::TranscriberBuilder;
 pub use model::Transcriber;
 pub use presets::TranscriberPreset;
+pub use subtitle::{DEFAULT_MAX_LINE_CHARS, DEFAULT_MAX_LINES, segments_to_srt, segments_to_vtt};
 pub use types::{
     Task, TranscribedToken, TranscriberError, TranscriberResult, TranscriptionProgress,
     TranscriptionProgressCallback, TranscriptionResult, TranscriptionSegment, TranscriptionStage,

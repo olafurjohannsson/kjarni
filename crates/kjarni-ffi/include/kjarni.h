@@ -1951,6 +1951,43 @@ struct KjarniTranscriberConfig kjarni_transcriber_config_default(void);
 void kjarni_transcription_free(struct KjarniTranscription transcription);
 
 /**
+ * Format transcription segments as SubRip (`.srt`) subtitle text.
+ *
+ * Long segments are wrapped on word boundaries at 42 characters per line and at
+ * most 2 lines per cue, with timestamps distributed proportionally.
+ *
+ * # Safety
+ *
+ * - `segments` must point to `len` readable `KjarniTranscriptionSegment`
+ *   values (it may be null when `len` is 0). Each non-null `text` pointer must
+ *   be nul-terminated UTF-8.
+ * - `out` must be a valid, writable pointer. On success it receives a string
+ *   the caller frees with `kjarni_string_free`; on failure it is set to null.
+ */
+enum KjarniErrorCode kjarni_transcription_to_srt(const struct KjarniTranscriptionSegment *segments,
+                                                 uintptr_t len,
+                                                 char **out);
+
+/**
+ * Format transcription segments as WebVTT (`.vtt`) subtitle text.
+ *
+ * Always begins with the `WEBVTT` header. Long segments are wrapped on word
+ * boundaries at 42 characters per line and at most 2 lines per cue, with
+ * timestamps distributed proportionally.
+ *
+ * # Safety
+ *
+ * - `segments` must point to `len` readable `KjarniTranscriptionSegment`
+ *   values (it may be null when `len` is 0). Each non-null `text` pointer must
+ *   be nul-terminated UTF-8.
+ * - `out` must be a valid, writable pointer. On success it receives a string
+ *   the caller frees with `kjarni_string_free`; on failure it is set to null.
+ */
+enum KjarniErrorCode kjarni_transcription_to_vtt(const struct KjarniTranscriptionSegment *segments,
+                                                 uintptr_t len,
+                                                 char **out);
+
+/**
  * Create a new Transcriber. Downloads the model on first use.
  *
  * # Safety

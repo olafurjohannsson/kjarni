@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -447,6 +448,10 @@ void test_transcriber() {
         bool ordered = true;
         for (const auto& s : r->segments) ordered = ordered && s.end >= s.start;
         ok(ordered, "every segment ends after it starts");
+        auto srt = kjarni::to_srt(*r);
+        ok(srt && !srt->empty(), "transcript formats to SRT");
+        auto vtt = kjarni::to_vtt(*r);
+        ok(vtt && vtt->starts_with("WEBVTT\n\n"), "transcript formats to VTT");
     }
 
     // A second of silence at 8 kHz exercises resampling and must not fail.
@@ -454,6 +459,110 @@ void test_transcriber() {
     ok(t->transcribe(silence, 8000).has_value(), "PCM at another sample rate is accepted");
     ok(!t->transcribe(silence, 0).has_value(), "a zero sample rate is rejected");
     ok(!t->transcribe_file("/no/such/file.wav").has_value(), "a missing file is an error");
+}
+
+void test_subtitles() {
+    section("subtitles");
+
+    auto empty_srt = kjarni::to_srt(std::vector<kjarni::Segment>{});
+    ok(empty_srt && empty_srt->empty(), "empty segments produce empty SRT");
+    auto empty_vtt = kjarni::to_vtt(std::vector<kjarni::Segment>{});
+    ok(empty_vtt && *empty_vtt == "WEBVTT\n\n",
+       "empty segments produce WEBVTT header");
+
+    const std::vector<kjarni::Segment> short_segs{
+        {0.0f, 1.5f, "  Hello there. "},
+        {1.5f, 2.0f, "  \n\t  "},
+        {61.25f, 3725.004f, " General\n\tKenobi. "},
+    };
+    auto short_srt = kjarni::to_srt(short_segs);
+    ok(short_srt && *short_srt ==
+           "1\n00:00:00,000 --> 00:00:01,500\nHello there.\n\n"
+           "2\n00:01:01,250 --> 01:02:05,004\nGeneral Kenobi.\n\n",
+       "short SRT skips whitespace-only segments without cue numbering gaps");
+    auto short_vtt = kjarni::to_vtt(short_segs);
+    ok(short_vtt && *short_vtt ==
+           "WEBVTT\n\n"
+           "00:00:00.000 --> 00:00:01.500\nHello there.\n\n"
+           "00:01:01.250 --> 01:02:05.004\nGeneral Kenobi.\n\n",
+       "short VTT has header and dot separator");
+
+    const std::vector<kjarni::Segment> wrap_seg{
+        {0.0f, 4.0f, "This is a moderately long subtitle line that should wrap onto two lines."},
+    };
+    auto wrap_srt = kjarni::to_srt(wrap_seg);
+    ok(wrap_srt && *wrap_srt ==
+           "1\n00:00:00,000 --> 00:00:04,000\n"
+           "This is a moderately long subtitle line\n"
+           "that should wrap onto two lines.\n\n",
+       "wraps segment over 42 chars onto two lines");
+
+    const std::vector<kjarni::Segment> long_seg{
+        {10.0f, 20.0f,
+         "Alpha bravo charlie delta echo foxtrot golf "
+         "hotel india juliet kilo lima mike november "
+         "oscar papa quebec."},
+    };
+    auto long_srt = kjarni::to_srt(long_seg);
+    ok(long_srt && *long_srt ==
+           "1\n00:00:10,000 --> 00:00:17,404\n"
+           "Alpha bravo charlie delta echo foxtrot\n"
+           "golf hotel india juliet kilo lima mike\n\n"
+           "2\n00:00:17,404 --> 00:00:20,000\n"
+           "november oscar papa quebec.\n\n",
+       "splits very long segment into proportional cues");
+
+    const std::string long_word = "supercalifragilisticexpialidociousandmorewords";
+    const std::vector<kjarni::Segment> long_word_seg{
+        {0.0f, 6.0f, "Prefix " + long_word + " suffix"},
+    };
+    auto long_word_srt = kjarni::to_srt(long_word_seg);
+    ok(long_word_srt && *long_word_srt ==
+           "1\n00:00:00,000 --> 00:00:05,390\nPrefix\n" + long_word + "\n\n"
+           "2\n00:00:05,390 --> 00:00:06,000\nsuffix\n\n",
+       "single word over 42 chars stays intact on its own line");
+
+    const std::string icelandic = "Þórður sagði halló við alla í Reykjavík í";
+    const std::vector<kjarni::Segment> unicode_seg{{0.0f, 3.0f, icelandic + " dag."}};
+    auto unicode_srt = kjarni::to_srt(unicode_seg);
+    ok(unicode_srt && *unicode_srt ==
+           "1\n00:00:00,000 --> 00:00:03,000\n" + icelandic + "\ndag.\n\n",
+       "counts Unicode scalar characters rather than UTF-8 bytes");
+
+    const float nan_f = std::numeric_limits<float>::quiet_NaN();
+    const float inf_f = std::numeric_limits<float>::infinity();
+    const std::vector<kjarni::Segment> edge_segs{
+        {0.0f, 0.9996f, "Rounding up."},
+        {nan_f, inf_f, "Non-finite."},
+        {-2.5f, -1.0f, "Negative."},
+        {5.0f, 3.0f, "Reversed."},
+    };
+    auto edge_srt = kjarni::to_srt(edge_segs);
+    ok(edge_srt && *edge_srt ==
+           "1\n00:00:00,000 --> 00:00:01,000\nRounding up.\n\n"
+           "2\n00:00:00,000 --> 00:00:00,000\nNon-finite.\n\n"
+           "3\n00:00:00,000 --> 00:00:00,000\nNegative.\n\n"
+           "4\n00:00:05,000 --> 00:00:05,000\nReversed.\n\n",
+       "handles rounding, non-finite, negative, and reversed bounds");
+
+    const std::vector<kjarni::Segment> arrow_seg{{0.0f, 2.0f, "From A --> B and x-->y"}};
+    auto arrow_vtt = kjarni::to_vtt(arrow_seg);
+    ok(arrow_vtt && *arrow_vtt ==
+           "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nFrom A -- > B and x-- >y\n\n",
+       "VTT escapes timing arrow in cue text");
+
+    const kjarni::Transcript fallback{"  Just full text. ", "en", 4.5f, {}};
+    auto fb_srt = kjarni::to_srt(fallback);
+    ok(fb_srt && *fb_srt == "1\n00:00:00,000 --> 00:00:04,500\nJust full text.\n\n",
+       "Transcript to_srt falls back to text when segments empty");
+    auto fb_vtt = kjarni::to_vtt(fallback);
+    ok(fb_vtt && *fb_vtt == "WEBVTT\n\n00:00:00.000 --> 00:00:04.500\nJust full text.\n\n",
+       "Transcript to_vtt falls back to text when segments empty");
+    const kjarni::Transcript empty{"   ", "en", 1.0f, {}};
+    auto empty_tr_srt = kjarni::to_srt(empty);
+    ok(empty_tr_srt && empty_tr_srt->empty(), "empty Transcript to_srt is empty");
+    auto empty_tr_vtt = kjarni::to_vtt(empty);
+    ok(empty_tr_vtt && *empty_tr_vtt == "WEBVTT\n\n", "empty Transcript to_vtt is WEBVTT header");
 }
 
 // ─── Summarizer and translator ───────────────────────────────────
@@ -607,6 +716,7 @@ int main() {
     test_ownership();
     test_index_and_search();
     test_transcriber();
+    test_subtitles();
     test_summarizer();
     test_translator();
     test_image_index();

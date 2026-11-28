@@ -2,7 +2,9 @@ package kjarni
 
 import (
 	"errors"
+	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -23,6 +25,98 @@ type Transcript struct {
 	Language     string
 	DurationSecs float32
 	Segments     []Segment
+}
+
+// ToSRT formats the transcript as SubRip (.srt) subtitle text.
+func (t *Transcript) ToSRT() (string, error) {
+	if t == nil {
+		return SegmentsToSRT(nil)
+	}
+	if len(t.Segments) == 0 {
+		if strings.TrimSpace(t.Text) == "" {
+			return SegmentsToSRT(nil)
+		}
+		end := float32(0)
+		d := float64(t.DurationSecs)
+		if !math.IsNaN(d) && !math.IsInf(d, 0) && t.DurationSecs > 0 {
+			end = t.DurationSecs
+		}
+		return SegmentsToSRT([]Segment{{Start: 0, End: end, Text: t.Text}})
+	}
+	return SegmentsToSRT(t.Segments)
+}
+
+// ToVTT formats the transcript as WebVTT (.vtt) subtitle text.
+func (t *Transcript) ToVTT() (string, error) {
+	if t == nil {
+		return SegmentsToVTT(nil)
+	}
+	if len(t.Segments) == 0 {
+		if strings.TrimSpace(t.Text) == "" {
+			return SegmentsToVTT(nil)
+		}
+		end := float32(0)
+		d := float64(t.DurationSecs)
+		if !math.IsNaN(d) && !math.IsInf(d, 0) && t.DurationSecs > 0 {
+			end = t.DurationSecs
+		}
+		return SegmentsToVTT([]Segment{{Start: 0, End: end, Text: t.Text}})
+	}
+	return SegmentsToVTT(t.Segments)
+}
+
+// SegmentsToSRT formats timed segments as SubRip (.srt) subtitle text.
+// Long segments are wrapped on word boundaries at around 42 characters per
+// line and at most 2 lines per cue, with timestamps split proportionally.
+func SegmentsToSRT(segments []Segment) (string, error) {
+	return formatSubtitles(segments, _transcriptionToSRTSym)
+}
+
+// SegmentsToVTT formats timed segments as WebVTT (.vtt) subtitle text.
+// Always starts with the WEBVTT header. Long segments are wrapped on word
+// boundaries at around 42 characters per line and at most 2 lines per cue,
+// with timestamps split proportionally.
+func SegmentsToVTT(segments []Segment) (string, error) {
+	return formatSubtitles(segments, _transcriptionToVTTSym)
+}
+
+func formatSubtitles(segments []Segment, sym uintptr) (string, error) {
+	if err := ensureInit(); err != nil {
+		return "", err
+	}
+	if sym == 0 {
+		return "", errors.New("this Kjarni library has no subtitle formatting; update it")
+	}
+
+	var data uintptr
+	var raw []ffiTranscriptionSegment
+	var keeps []func()
+	if len(segments) > 0 {
+		raw = make([]ffiTranscriptionSegment, len(segments))
+		keeps = make([]func(), len(segments))
+		for i, seg := range segments {
+			var textPtr uintptr
+			textPtr, keeps[i] = cString(seg.Text)
+			raw[i] = ffiTranscriptionSegment{
+				Start: seg.Start,
+				End:   seg.End,
+				Text:  textPtr,
+			}
+		}
+		data = uintptr(unsafe.Pointer(&raw[0]))
+	}
+
+	var out uintptr
+	r1, _, _ := purego.SyscallN(sym, data, uintptr(len(raw)), uintptr(unsafe.Pointer(&out)))
+	for _, keep := range keeps {
+		keep()
+	}
+	runtime.KeepAlive(raw)
+
+	if code := int32(r1); code != 0 {
+		return "", lastError(code)
+	}
+	return takeString(out), nil
 }
 
 type ffiTranscriberConfig struct {

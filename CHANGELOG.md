@@ -7,6 +7,12 @@
   documents after it, and an ID saved from an earlier search could point to a
   different document. IDs are now assigned once and never reused. Indexes now
   use format 3; earlier indexes must be rebuilt.
+- **Subtitle output (`srt` and `vtt`).** Added `--format srt` and `--format vtt` to
+  `kjarni transcribe`, `segments_to_srt` / `segments_to_vtt` and `TranscriptionResult::to_srt`
+  / `to_vtt` in Rust, `kjarni_transcription_to_srt` / `kjarni_transcription_to_vtt` in the
+  C ABI, and thin SRT/VTT wrappers in the Python, C#, Go, and C++ bindings.
+  Long segments are wrapped on word boundaries at 42 characters per line and at most
+  2 lines per cue across CLI, HTTP (`/v1/audio/transcriptions`), and all language bindings.
 
 ## 0.8.2
 

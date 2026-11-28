@@ -1,12 +1,13 @@
 """High-level Transcriber API."""
 
+import math
 import os
 from typing import List, NamedTuple, Optional, Sequence, Union
 from ctypes import (
     c_void_p, c_char_p, c_int, c_int32, c_float, c_size_t, c_uint32, byref, POINTER, Structure,
 )
 
-from ._ffi import _lib, check_error, encode_or_none, KjarniDevice
+from ._ffi import _lib, check_error, encode_or_none, take_string, KjarniDevice
 
 
 class KjarniTranscriberConfig(Structure):
@@ -52,6 +53,14 @@ _lib.kjarni_transcriber_transcribe_pcm.argtypes = [
 ]
 _lib.kjarni_transcription_free.restype = None
 _lib.kjarni_transcription_free.argtypes = [KjarniTranscription]
+_lib.kjarni_transcription_to_srt.restype = c_int
+_lib.kjarni_transcription_to_srt.argtypes = [
+    POINTER(KjarniTranscriptionSegment), c_size_t, POINTER(c_void_p)
+]
+_lib.kjarni_transcription_to_vtt.restype = c_int
+_lib.kjarni_transcription_to_vtt.argtypes = [
+    POINTER(KjarniTranscriptionSegment), c_size_t, POINTER(c_void_p)
+]
 
 
 class Segment(NamedTuple):
@@ -68,6 +77,62 @@ class Transcript(NamedTuple):
     language: str
     duration_secs: float
     segments: List[Segment]
+
+    def to_srt(self) -> str:
+        """Format this transcript as SubRip (.srt) subtitle text."""
+        if not self.segments:
+            if not self.text:
+                return segments_to_srt([])
+            end = max(0.0, self.duration_secs) if math.isfinite(self.duration_secs) else 0.0
+            return segments_to_srt([Segment(0.0, end, self.text)])
+        return segments_to_srt(self.segments)
+
+    def to_vtt(self) -> str:
+        """Format this transcript as WebVTT (.vtt) subtitle text."""
+        if not self.segments:
+            if not self.text:
+                return segments_to_vtt([])
+            end = max(0.0, self.duration_secs) if math.isfinite(self.duration_secs) else 0.0
+            return segments_to_vtt([Segment(0.0, end, self.text)])
+        return segments_to_vtt(self.segments)
+
+
+def segments_to_srt(segments: Sequence[Segment]) -> str:
+    """Format timed segments as SubRip (.srt) subtitle text.
+
+    Long segments are split on word boundaries into lines of at most 42
+    characters and 2 lines per cue, with timestamps distributed proportionally.
+    """
+    return _format_subtitles(segments, _lib.kjarni_transcription_to_srt)
+
+
+def segments_to_vtt(segments: Sequence[Segment]) -> str:
+    """Format timed segments as WebVTT (.vtt) subtitle text.
+
+    Always begins with the ``WEBVTT`` header. Long segments are split on word
+    boundaries into lines of at most 42 characters and 2 lines per cue, with
+    timestamps distributed proportionally.
+    """
+    return _format_subtitles(segments, _lib.kjarni_transcription_to_vtt)
+
+
+def _format_subtitles(segments: Sequence[Segment], c_fn) -> str:
+    seg_list = list(segments)
+    out = c_void_p()
+    if not seg_list:
+        check_error(c_fn(None, 0, byref(out)))
+        return take_string(out)
+
+    # Keep encoded UTF-8 byte buffers alive for the duration of the FFI call.
+    encoded = [("" if seg.text is None else seg.text).encode("utf-8") for seg in seg_list]
+    c_segments = (KjarniTranscriptionSegment * len(seg_list))()
+    for i, (seg, text_bytes) in enumerate(zip(seg_list, encoded)):
+        c_segments[i].start = seg.start
+        c_segments[i].end = seg.end
+        c_segments[i].text = text_bytes
+
+    check_error(c_fn(c_segments, len(seg_list), byref(out)))
+    return take_string(out)
 
 
 def _decode(b: Optional[bytes]) -> str:
