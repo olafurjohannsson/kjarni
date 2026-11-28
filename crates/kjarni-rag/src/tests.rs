@@ -429,6 +429,74 @@ mod rag_integration_tests {
     }
 
     #[test]
+    fn document_ids_survive_segment_merges_and_removals() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("index");
+        let config = config(2, 4);
+
+        let names = [
+            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
+        ];
+        {
+            let mut writer = IndexWriter::open(&path, config)?;
+            writer.add("stable alpha", &[1.0, 0.0], Some(&with_source("/doc0")))?;
+            writer.commit()?;
+        }
+        for (i, name) in names.iter().enumerate().skip(1) {
+            let mut writer = IndexWriter::open_existing(&path)?;
+            writer.add(
+                &format!("stable {name}"),
+                &[1.0, i as f32],
+                Some(&with_source(&format!("/doc{i}"))),
+            )?;
+            writer.commit()?;
+        }
+
+        // Eight one-document segments trigger the small-segment merge.
+        let reader = IndexReader::open(&path)?;
+        assert!(reader.segment_count() < 8);
+        for (i, name) in names.iter().enumerate() {
+            let result = reader
+                .search_keywords(name, 1)
+                .pop()
+                .expect("document must be searchable");
+            assert_eq!(result.text, format!("stable {name}"));
+            assert_eq!(result.document_id, i);
+            assert_eq!(reader.get_document(i)?, format!("stable {name}"));
+        }
+
+        let mut writer = IndexWriter::open_existing(&path)?;
+        writer.add(
+            "stable india",
+            &[1.0, 8.0],
+            Some(&with_source("/replacement")),
+        )?;
+        assert_eq!(
+            writer.remove_where(
+                |metadata| metadata.get(crate::SOURCE_PATH_KEY) == Some(&"/doc1".to_string())
+            )?,
+            1
+        );
+        writer.commit()?;
+
+        let reader = IndexReader::open(&path)?;
+        assert_eq!(reader.len(), 8);
+        assert!(reader.search_keywords("bravo", 1).is_empty());
+        for i in [0, 2, 3, 4, 5, 6, 7] {
+            let result = reader
+                .search_keywords(names[i], 1)
+                .pop()
+                .expect("retained document must be searchable");
+            assert_eq!(result.document_id, i);
+            assert_eq!(reader.get_document(i)?, format!("stable {}", names[i]));
+        }
+        let replacement = reader.search_keywords("india", 1).pop().unwrap();
+        assert_eq!(replacement.document_id, 8);
+        assert_eq!(reader.get_document(8)?, "stable india");
+        Ok(())
+    }
+
+    #[test]
     fn a_reader_notices_a_new_commit() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let path = dir.path().join("index");
@@ -454,6 +522,62 @@ mod rag_integration_tests {
         let error = IndexReader::open(&path).err().expect("open must fail");
         assert!(error.to_string().contains("rebuild"), "{error}");
         assert!(IndexWriter::open_existing(&path).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn reader_resolves_unsorted_document_ids_after_reordered_merges() -> anyhow::Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("index");
+        let cfg = config(2, 16);
+
+        {
+            let mut writer = IndexWriter::open(&path, cfg)?;
+            for id in 0..12 {
+                writer.add(
+                    &format!("doc-{id}"),
+                    &[1.0, id as f32],
+                    Some(&with_source(&format!("/large/{id}"))),
+                )?;
+            }
+            writer.commit()?;
+        }
+        for id in 12..20 {
+            let mut writer = IndexWriter::open_existing(&path)?;
+            writer.add(
+                &format!("doc-{id}"),
+                &[1.0, id as f32],
+                Some(&with_source(&format!("/small/{id}"))),
+            )?;
+            writer.commit()?;
+        }
+        {
+            let mut writer = IndexWriter::open_existing(&path)?;
+            let removed = writer.remove_where(|m| {
+                m.get(crate::SOURCE_PATH_KEY)
+                    .is_some_and(|s| (4..12).any(|k| s == &format!("/large/{k}")))
+            })?;
+            assert_eq!(removed, 8);
+            writer.commit()?;
+        }
+        for id in 20..26 {
+            let mut writer = IndexWriter::open_existing(&path)?;
+            writer.add(
+                &format!("doc-{id}"),
+                &[1.0, id as f32],
+                Some(&with_source(&format!("/tail/{id}"))),
+            )?;
+            writer.commit()?;
+        }
+
+        let reader = IndexReader::open(&path)?;
+        let surviving: Vec<usize> = (0..4).chain(12..26).collect();
+        let mut got_ids: Vec<usize> = reader.document_ids().collect();
+        got_ids.sort_unstable();
+        assert_eq!(got_ids, surviving);
+        for id in surviving {
+            assert_eq!(reader.get_document(id)?, format!("doc-{id}"));
+        }
         Ok(())
     }
 

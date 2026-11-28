@@ -799,7 +799,7 @@ fn stamped(mut meta: HashMap<String, String>, stamp: &Option<String>) -> HashMap
 fn indexed_stamps(index_path: &str) -> IndexerResult<HashMap<String, Option<String>>> {
     let reader = IndexReader::open(index_path).map_err(IndexerError::IndexingFailed)?;
     let mut stamps = HashMap::new();
-    for id in 0..reader.len() {
+    for id in reader.document_ids() {
         let meta = reader
             .get_metadata(id)
             .map_err(IndexerError::IndexingFailed)?;
@@ -1394,7 +1394,8 @@ mod indexer_tests {
         );
 
         let reader = IndexReader::open(index).unwrap();
-        let mut texts: Vec<String> = (0..reader.len())
+        let mut texts: Vec<String> = reader
+            .document_ids()
             .map(|i| reader.get_document(i).unwrap())
             .collect();
         texts.sort();
@@ -2002,7 +2003,8 @@ mod indexer_tests {
 
         let reader = kjarni_rag::IndexReader::open(&index).unwrap();
         assert_eq!(reader.len(), 1);
-        assert_eq!(reader.get_document(0).unwrap(), "three");
+        let id = reader.document_ids().next().unwrap();
+        assert_eq!(reader.get_document(id).unwrap(), "three");
     }
 
     #[tokio::test]
