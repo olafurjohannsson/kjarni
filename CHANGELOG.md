@@ -13,6 +13,21 @@
   C ABI, and thin SRT/VTT wrappers in the Python, C#, Go, and C++ bindings.
   Long segments are wrapped on word boundaries at 42 characters per line and at most
   2 lines per cue across CLI, HTTP (`/v1/audio/transcriptions`), and all language bindings.
+- **Llama models download without a Hugging Face token.** `llama3.2-1b-instruct`,
+  `llama3.2-3b-instruct` and `llama3.1-8b-instruct` came from Meta's gated
+  repositories, so they failed with HTTP 401 unless you had accepted Meta's
+  licence and set `HF_TOKEN`. They now download from copies in the kjarni-ai
+  organisation on Hugging Face, with the same files and Meta's licence. A copy
+  you already downloaded is used as it is.
+- **Models download from the kjarni-ai organisation.** `bge-m3`, `toxic-bert`,
+  `roberta-sentiment`, `bert-sentiment-multilingual` and `distilbart-cnn` download
+  from kjarni-ai on Hugging Face, each with a model card, its original licence and
+  credit. The files are unchanged, and models already downloaded stay where they
+  are.
+- **`kjarni chat` prints only the replies when input is piped.** With input from
+  a pipe or a file it printed a `> ` prompt and a blank line around every reply,
+  so `echo "..." | kjarni chat -q` output had to be cleaned up. It now prints
+  each reply on its own line; typing in a terminal is unchanged.
 
 ## 0.8.2
 

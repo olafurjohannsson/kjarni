@@ -492,11 +492,11 @@ impl ModelType {
                     // BAAI publish bge-m3 only as pytorch_model.bin, so the
                     // safetensors URL on their repo 404s. This mirror carries the
                     // converted weights and the same tokenizer and config.
-                    weights_url: "https://huggingface.co/olafuraron/bge-m3-safetensors/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/bge-m3/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/bge-m3-safetensors/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/bge-m3/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/bge-m3-safetensors/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/bge-m3/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },
@@ -540,11 +540,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/twitter-roberta-base-sentiment-latest/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/twitter-roberta-base-sentiment-latest/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/twitter-roberta-base-sentiment-latest/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },
@@ -556,11 +556,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/olafuraron/bert-base-multilingual-uncased-sentiment-safetensors/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/bert-base-multilingual-uncased-sentiment/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/bert-base-multilingual-uncased-sentiment-safetensors/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/bert-base-multilingual-uncased-sentiment/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/bert-base-multilingual-uncased-sentiment-safetensors/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/bert-base-multilingual-uncased-sentiment/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },
@@ -636,11 +636,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Classification,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/olafuraron/toxic-bert-safetensors/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/toxic-bert/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/toxic-bert-safetensors/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/toxic-bert/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/toxic-bert-safetensors/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/toxic-bert/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },
@@ -796,11 +796,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Llama,
                 task: ModelTask::Chat,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/Llama-3.2-1B-Instruct/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/Llama-3.2-1B-Instruct/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/Llama-3.2-1B-Instruct/resolve/main/config.json",
                     gguf_url: Some(
                         "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
                     ),
@@ -814,11 +814,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Llama,
                 task: ModelTask::Chat,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/model.safetensors.index.json",
+                    weights_url: "https://huggingface.co/kjarni-ai/Llama-3.2-3B-Instruct/resolve/main/model.safetensors.index.json",
                     tokenizer_url: Some(
-                        "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/Llama-3.2-3B-Instruct/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/Llama-3.2-3B-Instruct/resolve/main/config.json",
                     gguf_url: Some(
                         "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
                     ),
@@ -868,11 +868,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Llama,
                 task: ModelTask::Chat,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/resolve/main/model.safetensors.index.json",
+                    weights_url: "https://huggingface.co/kjarni-ai/Llama-3.1-8B-Instruct/resolve/main/model.safetensors.index.json",
                     tokenizer_url: Some(
-                        "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/Llama-3.1-8B-Instruct/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/Llama-3.1-8B-Instruct/resolve/main/config.json",
                     gguf_url: Some(
                         "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
                     ),
@@ -988,11 +988,11 @@ impl ModelType {
                 architecture: ModelArchitecture::Bart,
                 task: ModelTask::Seq2Seq,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/olafuraron/distilbart-cnn-12-6/resolve/main/model.safetensors",
+                    weights_url: "https://huggingface.co/kjarni-ai/distilbart-cnn-12-6/resolve/main/model.safetensors",
                     tokenizer_url: Some(
-                        "https://huggingface.co/olafuraron/distilbart-cnn-12-6/resolve/main/tokenizer.json",
+                        "https://huggingface.co/kjarni-ai/distilbart-cnn-12-6/resolve/main/tokenizer.json",
                     ),
-                    config_url: "https://huggingface.co/olafuraron/distilbart-cnn-12-6/resolve/main/config.json",
+                    config_url: "https://huggingface.co/kjarni-ai/distilbart-cnn-12-6/resolve/main/config.json",
                     gguf_url: None,
                     preprocessor_url: None,
                 },
@@ -1153,17 +1153,22 @@ impl ModelType {
             "nomic-embed-text-v1.5" | "nomic-ai/nomic-embed-text-v1.5" => {
                 Some(Self::NomicEmbedText)
             }
-            "bge-m3" | "baai/bge-m3" => Some(Self::BgeM3),
+            "bge-m3" | "baai/bge-m3" | "kjarni-ai/bge-m3" => Some(Self::BgeM3),
             "intfloat/multilingual-e5-small" => Some(Self::MultilingualE5Small),
             "distilbert-base-uncased-finetuned-sst-2-english" => Some(Self::DistilBertSST2),
-            "twitter-roberta-base-sentiment-latest" => Some(Self::TwitterRobertaSentiment),
+            "twitter-roberta-base-sentiment-latest"
+            | "kjarni-ai/twitter-roberta-base-sentiment-latest" => {
+                Some(Self::TwitterRobertaSentiment)
+            }
             "bert-base-multilingual-uncased-sentiment"
-            | "bert-base-multilingual-uncased-sentiment-safetensors" => {
+            | "bert-base-multilingual-uncased-sentiment-safetensors"
+            | "kjarni-ai/bert-base-multilingual-uncased-sentiment" => {
                 Some(Self::BertMultilingualSentiment)
             }
-            "toxic-bert" | "toxic-bert-safetensors" | "unitary/toxic-bert" => {
-                Some(Self::ToxicBertMultilingual)
-            }
+            "toxic-bert"
+            | "toxic-bert-safetensors"
+            | "unitary/toxic-bert"
+            | "kjarni-ai/toxic-bert" => Some(Self::ToxicBertMultilingual),
             "roberta-base-go_emotions" | "samlowe/roberta-base-go_emotions" => {
                 Some(Self::RobertaGoEmotions)
             }
@@ -1173,9 +1178,10 @@ impl ModelType {
             }
             "distilbert-ner" | "dslim/distilbert-ner" => Some(Self::DistilBertNer),
 
-            "distilbart-cnn" | "olafuraron/distilbart-cnn-12-6" | "distilbart-cnn-12-6" => {
-                Some(Self::DistilBartCnn)
-            }
+            "distilbart-cnn"
+            | "olafuraron/distilbart-cnn-12-6"
+            | "kjarni-ai/distilbart-cnn-12-6"
+            | "distilbart-cnn-12-6" => Some(Self::DistilBartCnn),
             "bart-large-cnn" | "facebook/bart-large-cnn" => Some(Self::BartLargeCnn),
             "opus-mt-en-de" | "helsinki-nlp/opus-mt-en-de" => Some(Self::OpusMtEnDe),
             "opus-mt-de-en" | "helsinki-nlp/opus-mt-de-en" => Some(Self::OpusMtDeEn),
@@ -1206,7 +1212,28 @@ impl ModelType {
 
     /// Get the local cache directory for this model
     pub fn cache_dir(&self, base_dir: &Path) -> PathBuf {
-        base_dir.join(self.repo_id().replace('/', "_"))
+        base_dir.join(self.cache_folder())
+    }
+
+    /// The name of this model's folder in the cache. It stays the same when the
+    /// model's download location moves, so a model that is already downloaded
+    /// is found there instead of being downloaded again.
+    pub fn cache_folder(&self) -> String {
+        match self {
+            Self::Llama3_2_1B_Instruct => "meta-llama_Llama-3.2-1B-Instruct".to_string(),
+            Self::Llama3_2_3B_Instruct => "meta-llama_Llama-3.2-3B-Instruct".to_string(),
+            Self::Llama3_1_8B_Instruct => "meta-llama_Llama-3.1-8B-Instruct".to_string(),
+            Self::BgeM3 => "olafuraron_bge-m3-safetensors".to_string(),
+            Self::TwitterRobertaSentiment => {
+                "olafuraron_twitter-roberta-base-sentiment-latest-safetensors".to_string()
+            }
+            Self::BertMultilingualSentiment => {
+                "olafuraron_bert-base-multilingual-uncased-sentiment-safetensors".to_string()
+            }
+            Self::ToxicBertMultilingual => "olafuraron_toxic-bert-safetensors".to_string(),
+            Self::DistilBartCnn => "olafuraron_distilbart-cnn-12-6".to_string(),
+            _ => self.repo_id().replace('/', "_"),
+        }
     }
 
     /// Check if this model is downloaded in the given cache directory
@@ -1847,6 +1874,83 @@ mod tests {
                 Some(m),
                 "{} does not resolve back to itself",
                 m.cli_name()
+            );
+        }
+    }
+
+    /// Every model's cache folder, as it is on users' disks. A model whose
+    /// download location moves must keep its folder, or everyone who has it
+    /// downloads it again.
+    #[test]
+    fn cache_folders_do_not_change() {
+        let expected = [
+            ("minilm-l6-v2", "sentence-transformers_all-MiniLM-L6-v2"),
+            ("nomic-embed-text", "nomic-ai_nomic-embed-text-v1.5"),
+            ("bge-m3", "olafuraron_bge-m3-safetensors"),
+            ("multilingual-e5-small", "intfloat_multilingual-e5-small"),
+            (
+                "minilm-l6-v2-cross-encoder",
+                "cross-encoder_ms-marco-MiniLM-L-6-v2",
+            ),
+            ("mpnet-base-v2", "sentence-transformers_all-mpnet-base-v2"),
+            (
+                "distilbert-base",
+                "distilbert-base-cased-distilled-squad_resolve",
+            ),
+            (
+                "distilbert-sentiment",
+                "distilbert_distilbert-base-uncased-finetuned-sst-2-english",
+            ),
+            (
+                "roberta-sentiment",
+                "olafuraron_twitter-roberta-base-sentiment-latest-safetensors",
+            ),
+            (
+                "bert-sentiment-multilingual",
+                "olafuraron_bert-base-multilingual-uncased-sentiment-safetensors",
+            ),
+            ("toxic-bert", "olafuraron_toxic-bert-safetensors"),
+            ("roberta-emotions", "SamLowe_roberta-base-go_emotions"),
+            (
+                "distilroberta-emotion",
+                "olafuraron_emotion-english-distilroberta-base-safetensors",
+            ),
+            ("minilm-zeroshot", "cross-encoder_nli-MiniLM2-L6-H768"),
+            ("distilbert-ner", "dslim_distilbert-NER"),
+            ("qwen2.5-0.5b-instruct", "Qwen_Qwen2.5-0.5B-Instruct"),
+            ("qwen2.5-1.5b-instruct", "Qwen_Qwen2.5-1.5B-Instruct"),
+            ("qwen3.5-0.8b", "Qwen_Qwen3.5-0.8B"),
+            ("qwen3.5-2b", "Qwen_Qwen3.5-2B"),
+            ("qwen3.5-4b", "Qwen_Qwen3.5-4B"),
+            ("qwen3.5-9b", "Qwen_Qwen3.5-9B"),
+            ("qwen3.5-27b", "Qwen_Qwen3.5-27B"),
+            ("qwen3.5-35b-a3b", "Qwen_Qwen3.5-35B-A3B"),
+            ("llama3.2-1b-instruct", "meta-llama_Llama-3.2-1B-Instruct"),
+            ("llama3.2-3b-instruct", "meta-llama_Llama-3.2-3B-Instruct"),
+            ("phi3.5-mini-instruct", "microsoft_Phi-3.5-mini-instruct"),
+            ("mistral-7b-instruct", "mistralai_Mistral-7B-Instruct-v0.3"),
+            ("llama3.1-8b-instruct", "meta-llama_Llama-3.1-8B-Instruct"),
+            ("deepseek-r1-8b", "deepseek-ai_DeepSeek-R1-Distill-Llama-8B"),
+            ("flan-t5-base", "google_flan-t5-base"),
+            ("flan-t5-large", "google_flan-t5-large"),
+            ("distilbart-cnn", "olafuraron_distilbart-cnn-12-6"),
+            ("bart-large-cnn", "facebook_bart-large-cnn"),
+            ("opus-mt-en-de", "kjarni-ai_opus-mt-en-de"),
+            ("opus-mt-de-en", "kjarni-ai_opus-mt-de-en"),
+            ("whisper-small", "openai_whisper-small"),
+            ("whisper-large-v3", "openai_whisper-large-v3"),
+            ("distilgpt2", "distilgpt2_resolve"),
+            ("gpt2", "gpt2_resolve"),
+            ("clip-vit-base-32", "laion_CLIP-ViT-B-32-laion2B-s34B-b79K"),
+        ];
+        assert_eq!(expected.len(), ModelType::all().count());
+        for (name, folder) in expected {
+            let m = ModelType::from_cli_name(name).unwrap();
+            assert_eq!(m.cache_folder(), folder, "{name}");
+            assert_eq!(
+                m.cache_dir(Path::new("/cache")),
+                Path::new("/cache").join(folder),
+                "{name}"
             );
         }
     }

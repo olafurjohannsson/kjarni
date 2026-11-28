@@ -115,9 +115,10 @@ pub async fn run(
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let interactive = io::IsTerminal::is_terminal(&stdin);
 
     loop {
-        print!("> ");
+        print!("{}", input_prompt(interactive));
         stdout.flush()?;
 
         let mut input = String::new();
@@ -183,7 +184,7 @@ pub async fn run(
             convo.push_assistant(full_response.trim());
         }
 
-        println!("\n");
+        print!("{}", after_reply(interactive));
     }
 
     if !quiet {
@@ -191,6 +192,18 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+/// The prompt before each message: `> ` when someone is typing, nothing when
+/// the messages are piped in, so piped output holds only the replies.
+fn input_prompt(interactive: bool) -> &'static str {
+    if interactive { "> " } else { "" }
+}
+
+/// What follows a reply: a blank line before the next prompt when someone is
+/// typing, a single line end when the messages are piped in.
+fn after_reply(interactive: bool) -> &'static str {
+    if interactive { "\n\n" } else { "\n" }
 }
 
 /// Parse a slash command from user input
@@ -312,6 +325,18 @@ Commands:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn piped_input_gets_no_prompt_and_one_line_end() {
+        assert_eq!(input_prompt(false), "");
+        assert_eq!(after_reply(false), "\n");
+    }
+
+    #[test]
+    fn typed_input_gets_the_prompt_and_a_blank_line() {
+        assert_eq!(input_prompt(true), "> ");
+        assert_eq!(after_reply(true), "\n\n");
+    }
     struct MockConversation {
         messages: Vec<(String, String)>,
         clear_calls: Vec<bool>,
