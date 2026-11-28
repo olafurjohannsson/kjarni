@@ -83,7 +83,7 @@ impl Gpt2Model {
         }
 
         let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
-        let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
+        let model_dir = model_type.cache_dir(&cache_dir);
 
         download_model_files(
             &model_dir,

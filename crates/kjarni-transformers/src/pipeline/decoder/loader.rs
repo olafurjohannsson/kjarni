@@ -73,7 +73,7 @@ impl DecoderLoader {
     ) -> Result<M> {
         let info = model_type.info();
         let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
-        let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
+        let model_dir = model_type.cache_dir(&cache_dir);
 
         let config = load_config.unwrap_or_default();
 
@@ -371,7 +371,7 @@ fn folder_chat_template(dir: &Path) -> Option<Box<dyn ChatTemplate>> {
 #[cfg(not(target_arch = "wasm32"))]
 fn registry_model_of_folder(dir: &Path) -> Option<ModelType> {
     let name = dir.file_name()?.to_str()?;
-    ModelType::all().find(|mt| mt.repo_id().replace('/', "_") == name)
+    ModelType::all().find(|mt| mt.cache_folder() == name)
 }
 
 /// The chat template a model was tuned on, as its own `chat_template` renders

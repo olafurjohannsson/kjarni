@@ -54,7 +54,7 @@ impl WhisperModel {
     ) -> Result<Self> {
         let info = model_type.info();
         let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
-        let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
+        let model_dir = model_type.cache_dir(&cache_dir);
 
         // Download model files
         kjarni_transformers::models::download_model_files(
