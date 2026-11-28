@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Indexing progress shows the document total.** Embedding progress now
+  reports `current/total` instead of `current/0`.
+
 ## 0.8.2
 
 - **Longer prompts fit on the GPU.** Memory freed after a long prompt stayed

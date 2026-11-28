@@ -1,14 +1,12 @@
 //! Indexing a folder and searching it through the C interface, as the C#,
 //! Go, C++ and Python bindings do.
 
-use std::ffi::{CStr, CString, c_char, c_void};
-use std::ptr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use crate::callback::*;
 use crate::indexer::*;
 use crate::searcher::*;
 use crate::{KjarniDevice, KjarniErrorCode};
+use std::ffi::{CStr, CString, c_char, c_void};
+use std::ptr;
 
 fn c(s: &str) -> CString {
     CString::new(s).unwrap()
@@ -98,8 +96,12 @@ fn defaults_are_what_the_bindings_document() {
     assert!(options.filter_key.is_null());
 }
 
-extern "C" fn count_progress(_: KjarniProgress, user_data: *mut c_void) {
-    unsafe { &*(user_data as *const AtomicUsize) }.fetch_add(1, Ordering::SeqCst);
+extern "C" fn count_progress(progress: KjarniProgress, user_data: *mut c_void) {
+    let events = unsafe { &*(user_data as *const std::sync::Mutex<Vec<(usize, usize)>>) };
+    events
+        .lock()
+        .unwrap()
+        .push((progress.current, progress.total));
 }
 
 #[test]
@@ -165,7 +167,7 @@ fn index_a_folder_add_to_it_search_it_and_delete_it() {
         assert_eq!(code, KjarniErrorCode::Cancelled);
         kjarni_cancel_token_free(token);
 
-        let calls = AtomicUsize::new(0);
+        let events: std::sync::Mutex<Vec<(usize, usize)>> = std::sync::Mutex::new(Vec::new());
         let code = kjarni_indexer_create_with_callback(
             indexer,
             index.as_ptr(),
@@ -173,14 +175,20 @@ fn index_a_folder_add_to_it_search_it_and_delete_it() {
             1,
             1,
             Some(count_progress),
-            &calls as *const AtomicUsize as *mut c_void,
+            &events as *const std::sync::Mutex<Vec<(usize, usize)>> as *mut c_void,
             ptr::null(),
             &mut stats,
         );
         assert_eq!(code, KjarniErrorCode::Ok);
         assert_eq!(stats.files_processed, 3);
         assert_eq!(stats.dimension, 384);
-        assert!(calls.load(Ordering::SeqCst) > 0, "progress was reported");
+        let recorded = events.lock().unwrap().clone();
+        assert!(!recorded.is_empty(), "progress was reported");
+        for (current, total) in &recorded {
+            if *current > 0 {
+                assert!(*total >= *current, "progress reported {current}/{total}");
+            }
+        }
 
         let mut info = std::mem::zeroed::<KjarniIndexInfo>();
         assert_eq!(
