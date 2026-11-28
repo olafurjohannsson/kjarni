@@ -11,6 +11,17 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 
+/// Format version of the binary index written by `save_binary`.
+/// Version 1 is the first versioned format; files without the header below
+/// were written by 0.8.2 or earlier.
+const SEARCH_INDEX_FORMAT_VERSION: u32 = 1;
+/// Magic prefix for the binary index format, so an unversioned file can be
+/// told apart from a versioned one.
+const SEARCH_INDEX_MAGIC: &[u8; 8] = b"KJARNSIX";
+/// Reported when a saved index predates the versioned format (or its version
+/// is older than the one this build reads): the only fix is rebuilding it.
+const OLD_INDEX_ERROR: &str = "this index was saved by an older version of Kjarni; rebuild it";
+
 /// Complete search index with BM25 and semantic search
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchIndex {
@@ -22,6 +33,10 @@ pub struct SearchIndex {
     document_ids: Vec<usize>,
     /// Next ID for a newly added document; IDs are never reused.
     next_document_id: usize,
+    /// Document ID -> in-memory slot. Derived from `document_ids`, never
+    /// stored: it is rebuilt whenever the index changes or is loaded.
+    #[serde(skip)]
+    id_to_local: HashMap<usize, usize>,
 }
 
 impl SearchIndex {
@@ -34,6 +49,7 @@ impl SearchIndex {
             metadata: Vec::new(),
             document_ids: Vec::new(),
             next_document_id: 0,
+            id_to_local: HashMap::new(),
         }
     }
 
@@ -46,6 +62,7 @@ impl SearchIndex {
             metadata: Vec::new(),
             document_ids: Vec::new(),
             next_document_id: 0,
+            id_to_local: HashMap::new(),
         }
     }
 
@@ -89,6 +106,7 @@ impl SearchIndex {
         self.metadata = new_metadata;
         self.document_ids = new_document_ids;
         self.bm25 = bm25;
+        self.rebuild_id_map();
 
         removed
     }
@@ -133,24 +151,46 @@ impl SearchIndex {
         let document_ids = (0..documents.len()).collect();
         let next_document_id = documents.len();
 
-        Ok(Self {
+        let mut index = Self {
             bm25,
             vectors,
             documents,
             metadata,
             document_ids,
             next_document_id,
-        })
+            id_to_local: HashMap::new(),
+        };
+        index.rebuild_id_map();
+        Ok(index)
     }
     /// Save index in binary format (much smaller than JSON)
     pub fn save_binary<W: Write>(&self, writer: W) -> Result<()> {
+        let mut writer = writer;
+        writer.write_all(SEARCH_INDEX_MAGIC)?;
+        writer.write_all(&SEARCH_INDEX_FORMAT_VERSION.to_le_bytes())?;
         bincode::serialize_into(writer, self)?;
         Ok(())
     }
 
     /// Load index from binary format
     pub fn load_binary<R: Read>(reader: R) -> Result<Self> {
-        Ok(bincode::deserialize_from(reader)?)
+        let mut reader = reader;
+        let mut header = [0u8; 12];
+        if reader.read_exact(&mut header).is_err() || &header[..8] != SEARCH_INDEX_MAGIC {
+            return Err(anyhow::anyhow!(OLD_INDEX_ERROR));
+        }
+        let version = u32::from_le_bytes(header[8..12].try_into().unwrap());
+        if version > SEARCH_INDEX_FORMAT_VERSION {
+            return Err(anyhow::anyhow!(
+                "index format version {version} is newer than this kjarni reads ({SEARCH_INDEX_FORMAT_VERSION})"
+            ));
+        }
+        if version < SEARCH_INDEX_FORMAT_VERSION {
+            return Err(anyhow::anyhow!(OLD_INDEX_ERROR));
+        }
+        let mut index: Self = bincode::deserialize_from(reader)?;
+        index.rebuild_id_map();
+        Ok(index)
     }
 
     /// Save to file (auto-detect format by extension)
@@ -200,6 +240,7 @@ impl SearchIndex {
         self.metadata.push(metadata.unwrap_or_default());
         self.document_ids.push(doc_id);
         self.next_document_id += 1;
+        self.id_to_local.insert(doc_id, local_id);
 
         Ok(doc_id)
     }
@@ -338,11 +379,24 @@ impl SearchIndex {
 
     /// Load index from JSON
     pub fn load_json(json: &str) -> Result<Self> {
-        serde_json::from_str(json).map_err(Into::into)
+        let mut index: Self = serde_json::from_str(json)?;
+        index.rebuild_id_map();
+        Ok(index)
+    }
+
+    /// Rebuild the ID -> slot map from `document_ids`. Called after any
+    /// change to the document list and after loading.
+    fn rebuild_id_map(&mut self) {
+        self.id_to_local = self
+            .document_ids
+            .iter()
+            .enumerate()
+            .map(|(slot, &id)| (id, slot))
+            .collect();
     }
 
     fn local_id(&self, document_id: usize) -> Option<usize> {
-        self.document_ids.iter().position(|&id| id == document_id)
+        self.id_to_local.get(&document_id).copied()
     }
 }
 
@@ -515,6 +569,114 @@ mod tests {
         assert_eq!(
             index.search_keywords("delta", 1).pop().unwrap().document_id,
             3
+        );
+    }
+
+    #[test]
+    fn lookups_find_the_right_slot_after_removals() {
+        let mut index = SearchIndex::with_dimension(4);
+        let source = |value: &str| HashMap::from([("source".to_string(), value.to_string())]);
+
+        for (i, (text, src)) in [("alpha", "a"), ("bravo", "b"), ("charlie", "c")]
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(
+                index
+                    .add_document(
+                        text.to_string(),
+                        mock_embedding(i as f32 + 1.0),
+                        Some(source(src))
+                    )
+                    .unwrap(),
+                i
+            );
+        }
+
+        assert_eq!(index.remove_by_source("a"), 1);
+        assert_eq!(index.get_document(0), None);
+        assert_eq!(index.get_document(1), Some("bravo"));
+        assert_eq!(index.get_document(2), Some("charlie"));
+        assert_eq!(index.get_metadata(2).unwrap().get("source").unwrap(), "c");
+
+        // Removing the middle document shifts the slots again.
+        assert_eq!(index.remove_by_source("b"), 1);
+        assert_eq!(index.get_document(1), None);
+        assert_eq!(index.get_document(2), Some("charlie"));
+
+        // IDs are never reused, and the new document is reachable.
+        let new_id = index
+            .add_document("delta".to_string(), mock_embedding(4.0), Some(source("d")))
+            .unwrap();
+        assert_eq!(new_id, 3);
+        assert_eq!(index.get_document(3), Some("delta"));
+    }
+
+    #[test]
+    fn binary_roundtrip_preserves_lookups() {
+        let mut index = SearchIndex::with_dimension(4);
+        index
+            .add_document("alpha".to_string(), mock_embedding(1.0), None)
+            .unwrap();
+        index
+            .add_document("bravo".to_string(), mock_embedding(2.0), None)
+            .unwrap();
+
+        let mut buf = Vec::new();
+        index.save_binary(&mut buf).unwrap();
+        let restored = SearchIndex::load_binary(&buf[..]).unwrap();
+
+        assert_eq!(restored.get_document(0), Some("alpha"));
+        assert_eq!(restored.get_document(1), Some("bravo"));
+        assert_eq!(restored.get_document(99), None);
+    }
+
+    #[test]
+    fn binary_load_rejects_unversioned_index() {
+        // A 0.8.2 index serialises the same four fields in the same order,
+        // with no header and no document_ids / next_document_id.
+        #[derive(Serialize)]
+        struct LegacySearchIndex<'a> {
+            bm25: &'a Bm25Index,
+            vectors: &'a VectorStore,
+            documents: &'a [String],
+            metadata: &'a [HashMap<String, String>],
+        }
+
+        let index =
+            SearchIndex::build(vec!["alpha".to_string()], vec![mock_embedding(1.0)], vec![])
+                .unwrap();
+        let legacy = LegacySearchIndex {
+            bm25: &index.bm25,
+            vectors: &index.vectors,
+            documents: &index.documents,
+            metadata: &index.metadata,
+        };
+        let bytes = bincode::serialize(&legacy).unwrap();
+
+        let err = SearchIndex::load_binary(&bytes[..]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("this index was saved by an older version of Kjarni; rebuild it"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn binary_load_rejects_newer_version() {
+        let mut index = SearchIndex::with_dimension(4);
+        index
+            .add_document("alpha".to_string(), mock_embedding(1.0), None)
+            .unwrap();
+
+        let mut buf = Vec::new();
+        index.save_binary(&mut buf).unwrap();
+        buf[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let err = SearchIndex::load_binary(&buf[..]).unwrap_err();
+        assert!(
+            err.to_string().contains("newer than this kjarni reads"),
+            "unexpected error: {err}"
         );
     }
 
