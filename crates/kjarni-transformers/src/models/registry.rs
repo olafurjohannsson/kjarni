@@ -698,7 +698,7 @@ impl ModelType {
                     ),
                     preprocessor_url: None,
                 },
-                description: "Qwen's hybrid small model: linear attention in three layers of four. CPU only for now.",
+                description: "Qwen's hybrid small model: linear attention in three layers of four.",
                 size_mb: 1750,
                 params_millions: 752,
             },
@@ -716,7 +716,7 @@ impl ModelType {
                     ),
                     preprocessor_url: None,
                 },
-                description: "Qwen 3.5 at 2B: the 0.8B's design, twice as wide. CPU only for now.",
+                description: "Qwen 3.5 at 2B: the 0.8B's design, twice as wide.",
                 size_mb: 4500,
                 params_millions: 1882,
             },
@@ -734,7 +734,7 @@ impl ModelType {
                     ),
                     preprocessor_url: None,
                 },
-                description: "Qwen 3.5 at 4B, with 32 linear-attention heads. CPU only for now.",
+                description: "Qwen 3.5 at 4B, with 32 linear-attention heads.",
                 size_mb: 9300,
                 params_millions: 4206,
             },
@@ -752,7 +752,7 @@ impl ModelType {
                     ),
                     preprocessor_url: None,
                 },
-                description: "Qwen 3.5 at 9B, with its own LM head. CPU only for now.",
+                description: "Qwen 3.5 at 9B, with its own LM head.",
                 size_mb: 19306,
                 params_millions: 9653,
             },
@@ -770,7 +770,7 @@ impl ModelType {
                     ),
                     preprocessor_url: None,
                 },
-                description: "Qwen 3.5 at 27B, the largest dense one. CPU only for now; about 17 GB as Q4_K_M.",
+                description: "Qwen 3.5 at 27B, the largest dense one; about 17 GB as Q4_K_M.",
                 size_mb: 55563,
                 params_millions: 27781,
             },
@@ -1750,6 +1750,26 @@ pub fn model_cache_dir(model_dir: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The GPU decoder runs every dense Qwen 3.5 model and refuses only the
+    /// mixture-of-experts 35B-A3B, so the dense models' registry descriptions
+    /// must not keep the stale "CPU only for now" note.
+    #[test]
+    fn dense_qwen3_5_descriptions_do_not_say_cpu_only() {
+        for model in [
+            ModelType::Qwen3_5_0_8B,
+            ModelType::Qwen3_5_2B,
+            ModelType::Qwen3_5_4B,
+            ModelType::Qwen3_5_9B,
+            ModelType::Qwen3_5_27B,
+        ] {
+            assert!(
+                !model.info().description.contains("CPU only"),
+                "stale CPU-only note: {}",
+                model.info().description
+            );
+        }
+    }
 
     #[test]
     fn bge_m3_pools_the_cls_token() {
